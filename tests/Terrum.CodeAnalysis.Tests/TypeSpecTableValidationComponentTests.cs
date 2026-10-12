@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -58,6 +59,20 @@ public sealed class TypeSpecTableValidationComponentTests
             genericParamCount, typeArgCount));
         cases.Add(Valid(validTable, validRows.Length, 0xFF_FFFF, 0xFF_FFFF,
             0xFF_FFFF, typeArgCount));
+        var overlappingRanges = TrRmVariableTableWriter.EncodeBlobs([
+            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.Reference(0x02, 1),
+            TrRmTypeSpecTableWriter.Constructed(2, 1, 2),
+            TrRmTypeSpecTableWriter.Constructed(2, 1, 2),
+        ]);
+        cases.Add(Valid(overlappingRanges, 4, typeDefCount, importCount,
+            genericParamCount, typeArgCount));
+        AddRejectedTableCase(cases, WithOffset(validTable, 0, 1), validRows.Length,
+            typeDefCount, importCount, genericParamCount, typeArgCount);
+        AddRejectedTableCase(cases, WithOffset(validTable, 1, 0), validRows.Length,
+            typeDefCount, importCount, genericParamCount, typeArgCount);
+        AddRejectedTableCase(cases, [.. validTable, 0], validRows.Length,
+            typeDefCount, importCount, genericParamCount, typeArgCount);
 
         cases.Add(new TableCase([], 0, typeDefCount, importCount, genericParamCount,
             typeArgCount, false, true));
@@ -150,7 +165,6 @@ public sealed class TypeSpecTableValidationComponentTests
 
         var root = RepositoryRoot();
         var componentPaths = new[] {
-            "VariableTableIndex.terrum",
             "TypeSpecTableValidation.terrum",
         };
         var components = new List<SyntaxTree>();
@@ -177,7 +191,7 @@ public sealed class TypeSpecTableValidationComponentTests
 
             var compilation = Compilation.Create(components,
             [
-                new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Section], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32, [.. testCase.Section], false),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
                     testCase.RecordCount,
@@ -212,6 +226,13 @@ public sealed class TypeSpecTableValidationComponentTests
             genericParamCount, typeArgCount));
         cases.Add(new TableCase([.. section.Select(static value => (int)value)], recordCount,
             typeDefCount, importCount, genericParamCount, typeArgCount, false, true));
+    }
+
+    private static byte[] WithOffset(byte[] section, int index, uint value)
+    {
+        var copy = section.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(copy.AsSpan(index * sizeof(uint)), value);
+        return copy;
     }
 
     private static void AddInvalid(List<TableCase> cases, byte[][] rows, int recordCount,

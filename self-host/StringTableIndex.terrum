@@ -4,37 +4,54 @@ public static bool TryGetStringTableRowLayout(int32 recordCount, int32 row,
     init ref<int32> rowStart, init ref<int32> rowLength,
     init ref<int32> encoding, init ref<int32> contentByteLength)
 {
-    if (!TryGetVariableTableRowExtent(recordCount, 8, 4, row,
+    if (recordCount <= 0 || row <= 0 || row > recordCount
+        || !TryValidateStringTableIndex(recordCount))
+    {
+        return false;
+    }
+
+    return TryGetValidatedStringTableRowLayout(recordCount, row,
+        init rowStart, init rowLength, init encoding, init contentByteLength);
+}
+
+bool TryValidateStringTableIndex(int32 recordCount)
+{
+    if (!TryValidateVariableTableIndex(recordCount, 8, 4))
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryGetValidatedVariableTableRowExtent(recordCount, 8, 4, row,
+            init var start, init var length)
+            || !TryGetStringRowLayout(indexByteLength + start, length,
+            init var rowEncoding, init var rowContentLength))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Use only after validating this exact variable-table index and every String row layout.
+bool TryGetValidatedStringTableRowLayout(int32 recordCount, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength,
+    init ref<int32> encoding, init ref<int32> contentByteLength)
+{
+    if (!TryGetValidatedVariableTableRowExtent(recordCount, 8, 4, row,
         init var selectedStart, init var selectedLength))
     {
         return false;
     }
 
     int32 indexByteLength = (recordCount + 1) * 4;
-    mut int32 selectedEncoding = 0;
-    mut int32 selectedContentLength = 0;
-    mut uint32 previous = 0;
-    for (mut int32 currentRow = 1; currentRow <= recordCount; currentRow = currentRow + 1)
+    if (!TryGetStringRowLayout(indexByteLength + selectedStart, selectedLength,
+        init var selectedEncoding, init var selectedContentLength))
     {
-        if (!TryReadVariableTableOffset(currentRow, init var next))
-        {
-            return false;
-        }
-
-        int32 start = int32(previous);
-        int32 length = int32(next - previous);
-        if (!TryGetStringRowLayout(indexByteLength + start, length,
-            init var rowEncoding, init var rowContentLength))
-        {
-            return false;
-        }
-
-        if (currentRow == row)
-        {
-            selectedEncoding = rowEncoding;
-            selectedContentLength = rowContentLength;
-        }
-        previous = next;
+        return false;
     }
 
     rowStart = selectedStart;

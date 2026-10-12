@@ -29,6 +29,21 @@ public static bool TryGetVariableTableRowExtent(int32 recordCount, int32 minimum
     if (recordCount <= 0 || recordCount > 16777215
         || minimumRowBytes < 0 || (rowAlignment != 1 && rowAlignment != 4)
         || row <= 0 || row > recordCount
+        || recordCount > Host.Rows.Length / 4 - 1
+        || !TryValidateVariableTableIndex(recordCount, minimumRowBytes, rowAlignment))
+    {
+        return false;
+    }
+
+    return TryGetValidatedVariableTableRowExtent(recordCount, minimumRowBytes,
+        rowAlignment, row, init rowStart, init rowLength);
+}
+
+bool TryValidateVariableTableIndex(int32 recordCount,
+    int32 minimumRowBytes, int32 rowAlignment)
+{
+    if (recordCount < 0 || recordCount > 16777215
+        || minimumRowBytes < 0 || (rowAlignment != 1 && rowAlignment != 4)
         || recordCount > Host.Rows.Length / 4 - 1)
     {
         return false;
@@ -44,8 +59,6 @@ public static bool TryGetVariableTableRowExtent(int32 recordCount, int32 minimum
     }
 
     mut uint32 previous = firstOffset;
-    mut int32 selectedStart = 0;
-    mut int32 selectedLength = 0;
     for (mut int32 currentRow = 1; currentRow <= recordCount; currentRow = currentRow + 1)
     {
         if (!TryReadVariableTableOffset(currentRow, init var next)
@@ -56,21 +69,39 @@ public static bool TryGetVariableTableRowExtent(int32 recordCount, int32 minimum
         {
             return false;
         }
-
-        if (currentRow == row)
-        {
-            selectedStart = int32(previous);
-            selectedLength = int32(next - previous);
-        }
         previous = next;
     }
 
-    if (previous != uint32(dataByteLength))
+    return previous == uint32(dataByteLength);
+}
+
+// Use only after validating this exact variable-table index with TryValidateVariableTableIndex.
+bool TryGetValidatedVariableTableRowExtent(int32 recordCount,
+    int32 minimumRowBytes, int32 rowAlignment, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || minimumRowBytes < 0 || (rowAlignment != 1 && rowAlignment != 4)
+        || row <= 0 || row > recordCount
+        || recordCount > Host.Rows.Length / 4 - 1)
     {
         return false;
     }
 
-    rowStart = selectedStart;
-    rowLength = selectedLength;
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.Rows.Length - indexByteLength;
+    if (dataByteLength < minimumRowBytes
+        || !TryReadVariableTableOffset(row - 1, init var start)
+        || !TryReadVariableTableOffset(row, init var end)
+        || end > uint32(dataByteLength)
+        || start > uint32(dataByteLength - minimumRowBytes)
+        || end < start + uint32(minimumRowBytes)
+        || (rowAlignment == 4 && ((start | end) & 3) != 0))
+    {
+        return false;
+    }
+
+    rowStart = int32(start);
+    rowLength = int32(end - start);
     return true;
 }

@@ -3,39 +3,81 @@ namespace Terrum.CodeAnalysis;
 public static bool TryValidateTypeSpecTable(int32 recordCount, int32 typeDefCount,
     int32 importCount, int32 genericParamCount, int32 typeArgCount)
 {
+    return TryValidateTypeSpecTableAndCountArguments(recordCount, typeDefCount,
+        importCount, genericParamCount, typeArgCount, init var ignoredConstructedArgumentCount);
+}
+
+bool TryValidateTypeSpecTableAndCountArguments(int32 recordCount, int32 typeDefCount,
+    int32 importCount, int32 genericParamCount, int32 typeArgCount,
+    init ref<uint32> constructedArgumentCount)
+{
     if (!IsValidTypeSpecCount(typeDefCount) || !IsValidTypeSpecCount(importCount)
         || !IsValidTypeSpecCount(genericParamCount) || !IsValidTypeSpecCount(typeArgCount)
-        || !TryGetVariableTableRowExtent(recordCount, 3, 1, recordCount,
-            init var finalRowStart, init var finalRowLength))
+        || recordCount <= 0 || recordCount > 16777215
+        || recordCount > Host.TypeSpecs.Length / 4 - 1)
     {
         return false;
     }
 
     int32 indexByteLength = (recordCount + 1) * 4;
-    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    int32 dataByteLength = Host.TypeSpecs.Length - indexByteLength;
+    if (dataByteLength < 3
+        || !TryReadTypeSpecTableOffset(0, init var firstOffset)
+        || firstOffset != 0)
     {
-        if (!TryReadVariableTableOffset(row - 1, init var startOffset)
-            || !TryReadVariableTableOffset(row, init var endOffset))
-        {
-            return false;
-        }
-
-        int32 rowStart = indexByteLength + int32(startOffset);
-        int32 rowLength = int32(endOffset - startOffset);
-        if (!TryValidateTypeSpecRow(row, indexByteLength, rowStart, rowLength, typeDefCount,
-            importCount, genericParamCount, typeArgCount))
-        {
-            return false;
-        }
+        return false;
     }
 
+    mut uint32 declaredArgumentCount = 0;
+    mut uint32 previousOffset = firstOffset;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryReadTypeSpecTableOffset(row, init var nextOffset)
+            || nextOffset > uint32(dataByteLength)
+            || previousOffset > uint32(dataByteLength - 3)
+            || nextOffset < previousOffset + 3)
+        {
+            return false;
+        }
+
+        int32 rowStart = indexByteLength + int32(previousOffset);
+        int32 rowLength = int32(nextOffset - previousOffset);
+        if (!TryValidateTypeSpecRow(row, indexByteLength,
+                rowStart, rowLength, typeDefCount, importCount, genericParamCount,
+                typeArgCount, init var rowArgumentCount))
+        {
+            return false;
+        }
+
+        if (declaredArgumentCount <= uint32(typeArgCount))
+        {
+            if (rowArgumentCount > uint32(typeArgCount) - declaredArgumentCount)
+            {
+                declaredArgumentCount = uint32(typeArgCount) + 1;
+            }
+            else
+            {
+                declaredArgumentCount = declaredArgumentCount + rowArgumentCount;
+            }
+        }
+        previousOffset = nextOffset;
+    }
+
+    if (previousOffset != uint32(dataByteLength))
+    {
+        return false;
+    }
+
+    constructedArgumentCount = declaredArgumentCount;
     return true;
 }
 
 bool TryValidateTypeSpecRow(int32 row, int32 indexByteLength,
     int32 rowStart, int32 rowLength,
-    int32 typeDefCount, int32 importCount, int32 genericParamCount, int32 typeArgCount)
+    int32 typeDefCount, int32 importCount, int32 genericParamCount, int32 typeArgCount,
+    init ref<uint32> constructedArgumentCount)
 {
+    constructedArgumentCount = 0;
     if (rowLength < 3
         || !TryReadTypeSpecByte(rowStart, rowLength, 0, init var form)
         || !TryReadTypeSpecByte(rowStart, rowLength, 1, init var qualifiers)
@@ -93,6 +135,7 @@ bool TryValidateTypeSpecRow(int32 row, int32 indexByteLength,
             return false;
         }
 
+        constructedArgumentCount = count;
         return true;
     }
 
@@ -139,8 +182,8 @@ bool IsEarlierTypeSpecRow(uint32 reference, int32 row)
 bool TryGetTypeSpecForm(int32 indexByteLength, int32 row,
     init ref<int32> form)
 {
-    if (!TryReadVariableTableOffset(row - 1, init var startOffset)
-        || !TryReadVariableTableOffset(row, init var endOffset))
+    if (!TryReadTypeSpecTableOffset(row - 1, init var startOffset)
+        || !TryReadTypeSpecTableOffset(row, init var endOffset))
     {
         return false;
     }
@@ -154,8 +197,8 @@ bool TryGetTypeSpecConstructedArgumentRange(int32 typeSpecCount, int32 indexByte
     int32 row, init ref<uint32> first, init ref<uint32> count)
 {
     if (row < 1 || row > typeSpecCount
-        || !TryReadVariableTableOffset(row - 1, init var startOffset)
-        || !TryReadVariableTableOffset(row, init var endOffset))
+        || !TryReadTypeSpecTableOffset(row - 1, init var startOffset)
+        || !TryReadTypeSpecTableOffset(row, init var endOffset))
     {
         return false;
     }
@@ -179,8 +222,8 @@ bool IsNoncanonicalInlineTypeSpec(int32 indexByteLength, uint32 reference)
     {
         return false;
     }
-    if (!TryReadVariableTableOffset(int32(reference) - 1, init var startOffset)
-        || !TryReadVariableTableOffset(int32(reference), init var endOffset))
+    if (!TryReadTypeSpecTableOffset(int32(reference) - 1, init var startOffset)
+        || !TryReadTypeSpecTableOffset(int32(reference), init var endOffset))
     {
         return true;
     }
@@ -200,12 +243,12 @@ bool TryReadTypeSpecByte(int32 rowStart, int32 rowLength, int32 offset,
     init ref<int32> value)
 {
     if (rowStart < 0 || rowLength < 0 || offset < 0 || offset >= rowLength
-        || rowStart > Host.Rows.Length - rowLength)
+        || rowStart > Host.TypeSpecs.Length - rowLength)
     {
         return false;
     }
 
-    int32 part = Host.Rows[rowStart + offset];
+    int32 part = Host.TypeSpecs[rowStart + offset];
     if (part < 0 || part > 255)
     {
         return false;
@@ -235,4 +278,84 @@ bool TryReadTypeSpecWord(int32 rowStart, int32 rowLength, int32 offset,
 bool IsValidTypeSpecCount(int32 count)
 {
     return count >= 0 && count <= 16777215;
+}
+
+bool TryGetTypeSpecRowExtent(int32 recordCount, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || row <= 0 || row > recordCount
+        || recordCount > Host.TypeSpecs.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.TypeSpecs.Length - indexByteLength;
+    if (!TryReadTypeSpecTableOffset(row - 1, init var startOffset)
+        || !TryReadTypeSpecTableOffset(row, init var endOffset)
+        || startOffset > endOffset || endOffset > uint32(dataByteLength))
+    {
+        return false;
+    }
+
+    rowStart = indexByteLength + int32(startOffset);
+    rowLength = int32(endOffset - startOffset);
+    return true;
+}
+
+bool TryReadTypeSpecTableOffset(int32 offsetIndex, init ref<uint32> offset)
+{
+    if (offsetIndex < 0 || offsetIndex >= Host.TypeSpecs.Length / 4)
+    {
+        return false;
+    }
+
+    int32 at = offsetIndex * 4;
+    mut uint32 value = 0;
+    for (mut int32 byteIndex = 0; byteIndex < 4; byteIndex = byteIndex + 1)
+    {
+        int32 part = Host.TypeSpecs[at + byteIndex];
+        if (part < 0 || part > 255)
+        {
+            return false;
+        }
+        value = value | (uint32(part) << (byteIndex * 8));
+    }
+
+    offset = value;
+    return true;
+}
+
+bool TryValidateTypeSpecTableIndex(int32 recordCount)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || recordCount > Host.TypeSpecs.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.TypeSpecs.Length - indexByteLength;
+    if (dataByteLength < 3
+        || !TryReadTypeSpecTableOffset(0, init var firstOffset)
+        || firstOffset != 0)
+    {
+        return false;
+    }
+
+    mut uint32 previous = firstOffset;
+    for (mut int32 currentRow = 1; currentRow <= recordCount; currentRow = currentRow + 1)
+    {
+        if (!TryReadTypeSpecTableOffset(currentRow, init var next)
+            || next > uint32(dataByteLength)
+            || previous > uint32(dataByteLength - 3)
+            || next < previous + 3)
+        {
+            return false;
+        }
+        previous = next;
+    }
+
+    return previous == uint32(dataByteLength);
 }

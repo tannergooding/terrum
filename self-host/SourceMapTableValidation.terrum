@@ -14,9 +14,8 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
             moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
             featureCount, fieldCount, genericParamCount, layoutCount,
             contractCount, methodSigCount, bodyCount)
-        || !TryValidateSourceFileTable(sourceFileRecordCount, moduleCount,
-            stringCount, moduleRefCount, typeDefCount, methodDefCount,
-            sourceFileCount, featureCount))
+        || !TryValidateSourceFileRowsAfterModuleValidation(
+            sourceFileRecordCount, stringCount))
     {
         return false;
     }

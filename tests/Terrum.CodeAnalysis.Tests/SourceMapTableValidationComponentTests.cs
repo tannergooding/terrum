@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -39,6 +40,7 @@ public sealed class SourceMapTableValidationComponentTests
     public async Task SourceMapValidationMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var valid = CreateCase();
+        var manyModules = CreateManyModuleCase();
         var twoInstructions = CreateCase(twoMethods: true);
         var twoModuleTransitions = CreateCase(twoModules: true, reverseBodyOwners: true);
         var twoBlockBody = valid with {
@@ -50,6 +52,7 @@ public sealed class SourceMapTableValidationComponentTests
         var unusedSlots = WithSourceMap(valid, MapWithUnusedSlots());
         var cases = new List<TableCase> {
             valid,
+            manyModules,
             WithWord(valid, 16, 1),
             secondBlock,
             WithWord(secondBlock, 16, 2),
@@ -96,6 +99,10 @@ public sealed class SourceMapTableValidationComponentTests
             Reject(CreateCase(twoModules: true, fileRow: 2)),
             Reject(valid with { SourceFileCount = 2 }),
         };
+
+        var invalidSourceFilePath = valid.SourceFiles.ToArray();
+        invalidSourceFilePath[0] = 4;
+        cases.Add(Reject(valid with { SourceFiles = invalidSourceFilePath }));
 
         var invalidByte = valid.SourceMaps.ToArray();
         invalidByte[0] = 256;
@@ -239,6 +246,53 @@ public sealed class SourceMapTableValidationComponentTests
             operationBlockCounts,
             operationCounts,
             twoMethods || reverseBodyOwners ? 2 : 1,
+            true,
+            true);
+    }
+
+    private static TableCase CreateManyModuleCase()
+    {
+        const int moduleCount = 512;
+        var names = TrRmStringTableWriter.EncodeNames(Enumerable.Range(0, moduleCount)
+            .Select(static index => ("Module" + index.ToString("D4", CultureInfo.InvariantCulture), 0))
+            .Append(("Run", 0))
+            .Append(("src/A", 0))
+            .ToArray());
+        var modules = new byte[moduleCount * 44];
+        for (var row = 0; row < moduleCount; row++)
+        {
+            var offset = row * 44;
+            Write(modules, offset, (uint)row + 1);
+            Write(modules, offset + 4, 1);
+            Write(modules, offset + 28, 1);
+            Write(modules, offset + 32, 1);
+            Write(modules, offset + 36, 1);
+            Write(modules, offset + 40, 1);
+        }
+
+        var method = new byte[28];
+        Write(method, 4, moduleCount + 1);
+        Write(method, 8, 1);
+        Write(method, 24, 1);
+        var sourceFile = new byte[8];
+        Write(sourceFile, 0, moduleCount + 2);
+        return new TableCase(
+            [.. names.Select(static value => (int)value)],
+            [.. modules.Select(static value => (int)value)],
+            [],
+            [.. method.Select(static value => (int)value)],
+            [.. EncodeSignature().Select(static value => (int)value)],
+            [.. sourceFile.Select(static value => (int)value)],
+            [.. Map(1).Select(static value => (int)value)],
+            moduleCount,
+            moduleCount + 2,
+            1,
+            1,
+            1,
+            [0, 1],
+            [0, 1],
+            [0, 1],
+            1,
             true,
             true);
     }

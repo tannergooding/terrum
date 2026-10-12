@@ -19,15 +19,39 @@ public sealed class VariableTableIndexComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            int32 caseCount = Host.Expected.Length / 7;
+            int32 caseCount = Host.Expected.Length / 8;
             for (mut int32 index = 0; index < caseCount; index = index + 1) {
-                int32 record = index * 7;
+                int32 record = index * 8;
                 int32 count = Host.Expected[record];
                 int32 minimumRowBytes = Host.Expected[record + 1];
                 int32 rowAlignment = Host.Expected[record + 2];
                 int32 row = Host.Expected[record + 3];
                 bool expectedSuccess = Host.Expected[record + 4] != 0;
+                bool validIndex = TryValidateVariableTableIndex(
+                    count, minimumRowBytes, rowAlignment);
+                if (validIndex != (Host.Expected[record + 7] != 0)) {
+                    return 8;
+                }
+                if (validIndex) {
+                    for (mut int32 indexedRow = 1; indexedRow <= count; indexedRow = indexedRow + 1) {
+                        if (!TryGetValidatedVariableTableRowExtent(
+                            count, minimumRowBytes, rowAlignment, indexedRow,
+                            init var indexedRowStart, init var indexedRowLength)) {
+                            return 7;
+                        }
+                        if (!TryGetVariableTableRowExtent(
+                            count, minimumRowBytes, rowAlignment, indexedRow,
+                            init var checkedRowStart, init var checkedRowLength)
+                            || indexedRowStart != checkedRowStart
+                            || indexedRowLength != checkedRowLength) {
+                            return 9;
+                        }
+                    }
+                }
                 if (expectedSuccess) {
+                    if (!validIndex) {
+                        return 4;
+                    }
                     if (!TryGetVariableTableRowExtent(count, minimumRowBytes, rowAlignment, row,
                         init var rowStart, init var rowLength)) {
                         return 1;
@@ -36,9 +60,21 @@ public sealed class VariableTableIndexComponentTests
                         || rowLength != Host.Expected[record + 6]) {
                         return 2;
                     }
+                    if (!TryGetValidatedVariableTableRowExtent(
+                        count, minimumRowBytes, rowAlignment, row,
+                        init var validatedRowStart, init var validatedRowLength)
+                        || validatedRowStart != rowStart
+                        || validatedRowLength != rowLength) {
+                        return 5;
+                    }
                 } else if (TryGetVariableTableRowExtent(count, minimumRowBytes, rowAlignment, row,
                     init var rejectedStart, init var rejectedLength)) {
                     return 3;
+                } else if (validIndex
+                    && TryGetValidatedVariableTableRowExtent(
+                        count, minimumRowBytes, rowAlignment, row,
+                        init var unusedStart, init var unusedLength)) {
+                    return 6;
                 }
             }
             return 0;
@@ -58,12 +94,15 @@ public sealed class VariableTableIndexComponentTests
         {
             cases.Add(Success(blobs, 4, 0, 1, row));
         }
-        cases.Add(Rejected(blobs, 4, 0, 1, 0));
-        cases.Add(Rejected(blobs, 4, 0, 1, 5));
+        cases.Add(Rejected(blobs, 4, 0, 1, 0, validIndex: true));
+        cases.Add(Rejected(blobs, 4, 0, 1, 5, validIndex: true));
         cases.Add(Rejected(blobs, 0, 0, 1, 1));
         cases.Add(Rejected(blobs, 0x1000000, 0, 1, 1));
         cases.Add(Rejected(blobs, 4, -1, 1, 1));
         cases.Add(Rejected(blobs, 4, 0, 2, 1));
+        cases.Add(Success(TrRmVariableTableWriter.EncodeBlobs(
+            Enumerable.Repeat<ReadOnlyMemory<byte>>(new byte[] { 7 }, 256).ToArray()),
+            256, 0, 1, 256));
 
         var truncatedIndex = blobs[..^sizeof(uint)];
         cases.Add(Rejected(truncatedIndex, 4, 0, 1, 1));
@@ -94,7 +133,7 @@ public sealed class VariableTableIndexComponentTests
         {
             cases.Add(Success(bodies, 2, 1, 1, row));
         }
-        cases.Add(Rejected(bodies, 2, 1, 1, 0));
+        cases.Add(Rejected(bodies, 2, 1, 1, 0, validIndex: true));
 
         var emptyBody = bodies.ToArray();
         BinaryPrimitives.WriteUInt32LittleEndian(emptyBody.AsSpan(4), 0);
@@ -126,14 +165,17 @@ public sealed class VariableTableIndexComponentTests
         var start = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(section.AsSpan((row - 1) * sizeof(uint))));
         var length = reader.GetRow(row).Length;
         return new TableCase([.. section.Select(static value => (int)value)],
-            [[count, minimumRowBytes, rowAlignment, row, 1, start, length]]);
+            [[count, minimumRowBytes, rowAlignment, row, 1, start, length, 1]]);
     }
 
-    private static TableCase Rejected(byte[] section, int count, int minimumRowBytes, int rowAlignment, int row)
-        => Rejected([.. section.Select(static value => (int)value)], count, minimumRowBytes, rowAlignment, row);
+    private static TableCase Rejected(byte[] section, int count, int minimumRowBytes, int rowAlignment,
+        int row, bool validIndex = false) =>
+        Rejected([.. section.Select(static value => (int)value)], count, minimumRowBytes,
+            rowAlignment, row, validIndex);
 
-    private static TableCase Rejected(int[] section, int count, int minimumRowBytes, int rowAlignment, int row)
-        => new(section, [[count, minimumRowBytes, rowAlignment, row, 0, -1, -1]]);
+    private static TableCase Rejected(int[] section, int count, int minimumRowBytes, int rowAlignment,
+        int row, bool validIndex = false) =>
+        new(section, [[count, minimumRowBytes, rowAlignment, row, 0, -1, -1, validIndex ? 1 : 0]]);
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {

@@ -33,6 +33,7 @@ public sealed class MethodSigParamTableValidationComponentTests
         var valid = CreateValidCase();
         var cases = new List<TableCase> {
             valid,
+            CreateGroupedCase(),
             valid with { GenericParamCount = 0xFF_FFFF },
             valid with { SignatureCount = 0, Signatures = [], ExpectedValid = false },
             valid with { ParamCount = 0, Parameters = [], ExpectedValid = false },
@@ -133,7 +134,6 @@ public sealed class MethodSigParamTableValidationComponentTests
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>();
         foreach (var name in new[] {
-            "VariableTableIndex.terrum",
             "TypeSpecTableValidation.terrum",
             "MethodSigParamTableValidation.terrum",
         })
@@ -155,7 +155,7 @@ public sealed class MethodSigParamTableValidationComponentTests
 
             var compilation = Compilation.Create(components,
             [
-                new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Types], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32, [.. testCase.Types], false),
                 new HostBuffer("Signatures", PrimitiveType.Int32, [.. testCase.Signatures], false),
                 new HostBuffer("Params", PrimitiveType.Int32, [.. testCase.Parameters], false),
                 new HostBuffer("Expected", PrimitiveType.Int32,
@@ -190,6 +190,31 @@ public sealed class MethodSigParamTableValidationComponentTests
         var testCase = new TableCase([.. types.Select(static value => (int)value)],
             [.. signatures.Select(static value => (int)value)],
             [.. parameters.Select(static value => (int)value)], 2, 3, 2, 2, 0, 0, 0, true, true);
+        Assert.True(ValidateHosted(testCase));
+        return testCase;
+    }
+
+    private static TableCase CreateGroupedCase()
+    {
+        const int paramCount = 512;
+        byte[] types = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.Builtin(0),
+        ], 0, 0, 0, 0);
+        byte[] signatures = EncodeWords(1, 0, 1, paramCount, 0, 0);
+        var parameters = new byte[paramCount * 16];
+        for (var index = 0; index < paramCount; index++)
+        {
+            var offset = index * 16;
+            WriteWord(parameters, offset, 1);
+            WriteWord(parameters, offset + 4, (uint)index);
+            WriteWord(parameters, offset + 8, 2);
+        }
+
+        var testCase = new TableCase([.. types.Select(static value => (int)value)],
+            [.. signatures.Select(static value => (int)value)],
+            [.. parameters.Select(static value => (int)value)],
+            1, paramCount, 0, 2, 0, 0, 0, true, true);
         Assert.True(ValidateHosted(testCase));
         return testCase;
     }

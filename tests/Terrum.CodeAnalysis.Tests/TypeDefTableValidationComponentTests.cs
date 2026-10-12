@@ -197,6 +197,117 @@ public sealed class TypeDefTableValidationComponentTests
         }
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task TypeDefFieldAndTypeSpecValidationCompose(BoundRuntimePolicy policy)
+    {
+        var strings = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("Widget", 0), ("Value", 0), ("Gadget", 0),
+        ]);
+        var modules = EncodeModules(1, 1);
+        var typeDefs = EncodeTypeDefs((1, 3, 4, 1, 1, 0, 0, 0, 0, 0));
+        var fieldDefs = EncodeFieldDef(1, 4, 1, 0, uint.MaxValue);
+        var typeSpecs = TrRmTypeSpecTableWriter.Encode(
+            [TrRmTypeSpecTableWriter.Builtin(8)], 1, 0, 0, 0);
+        var recursiveTypeSpecs = TrRmTypeSpecTableWriter.Encode(
+            [TrRmTypeSpecTableWriter.Reference(0x02, 1)], 1, 0, 0, 0);
+        var missingTypeSpecs = TrRmVariableTableWriter.EncodeBlobs(
+            [TrRmTypeSpecTableWriter.Reference(0x02, 2)]);
+        var invalidTypeSpecs = (byte[])typeSpecs.Clone();
+        var typeSpecRowStart = sizeof(uint) * 2
+            + (int)BinaryPrimitives.ReadUInt32LittleEndian(typeSpecs.AsSpan(0));
+        invalidTypeSpecs[typeSpecRowStart + 2] = 0x1A;
+        var cases = new[] {
+            (TypeSpecs: typeSpecs, ExpectedValid: true),
+            (TypeSpecs: recursiveTypeSpecs, ExpectedValid: true),
+            (TypeSpecs: missingTypeSpecs, ExpectedValid: false),
+            (TypeSpecs: invalidTypeSpecs, ExpectedValid: false),
+        };
+
+        var root = RepositoryRoot();
+        var components = new List<SyntaxTree>();
+        foreach (var name in new[] {
+            "VariableTableIndex.terrum",
+            "StringRowLayout.terrum",
+            "StringRowText.terrum",
+            "StringTableText.terrum",
+            "ModuleTableValidation.terrum",
+            "TypeDefTableValidation.terrum",
+            "LayoutTableValidation.terrum",
+            "TypeSpecTableValidation.terrum",
+            "FieldDefTableValidation.terrum",
+        })
+        {
+            var path = Path.Combine(root, "self-host", name);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            components.Add(tree);
+        }
+        components.Add(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                bool typeSpecValid = TryValidateTypeSpecTable(
+                    Host.Expected[12], Host.Expected[4], 0, Host.Expected[9], 0);
+                bool typeDefValid = TryValidateTypeDefTable(
+                    Host.Expected[0], Host.Expected[1], Host.Expected[2],
+                    Host.Expected[3], Host.Expected[4], Host.Expected[5],
+                    Host.Expected[6], Host.Expected[7], Host.Expected[8],
+                    Host.Expected[9], Host.Expected[10], Host.Expected[11]);
+                bool fieldDefValid = TryValidateFieldDefTable(
+                    Host.Expected[0], Host.Expected[1], Host.Expected[2],
+                    Host.Expected[3], Host.Expected[4], Host.Expected[5],
+                    Host.Expected[6], Host.Expected[7], Host.Expected[8],
+                    Host.Expected[9], Host.Expected[10], Host.Expected[11],
+                    Host.Expected[12]);
+                bool valid = typeSpecValid && typeDefValid && fieldDefValid;
+                if (valid != (Host.Expected[13] != 0)) { return 1; }
+                if (!valid) { return 0; }
+                if (Host.FieldOwners.Length != 2
+                    || Host.FieldOwners[0] != 0 || Host.FieldOwners[1] != 1) { return 1; }
+                return 0;
+            }
+            """, "type-def-field-typespec-validation.terrum"));
+
+        foreach (var testCase in cases)
+        {
+            Assert.Equal(testCase.ExpectedValid, ValidateComposedHosted(
+                strings, modules, typeDefs, fieldDefs, testCase.TypeSpecs));
+
+            var compilation = Compilation.Create(components,
+            [
+                new HostBuffer("Rows", PrimitiveType.Int32,
+                    [.. strings.Select(static value => (int)value)], false),
+                new HostBuffer("Modules", PrimitiveType.Int32,
+                    [.. modules.Select(static value => (int)value)], false),
+                new HostBuffer("TypeDefs", PrimitiveType.Int32,
+                    [.. typeDefs.Select(static value => (int)value)], false),
+                new HostBuffer("Layouts", PrimitiveType.Int32, [], false),
+                new HostBuffer("FieldDefs", PrimitiveType.Int32,
+                    [.. fieldDefs.Select(static value => (int)value)], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32,
+                    [.. testCase.TypeSpecs.Select(static value => (int)value)], false),
+                new HostBuffer("IdentitySlots", PrimitiveType.Int32,
+                    [.. Enumerable.Repeat(123, 2)], true),
+                new HostBuffer("FieldOwners", PrimitiveType.Int32,
+                    [.. Enumerable.Repeat(123, 2)], true),
+                new HostBuffer("LayoutOwners", PrimitiveType.Int32,
+                    [.. Enumerable.Repeat(123, 1)], true),
+                new HostBuffer("Expected", PrimitiveType.Int32,
+                [
+                    1, 1, 5, 0, 1, 0, 0, -1, 1, 0, 0, 0, 1,
+                    testCase.ExpectedValid ? 1 : 0,
+                ], false),
+            ], policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.True(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0,
+                $"JIT composition case expected {testCase.ExpectedValid}.");
+            Assert.True(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0,
+                $"AOT composition case expected {testCase.ExpectedValid}.");
+        }
+    }
+
     private static TableCase Valid(byte[] strings, byte[] modules, byte[] typeDefs,
         int recordCount = 2, int moduleCount = 2, int stringCount = 5,
         int moduleRefCount = 0, int typeDefCount = 2, int methodDefCount = 0,
@@ -211,6 +322,26 @@ public sealed class TypeDefTableValidationComponentTests
             genericParamCount, layoutCount, contractCount,
             true, true, moduleCount + 1, fieldCount + 1,
             expectedFieldOwners ?? [.. Enumerable.Repeat(0, fieldCount + 1)]);
+
+    private static bool ValidateComposedHosted(byte[] stringBytes, byte[] moduleBytes,
+        byte[] typeDefBytes, byte[] fieldDefBytes, byte[] typeSpecBytes)
+    {
+        try
+        {
+            var strings = new TrRmStringTableReader(stringBytes, 5);
+            var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+                0, 1, 0, 0, -1);
+            var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1, 1, 0, 0, 0);
+            var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, 1, strings, modules,
+                1, 0, 0, 0);
+            _ = new TrRmFieldDefTableReader(fieldDefBytes, 1, strings, typeDefs, typeSpecs);
+            return true;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
 
     private static TableCase Rejected(byte[] strings, byte[] modules, byte[] typeDefs,
         int stringCount = 5, bool hasHostedOracle = true, int recordCount = 2,
@@ -257,6 +388,18 @@ public sealed class TypeDefTableValidationComponentTests
         }
         BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(rows.Length * sizeof(uint)), (uint)offset);
         return section;
+    }
+
+    private static byte[] EncodeFieldDef(uint owner, uint name, uint typeSpec,
+        uint flags, uint byteOffset)
+    {
+        var field = new byte[20];
+        WriteWord(field, 0, owner);
+        WriteWord(field, 4, name);
+        WriteWord(field, 8, typeSpec);
+        WriteWord(field, 12, flags);
+        WriteWord(field, 16, byteOffset);
+        return field;
     }
 
     private static byte[] EncodeModules(int moduleCount, int typeDefCount)

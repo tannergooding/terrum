@@ -1,0 +1,62 @@
+namespace Terrum.CodeAnalysis;
+
+// Keep this offset-only cursor within the Host.Rows invocation that created it.
+unique struct StringRowTextCursor
+{
+    private mut int32 _byteOffset;
+    private mut int32 _remainingByteLength;
+    private int32 _encoding;
+    private mut int32 _remainingScalarCount;
+
+    private StringRowTextCursor(int32 byteOffset, int32 contentByteLength,
+        int32 encoding, int32 scalarCount)
+    {
+        _byteOffset = byteOffset;
+        _remainingByteLength = contentByteLength;
+        _encoding = encoding;
+        _remainingScalarCount = scalarCount;
+    }
+
+    public static bool TryCreateName(int32 rowStart, int32 rowLength,
+        init ref<StringRowTextCursor> result)
+    {
+        return TryCreate(rowStart, rowLength, false, init result);
+    }
+
+    public static bool TryCreateNamespace(int32 rowStart, int32 rowLength,
+        init ref<StringRowTextCursor> result)
+    {
+        return TryCreate(rowStart, rowLength, true, init result);
+    }
+
+    public mut bool TryRead(init ref<int32> scalar)
+    {
+        if (_remainingScalarCount <= 0
+            || !TryDecodeStringRowScalarAtOffset(_byteOffset, _remainingByteLength, _encoding,
+                init var value, init var bytesRead)
+            || bytesRead > _remainingByteLength)
+        {
+            return false;
+        }
+
+        _byteOffset = _byteOffset + bytesRead;
+        _remainingByteLength = _remainingByteLength - bytesRead;
+        _remainingScalarCount = _remainingScalarCount - 1;
+        scalar = value;
+        return true;
+    }
+
+    static bool TryCreate(int32 rowStart, int32 rowLength, bool allowEmpty,
+        init ref<StringRowTextCursor> result)
+    {
+        if (!TryAnalyzeStringRowText(rowStart, rowLength, allowEmpty, -1,
+            init var encoding, init var contentByteLength,
+            init var scalarCount, init var unusedScalar))
+        {
+            return false;
+        }
+
+        result = new StringRowTextCursor(rowStart + 4, contentByteLength, encoding, scalarCount);
+        return true;
+    }
+}

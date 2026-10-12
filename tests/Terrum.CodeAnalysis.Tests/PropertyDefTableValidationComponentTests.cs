@@ -21,9 +21,12 @@ public sealed class PropertyDefTableValidationComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            bool valid = TryValidatePropertyDefTable(
-                Host.Expected[0], Host.Expected[1], Host.Expected[2],
-                Host.Expected[3], Host.Expected[4], Host.Expected[5]);
+            bool valid = TryValidateMethodSigParamTables(
+                Host.Expected[5], 0, 0, Host.Expected[3],
+                Host.Expected[2], 0, 0)
+                && TryValidatePropertyDefTable(
+                    Host.Expected[0], Host.Expected[1], Host.Expected[2],
+                    Host.Expected[3], Host.Expected[4], Host.Expected[5]);
             return valid == (Host.Expected[6] != 0) ? 0 : 1;
         }
         """;
@@ -101,6 +104,8 @@ public sealed class PropertyDefTableValidationComponentTests
             "VariableTableIndex.terrum",
             "StringRowLayout.terrum",
             "StringRowText.terrum",
+            "TypeSpecTableValidation.terrum",
+            "MethodSigParamTableValidation.terrum",
             "PropertyDefTableValidation.terrum",
         })
         {
@@ -122,10 +127,12 @@ public sealed class PropertyDefTableValidationComponentTests
             var compilation = Compilation.Create(components,
             [
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Strings], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32, [.. testCase.TypeSpecs], false),
                 new HostBuffer("Properties", PrimitiveType.Int32, [.. testCase.Properties], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
                 new HostBuffer("Methods", PrimitiveType.Int32, [.. testCase.Methods], false),
                 new HostBuffer("Signatures", PrimitiveType.Int32, [.. testCase.Signatures], false),
+                new HostBuffer("Params", PrimitiveType.Int32, [], false),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
                     testCase.PropertyCount, testCase.StringCount, testCase.TypeDefCount,

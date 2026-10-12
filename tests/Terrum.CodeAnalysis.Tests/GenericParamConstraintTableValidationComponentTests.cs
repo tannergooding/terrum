@@ -20,7 +20,10 @@ public sealed class GenericParamConstraintTableValidationComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            bool valid = TryValidateConstraintTable(
+            bool valid = TryValidateMethodSigParamTables(
+                Host.Expected[12], 0, Host.Expected[9], Host.Expected[13],
+                Host.Expected[4], 0, 0)
+                && TryValidateConstraintTable(
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
                 Host.Expected[6], Host.Expected[7], Host.Expected[8],
@@ -40,6 +43,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
         var valid = CreateValidCase();
         var cases = new List<TableCase> {
             valid,
+            CreateGroupedFormalCase(valid),
             CreateNoFormalCase(valid),
             WithFormalWord(valid, 0, 0x1700_0001),
             WithFormalWord(valid, 0, 0x1300_0002),
@@ -85,8 +89,10 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             "ModuleTableValidation.terrum",
             "TypeDefTableValidation.terrum",
             "MethodDefTableValidation.terrum",
+            "MethodSigParamTableValidation.terrum",
             "GenericParamTableValidation.terrum",
             "ConstraintTableValidation.terrum",
+            "TypeSpecTableValidation.terrum",
         })
         {
             var path = Path.Combine(root, "self-host", name);
@@ -109,10 +115,16 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             var compilation = Compilation.Create(components,
             [
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Strings], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32,
+                    [.. TrRmTypeSpecTableWriter.Encode([
+                        TrRmTypeSpecTableWriter.Builtin(8),
+                    ], testCase.TypeDefCount, 0, testCase.GenericParamCount, 0)
+                        .Select(static value => (int)value)], false),
                 new HostBuffer("Modules", PrimitiveType.Int32, [.. testCase.Modules], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
                 new HostBuffer("Methods", PrimitiveType.Int32, [.. testCase.Methods], false),
                 new HostBuffer("Signatures", PrimitiveType.Int32, [.. testCase.Signatures], false),
+                new HostBuffer("Params", PrimitiveType.Int32, [], false),
                 new HostBuffer("GenericParams", PrimitiveType.Int32, [.. testCase.GenericParams], false),
                 new HostBuffer("Constraints", PrimitiveType.Int32, [.. testCase.Constraints], false),
                 new HostBuffer("IdentitySlots", PrimitiveType.Int32,
@@ -185,6 +197,35 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             GenericParamCount = 0,
             ConstraintCount = 0,
         };
+    }
+
+    private static TableCase CreateGroupedFormalCase(TableCase testCase)
+    {
+        const int genericParamCount = 512;
+        var type = Type();
+        WriteWord(type, 24, genericParamCount);
+        var signature = Signature();
+        WriteWord(signature, 16, 0);
+        WriteWord(signature, 20, 0);
+        var genericParams = new byte[genericParamCount * 20];
+        for (var index = 0; index < genericParamCount; index++)
+        {
+            var offset = index * 20;
+            WriteWord(genericParams, offset, 0x1300_0001);
+            WriteWord(genericParams, offset + 4, (uint)index);
+            WriteWord(genericParams, offset + 8, 5);
+        }
+
+        var groupedCase = testCase with {
+            TypeDefs = [.. type.Select(static value => (int)value)],
+            Signatures = [.. signature.Select(static value => (int)value)],
+            GenericParams = [.. genericParams.Select(static value => (int)value)],
+            GenericParamCount = genericParamCount,
+            Constraints = [],
+            ConstraintCount = 0,
+        };
+        Assert.True(ValidateHosted(groupedCase));
+        return groupedCase;
     }
 
     private static TableCase WithFormalWord(TableCase testCase, int offset, uint value)

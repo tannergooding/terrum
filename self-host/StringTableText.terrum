@@ -46,6 +46,27 @@ public static bool TryReadStringTableNamespaceScalarAt(int32 recordCount, int32 
     return TryReadStringNamespaceScalarAt(rowStart, rowLength, scalarIndex, init scalar);
 }
 
+bool TryValidateStringTableTextIndex(int32 recordCount)
+{
+    return recordCount > 0 && TryValidateVariableTableIndex(recordCount, 8, 4);
+}
+
+// Use after validating this exact index against the unchanged Host.Rows.
+bool TryGetValidatedStringTableTextRow(int32 recordCount, int32 row,
+    init ref<int32> rowStart, init ref<int32> rowLength)
+{
+    if (!TryGetValidatedVariableTableRowExtent(recordCount, 8, 4, row,
+        init var dataRelativeStart, init var selectedLength))
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    rowStart = indexByteLength + dataRelativeStart;
+    rowLength = selectedLength;
+    return true;
+}
+
 bool TryGetIndexedStringRow(int32 recordCount, int32 row,
     init ref<int32> rowStart, init ref<int32> rowLength)
 {

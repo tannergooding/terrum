@@ -21,9 +21,12 @@ public sealed class ContractTableValidationComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            bool valid = TryValidateContractTable(
-                Host.Expected[0], Host.Expected[1], Host.Expected[2],
-                Host.Expected[3], Host.Expected[4], Host.Expected[5]);
+            bool valid = TryValidateMethodSigParamTables(
+                Host.Expected[3], Host.Expected[4], 0, Host.Expected[5],
+                Host.Expected[1], 0, 0)
+                && TryValidateContractTable(
+                    Host.Expected[0], Host.Expected[1], Host.Expected[2],
+                    Host.Expected[3], Host.Expected[4], Host.Expected[5]);
             return valid == (Host.Expected[6] != 0) ? 0 : 1;
         }
         """;
@@ -38,6 +41,7 @@ public sealed class ContractTableValidationComponentTests
             new Clause(0x1300_0001, 5, Word(1)),
             new Clause(0x1600_0001, 1, Word(1)),
         ]);
+        var largeSingletons = CreateLargeSingletonFixture(512);
         var outputState = CreateFixture([
             new Clause(0x1600_0001, 2, OutputState()),
         ], hasOutputParam: true);
@@ -151,14 +155,23 @@ public sealed class ContractTableValidationComponentTests
                 Tables = empty.Tables with { Contracts = [0, 0, 0, 0] },
             }),
             InvalidContractByte(cleanupThenEffect, 1, 8, 256),
+            largeSingletons,
+            Invalid(CreateLargeSingletonFixture(512, duplicateFirst: true)),
         };
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>();
-        var path = Path.Combine(root, "self-host", "ContractTableValidation.terrum");
-        var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        components.Add(tree);
+        foreach (var name in new[] {
+            "TypeSpecTableValidation.terrum",
+            "MethodSigParamTableValidation.terrum",
+            "ContractTableValidation.terrum",
+        })
+        {
+            var path = Path.Combine(root, "self-host", name);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            components.Add(tree);
+        }
         components.Add(SyntaxTree.Parse(VerificationSource, "contract-table-validation.terrum"));
 
         for (var caseIndex = 0; caseIndex < cases.Count; caseIndex++)
@@ -166,7 +179,8 @@ public sealed class ContractTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                Assert.Equal(testCase.ExpectedValid, ValidateHosted(testCase.Tables));
+                Assert.True(testCase.ExpectedValid == ValidateHosted(testCase.Tables),
+                    $"Hosted reader case {caseIndex}");
             }
 
             var tables = testCase.Tables;
@@ -264,6 +278,40 @@ public sealed class ContractTableValidationComponentTests
             hasOutputParam ? 1 : 0, 2), true, true);
     }
 
+    private static TestCase CreateLargeSingletonFixture(int methodCount,
+        bool duplicateFirst = false)
+    {
+        var methods = new byte[methodCount * 28];
+        var rows = new List<byte[]>();
+        uint firstContract = 1;
+        for (var method = 0; method < methodCount; method++)
+        {
+            var contractCount = duplicateFirst && method == 0 ? 2 : 1;
+            var methodOffset = method * 28;
+            WriteWord(methods, methodOffset + 4, 4);
+            WriteWord(methods, methodOffset + 8, 1);
+            WriteWord(methods, methodOffset + 16, firstContract);
+            WriteWord(methods, methodOffset + 20, (uint)contractCount);
+            for (var index = 0; index < contractCount; index++)
+            {
+                rows.Add(Contract(0x1600_0000u | (uint)(method + 1), 1, Word(1)));
+            }
+            firstContract += (uint)contractCount;
+        }
+
+        var signatures = new byte[24];
+        WriteWord(signatures, 0, 1);
+        byte[] typeSpecs = [
+            0, 0, 0, 0,
+            3, 0, 0, 0,
+            1, 0, 1,
+        ];
+        byte[] contracts = EncodeContractSection([.. rows]);
+        var tables = new TableData(contracts, [], methods, signatures, [], typeSpecs,
+            rows.Count, 0, methodCount, 1, 0, 1);
+        return new TestCase(tables, true, true);
+    }
+
     private static bool ValidateHosted(TableData tables)
     {
         try
@@ -278,7 +326,8 @@ public sealed class ContractTableValidationComponentTests
             WriteWord(moduleBytes, 32, 1);
             WriteWord(moduleBytes, 36, 1);
             WriteWord(moduleBytes, 40, 1);
-            var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 1, 1, 0);
+            var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+                0, tables.TypeDefCount, tables.MethodDefCount, 0);
             var types = new TrRmTypeDefTableReader(tables.TypeDefs, tables.TypeDefCount,
                 strings, modules, 0, 0, 0, tables.RecordCount);
             var typeSpecs = new TrRmTypeSpecTableReader(tables.TypeSpecs,

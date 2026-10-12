@@ -3,8 +3,10 @@ namespace Terrum.CodeAnalysis;
 public static bool TryGetBlobTableRowExtent(int32 recordCount, int32 row,
     init ref<int32> blobStart, init ref<int32> blobLength)
 {
-    if (!TryGetVariableTableRowExtent(recordCount, 0, 1, row,
-        init var rowStart, init var rowLength))
+    if (row <= 0 || row > recordCount
+        || !TryValidateBlobTableIndex(recordCount)
+        || !TryGetValidatedBlobTableRowExtent(recordCount, row,
+            init var rowStart, init var rowLength))
     {
         return false;
     }
@@ -12,4 +14,16 @@ public static bool TryGetBlobTableRowExtent(int32 recordCount, int32 row,
     blobStart = rowStart;
     blobLength = rowLength;
     return true;
+}
+
+bool TryValidateBlobTableIndex(int32 recordCount)
+{
+    return recordCount > 0 && TryValidateVariableTableIndex(recordCount, 0, 1);
+}
+
+bool TryGetValidatedBlobTableRowExtent(int32 recordCount, int32 row,
+    init ref<int32> blobStart, init ref<int32> blobLength)
+{
+    return TryGetValidatedVariableTableRowExtent(recordCount, 0, 1, row,
+        init blobStart, init blobLength);
 }

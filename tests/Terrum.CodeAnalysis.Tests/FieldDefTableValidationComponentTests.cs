@@ -21,12 +21,15 @@ public sealed class FieldDefTableValidationComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            bool valid = TryValidateFieldDefTable(
-                Host.Expected[0], Host.Expected[1], Host.Expected[2],
-                Host.Expected[3], Host.Expected[4], Host.Expected[5],
-                Host.Expected[6], Host.Expected[7], Host.Expected[8],
-                Host.Expected[9], Host.Expected[10], Host.Expected[11],
-                Host.Expected[12]);
+            bool valid = TryValidateTypeSpecTable(
+                Host.Expected[12], Host.Expected[4], Host.Expected[3],
+                Host.Expected[9], 0)
+                && TryValidateFieldDefTable(
+                    Host.Expected[0], Host.Expected[1], Host.Expected[2],
+                    Host.Expected[3], Host.Expected[4], Host.Expected[5],
+                    Host.Expected[6], Host.Expected[7], Host.Expected[8],
+                    Host.Expected[9], Host.Expected[10], Host.Expected[11],
+                    Host.Expected[12]);
             return valid == (Host.Expected[13] != 0) ? 0 : 1;
         }
         """;
@@ -48,12 +51,31 @@ public sealed class FieldDefTableValidationComponentTests
         var laidOutType = EncodeTypeDefs(1);
         var layouts = EncodeLayouts(4);
         var fields = EncodeFields(1, 4, 1, 0, uint.MaxValue);
+        const int largeRecordCount = 512;
+        var manyTypes = EncodeTypeDefs(Enumerable.Range(0, largeRecordCount)
+            .Select(static index => (3u, 0x14u, (uint)index + 1, 1u, (uint)index + 1))
+            .ToArray());
+        var manyLayouts = EncodeLayouts(Enumerable.Range(0, largeRecordCount)
+            .Select(static index => ((uint)index + 1, 1u, 4u, 4u, 0u, 0u))
+            .ToArray());
+        var manyFields = new byte[largeRecordCount * 20];
+        for (var row = 0; row < largeRecordCount; row++)
+        {
+            var offset = row * 20;
+            WriteWord(manyFields, offset, (uint)row + 1);
+            WriteWord(manyFields, offset + 4, 4);
+            WriteWord(manyFields, offset + 8, 1);
+            WriteWord(manyFields, offset + 16, 0);
+        }
         var cases = new List<TableCase> {
             Valid(strings, modules, noLayoutType, [], fields, typeSpecs),
             Valid(strings, modules, laidOutType, layouts,
                 EncodeFields(1, 4, 1, 0, 0), typeSpecs, layoutCount: 1),
             Valid(strings, modules, laidOutType, layouts,
                 EncodeFields(1, 4, 1, 0, 3), typeSpecs, layoutCount: 1),
+            Valid(strings, modules, manyTypes, manyLayouts, manyFields, typeSpecs,
+                recordCount: largeRecordCount, typeDefCount: largeRecordCount,
+                fieldCount: largeRecordCount, layoutCount: largeRecordCount),
             Valid(strings, modules, EncodeTypeDefs(
                     (3, 0x14, 0, 0, 2), (5, 0x14, 1, 1, 1)),
                 EncodeLayouts((2, 1, 4, 4, 0, 0), (1, 0, 0, 4, 0, 0)),
@@ -119,6 +141,7 @@ public sealed class FieldDefTableValidationComponentTests
             "ModuleTableValidation.terrum",
             "TypeDefTableValidation.terrum",
             "LayoutTableValidation.terrum",
+            "TypeSpecTableValidation.terrum",
             "FieldDefTableValidation.terrum",
         })
         {
@@ -145,6 +168,7 @@ public sealed class FieldDefTableValidationComponentTests
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
                 new HostBuffer("Layouts", PrimitiveType.Int32, [.. testCase.Layouts], false),
                 new HostBuffer("FieldDefs", PrimitiveType.Int32, [.. testCase.FieldDefs], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32, [.. testCase.TypeSpecs], false),
                 new HostBuffer("IdentitySlots", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.ModuleCount + 1)], true),
                 new HostBuffer("FieldOwners", PrimitiveType.Int32,

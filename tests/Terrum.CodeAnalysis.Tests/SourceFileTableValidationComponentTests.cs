@@ -81,6 +81,12 @@ public sealed class SourceFileTableValidationComponentTests
             ExpectedValid = false,
         });
 
+        var manySourceFiles = Enumerable.Range(0, 512)
+            .Select(static index => (Path: index % 2 == 0 ? 3u : 4u, DigestBlob: 0u))
+            .ToArray();
+        cases.Add(Valid(strings, modules, EncodeSourceFiles(manySourceFiles),
+            recordCount: manySourceFiles.Length, sourceFileCount: manySourceFiles.Length));
+
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>();
         foreach (var name in new[] {

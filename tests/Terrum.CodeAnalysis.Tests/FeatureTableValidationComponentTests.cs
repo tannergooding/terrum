@@ -116,8 +116,9 @@ public sealed class FeatureTableValidationComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(),
-            $"feature-table-validation-{Guid.NewGuid():N}.exe");
+        var directory = Path.Combine(RepositoryRoot(), "artifacts", "feature-table-tests");
+        _ = Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"feature-table-validation-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy))

@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -51,6 +52,11 @@ public sealed class ModuleTableValidationComponentTests
             Valid(TrRmStringTableWriter.EncodeNames([("\U00010400", 1), ("\U00010400", 2)]),
                 [1, 2], 2, expectedValid: false),
         };
+
+        var manyNames = TrRmStringTableWriter.EncodeNames(Enumerable.Range(0, 512)
+            .Select(static index => ("M" + index.ToString("D4", CultureInfo.InvariantCulture), 0))
+            .ToArray());
+        cases.Add(Valid(manyNames, Enumerable.Range(1, 512).Reverse().ToArray(), 512));
 
         AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 4, 2);
         AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 8, 2);

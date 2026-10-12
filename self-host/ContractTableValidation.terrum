@@ -45,7 +45,7 @@ public static bool TryValidateContractTable(int32 recordCount,
         return false;
     }
 
-    if (!TryValidateContractTypeSpecIndex(typeSpecCount))
+    if (!TryValidateTypeSpecTableIndex(typeSpecCount))
     {
         return false;
     }
@@ -299,18 +299,18 @@ bool TryIsBooleanContractResult(uint32 owner, int32 methodDefCount,
         || !TryReadContractSignatureWord((int32(signature) - 1) * 24, 0,
             init var resultTypeSpec)
         || resultTypeSpec == 0 || resultTypeSpec > uint32(typeSpecCount)
-        || !TryGetContractTypeSpecExtent(typeSpecCount, int32(resultTypeSpec),
+        || !TryGetTypeSpecRowExtent(typeSpecCount, int32(resultTypeSpec),
             init var resultStart, init var resultLength))
     {
         return false;
     }
 
     return resultLength == 3
-        && TryReadContractTypeSpecByte(resultStart, resultLength, 0, init var form)
+        && TryReadTypeSpecByte(resultStart, resultLength, 0, init var form)
         && form == 1
-        && TryReadContractTypeSpecByte(resultStart, resultLength, 1, init var qualifiers)
+        && TryReadTypeSpecByte(resultStart, resultLength, 1, init var qualifiers)
         && qualifiers == 0
-        && TryReadContractTypeSpecByte(resultStart, resultLength, 2, init var code)
+        && TryReadTypeSpecByte(resultStart, resultLength, 2, init var code)
         && code == 1;
 }
 
@@ -337,55 +337,6 @@ bool TryGetContractParameterMode(uint32 owner, uint32 ordinal,
     uint32 paramRow = first + ordinal;
     return paramRow > 0 && paramRow <= uint32(paramCount)
         && TryReadContractParamByte((int32(paramRow) - 1) * 16 + 12, init mode);
-}
-
-bool TryValidateContractTypeSpecIndex(int32 typeSpecCount)
-{
-    if (typeSpecCount <= 0 || typeSpecCount > 0xFF_FFFF
-        || typeSpecCount > Host.TypeSpecs.Length / 4 - 1)
-    {
-        return false;
-    }
-
-    int32 indexByteLength = (typeSpecCount + 1) * 4;
-    int32 dataByteLength = Host.TypeSpecs.Length - indexByteLength;
-    if (dataByteLength < 3
-        || !TryReadContractTypeSpecOffset(0, init var firstOffset)
-        || firstOffset != 0)
-    {
-        return false;
-    }
-
-    mut uint32 previous = firstOffset;
-    for (mut int32 row = 1; row <= typeSpecCount; row = row + 1)
-    {
-        if (!TryReadContractTypeSpecOffset(row, init var nextOffset)
-            || nextOffset > uint32(dataByteLength)
-            || previous > uint32(dataByteLength - 3)
-            || nextOffset < previous + 3)
-        {
-            return false;
-        }
-        previous = nextOffset;
-    }
-
-    return previous == uint32(dataByteLength);
-}
-
-bool TryGetContractTypeSpecExtent(int32 typeSpecCount, int32 row,
-    init ref<int32> rowStart, init ref<int32> rowLength)
-{
-    if (row <= 0 || row > typeSpecCount
-        || !TryReadContractTypeSpecOffset(row - 1, init var startOffset)
-        || !TryReadContractTypeSpecOffset(row, init var endOffset)
-        || startOffset > endOffset)
-    {
-        return false;
-    }
-
-    rowStart = (typeSpecCount + 1) * 4 + int32(startOffset);
-    rowLength = int32(endOffset - startOffset);
-    return true;
 }
 
 bool TrySortAndCheckContractSingletons(int32 singletonCount)
@@ -467,29 +418,6 @@ bool TryReadContractTableOffset(int32 offsetIndex, init ref<uint32> offset)
     return true;
 }
 
-bool TryReadContractTypeSpecOffset(int32 offsetIndex, init ref<uint32> offset)
-{
-    if (offsetIndex < 0 || offsetIndex >= Host.TypeSpecs.Length / 4)
-    {
-        return false;
-    }
-
-    int32 at = offsetIndex * 4;
-    mut uint32 value = 0;
-    for (mut int32 byteIndex = 0; byteIndex < 4; byteIndex = byteIndex + 1)
-    {
-        int32 part = Host.TypeSpecs[at + byteIndex];
-        if (part < 0 || part > 255)
-        {
-            return false;
-        }
-        value = value | (uint32(part) << (byteIndex * 8));
-    }
-
-    offset = value;
-    return true;
-}
-
 bool TryReadContractWord(int32 rowStart, int32 rowLength, int32 offset,
     init ref<uint32> value)
 {
@@ -531,25 +459,6 @@ bool TryReadContractByte(int32 rowStart, int32 rowLength, int32 offset,
     }
 
     int32 part = Host.Contracts[rowStart + offset];
-    if (part < 0 || part > 255)
-    {
-        return false;
-    }
-
-    value = part;
-    return true;
-}
-
-bool TryReadContractTypeSpecByte(int32 rowStart, int32 rowLength, int32 offset,
-    init ref<int32> value)
-{
-    if (rowStart < 0 || rowLength < 0 || offset < 0 || offset >= rowLength
-        || rowStart > Host.TypeSpecs.Length - rowLength)
-    {
-        return false;
-    }
-
-    int32 part = Host.TypeSpecs[rowStart + offset];
     if (part < 0 || part > 255)
     {
         return false;

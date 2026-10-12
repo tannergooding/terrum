@@ -155,7 +155,7 @@ bool TryValidateMethodDefRow(int32 row, int32 stringCount,
         return false;
     }
 
-    if (!TryGetVariableTableRowExtent(stringCount, 8, 4, int32(name),
+    if (!TryGetValidatedVariableTableRowExtent(stringCount, 8, 4, int32(name),
             init var nameOffset, init var nameLength)
         || !TryGetStringNameScalarCount(stringIndexByteLength + int32(nameOffset),
             nameLength, init var nameScalarCount)

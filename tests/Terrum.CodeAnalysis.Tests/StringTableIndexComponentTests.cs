@@ -47,6 +47,42 @@ public sealed class StringTableIndexComponentTests
         }
         """;
 
+    private const string BatchVerificationSource = """
+        namespace Terrum.CodeAnalysis;
+        int32 Main() {
+            int32 count = Host.Expected[0];
+            if (!TryValidateStringTableIndex(count)) {
+                return 1;
+            }
+            for (mut int32 row = 1; row <= count; row = row + 1) {
+                int32 expected = 1 + (row - 1) * 4;
+                if (!TryGetValidatedStringTableRowLayout(count, row,
+                    init var rowStart, init var rowLength,
+                    init var encoding, init var contentByteLength)) {
+                    return 2;
+                }
+                if (rowStart != Host.Expected[expected]
+                    || rowLength != Host.Expected[expected + 1]
+                    || encoding != Host.Expected[expected + 2]
+                    || contentByteLength != Host.Expected[expected + 3]) {
+                    return 3;
+                }
+                if (row == 1 || row == count / 2 || row == count) {
+                    if (!TryGetStringTableRowLayout(count, row,
+                        init var standaloneStart, init var standaloneLength,
+                        init var standaloneEncoding, init var standaloneContentLength)
+                        || standaloneStart != rowStart
+                        || standaloneLength != rowLength
+                        || standaloneEncoding != encoding
+                        || standaloneContentLength != contentByteLength) {
+                        return 4;
+                    }
+                }
+            }
+            return 0;
+        }
+        """;
+
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
@@ -173,6 +209,72 @@ public sealed class StringTableIndexComponentTests
             Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
             Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
         }
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task StringTableIndexValidatesOnceThenReadsLargeBatches(BoundRuntimePolicy policy)
+    {
+        const int recordCount = 512;
+        var rows = Enumerable.Range(0, recordCount)
+            .Select(static index => {
+                var suffix = index.ToString("D3", System.Globalization.CultureInfo.InvariantCulture);
+                return (index % 4) switch {
+                    0 => (suffix, 0),
+                    1 => ("\u00E9" + suffix, 1),
+                    2 => ("\U0001F600" + suffix, 2),
+                    _ => ("Z" + suffix, 3),
+                };
+            })
+            .ToArray();
+        var section = TrRmStringTableWriter.EncodeTextRows(rows);
+        var expected = new List<int>(1 + recordCount * 4) { recordCount };
+        var dataStart = (recordCount + 1) * sizeof(uint);
+        for (var row = 1; row <= recordCount; row++)
+        {
+            var rowStart = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                section.AsSpan((row - 1) * sizeof(uint))));
+            var rowEnd = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                section.AsSpan(row * sizeof(uint))));
+            var rowLength = rowEnd - rowStart;
+            var rowDataStart = dataStart + rowStart;
+            var encoding = section[rowDataStart];
+            var width = encoding switch {
+                0 or 1 => 1,
+                2 => 2,
+                3 => 4,
+                _ => throw new InvalidDataException("The hosted writer emitted an unassigned encoding."),
+            };
+            var units = section[rowDataStart + 1]
+                | (section[rowDataStart + 2] << 8) | (section[rowDataStart + 3] << 16);
+            expected.AddRange([rowStart, rowLength, encoding, units * width]);
+        }
+
+        var root = RepositoryRoot();
+        var paths = new[] {
+            Path.Combine(root, "self-host", "StringRowLayout.terrum"),
+            Path.Combine(root, "self-host", "VariableTableIndex.terrum"),
+            Path.Combine(root, "self-host", "StringTableIndex.terrum"),
+        };
+        var components = new SyntaxTree[paths.Length];
+        for (var index = 0; index < paths.Length; index++)
+        {
+            components[index] = SyntaxTree.Parse(
+                await File.ReadAllTextAsync(paths[index]).ConfigureAwait(true), paths[index]);
+            Assert.False(components[index].HasErrors,
+                string.Join(Environment.NewLine, components[index].Diagnostics));
+        }
+        var entry = SyntaxTree.Parse(BatchVerificationSource, "string-table-index-batch-component.terrum");
+        var compilation = Compilation.Create([.. components, entry],
+        [
+            new HostBuffer("Rows", PrimitiveType.Int32, [.. section.Select(static value => (int)value)], false),
+            new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
+        ], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
     }
 
     private static TableCase InvalidTable(int[] section, int recordCount)

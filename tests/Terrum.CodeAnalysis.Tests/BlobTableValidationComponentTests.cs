@@ -18,6 +18,34 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class BlobTableValidationComponentTests
 {
+    private const string BatchVerificationSource = """
+        namespace Terrum.CodeAnalysis;
+        int32 Main() {
+            int32 recordCount = Host.Expected[0];
+            if (!TryValidateBlobTableIndex(recordCount)) {
+                return 1;
+            }
+            for (mut int32 row = 1; row <= recordCount; row = row + 1) {
+                int32 expectedRecord = 1 + (row - 1) * 2;
+                if (!TryGetValidatedBlobTableRowExtent(recordCount, row,
+                    init var blobStart, init var blobLength)
+                    || blobStart != Host.Expected[expectedRecord]
+                    || blobLength != Host.Expected[expectedRecord + 1]) {
+                    return 2;
+                }
+            }
+
+            init int32 vacantStart;
+            init int32 vacantLength;
+            if (TryGetValidatedBlobTableRowExtent(recordCount, 0,
+                init vacantStart, init vacantLength)
+                || vacantStart is init || vacantLength is init) {
+                return 3;
+            }
+            return 0;
+        }
+        """;
+
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
@@ -113,6 +141,50 @@ public sealed class BlobTableValidationComponentTests
             Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true));
         }
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ValidatedBlobIndexSupportsBatchRowReadsAsync(BoundRuntimePolicy policy)
+    {
+        var rows = Enumerable.Range(0, 512)
+            .Select(static index => index % 3 == 0
+                ? ReadOnlyMemory<byte>.Empty
+                : new ReadOnlyMemory<byte>(new byte[] { (byte)(index & 0xFF), (byte)(index >> 8) }))
+            .ToArray();
+        var section = TrRmVariableTableWriter.EncodeBlobs(rows);
+        var expected = new List<int> { rows.Length };
+        for (var row = 1; row <= rows.Length; row++)
+        {
+            var start = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                section.AsSpan((row - 1) * sizeof(uint))));
+            var end = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                section.AsSpan(row * sizeof(uint))));
+            expected.Add(start);
+            expected.Add(end - start);
+        }
+
+        var root = RepositoryRoot();
+        var components = new List<SyntaxTree>();
+        foreach (var name in new[] { "VariableTableIndex.terrum", "BlobTableValidation.terrum" })
+        {
+            var path = Path.Combine(root, "self-host", name);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            components.Add(tree);
+        }
+        components.Add(SyntaxTree.Parse(BatchVerificationSource, "blob-table-batch-validation.terrum"));
+
+        var compilation = Compilation.Create(components,
+        [
+            new HostBuffer("Rows", PrimitiveType.Int32, [.. section.Select(static value => (int)value)], false),
+            new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
+        ], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
     }
 
     private static TableCase Valid(byte[] section, int count, int row)

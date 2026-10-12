@@ -18,9 +18,7 @@ public static bool TryValidateFieldDefTable(int32 recordCount, int32 moduleCount
     }
 
     if (layoutCount > 0
-        && !TryValidateLayoutTable(layoutCount, moduleCount, stringCount,
-            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount,
-            fieldCount, genericParamCount, layoutCount, contractCount))
+        && !TryValidateLayoutRowsAfterTypeDefValidation(layoutCount, typeDefCount))
     {
         return false;
     }

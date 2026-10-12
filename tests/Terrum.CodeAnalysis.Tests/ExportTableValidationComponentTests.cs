@@ -49,6 +49,9 @@ public sealed partial class ImportTableValidationComponentTests
             NewCase(valid, ExportRows((0x1300_0001, 5), (0x1300_0002, 5))),
             NewCase(valid, ExportRows((0x1300_0001, 5), (0x1600_0001, 6))),
             NewCase(valid, ExportRows((0x1300_0001, 5), (0x1300_0001, 6))),
+            CreateLargeExportTableCase(valid),
+            NewCase(valid with { Strings = LongUnicodeExportKeyStrings() },
+                ExportRows((0x1300_0001, 5))),
             NewCase(valid, ExportRows((0x1300_0001, 5), (0x1300_0002, 8))),
             NewCase(valid, ExportRows((0x1300_0001, 5), (0x1600_0001, 8)), false),
             NewCase(valid, ExportRows((0x1600_0002, 5)), false),
@@ -229,6 +232,43 @@ public sealed partial class ImportTableValidationComponentTests
             WriteWord(bytes, index * 8 + 4, rows[index].Key);
         }
         return [.. bytes.Select(static value => (int)value)];
+    }
+
+    private static int[] LongUnicodeExportKeyStrings()
+    {
+        var longName = string.Concat(Enumerable.Repeat("\uD83D\uDE80", 512));
+        var strings = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Producer", 0), ("Consumer", 0), ("Widget", 0),
+            (longName, 1), ("Execute", 0), ("Value", 0), ("Key", 1),
+        ]);
+        return [.. strings.Select(static value => (int)value)];
+    }
+
+    private static ExportCase CreateLargeExportTableCase(TableCase tables)
+    {
+        const int exportCount = 512;
+        var names = new (string Text, int Encoding)[8 + exportCount];
+        names[0] = ("", 0);
+        names[1] = ("Producer", 0);
+        names[2] = ("Consumer", 0);
+        names[3] = ("Widget", 0);
+        names[4] = ("Key", 0);
+        names[5] = ("Execute", 0);
+        names[6] = ("Value", 0);
+        names[7] = ("Key", 1);
+
+        var exports = new (uint Definition, uint Key)[exportCount];
+        for (var index = 0; index < exportCount; index++)
+        {
+            names[8 + index] = ($"Export-{index:D4}", 0);
+            exports[index] = (0x1300_0001, (uint)(9 + index));
+        }
+
+        var strings = TrRmStringTableWriter.EncodeTextRows(names);
+        return NewCase(tables with {
+            Strings = [.. strings.Select(static value => (int)value)],
+            StringCount = names.Length,
+        }, ExportRows(exports));
     }
 
 

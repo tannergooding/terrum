@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -25,6 +26,18 @@ public sealed class ModuleRefTableValidationComponentTests
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
                 Host.Expected[6], Host.Expected[7]);
+            if (valid) {
+                int32 stringIndexByteLength = (Host.Expected[2] + 1) * 4;
+                for (mut int32 row = 1; row <= Host.Expected[1]; row = row + 1) {
+                    if (!TryReadModuleTableWord((row - 1) * 44, 0, init var identity)
+                        || !TryFindModuleTableRowByIdentity(Host.Expected[1],
+                            Host.Expected[2], stringIndexByteLength, int32(identity),
+                            init var selectedRow)
+                        || selectedRow != row) {
+                        return 2;
+                    }
+                }
+            }
             return valid == (Host.Expected[8] != 0) ? 0 : 1;
         }
         """;
@@ -53,6 +66,17 @@ public sealed class ModuleRefTableValidationComponentTests
             Rejected(strings, validModules, EncodeModuleRefs((2, 0, 1), (2, 0, 0))),
             Rejected(strings, validModules, EncodeModuleRefs((1, 0, 0), (3, 1, 0))),
         };
+
+        var manyNames = TrRmStringTableWriter.EncodeNames(Enumerable.Range(0, 512)
+            .Select(static index => ("M" + index.ToString("D4", CultureInfo.InvariantCulture), 0))
+            .ToArray());
+        var manyIdentities = Enumerable.Range(1, 512).Reverse().ToArray();
+        var manyModuleRefs = Enumerable.Range(1, 512).Reverse()
+            .Select(static identity => ((uint)identity, 0u, 0u))
+            .ToArray();
+        cases.Add(Valid(manyNames, EncodeManyModules(manyIdentities),
+            EncodeModuleRefs(manyModuleRefs), recordCount: 512, moduleCount: 512,
+            stringCount: 512, moduleRefCount: 512));
 
         var malformedProducer = EncodeStringSection(
             [0, 1, 0, 0, 65, 0, 0, 0],
@@ -201,6 +225,21 @@ public sealed class ModuleRefTableValidationComponentTests
         WriteWord(modules, 44 + 32, 1);
         WriteWord(modules, 44 + 36, 1);
         WriteWord(modules, 44 + 40, 1);
+        return modules;
+    }
+
+    private static byte[] EncodeManyModules(int[] identities)
+    {
+        var modules = new byte[identities.Length * 44];
+        for (var row = 0; row < identities.Length; row++)
+        {
+            var offset = row * 44;
+            WriteWord(modules, offset, checked((uint)identities[row]));
+            WriteWord(modules, offset + 28, 1);
+            WriteWord(modules, offset + 32, 1);
+            WriteWord(modules, offset + 36, 1);
+            WriteWord(modules, offset + 40, 1);
+        }
         return modules;
     }
 

@@ -34,6 +34,8 @@ public sealed class TypeArgTableValidationComponentTests
         var valid = CreateValidCase();
         var cases = new List<TableCase> {
             valid,
+            CreateLargeCase(),
+            CreateGroupedCase(),
             valid with {
                 TypeDefCount = 0xFF_FFFF,
                 ImportCount = 0xFF_FFFF,
@@ -80,7 +82,6 @@ public sealed class TypeArgTableValidationComponentTests
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>();
         foreach (var name in new[] {
-            "VariableTableIndex.terrum",
             "TypeSpecTableValidation.terrum",
             "TypeArgTableValidation.terrum",
         })
@@ -102,7 +103,7 @@ public sealed class TypeArgTableValidationComponentTests
 
             var compilation = Compilation.Create(components,
             [
-                new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Types], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32, [.. testCase.Types], false),
                 new HostBuffer("Args", PrimitiveType.Int32, [.. testCase.Arguments], false),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
@@ -140,6 +141,64 @@ public sealed class TypeArgTableValidationComponentTests
             [.. arguments.Select(static value => (int)value)], 3, 5, 1, 1, 0, 3, true, true);
         Assert.True(ValidateHosted(testCase));
         return testCase;
+    }
+
+    private static TableCase CreateLargeCase()
+    {
+        const int typeArgCount = 512;
+        var rows = new ReadOnlyMemory<byte>[typeArgCount + 2];
+        rows[0] = TrRmTypeSpecTableWriter.Builtin(8);
+        rows[1] = TrRmTypeSpecTableWriter.Reference(0x02, 1);
+        var argumentWords = new uint[typeArgCount * 3];
+        for (var index = 0; index < typeArgCount; index++)
+        {
+            rows[index + 2] = TrRmTypeSpecTableWriter.Constructed(2, (uint)index + 1, 1);
+            argumentWords[index * 3] = (uint)index + 3;
+            argumentWords[index * 3 + 2] = 1;
+        }
+
+        var types = EncodeTypes(typeArgCount, rows);
+        var arguments = EncodeArguments(argumentWords);
+        return new TableCase(
+            [.. types.Select(static value => (int)value)],
+            [.. arguments.Select(static value => (int)value)],
+            typeArgCount,
+            typeArgCount + 2,
+            1,
+            1,
+            0,
+            typeArgCount,
+            true,
+            true);
+    }
+
+    private static TableCase CreateGroupedCase()
+    {
+        const int typeArgCount = 512;
+        var types = EncodeTypes(typeArgCount,
+            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.Reference(0x02, 1),
+            TrRmTypeSpecTableWriter.Constructed(2, 1, typeArgCount));
+        var argumentWords = new uint[typeArgCount * 3];
+        for (var index = 0; index < typeArgCount; index++)
+        {
+            argumentWords[index * 3] = 3;
+            argumentWords[index * 3 + 1] = (uint)index;
+            argumentWords[index * 3 + 2] = 1;
+        }
+
+        var arguments = EncodeArguments(argumentWords);
+        return new TableCase(
+            [.. types.Select(static value => (int)value)],
+            [.. arguments.Select(static value => (int)value)],
+            typeArgCount,
+            3,
+            1,
+            1,
+            0,
+            typeArgCount,
+            true,
+            true);
     }
 
     private static void AddInvalidArguments(List<TableCase> cases, TableCase valid,

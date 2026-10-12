@@ -19,6 +19,11 @@ public static bool TryValidatePropertyDefTable(int32 recordCount,
     }
 
     int32 stringIndexByteLength = (stringCount + 1) * 4;
+    if (!TryValidateVariableTableIndex(stringCount, 8, 4))
+    {
+        return false;
+    }
+
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
         int32 rowStart = (row - 1) * 20;
@@ -32,7 +37,7 @@ public static bool TryValidatePropertyDefTable(int32 recordCount,
             || type == 0 || type > uint32(typeSpecCount)
             || getter == 0 || getter > uint32(methodDefCount)
             || flags > 2
-            || !TryGetVariableTableRowExtent(stringCount, 8, 4, int32(name),
+            || !TryGetValidatedVariableTableRowExtent(stringCount, 8, 4, int32(name),
                 init var nameOffset, init var nameLength)
             || !TryGetStringNameScalarCount(stringIndexByteLength + int32(nameOffset),
                 nameLength, init var nameScalarCount)

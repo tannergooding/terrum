@@ -41,6 +41,15 @@ public static bool TryReadStringNamespaceScalarAt(int32 rowStart, int32 rowLengt
 bool TryScanStringRowText(int32 rowStart, int32 rowLength, bool allowEmpty, int32 selectedIndex,
     init ref<int32> scalarCount, init ref<int32> selectedScalar)
 {
+    return TryAnalyzeStringRowText(rowStart, rowLength, allowEmpty, selectedIndex,
+        init var unusedEncoding, init var unusedContentLength,
+        init scalarCount, init selectedScalar);
+}
+
+bool TryAnalyzeStringRowText(int32 rowStart, int32 rowLength, bool allowEmpty, int32 selectedIndex,
+    init ref<int32> encodingResult, init ref<int32> contentByteLengthResult,
+    init ref<int32> scalarCount, init ref<int32> selectedScalar)
+{
     if (selectedIndex < -1
         || !TryGetStringRowLayout(rowStart, rowLength,
             init var encoding, init var contentByteLength))
@@ -80,15 +89,36 @@ bool TryScanStringRowText(int32 rowStart, int32 rowLength, bool allowEmpty, int3
         return false;
     }
 
+    encodingResult = encoding;
+    contentByteLengthResult = contentByteLength;
     scalarCount = count;
     selectedScalar = selected;
     return true;
 }
 
-bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteLength, int32 encoding,
+bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteLength,
+    int32 encoding, init ref<int32> scalar, init ref<int32> bytesRead)
+{
+    if (rowStart < 0 || position < 0 || position >= contentByteLength
+        || rowStart > Host.Rows.Length - 4
+        || contentByteLength > Host.Rows.Length - rowStart - 4)
+    {
+        return false;
+    }
+
+    return TryDecodeStringRowScalarAtOffset(rowStart + 4 + position,
+        contentByteLength - position, encoding, init scalar, init bytesRead);
+}
+
+bool TryDecodeStringRowScalarAtOffset(int32 byteOffset, int32 remainingByteLength, int32 encoding,
     init ref<int32> scalar, init ref<int32> bytesRead)
 {
-    int32 byteOffset = rowStart + 4 + position;
+    if (byteOffset < 0 || remainingByteLength <= 0 || byteOffset > Host.Rows.Length
+        || remainingByteLength > Host.Rows.Length - byteOffset)
+    {
+        return false;
+    }
+
     int32 first = Host.Rows[byteOffset];
     mut uint32 value = 0;
     mut int32 width = 0;
@@ -111,7 +141,7 @@ bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteL
         }
         else if (first >= 0xC2 && first <= 0xDF)
         {
-            if (contentByteLength - position < 2)
+            if (remainingByteLength < 2)
             {
                 return false;
             }
@@ -125,7 +155,7 @@ bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteL
         }
         else if (first >= 0xE0 && first <= 0xEF)
         {
-            if (contentByteLength - position < 3)
+            if (remainingByteLength < 3)
             {
                 return false;
             }
@@ -143,7 +173,7 @@ bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteL
         }
         else if (first >= 0xF0 && first <= 0xF4)
         {
-            if (contentByteLength - position < 4)
+            if (remainingByteLength < 4)
             {
                 return false;
             }
@@ -168,14 +198,14 @@ bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteL
     }
     else if (encoding == 2)
     {
-        if (contentByteLength - position < 2)
+        if (remainingByteLength < 2)
         {
             return false;
         }
         int32 firstUnit = first | (Host.Rows[byteOffset + 1] << 8);
         if (firstUnit >= 0xD800 && firstUnit <= 0xDBFF)
         {
-            if (contentByteLength - position < 4)
+            if (remainingByteLength < 4)
             {
                 return false;
             }
@@ -199,7 +229,7 @@ bool TryDecodeStringRowScalar(int32 rowStart, int32 position, int32 contentByteL
     }
     else
     {
-        if (contentByteLength - position < 4)
+        if (remainingByteLength < 4)
         {
             return false;
         }

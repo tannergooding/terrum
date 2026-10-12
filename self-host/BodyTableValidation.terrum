@@ -3,13 +3,98 @@ namespace Terrum.CodeAnalysis;
 public static bool TryGetBodyTableRowExtent(int32 recordCount, int32 row,
     init ref<int32> bodyStart, init ref<int32> bodyLength)
 {
-    if (!TryGetVariableTableRowExtent(recordCount, 1, 1, row,
-        init var rowStart, init var rowLength))
+    if (row <= 0 || row > recordCount
+        || !TryValidateBodyTableIndex(recordCount)
+        || !TryGetValidatedBodyTableRowExtent(recordCount, row,
+            init var rowStart, init var rowLength))
     {
         return false;
     }
 
     bodyStart = rowStart;
     bodyLength = rowLength;
+    return true;
+}
+
+bool TryValidateBodyTableIndex(int32 recordCount)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || recordCount > Host.BodyRows.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.BodyRows.Length - indexByteLength;
+    if (dataByteLength < 1
+        || !TryReadBodyTableOffset(0, init var firstOffset)
+        || firstOffset != 0)
+    {
+        return false;
+    }
+
+    mut uint32 previous = firstOffset;
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryReadBodyTableOffset(row, init var next)
+            || next > uint32(dataByteLength)
+            || previous > uint32(dataByteLength - 1)
+            || next < previous + uint32(1))
+        {
+            return false;
+        }
+        previous = next;
+    }
+
+    return previous == uint32(dataByteLength);
+}
+
+bool TryGetValidatedBodyTableRowExtent(int32 recordCount, int32 row,
+    init ref<int32> bodyStart, init ref<int32> bodyLength)
+{
+    if (recordCount <= 0 || recordCount > 16777215
+        || row <= 0 || row > recordCount
+        || recordCount > Host.BodyRows.Length / 4 - 1)
+    {
+        return false;
+    }
+
+    int32 indexByteLength = (recordCount + 1) * 4;
+    int32 dataByteLength = Host.BodyRows.Length - indexByteLength;
+    if (dataByteLength < 1
+        || !TryReadBodyTableOffset(row - 1, init var start)
+        || !TryReadBodyTableOffset(row, init var end)
+        || end > uint32(dataByteLength)
+        || start > uint32(dataByteLength - 1)
+        || end < start + uint32(1))
+    {
+        return false;
+    }
+
+    bodyStart = int32(start);
+    bodyLength = int32(end - start);
+    return true;
+}
+
+bool TryReadBodyTableOffset(int32 offsetIndex, init ref<uint32> offset)
+{
+    if (offsetIndex < 0 || offsetIndex >= Host.BodyRows.Length / 4)
+    {
+        return false;
+    }
+
+    int32 at = offsetIndex * 4;
+    mut uint32 value = 0;
+    for (mut int32 byteIndex = 0; byteIndex < 4; byteIndex = byteIndex + 1)
+    {
+        int32 part = Host.BodyRows[at + byteIndex];
+        if (part < 0 || part > 255)
+        {
+            return false;
+        }
+        value = value | (uint32(part) << (byteIndex * 8));
+    }
+
+    offset = value;
     return true;
 }

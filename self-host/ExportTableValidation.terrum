@@ -38,6 +38,11 @@ public static bool TryValidateExportTable(int32 recordCount,
         Host.ExportKeyContentLengths[slot] = 0;
     }
 
+    if (recordCount != 0 && !TryValidateVariableTableIndex(stringCount, 8, 4))
+    {
+        return false;
+    }
+
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
         int32 rowStart = (row - 1) * 8;
@@ -69,15 +74,15 @@ public static bool TryValidateExportTable(int32 recordCount,
                 return false;
             }
         }
-        if (!TryGetVariableTableRowExtent(stringCount, 8, 4, int32(key),
+        if (!TryGetValidatedVariableTableRowExtent(stringCount, 8, 4, int32(key),
             init var keyOffset, init var keyLength))
         {
             return false;
         }
         int32 keyStart = (stringCount + 1) * 4 + int32(keyOffset);
-        if (!TryGetStringNameScalarCount(keyStart, keyLength, init var keyScalarCount)
-            || !TryGetStringRowLayout(keyStart, keyLength,
-                init var keyEncoding, init var keyContentLength))
+        if (!TryAnalyzeStringRowText(keyStart, keyLength, false, -1,
+            init var keyEncoding, init var keyContentLength,
+            init var keyScalarCount, init var unusedScalar))
         {
             return false;
         }

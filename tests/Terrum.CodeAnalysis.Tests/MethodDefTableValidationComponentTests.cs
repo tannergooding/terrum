@@ -19,12 +19,15 @@ public sealed class MethodDefTableValidationComponentTests
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
-            bool valid = TryValidateMethodDefTable(
-                Host.Expected[0], Host.Expected[1], Host.Expected[2],
-                Host.Expected[3], Host.Expected[4], Host.Expected[5],
-                Host.Expected[6], Host.Expected[7], Host.Expected[8],
-                Host.Expected[9], Host.Expected[10], Host.Expected[11],
-                Host.Expected[12], Host.Expected[13]);
+            bool valid = TryValidateMethodSigParamTables(
+                Host.Expected[12], 0, Host.Expected[9], 1,
+                Host.Expected[4], Host.Expected[3], 0)
+                && TryValidateMethodDefTable(
+                    Host.Expected[0], Host.Expected[1], Host.Expected[2],
+                    Host.Expected[3], Host.Expected[4], Host.Expected[5],
+                    Host.Expected[6], Host.Expected[7], Host.Expected[8],
+                    Host.Expected[9], Host.Expected[10], Host.Expected[11],
+                    Host.Expected[12], Host.Expected[13]);
             if (valid != (Host.Expected[14] != 0)) { return 1; }
             if (!valid) { return 0; }
 
@@ -113,6 +116,8 @@ public sealed class MethodDefTableValidationComponentTests
             "StringRowText.terrum",
             "ModuleTableValidation.terrum",
             "TypeDefTableValidation.terrum",
+            "TypeSpecTableValidation.terrum",
+            "MethodSigParamTableValidation.terrum",
             "MethodDefTableValidation.terrum",
         })
         {
@@ -130,6 +135,9 @@ public sealed class MethodDefTableValidationComponentTests
                 Assert.Equal(testCase.ExpectedValid, ValidateHosted(testCase));
             }
 
+            var typeSpecs = TrRmTypeSpecTableWriter.Encode(
+                [TrRmTypeSpecTableWriter.Builtin(8)], testCase.TypeDefCount,
+                testCase.ModuleRefCount, testCase.GenericParamCount, 0);
             var compilation = Compilation.Create(components,
             [
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Strings], false),
@@ -137,6 +145,9 @@ public sealed class MethodDefTableValidationComponentTests
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
                 new HostBuffer("Methods", PrimitiveType.Int32, [.. testCase.Methods], false),
                 new HostBuffer("Signatures", PrimitiveType.Int32, [.. testCase.Signatures], false),
+                new HostBuffer("Params", PrimitiveType.Int32, [], false),
+                new HostBuffer("TypeSpecs", PrimitiveType.Int32,
+                    [.. typeSpecs.Select(static value => (int)value)], false),
                 new HostBuffer("IdentitySlots", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.ModuleCount + 1)], true),
                 new HostBuffer("FieldOwners", PrimitiveType.Int32,

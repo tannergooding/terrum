@@ -16,6 +16,19 @@ public static bool TryValidateLayoutTable(int32 recordCount, int32 moduleCount,
         return false;
     }
 
+    return TryValidateLayoutRowsAfterTypeDefValidation(recordCount, typeDefCount);
+}
+
+bool TryValidateLayoutRowsAfterTypeDefValidation(int32 recordCount, int32 typeDefCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || typeDefCount < 0 || typeDefCount > 0xFF_FFFF
+        || recordCount * 24 != Host.Layouts.Length
+        || Host.LayoutOwners.Length != recordCount + 1)
+    {
+        return false;
+    }
+
     for (mut int32 row = 0; row <= recordCount; row = row + 1)
     {
         Host.LayoutOwners[row] = 0;

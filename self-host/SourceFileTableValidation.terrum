@@ -5,14 +5,24 @@ public static bool TryValidateSourceFileTable(int32 recordCount, int32 moduleCou
     int32 sourceFileCount, int32 featureCount)
 {
     if (recordCount <= 0 || recordCount > 0xFF_FFFF
-        || recordCount != sourceFileCount
-        || recordCount * 8 != Host.SourceFiles.Length)
+        || recordCount != sourceFileCount)
     {
         return false;
     }
 
     if (!TryValidateModuleTable(moduleCount, stringCount, moduleRefCount,
         typeDefCount, methodDefCount, sourceFileCount, featureCount))
+    {
+        return false;
+    }
+
+    return TryValidateSourceFileRowsAfterModuleValidation(recordCount, stringCount);
+}
+
+bool TryValidateSourceFileRowsAfterModuleValidation(int32 recordCount, int32 stringCount)
+{
+    if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        || recordCount * 8 != Host.SourceFiles.Length)
     {
         return false;
     }

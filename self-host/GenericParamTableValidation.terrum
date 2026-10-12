@@ -58,6 +58,9 @@ public static bool TryValidateGenericParamTable(int32 recordCount,
         Host.ConstraintOwners[constraint] = 0;
     }
 
+    mut uint32 cachedOwner = 0;
+    mut uint32 cachedFirstFormal = 0;
+    mut uint32 cachedFormalCount = 0;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
         int32 rowStart = (row - 1) * 20;
@@ -74,28 +77,40 @@ public static bool TryValidateGenericParamTable(int32 recordCount,
 
         uint32 ownerKind = owner >> 24;
         int32 ownerRow = int32(owner & 0x00FF_FFFF);
-        init uint32 firstFormal;
-        init uint32 formalCount;
         if (ownerKind == 0x13 && ownerRow > 0 && ownerRow <= typeDefCount)
         {
-            int32 ownerOffset = (ownerRow - 1) * 40;
-            if (!TryReadTypeDefTableWord(ownerOffset, 20, init firstFormal)
-                || !TryReadTypeDefTableWord(ownerOffset, 24, init formalCount))
+            if (owner != cachedOwner)
             {
-                return false;
+                int32 ownerOffset = (ownerRow - 1) * 40;
+                if (!TryReadTypeDefTableWord(ownerOffset, 20, init var firstFormal)
+                    || !TryReadTypeDefTableWord(ownerOffset, 24, init var formalCount))
+                {
+                    return false;
+                }
+
+                cachedOwner = owner;
+                cachedFirstFormal = firstFormal;
+                cachedFormalCount = formalCount;
             }
         }
         else if (ownerKind == 0x16 && ownerRow > 0 && ownerRow <= methodDefCount)
         {
-            int32 ownerOffset = (ownerRow - 1) * 28;
-            if (!TryReadMethodDefTableWord(ownerOffset, 8, init var signature)
-                || signature == 0 || signature > uint32(methodSigCount)
-                || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 16,
-                    init firstFormal)
-                || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 20,
-                    init formalCount))
+            if (owner != cachedOwner)
             {
-                return false;
+                int32 ownerOffset = (ownerRow - 1) * 28;
+                if (!TryReadMethodDefTableWord(ownerOffset, 8, init var signature)
+                    || signature == 0 || signature > uint32(methodSigCount)
+                    || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 16,
+                        init var firstFormal)
+                    || !TryReadMethodSignatureWord((int32(signature) - 1) * 24, 20,
+                        init var formalCount))
+                {
+                    return false;
+                }
+
+                cachedOwner = owner;
+                cachedFirstFormal = firstFormal;
+                cachedFormalCount = formalCount;
             }
         }
         else
@@ -103,10 +118,10 @@ public static bool TryValidateGenericParamTable(int32 recordCount,
             return false;
         }
 
-        if (formalCount == 0 || uint32(row) < firstFormal
-            || uint32(row) >= firstFormal + formalCount
-            || ordinal != uint32(row) - firstFormal
-            || !TryGetVariableTableRowExtent(stringCount, 8, 4, int32(name),
+        if (cachedFormalCount == 0 || uint32(row) < cachedFirstFormal
+            || uint32(row) >= cachedFirstFormal + cachedFormalCount
+            || ordinal != uint32(row) - cachedFirstFormal
+            || !TryGetValidatedVariableTableRowExtent(stringCount, 8, 4, int32(name),
                 init var nameOffset, init var nameLength)
             || !TryGetStringNameScalarCount(stringIndexByteLength + int32(nameOffset),
                 nameLength, init var nameScalarCount))

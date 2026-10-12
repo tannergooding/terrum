@@ -4,52 +4,55 @@ public static bool TryValidateTypeArgTable(int32 recordCount, int32 typeSpecCoun
     int32 typeDefCount, int32 importCount, int32 genericParamCount, int32 typeArgCount)
 {
     if (recordCount <= 0 || recordCount > 0xFF_FFFF || recordCount != typeArgCount
-        || recordCount * 12 != Host.Args.Length
-        || !TryValidateTypeSpecTable(typeSpecCount, typeDefCount,
-            importCount, genericParamCount, typeArgCount))
+        || recordCount * 12 != Host.Args.Length)
+    {
+        return false;
+    }
+
+    if (!TryValidateTypeSpecTableAndCountArguments(typeSpecCount, typeDefCount,
+            importCount, genericParamCount, typeArgCount, init var declaredArgumentCount)
+        || declaredArgumentCount != uint32(recordCount))
     {
         return false;
     }
 
     int32 indexByteLength = (typeSpecCount + 1) * 4;
+    mut uint32 cachedOwner = 0;
+    mut uint32 cachedFirst = 0;
+    mut uint32 cachedCount = 0;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
         int32 argumentRowStart = (row - 1) * 12;
         if (!TryReadTypeArgWord(argumentRowStart, 0, init var owner)
-            || owner == 0 || owner > uint32(typeSpecCount)
-            || !TryGetTypeSpecConstructedArgumentRange(typeSpecCount, indexByteLength,
-                int32(owner), init var first, init var count)
-            || !TryReadTypeArgWord(argumentRowStart, 4, init var ordinal)
+            || owner == 0 || owner > uint32(typeSpecCount))
+        {
+            return false;
+        }
+
+        if (owner != cachedOwner)
+        {
+            if (!TryGetTypeSpecConstructedArgumentRange(typeSpecCount, indexByteLength,
+                    int32(owner), init var first, init var count))
+            {
+                return false;
+            }
+
+            cachedOwner = owner;
+            cachedFirst = first;
+            cachedCount = count;
+        }
+
+        if (!TryReadTypeArgWord(argumentRowStart, 4, init var ordinal)
             || !TryReadTypeArgWord(argumentRowStart, 8, init var argument)
-            || uint32(row) < first || uint32(row) >= first + count
-            || ordinal != uint32(row) - first
+            || uint32(row) < cachedFirst || uint32(row) >= cachedFirst + cachedCount
+            || ordinal != uint32(row) - cachedFirst
             || argument == 0 || argument >= owner)
         {
             return false;
         }
     }
 
-    mut int32 declaredCount = 0;
-    for (mut int32 row = 1; row <= typeSpecCount; row = row + 1)
-    {
-        if (!TryGetTypeSpecForm(indexByteLength, row, init var form))
-        {
-            return false;
-        }
-        if (form == 5)
-        {
-            if (!TryGetTypeSpecConstructedArgumentRange(typeSpecCount, indexByteLength,
-                    row, init var first, init var count)
-                || count > uint32(recordCount - declaredCount))
-            {
-                return false;
-            }
-
-            declaredCount = declaredCount + int32(count);
-        }
-    }
-
-    return declaredCount == recordCount;
+    return true;
 }
 
 bool TryReadTypeArgWord(int32 rowStart, int32 offset, init ref<uint32> value)

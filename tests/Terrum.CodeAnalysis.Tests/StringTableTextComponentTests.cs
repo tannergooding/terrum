@@ -17,6 +17,52 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class StringTableTextComponentTests
 {
+    private const string BatchVerificationSource = """
+        namespace Terrum.CodeAnalysis;
+        int32 Main() {
+            int32 recordCount = Host.Expected[0];
+            if (!TryValidateStringTableTextIndex(recordCount)) {
+                return 1;
+            }
+            mut int32 expectedRecord = 1;
+            for (mut int32 row = 1; row <= recordCount; row = row + 1) {
+                if (!TryGetValidatedStringTableTextRow(recordCount, row,
+                    init var rowStart, init var rowLength)) {
+                    return 2;
+                }
+
+                int32 expectedCount = Host.Expected[expectedRecord];
+                int32 scalarStart = Host.Expected[expectedRecord + 1];
+                if (!StringRowTextCursor.TryCreateName(rowStart, rowLength, init var created)) {
+                    return 3;
+                }
+                mut StringRowTextCursor cursor = move created;
+                mut int32 scalarIndex = 0;
+                while (cursor.TryRead(init var scalar)) {
+                    if (scalarIndex >= expectedCount
+                        || scalar != Host.Expected[scalarStart + scalarIndex]) {
+                        return 4;
+                    }
+                    scalarIndex = scalarIndex + 1;
+                }
+                if (scalarIndex != expectedCount) {
+                    return 5;
+                }
+                cursor = _;
+                expectedRecord = expectedRecord + 2 + expectedCount;
+            }
+
+            init int32 vacantStart;
+            init int32 vacantLength;
+            if (TryGetValidatedStringTableTextRow(recordCount, 0,
+                init vacantStart, init vacantLength)
+                || vacantStart is init || vacantLength is init) {
+                return 6;
+            }
+            return 0;
+        }
+        """;
+
     private const string VerificationSource = """
         namespace Terrum.CodeAnalysis;
         int32 Main() {
@@ -153,6 +199,30 @@ public sealed class StringTableTextComponentTests
         Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ValidatedStringTableIndexSupportsBatchTextReadsAsync(BoundRuntimePolicy policy)
+    {
+        var rows = Enumerable.Range(1, 512)
+            .Select(static index => (Text: $"m-row-{index}", Encoding: index % 4))
+            .ToArray();
+        var table = TrRmStringTableWriter.EncodeTextRows(rows);
+        var expected = new List<int> { rows.Length };
+        foreach (var row in rows)
+        {
+            var scalars = row.Text.EnumerateRunes().Select(static rune => rune.Value).ToArray();
+            expected.Add(scalars.Length);
+            expected.Add(expected.Count + 1);
+            expected.AddRange(scalars);
+        }
+        var program = await CompileAsync(table, [.. expected], BatchVerificationSource, policy)
+            .ConfigureAwait(true);
+
+        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+    }
+
     private static void AddValidRow(List<int[]> cases, byte[] table, int recordCount, int row, bool isName,
         string expectedText)
     {
@@ -201,6 +271,36 @@ public sealed class StringTableTextComponentTests
 
     private static int ReadRowStart(byte[] table, int row)
         => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(table.AsSpan((row - 1) * sizeof(uint))));
+
+    private static async Task<BoundProgram> CompileAsync(byte[] table, int[] expected,
+        string source, BoundRuntimePolicy policy)
+    {
+        var root = RepositoryRoot();
+        var componentPaths = new[] {
+            "VariableTableIndex.terrum",
+            "StringRowLayout.terrum",
+            "StringRowText.terrum",
+            "StringRowTextCursor.terrum",
+            "StringTableText.terrum",
+        };
+        var components = new List<SyntaxTree>();
+        foreach (var name in componentPaths)
+        {
+            var path = Path.Combine(root, "self-host", name);
+            var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            components.Add(tree);
+        }
+        components.Add(SyntaxTree.Parse(source, "string-table-text-batch-component.terrum"));
+
+        var compilation = Compilation.Create(components,
+        [
+            new HostBuffer("Rows", PrimitiveType.Int32, [.. table.Select(static value => (int)value)], false),
+            new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
+        ], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return Assert.IsType<BoundProgram>(compilation.Program);
+    }
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
