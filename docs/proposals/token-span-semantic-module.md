@@ -1,64 +1,83 @@
-# Persisted internal `Span<Token>` forwarding
+# Persisted private `Span<Token>` values and operations
 
-**Status: Deferred until a concrete private provider/consumer corpus and
-supported invocation profile justify persistence. No persisted `Span<Token>`
-contract or metadata is approved.**
+**Status: UNAPPROVED bounded recommendation, with provisional implementation
+under semantic-module revision 77. No persisted span contract or metadata is
+accepted. Returned-view forwarding remains outside this slice.**
 
 ## Summary
 
-The hosted compiler now provisionally verifies same-compilation internal
-functions that return readonly `Span<Token>` values under a closed
-`[return: DependsOn(...)]` source set. Semantic modules still reject every
-span-bearing value and do not serialize the span operations or result-source
-metadata. Persisting only the function signature or dependency ordinals would
-leave the body unverifiable and could erase backing obligations during
-linking. The current self-host corpus has not established a concrete persisted
-provider/consumer path that needs this extension.
+The complete `ScalarFrontend` publication and `ScalarFrontendProgramReader`
+consumer supply the previously missing concrete use case. The frontend needs
+private readonly token descriptors projected from validated snapshots, passed
+through private calls, copied, indexed and retired. It does not need
+`TokenCursor` capture storage or a returned-view ABI to publish v88 and summarize
+it against a fresh source grant.
 
-## Deferred decision
+## Bounded recommendation
 
-Defer implementation until a concrete persisted provider, consumer and
-invocation path demonstrates value under an existing invocation profile. The
-current same-compilation feature does not by itself justify a semantic-module
-revision. If that evidence appears, first consider a new exact revision for
-private internal top-level functions and persisted semantic-module JIT with
-fresh source grants. Keep exported/imported signatures span-free, and do not
-imply support for persisted AOT, native packages, graphs or module sets where
-their source-grant requirements are not currently admitted.
+Proceed provisionally with a new exact semantic-module revision for the private
+operations this corpus actually uses. Keep revision 76 byte-compatible and
+span-free; reject private span IR under that revision rather than reinterpreting
+it. Emit revision 77 only for the admitted source-grant span path or the separate
+[v88 frontend invocation profile](scalar-frontend-invocation-profile.md).
+Existing non-span scanner modules retain revision 76 and the unchanged
+`scanner-10` identity and ten-buffer shape.
 
-Any future slice must round-trip the complete admitted private IR, not only a
-new metadata row: preserve compiler-known Token/SourceRange/TokenSnapshot
-roles through module-local type remapping, serialize the supported span
-operations and declared dependency ordinals, then rederive backing sets,
-staging obligations and lifetime validity with the mandatory verifier. Do not
-persist trusted analysis results. `BoundSpanAdvance` is cursor-only and is
-outside a Span-only slice. Reverify every replacement's private graph; private
-dependency sets may change when bodies and callers are reverified, and are not
-external compatibility contracts.
+Retain the full admitted structured IR: snapshot projection, native-width
+length, unsigned indexing with by-value Token results, readonly descriptor
+copies/conditional selection, private parameter passing, and lexical descriptor
+retirement. Retain ordinary call argument mappings, structured cleanup and
+checked recovery. Keep span-bearing implementation callables private to the
+artifact even when a source method is accessible within its private managed
+implementation. Imported/exported signatures must remain span-free.
 
-## Required evidence
+Preserve explicit compiler-known Token, SourceRange and TokenSnapshot roles
+through type-table selection, remapping and private renaming. Roles identify
+which layout to validate; they do not attest that a layout or lifetime is
+valid. Mandatory verification must rederive backing sets, staged-argument
+obligations, initialized/live owners and descriptor retirement after reading
+and again after linking every replacement. Do not serialize trusted analysis
+results or turn private backing dependencies into external compatibility
+contracts.
 
-- Identify a real private provider/consumer corpus and an already-supported
-  invocation profile before assigning implementation priority.
-- Round-trip internal forwarding and consuming functions through a new exact
-  semantic-module revision using persisted JIT with fresh grants under both
-  runtime policies.
-- Reorder and rename module-private type tables to prove compiler-known type
-  roles survive linking without making private names globally shared.
-- Replace a provider while keeping the consumer unchanged; permit changed
-  private dependency sets only when the replacement body and complete caller
-  graph reverify. Reject undeclared provenance, local-owner escape and
-  malformed dependency metadata.
-- Cover named/transitive calls, conditional results, copies, owner
-  invalidation, descriptor retirement, argument staging, cleanup and checked
-  unwind after persistence.
-- Reject exported/imported spans, dependency-bearing fields, captures,
-  outputs, generic declarations and operations outside the exact profile.
-- Confirm revision 76 and unsupported revisions 69, 70, 71, 72, 73, 74, 75 or future revisions fail closed; retain
-  rejection of persisted AOT/native packages, graphs/module sets when
-  invocation profiles do not permit them, and source-free TRRM.
+## Exact provisional encoding
 
-This proposal does not approve a target contract, general reference metadata
-or public view ABI. Annotation spelling, profile, use case and any future
-bounded support remain provisional. The current recommendation is to defer
-this implementation until the evidence above is available.
+Revision 77 adds one role byte after each struct name: none, Token, SourceRange
+or TokenSnapshot. Existing declared type identifiers and remapping still
+identify each field and result type. Expression tags 32, 33 and 34 retain
+`BoundSnapshotSpan` (owner slot/source-buffer ordinal), `BoundSpanLength`
+(view expression), and `BoundSpanRead` (view/index expressions and Token result
+type). Statement tag 28 retains `BoundDropSpan`'s descriptor slot. The existing
+type/span headers, recursive node/size limits and function/variable metadata
+remain checked.
+
+Role layouts, uniqueness, snapshot provenance, source-buffer access, unsigned
+index carrier, scope shape and backing liveness are independently verified.
+The roles survive `$producer` renaming; private spelling is not a public type
+identity. New tags reject in revision 76. Unsupported revisions and malformed
+roles/tags reject without falling back to another interpretation.
+
+## Evidence and remaining boundary
+
+The focused source-provider/consumer corpus round-trips private span creation,
+named/transitive reads, copies, conditional backing, retirement and cleanup
+under both policies through fresh scanner grants. An unchanged revision-76
+scalar consumer also accepts a replacement revision-77 provider with reordered
+type declarations and changed private calls; linking renames its private types
+and rechecks their roles. Forgery regressions reject altered roles/layouts,
+source provenance, index width, descriptor retirement and a later output
+argument that invalidates already-staged backing. Checked recovery exercises
+descriptor cleanup before owners are reused.
+
+The separate frontend profile additionally executes complete v88 publication
+and summary decoding with fresh grants. Actual evidence and precise limits are
+recorded in the [implementation reference](../implementation.md) and
+[self-host inventory](../../self-host/README.md), not as acceptance here.
+
+Returned `Span<Token>` values, `[return: DependsOn(...)]` result metadata,
+`TokenCursor` captures/advance, span fields, output/vacant/mutable span slots,
+exported/imported span signatures and generic declaration metadata remain
+excluded. General views/references, source-dependent native DLLs/packages,
+graphs/module sets, persisted AOT and source-free TRRM are not established.
+This recommendation changes neither canonical lifetime contracts nor the
+accepted 64-token cursor/window bound.

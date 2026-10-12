@@ -218,17 +218,8 @@ public static partial class ModuleCompiler
 
     private static string RetainedNativeProfile(Module module)
     {
-        if (module.Structures.Any(static structure => structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan))
-            || module.Functions.Any(static item => ContractContainsType(item.Contract, PrimitiveType.TokenSpan)
-                || item.Function is BoundFunction function
-                    && (function.ReturnType == PrimitiveType.TokenSpan
-                        || !function.CapturedParameters.IsDefaultOrEmpty
-                        || function.ReturnsForwardedBacking
-                        || !function.ResultDependencyParameters.IsDefaultOrEmpty
-                        || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan))))
-        {
-            throw new ModuleFormatException("Compilation-local span, capture, and forwarding metadata cannot be persisted.");
-        }
+        ValidateFixedLayoutModule(module);
+        ValidatePrivateSpanModule(module);
         if (module.Structures.Any(static structure => structure.Fields.Any(
             static field => field.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView))
             || module.Functions.Any(static item => item.Import
@@ -522,6 +513,16 @@ public static partial class ModuleCompiler
 
         void Add(PrimitiveType type)
         {
+            if (type == PrimitiveType.TokenSpan)
+            {
+                var token = TokenSpanContract.Find(structures, TokenSpanContract.TokenName);
+                if (token < 0)
+                {
+                    throw new ModuleFormatException("Missing compiler-known token layout.");
+                }
+                Add((PrimitiveType)(100 + token));
+                return;
+            }
             var index = (int)type - 100;
             if (index >= 0 && !ManagedClassTypes.IsManaged(type))
             {
@@ -589,9 +590,9 @@ public static partial class ModuleCompiler
         if (program.InvocationProfileId is not null)
         {
             if (!program.RequiresSourceGrant
-                || !ScannerHost.IsInvocationProfileBufferSet(program.Buffers, program.InvocationProfileId))
+                || !InvocationProfiles.IsBufferSet(program.Buffers, program.InvocationProfileId))
             {
-                throw new ModuleFormatException("Invocation buffers do not match the named scanner profile.");
+                throw new ModuleFormatException("Invocation buffers do not match their named profile.");
             }
             return true;
         }
@@ -1401,6 +1402,16 @@ public static partial class ModuleCompiler
                     break;
                 case BoundViewRead view:
                     VisitExpression(view.Index);
+                    break;
+                case BoundSpanLength length:
+                    VisitExpression(length.View);
+                    break;
+                case BoundSpanRead read:
+                    VisitExpression(read.View);
+                    VisitExpression(read.Index);
+                    break;
+                case BoundSpanAdvance advance:
+                    VisitExpression(advance.View);
                     break;
                 case BoundBufferRead buffer:
                     VisitExpression(buffer.Index);
@@ -2718,7 +2729,9 @@ public static partial class ModuleCompiler
         if (a.Name != b.Name || a.Size != b.Size || a.Fields.Length != b.Fields.Length
             || a.IsPrivate != b.IsPrivate || a.IsInternal != b.IsInternal
             || a.IsUnique != b.IsUnique || a.CleanupMethod != b.CleanupMethod
-            || a.IsTransparent != b.IsTransparent)
+            || a.IsTransparent != b.IsTransparent
+            || a.BlittableTargetRequirement != b.BlittableTargetRequirement
+            || (a.BlittableTargetRequirement != 0 && a.IsSequential != b.IsSequential))
         {
             return false;
         }
@@ -2839,6 +2852,15 @@ public static partial class ModuleCompiler
             BoundMutableReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination, classOffset, destinationTypes) },
             BoundViewLength => expression,
             BoundBufferLength => expression,
+            BoundSnapshotSpan => expression,
+            BoundSpanLength length => length with {
+                View = RemapExpression(length.View, source, destination, classOffset, destinationTypes),
+            },
+            BoundSpanRead read => read with {
+                Type = RemapType(read.Type, source, destination, classOffset, destinationTypes),
+                View = RemapExpression(read.View, source, destination, classOffset, destinationTypes),
+                Index = RemapExpression(read.Index, source, destination, classOffset, destinationTypes),
+            },
             BoundViewRead view => view with { Index = RemapExpression(view.Index, source, destination, classOffset, destinationTypes) },
             BoundBufferRead buffer => buffer with {
                 Type = RemapType(buffer.Type, source, destination, classOffset, destinationTypes),
@@ -2982,7 +3004,7 @@ public static partial class ModuleCompiler
                 Index = RemapExpression(write.Index, source, destination, classOffset, destinationTypes),
                 Value = RemapExpression(write.Value, source, destination, classOffset, destinationTypes),
             },
-            BoundDrop => statement,
+            BoundDrop or BoundDropSpan => statement,
             BoundDropConstructedFields => statement,
             SymbolicDrop => statement,
             BoundUnsafe unsafeBlock => unsafeBlock with {
@@ -3020,7 +3042,7 @@ public static partial class ModuleCompiler
     {
         if (TokenSpanContract.HasMetadata(program))
         {
-            throw new ModuleContractException("Compilation-local span and capture metadata cannot be persisted.");
+            ValidatePrivateSpanDeclarations(program);
         }
     }
 
@@ -3034,11 +3056,22 @@ public static partial class ModuleCompiler
                 "Semantic modules do not persist implicit reference parameter contracts.");
         }
         RejectCompilationLocalSpans(program);
+        if (TokenSpanContract.HasMetadata(program)
+            || ScalarFrontendHost.IsInvocationProfileIdentity(module.InvocationProfileId))
+        {
+            module = module with {
+                FormatVersion = PrivateSpanVersion,
+                Structures = [.. module.Structures.Select(static structure => structure with {
+                    TokenSpanRole = TokenSpanContract.RoleOf(structure),
+                })],
+            };
+        }
+        module = SelectFixedLayoutRevision(module);
         ValidateUnsafeExpressionScopes(program, module);
         if (module.InvocationProfileId is null
             ? !module.InvocationBuffers.IsEmpty
             : !module.RequiresSourceGrant
-                || !ScannerHost.IsInvocationProfileBufferSet(module.InvocationBuffers, module.InvocationProfileId))
+                || !InvocationProfiles.IsBufferSet(module.InvocationBuffers, module.InvocationProfileId))
         {
             throw new ModuleFormatException("Module invocation buffers do not match their profile requirement.");
         }
@@ -3064,7 +3097,7 @@ public static partial class ModuleCompiler
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Magic);
-        writer.Write(Version);
+        writer.Write(module.FormatVersion);
         PutString(writer, RetainedNativeProfile(module));
         writer.Write(module.Consumer);
         writer.Write((byte)program.RuntimePolicy);
@@ -3082,11 +3115,20 @@ public static partial class ModuleCompiler
         foreach (var structure in module.Structures)
         {
             PutString(writer, structure.Name);
+            if (module.FormatVersion == PrivateSpanVersion)
+            {
+                writer.Write((byte)structure.TokenSpanRole);
+            }
             writer.Write(structure.Size);
             writer.Write(structure.IsPrivate);
             writer.Write(structure.IsInternal);
             writer.Write(structure.IsUnique);
             writer.Write(structure.IsTransparent);
+            if (module.FormatVersion == FixedLayoutVersion)
+            {
+                writer.Write(structure.BlittableTargetRequirement);
+                writer.Write(structure.IsSequential);
+            }
             writer.Write(structure.CleanupMethod is not null);
             if (structure.CleanupMethod is string cleanup)
             {
@@ -3166,7 +3208,7 @@ public static partial class ModuleCompiler
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
-            using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
+            using var reader = new ModuleReader(stream);
             var (policy, profile, requiresSourceGrant, invocationProfileId, invocationBuffers) =
                 ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
@@ -3184,6 +3226,7 @@ public static partial class ModuleCompiler
             }
             var items = ReadFunctions(reader, count, expectedConsumer, structures, classes);
             var module = new Module(expectedConsumer, entry, structures, items) {
+                FormatVersion = reader.FormatVersion,
                 Classes = classes,
                 ImportedStructures = importedTypes,
                 RequiresSourceGrant = requiresSourceGrant,
@@ -3213,7 +3256,7 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
-            if (hasPrivateManagedState)
+            if (hasPrivateManagedState || !expectedConsumer && module.FormatVersion == PrivateSpanVersion)
             {
                 ValidateProducer(module);
             }
@@ -3235,10 +3278,11 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version != Version)
+        if (version is not (Version or PrivateSpanVersion or FixedLayoutVersion) || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
+        moduleReader.FormatVersion = version;
         var profile = GetString(reader);
         if (GetBool(reader) != expectedConsumer)
         {
@@ -3248,9 +3292,12 @@ public static partial class ModuleCompiler
         var requiresSourceGrant = GetBool(reader);
         var profileIdText = GetString(reader);
         var invocationProfileId = profileIdText.Length == 0 ? null : profileIdText;
-        var bufferCount = Count(reader, 10);
+        var bufferCount = Count(reader, version == PrivateSpanVersion ? 12 : 10);
         if ((invocationProfileId is not null
-                && (invocationProfileId != ScannerHost.InvocationProfileIdentity || !requiresSourceGrant || bufferCount != 10))
+                && (!requiresSourceGrant
+                    || invocationProfileId != ScannerHost.InvocationProfileIdentity
+                        && (version != PrivateSpanVersion
+                            || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId))))
             || (invocationProfileId is null && bufferCount != 0))
         {
             throw new ModuleFormatException("Unsupported invocation profile metadata.");
@@ -3268,9 +3315,9 @@ public static partial class ModuleCompiler
         }
         var buffers = invocationBuffers.MoveToImmutable();
         if (invocationProfileId is not null
-            && !ScannerHost.IsInvocationProfileBufferSet(buffers, invocationProfileId))
+            && !InvocationProfiles.IsBufferSet(buffers, invocationProfileId))
         {
-            throw new ModuleFormatException("Invocation buffers do not match the named scanner profile.");
+            throw new ModuleFormatException("Invocation buffers do not match their named profile.");
         }
         if (policy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions)
             || profile is not ("native-10" or "native-11" or "native-12" or "native-13" or "native-14"
@@ -3293,11 +3340,20 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Duplicate or empty type identity.");
             }
+            var role = reader is ModuleReader { FormatVersion: PrivateSpanVersion }
+                ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
+            if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
+            {
+                throw new ModuleFormatException("Unknown compiler-known span type role.");
+            }
             var size = reader.ReadInt32();
             var isPrivate = GetBool(reader);
             var isInternal = GetBool(reader);
             var isUnique = GetBool(reader);
             var isTransparent = GetBool(reader);
+            var fixedLayout = reader is ModuleReader { FormatVersion: FixedLayoutVersion };
+            var blittableTargetRequirement = fixedLayout ? reader.ReadInt32() : 0;
+            var isSequential = fixedLayout && GetBool(reader);
             var cleanup = GetBool(reader) ? GetString(reader) : null;
             var fieldCount = Count(reader, MaximumSlots);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
@@ -3318,10 +3374,13 @@ public static partial class ModuleCompiler
                 });
             }
             structures.Add(new BoundStruct(name, fields.ToImmutable(), size) {
+                TokenSpanRole = role,
                 IsPrivate = isPrivate,
                 IsInternal = isInternal,
                 IsUnique = isUnique,
                 IsTransparent = isTransparent,
+                BlittableTargetRequirement = blittableTargetRequirement,
+                IsSequential = isSequential,
                 CleanupMethod = cleanup,
             });
         }
@@ -3575,6 +3634,7 @@ public static partial class ModuleCompiler
             BoundUnsafe => (byte)11,
             BoundTryCatch => (byte)12,
             BoundDrop => (byte)13,
+            BoundDropSpan => (byte)28,
             BoundOwnerDeclaration => (byte)14,
             BoundVacantLocal => (byte)24,
             BoundLifetimeEnd => (byte)26,
@@ -3637,6 +3697,9 @@ public static partial class ModuleCompiler
                 break;
             case BoundOwnerDeclaration declaration:
                 writer.Write(declaration.Variable);
+                break;
+            case BoundDropSpan dropSpan:
+                writer.Write(dropSpan.Variable);
                 break;
             case BoundVacantLocal vacant:
                 writer.Write(vacant.Variable);
@@ -3881,6 +3944,9 @@ public static partial class ModuleCompiler
                     GetExpression(reader, ref remaining, depth + 1), span) {
                     IsEndRelativeOffset = isEndRelativeOffset,
                 };
+            case 28:
+                RequirePrivateSpanRevision(reader);
+                return new BoundDropSpan(reader.ReadInt32(), span);
             case 18:
                 return new BoundBreak(span);
             case 19:
@@ -3939,6 +4005,9 @@ public static partial class ModuleCompiler
             BoundIsInitialized => (byte)28,
             BoundBufferLength => (byte)29,
             BoundBufferRead => (byte)30,
+            BoundSnapshotSpan => (byte)32,
+            BoundSpanLength => (byte)33,
+            BoundSpanRead => (byte)34,
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         writer.Write((int)expression.Type);
@@ -3965,6 +4034,17 @@ public static partial class ModuleCompiler
                 break;
             case BoundBufferLength bufferLength:
                 writer.Write(bufferLength.Buffer);
+                break;
+            case BoundSnapshotSpan snapshot:
+                writer.Write(snapshot.Variable);
+                writer.Write(snapshot.SourceBuffer);
+                break;
+            case BoundSpanLength length:
+                PutExpression(writer, length.View, names, ref remaining, depth + 1, inUnsafe);
+                break;
+            case BoundSpanRead read:
+                PutExpression(writer, read.View, names, ref remaining, depth + 1, inUnsafe);
+                PutExpression(writer, read.Index, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundViewRead viewRead:
                 writer.Write(viewRead.Variable);
@@ -4227,6 +4307,16 @@ public static partial class ModuleCompiler
                     throw new ModuleFormatException("Expression-scoped unsafe operand type mismatch.");
                 }
                 return new BoundUnsafeExpression(unsafeOperand, span);
+            case 32 when type == PrimitiveType.TokenSpan:
+                RequirePrivateSpanRevision(reader);
+                return new BoundSnapshotSpan(reader.ReadInt32(), reader.ReadInt32(), span);
+            case 33 when type == TokenSpanContract.IndexCarrier:
+                RequirePrivateSpanRevision(reader);
+                return new BoundSpanLength(GetExpression(reader, ref remaining, depth + 1), span);
+            case 34:
+                RequirePrivateSpanRevision(reader);
+                var spanView = GetExpression(reader, ref remaining, depth + 1);
+                return new BoundSpanRead(spanView, GetExpression(reader, ref remaining, depth + 1), type, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }
@@ -4252,7 +4342,7 @@ public static partial class ModuleCompiler
             BoundLocal local => local with {
                 Initializer = ResolveExpression(local.Initializer, names, functions, structures, valueTypes, inUnsafe),
             },
-            BoundLifetimeEnd or BoundOwnerDeclaration or BoundVacantLocal => statement,
+            BoundLifetimeEnd or BoundOwnerDeclaration or BoundVacantLocal or BoundDropSpan => statement,
             BoundAssignment assignment => assignment with {
                 Value = ResolveExpression(assignment.Value, names, functions, structures, valueTypes, inUnsafe),
             },
@@ -4457,6 +4547,13 @@ public static partial class ModuleCompiler
             BoundViewRead view => view with {
                 Index = ResolveExpression(view.Index, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
+            BoundSpanLength length => length with {
+                View = ResolveExpression(length.View, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
+            },
+            BoundSpanRead read => read with {
+                View = ResolveExpression(read.View, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
+                Index = ResolveExpression(read.Index, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
+            },
             BoundBufferRead buffer => buffer with {
                 Index = ResolveExpression(buffer.Index, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
@@ -4541,6 +4638,7 @@ public static partial class ModuleCompiler
 
     internal sealed record Module(bool Consumer, int EntryPoint, ImmutableArray<BoundStruct> Structures, ImmutableArray<ModuleFunction> Functions)
     {
+        public int FormatVersion { get; init; } = Version;
         public ImmutableArray<BoundClass> Classes { get; init; } = [];
         public ImmutableArray<string> ImportedStructures { get; init; } = [];
         public bool RequiresSourceGrant { get; init; }

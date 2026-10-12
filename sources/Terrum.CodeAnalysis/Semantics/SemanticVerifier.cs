@@ -149,7 +149,7 @@ public static partial class SemanticVerifier
         if (program.InvocationProfileId is not null
             && (!program.RequiresSourceGrant
                 || (!program.Buffers.IsEmpty
-                    && !ScannerHost.IsInvocationProfileBufferSet(program.Buffers, program.InvocationProfileId))))
+                    && !InvocationProfiles.IsBufferSet(program.Buffers, program.InvocationProfileId))))
         {
             throw Invalid();
         }
@@ -184,6 +184,10 @@ public static partial class SemanticVerifier
         if (program.Buffers.Any(static buffer => buffer.IsInvocationScoped) && !program.RequiresSourceGrant)
         {
             throw Invalid();
+        }
+        if (program.Structures.Any(static structure => structure is not null && structure.BlittableTargetRequirement != 0))
+        {
+            _ = FixedLayoutStorage.Validate(program.Structures);
         }
         var structNames = new HashSet<string>(program.Structures.Length, StringComparer.Ordinal);
         var layoutStates = new byte[program.Structures.Length];
@@ -324,7 +328,8 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             if (structure.IsSequential && (!structure.IsInternal || structure.IsUnique
-                || structure.IsTransparent || structure.Fields.Any(static field => !field.IsPrivate)))
+                || structure.IsTransparent || structure.Fields.Any(static field => !field.IsPrivate))
+                && structure.BlittableTargetRequirement == 0)
             {
                 throw Invalid();
             }

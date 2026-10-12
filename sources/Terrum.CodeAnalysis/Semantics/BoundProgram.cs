@@ -262,11 +262,16 @@ public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fi
     public bool IsMutable { get; init; }
 }
 
-/// <summary>A compact value type of at most sixteen bytes, with checked value fields or the compilation-local token cursor capture.</summary>
+/// <summary>A compact value type of at most sixteen bytes, with checked value fields, a compilation-local token cursor capture, or a compiler-sealed opaque payload.</summary>
 public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
-    /// <summary>Whether source requested private declaration-order natural layout.</summary>
+    internal TokenSpanTypeRole TokenSpanRole { get; init; }
+
+    /// <summary>Whether the value requests declaration-order natural layout; a public commitment also requires <see cref="BlittableTargetRequirement"/>.</summary>
     public bool IsSequential { get; init; }
+
+    /// <summary>The provisional fixed-storage target requirement, or zero for no commitment. This bound-IR opt-in does not register a source attribute.</summary>
+    public int BlittableTargetRequirement { get; init; }
 
     /// <summary>Whether this Copy value has the storage and call ABI of its sole scalar field.</summary>
     public bool IsTransparent { get; init; }

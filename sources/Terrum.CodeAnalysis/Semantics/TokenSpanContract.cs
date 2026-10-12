@@ -6,6 +6,14 @@ using System.Linq;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
+internal enum TokenSpanTypeRole : byte
+{
+    None,
+    Token,
+    Range,
+    Snapshot,
+}
+
 internal static class TokenSpanContract
 {
     internal const string TokenName = "Terrum.CodeAnalysis.Token";
@@ -17,11 +25,27 @@ internal static class TokenSpanContract
     internal static int CountOffset => NativeTargetProfile.PointerSize;
     internal static int DescriptorSize => checked(2 * NativeTargetProfile.PointerSize);
 
+    internal static TokenSpanTypeRole RoleOf(BoundStruct structure) =>
+        structure.TokenSpanRole != TokenSpanTypeRole.None ? structure.TokenSpanRole : structure.Name switch {
+            TokenName => TokenSpanTypeRole.Token,
+            RangeName => TokenSpanTypeRole.Range,
+            SnapshotName => TokenSpanTypeRole.Snapshot,
+            _ => TokenSpanTypeRole.None,
+        };
+
     internal static int Find(IReadOnlyList<BoundStruct> structures, string name)
     {
+        var role = name switch {
+            TokenName => TokenSpanTypeRole.Token,
+            RangeName => TokenSpanTypeRole.Range,
+            SnapshotName => TokenSpanTypeRole.Snapshot,
+            _ => TokenSpanTypeRole.None,
+        };
         for (var index = 0; index < structures.Count; index++)
         {
-            if (structures[index].Name == name)
+            if (role != TokenSpanTypeRole.None
+                ? RoleOf(structures[index]) == role
+                : structures[index].Name == name)
             {
                 return index;
             }
@@ -252,7 +276,7 @@ internal static class TokenSpanContract
     }
 
     internal static bool ValidSnapshot(BoundStruct structure) =>
-        structure.Name == SnapshotName && structure.IsUnique && structure.Size == 16
+        RoleOf(structure) == TokenSpanTypeRole.Snapshot && structure.IsUnique && structure.Size == 16
         && structure.Fields is [var records, var count]
         && records.Name == "_records" && records.Type == PrimitiveType.OwnedInt32Buffer
         && records.Offset == 0 && records.Size == 8 && records.IsPrivate && !records.IsMutable

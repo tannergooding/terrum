@@ -245,7 +245,7 @@ public sealed partial class CliTests
         var program = string.Join(' ', functions);
         var source = program + new string(' ', ScannerHost.MaximumSourceLength - program.Length);
         Assert.True(Lexer.Lex(SourceText.From(program)).Tokens.Length
-            > 64);
+            > ScalarFrontendHost.MaximumInvocationTokens);
         Assert.Equal(ScannerHost.MaximumSourceLength, source.Length);
 
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);

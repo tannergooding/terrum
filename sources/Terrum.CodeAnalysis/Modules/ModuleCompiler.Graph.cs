@@ -501,7 +501,7 @@ public static partial class ModuleCompiler
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
-            using var reader = new BinaryReader(stream, StrictUtf8, leaveOpen: true);
+            using var reader = new ModuleReader(stream);
             var (policy, profile, requiresSourceGrant, invocationProfileId, invocationBuffers) =
                 ReadModuleHeader(reader, expectedConsumer: true);
             if (requiresSourceGrant || invocationProfileId is not null || !invocationBuffers.IsEmpty)
@@ -526,6 +526,7 @@ public static partial class ModuleCompiler
             }
             var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes);
             var module = new Module(true, -1, structures, functions) {
+                FormatVersion = reader.FormatVersion,
                 Classes = classes,
                 ImportedStructures = imported,
                 RequiresSourceGrant = requiresSourceGrant,

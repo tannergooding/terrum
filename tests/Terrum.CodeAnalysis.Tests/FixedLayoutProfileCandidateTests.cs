@@ -27,6 +27,8 @@ public sealed class FixedLayoutProfileCandidateTests
         public struct BooleanField { public bool Value; }
         public struct Float32Field { public float32 Value; }
         public struct FloatingField { public float64 Value; }
+        public struct FloatingInner { public float32 Value; public bool Enabled; }
+        public struct FloatingOuter { public char16 Prefix; public FloatingInner Value; }
         unique struct UniqueValue { public int32 Value; }
         public struct MissingNested { public Inner Value; }
         """;
@@ -36,7 +38,7 @@ public sealed class FixedLayoutProfileCandidateTests
     {
         var program = Compile(Declarations);
         var claims = Claims("Inner", "Outer", "Padded", "Over16", "BooleanField", "FloatingField",
-            "Float32Field", "UniqueValue", "MissingNested");
+            "Float32Field", "FloatingInner", "FloatingOuter", "UniqueValue", "MissingNested");
 
         var inner = Assert.IsType<CandidateDescriptor>(Describe(program, "Inner", claims));
         Assert.Equal((8, 4), (inner.Layout.Size, inner.Layout.Alignment));
@@ -57,6 +59,29 @@ public sealed class FixedLayoutProfileCandidateTests
             field => Assert.Equal((0, 2), (field.Offset, field.Size)),
             field => Assert.Equal((4, 4), (field.Offset, field.Size)),
             field => Assert.Equal((8, 2), (field.Offset, field.Size)));
+
+        var booleanLayout = Assert.IsType<CandidateDescriptor>(
+            Describe(program, "BooleanField", claims)).Layout;
+        Assert.Equal((1, 1), (booleanLayout.Size, booleanLayout.Alignment));
+        var float32Layout = Assert.IsType<CandidateDescriptor>(
+            Describe(program, "Float32Field", claims)).Layout;
+        Assert.Equal((4, 4), (float32Layout.Size, float32Layout.Alignment));
+        var float64Layout = Assert.IsType<CandidateDescriptor>(
+            Describe(program, "FloatingField", claims)).Layout;
+        Assert.Equal((8, 8), (float64Layout.Size, float64Layout.Alignment));
+        var floatingInner = Assert.IsType<CandidateDescriptor>(
+            Describe(program, "FloatingInner", claims)).Layout;
+        Assert.Equal((8, 4), (floatingInner.Size, floatingInner.Alignment));
+        Assert.Collection(floatingInner.Fields,
+            field => Assert.Equal((0, 4), (field.Offset, field.Size)),
+            field => Assert.Equal((4, 1), (field.Offset, field.Size)));
+        var floatingOuter = Assert.IsType<CandidateDescriptor>(
+            Describe(program, "FloatingOuter", claims)).Layout;
+        Assert.Equal((12, 4), (floatingOuter.Size, floatingOuter.Alignment));
+        Assert.Collection(floatingOuter.Fields,
+            field => Assert.Equal((0, 2), (field.Offset, field.Size)),
+            field => Assert.Equal((4, 8), (field.Offset, field.Size)));
+        Assert.Equal("FloatingInner", Assert.Single(floatingOuter.NestedLayouts).NominalName);
 
         await RunNativeStorageProbeAsync().ConfigureAwait(true);
     }
@@ -151,13 +176,10 @@ public sealed class FixedLayoutProfileCandidateTests
     {
         var program = Compile(Declarations);
         var claims = Claims("Inner", "Outer", "Padded", "Over16", "BooleanField", "FloatingField",
-            "Float32Field", "UniqueValue", "MissingNested");
+            "Float32Field", "FloatingInner", "FloatingOuter", "UniqueValue", "MissingNested");
 
         Assert.Null(Describe(program, "Outer", Claims("Outer")));
         Assert.Null(Describe(program, "MissingNested", Claims("MissingNested")));
-        Assert.Null(Describe(program, "BooleanField", claims));
-        Assert.Null(Describe(program, "Float32Field", claims));
-        Assert.Null(Describe(program, "FloatingField", claims));
         Assert.Null(Describe(program, "UniqueValue", claims));
         Assert.Null(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
             new CandidateClaim(true, "Sequential", Profile, Target, 8))));
@@ -178,9 +200,32 @@ public sealed class FixedLayoutProfileCandidateTests
             ],
             Size = 24,
         };
-        Assert.Null(Describe(program with {
+        var largerDescriptor = Assert.IsType<CandidateDescriptor>(Describe(program with {
             Structures = program.Structures.SetItem(IndexOf(program, "Over16"), over16),
         }, "Over16", claims));
+        Assert.Equal((24, 8), (largerDescriptor.Layout.Size, largerDescriptor.Layout.Alignment));
+        Assert.Collection(largerDescriptor.Layout.Fields,
+            field => Assert.Equal((0, 2), (field.Offset, field.Size)),
+            field => Assert.Equal((8, 8), (field.Offset, field.Size)),
+            field => Assert.Equal((16, 2), (field.Offset, field.Size)));
+        var largeAggregate = Find(program, "Over16") with {
+            Fields = [
+                new BoundStructField("A", PrimitiveType.UInt64, 0, 8),
+                new BoundStructField("B", PrimitiveType.UInt64, 8, 8),
+                new BoundStructField("C", PrimitiveType.UInt64, 16, 8),
+                new BoundStructField("D", PrimitiveType.UInt64, 24, 8),
+                new BoundStructField("E", PrimitiveType.UInt64, 32, 8),
+            ],
+            Size = 40,
+        };
+        var largeProgram = program with {
+            Structures = program.Structures.SetItem(IndexOf(program, "Over16"), largeAggregate),
+        };
+        var largeDescriptor = Assert.IsType<CandidateDescriptor>(
+            Describe(largeProgram, "Over16", claims));
+        Assert.Equal((40, 8), (largeDescriptor.Layout.Size, largeDescriptor.Layout.Alignment));
+        Assert.Equal(new[] { 0, 8, 16, 24, 32 },
+            largeDescriptor.Layout.Fields.Select(static field => field.Offset));
 
         var managed = Find(program, "Over16") with {
             Fields = [new BoundStructField("Value", PrimitiveType.ManagedNode, 0, 4)],
@@ -282,7 +327,7 @@ public sealed class FixedLayoutProfileCandidateTests
 
         try
         {
-            var size = 0;
+            var size = 0L;
             var alignment = 1;
             var fields = new List<CandidateField>(structure.Fields.Length);
             var nestedLayouts = new List<CandidateLayout>();
@@ -311,8 +356,11 @@ public sealed class FixedLayoutProfileCandidateTests
                 else
                 {
                     (fieldSize, fieldAlignment) = field.Type switch {
+                        PrimitiveType.Bool => (1, 1),
                         PrimitiveType.Int32 or PrimitiveType.UInt32 => (4, 4),
+                        PrimitiveType.Float32 => (4, 4),
                         PrimitiveType.Int64 or PrimitiveType.UInt64 => (8, 8),
+                        PrimitiveType.Float64 => (8, 8),
                         PrimitiveType.Char16 => (2, 2),
                         _ => (0, 0),
                     };
@@ -323,7 +371,8 @@ public sealed class FixedLayoutProfileCandidateTests
                 }
 
                 var expectedOffset = Align(size, fieldAlignment);
-                if (field.Offset != expectedOffset || field.Size != fieldSize)
+                if (expectedOffset > int.MaxValue - fieldSize
+                    || field.Offset != expectedOffset || field.Size != fieldSize)
                 {
                     return false;
                 }
@@ -334,13 +383,13 @@ public sealed class FixedLayoutProfileCandidateTests
             }
 
             size = Align(size, alignment);
-            if (size is < 1 or > 16 || structure.Size != size
+            if (size is < 1 or > int.MaxValue || structure.Size != size
                 || (claim.AggregateAlignment is int claimedAlignment && claimedAlignment != alignment))
             {
                 return false;
             }
 
-            layout = new CandidateLayout(structure.Name, size, alignment, fields.ToArray(),
+            layout = new CandidateLayout(structure.Name, (int)size, alignment, fields.ToArray(),
                 nestedLayouts.ToArray());
             return true;
         }
@@ -367,7 +416,8 @@ public sealed class FixedLayoutProfileCandidateTests
         && producer.NestedLayouts.Zip(consumer.NestedLayouts)
             .All(static pair => LayoutsCompatible(pair.First, pair.Second));
 
-    private static int Align(int value, int alignment) => (value + alignment - 1) & -alignment;
+    private static long Align(long value, int alignment) =>
+        (value + alignment - 1) & -(long)alignment;
 
     private static string TypeName(BoundProgram program, PrimitiveType type)
     {

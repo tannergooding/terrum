@@ -14,12 +14,24 @@ public static partial class SemanticVerifier
     private static bool VerifySpanContracts(BoundProgram program)
     {
         var hasSpans = TokenSpanContract.HasMetadata(program);
-        if (hasSpans && !TokenSpanContract.ValidTokenLayout(program.Structures))
+        if ((hasSpans || program.Structures.Any(static structure =>
+                structure.TokenSpanRole is TokenSpanTypeRole.Token or TokenSpanTypeRole.Range))
+            && !TokenSpanContract.ValidTokenLayout(program.Structures))
         {
             throw InvalidEffect(default, "Ownership");
         }
+        var roles = new HashSet<TokenSpanTypeRole>();
         foreach (var structure in program.Structures)
         {
+            var role = hasSpans ? TokenSpanContract.RoleOf(structure) : structure.TokenSpanRole;
+            if (role != TokenSpanTypeRole.None
+                && (role is < TokenSpanTypeRole.Token or > TokenSpanTypeRole.Snapshot
+                    || !roles.Add(role)
+                    || role == TokenSpanTypeRole.Snapshot
+                        && !TokenSpanContract.ValidSnapshot(structure)))
+            {
+                throw InvalidEffect(default, "Ownership");
+            }
             if (structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan)
                 && !TokenSpanContract.ValidCursor(structure)
                 || structure.Fields.Any(field => TokenSpanContract.IsCursor(field.Type, program.Structures)))
