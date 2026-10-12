@@ -116,7 +116,7 @@ public sealed partial class CliTests
             foreach (var unsupported in new[] {
                 "int32 Main() { return int32.MaxValue; }",
                 "int32 Main() { return int32 .MaxValue; }",
-                "namespace N.Types; int32 Main() { return 42; }",
+                "namespace N.Types; namespace M.Types; int32 Main() { return 42; }",
             })
             {
                 var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(unsupported),

@@ -16,7 +16,7 @@ public sealed class DoForFrontendProjectionTests
     {
         const string text = "public int32 Value() { return 42; }";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = words[2] = words[5] = 1;
         words[9] = text.IndexOf("Value", StringComparison.Ordinal);
         words[10] = 5;
@@ -57,7 +57,7 @@ public sealed class DoForFrontendProjectionTests
             : "public int32 Value() { do { return 42; } while (false); }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = words[2] = words[5] = 1;
         words[9] = text.IndexOf("Value", StringComparison.Ordinal);
         words[10] = 5;

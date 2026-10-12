@@ -131,7 +131,7 @@ public sealed class AttachedConstructTests
     {
         var source = SourceText.From("int32 Main" + gap + "() { return 42; }");
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85; words[1] = 1; words[5] = 1;
+        words[0] = 87; words[1] = 1; words[5] = 1;
         words[9] = 6; words[10] = 4;
         words[22] = 1; words[23] = 3; words[24] = 42;
         words[26] = source.ToString().IndexOf("42", StringComparison.Ordinal); words[27] = 2;
@@ -165,7 +165,7 @@ public sealed class AttachedConstructTests
         })
         {
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = 85; words[1] = 1; words[2] = 1; words[5] = 1;
+            words[0] = 87; words[1] = 1; words[2] = 1; words[5] = 1;
             words[9] = text.IndexOf("@await", StringComparison.Ordinal); words[10] = 6;
             words[37] = 3; words[38] = -1; words[39] = 2; words[40] = -1; words[41] = 1;
             var outer = text.IndexOf("int32", words[9], StringComparison.Ordinal);

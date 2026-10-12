@@ -16,7 +16,7 @@ public sealed class ReturnFrontendProjectionTests
         const string text = "public int32 Value(bool flag) { if (flag) { return 42; } else { return 43; } }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

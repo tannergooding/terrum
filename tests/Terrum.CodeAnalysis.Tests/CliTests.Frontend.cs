@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -170,12 +171,83 @@ public sealed partial class CliTests
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
     }
 
+    [Theory]
+    [InlineData("int32 Main() { return (42); }", "(42)", 42)]
+    [InlineData("int32 Main() { return ((20 + 22)); }", "((20 + 22))", 42)]
+    [InlineData("int32 Main() { return 6 * (3 + 4); }", "(3 + 4)", 42)]
+    [InlineData("int32 Main() { return 6 * 3 + 4; }", "", 22)]
+    public async Task FrontendGroupedExpressionsPreserveSourceSpansAndHostedEmissionAsync(
+        string source, string groupedExpression, int expected)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (componentExit, componentOutput, componentError) = await RunAsync(
+            Encoding.UTF8.GetBytes(source), "frontend-component", directory, "-",
+            "--runtime", "fail-fast", "--json");
+        Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
+        Assert.Empty(componentError);
+        using (var document = JsonDocument.Parse(componentOutput))
+        {
+            var result = document.RootElement.GetProperty("result");
+            if (groupedExpression.Length == 0)
+            {
+                if (result.TryGetProperty("nodes", out var ungroupedNodes))
+                {
+                    Assert.DoesNotContain(ungroupedNodes.EnumerateArray(), static node =>
+                        node.GetProperty("operation").GetInt32() == 46);
+                }
+            }
+            else
+            {
+                var start = source.IndexOf(groupedExpression, StringComparison.Ordinal);
+                Assert.True(start >= 0);
+                if (result.TryGetProperty("nodes", out var nodes))
+                {
+                    Assert.Contains(nodes.EnumerateArray(), node =>
+                        node.GetProperty("operation").GetInt32() == 46
+                        && node.GetProperty("span").GetProperty("start").GetInt32() == start
+                        && node.GetProperty("span").GetProperty("length").GetInt32()
+                            == groupedExpression.Length);
+                }
+                else
+                {
+                    var span = result.GetProperty("whenTrue").GetProperty("span");
+                    Assert.Equal(start, span.GetProperty("start").GetInt32());
+                    Assert.Equal(groupedExpression.Length, span.GetProperty("length").GetInt32());
+                }
+            }
+        }
+
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source, expected);
+    }
+
     [Fact]
     public async Task FrontendBuildMatchesHostedAtMaximumSourceLengthAsync()
     {
         const string program = "int32 Main() { return 42; }";
         var source = program + new string(' ', ScannerHost.MaximumSourceLength - program.Length);
         Assert.Equal(ScannerHost.MaximumSourceLength, source.Length);
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task FrontendBuildMatchesHostedForMaximumFunctionGraphAtSourceLimitAsync()
+    {
+        var functions = new string[ScalarFrontendHost.MaximumFunctions];
+        for (var index = 0; index < functions.Length - 1; index++)
+        {
+            var body = index == 0
+                ? "Main() => F1()"
+                : $"F{index}() => F{index + 1}()";
+            functions[index] = $"int32 {body};";
+        }
+        functions[^1] = $"int32 F{functions.Length - 1}() => 42;";
+        var program = string.Join(' ', functions);
+        var source = program + new string(' ', ScannerHost.MaximumSourceLength - program.Length);
+        Assert.True(Lexer.Lex(SourceText.From(program)).Tokens.Length
+            > 64);
+        Assert.Equal(ScannerHost.MaximumSourceLength, source.Length);
+
         await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
     }
 
@@ -205,7 +277,8 @@ public sealed partial class CliTests
         }
     }
 
-    private static async Task AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
+    private static async Task AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(
+        string source, int expectedExitCode = 42)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "..")), "self-host");
@@ -219,10 +292,12 @@ public sealed partial class CliTests
                 var input = Encoding.UTF8.GetBytes(source);
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input, "frontend-build",
                     directory, "-", "-o", nativePath, "--runtime", policy, "--json");
-                var (hostedExit, _, hostedError) = await RunAsync(input, "build",
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(input, "build",
                     "-", "-o", hostedPath, "--runtime", policy, "--json");
-                Assert.Equal(0, nativeExit);
-                Assert.Equal(0, hostedExit);
+                Assert.True(nativeExit == 0,
+                    $"{policy} frontend build exited {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0,
+                    $"{policy} hosted build exited {hostedExit}: {hostedOutput}{hostedError}");
                 Assert.Empty(nativeError);
                 Assert.Empty(hostedError);
                 using (var document = JsonDocument.Parse(nativeOutput))
@@ -237,7 +312,7 @@ public sealed partial class CliTests
                     CreateNoWindow = true,
                 }) ?? throw new InvalidOperationException("Could not start native frontend executable.");
                 await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
-                Assert.Equal(42, process.ExitCode);
+                Assert.Equal(expectedExitCode, process.ExitCode);
             }
         }
         finally
@@ -702,7 +777,31 @@ public sealed partial class CliTests
             Assert.Empty(result.GetProperty("diagnostics").EnumerateArray());
         }
 
-        var (lexExit, lexOutput, lexError) = await RunAsync(Encoding.UTF8.GetBytes("@"),
+        const string LocatedInvalid = "int32 Value()\r\n{\r\n return /* \U0001F600 */ missing;\r\n}";
+        var (locatedExit, locatedOutput, locatedError) = await RunAsync(
+            Encoding.UTF8.GetBytes(LocatedInvalid),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.Equal(1, locatedExit);
+        Assert.Empty(locatedError);
+        using (var document = JsonDocument.Parse(locatedOutput))
+        {
+            var result = document.RootElement;
+            var range = result.GetProperty("result").GetProperty("errorRange");
+            Assert.Equal(2, range.GetProperty("start").GetProperty("line").GetInt32());
+            Assert.Equal(17, range.GetProperty("start").GetProperty("character").GetInt32());
+            Assert.Equal(2, range.GetProperty("end").GetProperty("line").GetInt32());
+            Assert.Equal(24, range.GetProperty("end").GetProperty("character").GetInt32());
+        }
+
+        var (consoleExit, consoleOutput, consoleError) = await RunAsync(
+            Encoding.UTF8.GetBytes(LocatedInvalid),
+            "frontend-component", directory, "-", "--runtime", policy);
+        Assert.Equal(1, consoleExit);
+        Assert.Empty(consoleOutput);
+        Assert.Contains("<stdin>(3,18): Frontend 3 at [35..42).", consoleError);
+
+        const string LocatedLexicalError = "int32 Value()\r\n{\r\n @\r\n}";
+        var (lexExit, lexOutput, lexError) = await RunAsync(Encoding.UTF8.GetBytes(LocatedLexicalError),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
         Assert.Equal(1, lexExit);
         Assert.Empty(lexError);
@@ -711,7 +810,16 @@ public sealed partial class CliTests
             var result = document.RootElement;
             Assert.False(result.GetProperty("success").GetBoolean());
             Assert.False(result.TryGetProperty("result", out _));
-            Assert.Equal("TRM0001", result.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            var diagnostic = result.GetProperty("diagnostics")[0];
+            Assert.Equal("TRM0001", diagnostic.GetProperty("code").GetString());
+            Assert.Equal(2, diagnostic.GetProperty("range").GetProperty("start")
+                .GetProperty("line").GetInt32());
+            Assert.Equal(1, diagnostic.GetProperty("range").GetProperty("start")
+                .GetProperty("character").GetInt32());
+            Assert.Equal(2, diagnostic.GetProperty("range").GetProperty("end")
+                .GetProperty("line").GetInt32());
+            Assert.Equal(2, diagnostic.GetProperty("range").GetProperty("end")
+                .GetProperty("character").GetInt32());
         }
     }
 
@@ -985,6 +1093,9 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return (42; }", ";")]
     [InlineData("int32 Main() { return ((42); }", ";")]
     [InlineData("int32 Main() { return (42)); }", ")")]
+    [InlineData("int32 Main() { return (20 + 22; }", ";")]
+    [InlineData("int32 Main() { return ((20 + 22); }", ";")]
+    [InlineData("int32 Main() { return (20 + 22)); }", ")")]
     public async Task FrontendComponentRejectsUnbalancedExpressionGroupAsync(
         string source, string offending)
     {
@@ -998,8 +1109,10 @@ public sealed partial class CliTests
         var result = document.RootElement.GetProperty("result");
         Assert.False(result.GetProperty("valid").GetBoolean());
         Assert.Equal(1, result.GetProperty("errorCode").GetInt32());
+        var errorSpan = result.GetProperty("errorSpan");
         Assert.Equal(source.LastIndexOf(offending, StringComparison.Ordinal),
-            result.GetProperty("errorSpan").GetProperty("start").GetInt32());
+            errorSpan.GetProperty("start").GetInt32());
+        Assert.Equal(offending.Length, errorSpan.GetProperty("length").GetInt32());
     }
 
     [Theory]

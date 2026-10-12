@@ -9,7 +9,7 @@ namespace Terrum.CodeAnalysis;
 // true/false literal (with no parameter slots). For a numeric literal,
 // the parameter slots carry the low/high 32-bit words of its contextual
 // magnitude; a leading minus is included in the expression span.
-// Compact v85 binary parameter/literal expressions add 100/200 to the operator
+// Compact v87 binary parameter/literal expressions add 100/200 to the operator
 // for a parameter on the left, or 300/400 for one on the right (parameter 1/2).
 // The two slots hold the literal's low/high magnitude words.
 // Unary minus on that literal adds another 1200 to the operation.
@@ -72,8 +72,8 @@ public class ScalarFrontendResult
 
     public ScalarFrontendResult(bool valid, bool isPublic, int32 errorCode, SourceRange errorSpan,
         int32 returnType, int32 parameterCount, int32 firstType, int32 secondType,
-        int32 thirdType, int32 outParameterMask, SourceRange name, SourceRange firstName, SourceRange secondName,
-        SourceRange thirdName,
+        int32 thirdType, int32 outParameterMask, SourceRange name,
+        SourceRange firstName, SourceRange secondName, SourceRange thirdName,
         bool hasCondition, bool hasFallthrough, ScalarFrontendExpression condition,
         ScalarFrontendExpression whenTrue, ScalarFrontendExpression whenFalse)
     {
@@ -132,8 +132,8 @@ bool TryGetScalarWindowToken(Span<Token> tokenView, int32 start, int32 end,
 mut class ScalarFrontendState
 {
     private int32 _tokenStart;
-    // The 64-token limit leaves the sign bit free to tag a synthetic EOF.
-    private int32 _tokenEndAndEof;
+    private int32 _tokenEnd;
+    private bool _syntheticEof;
     private mut int32 _at;
     private mut int32 _error;
     private mut SourceRange _errorSpan;
@@ -159,8 +159,8 @@ mut class ScalarFrontendState
         bool syntheticEof, SourceRange empty)
     {
         _tokenStart = tokenStart;
-        _tokenEndAndEof = tokenEnd;
-        if (syntheticEof) { _tokenEndAndEof = _tokenEndAndEof | int32.MinValue; }
+        _tokenEnd = tokenEnd;
+        _syntheticEof = syntheticEof;
         _at = 0;
         _error = 0;
         _errorSpan = empty;
@@ -173,6 +173,10 @@ mut class ScalarFrontendState
         _thirdType = 0;
         _parameterCount = 0;
         _outParameterMask = 0;
+        for (mut int32 word = 18; word < 34; word = word + 1)
+        {
+            Host.Frontend[word] = 0;
+        }
         _functionReturnType = 0;
         _isPublic = false;
         _localCount = 0;
@@ -192,12 +196,12 @@ mut class ScalarFrontendState
 
     private int32 GetTokenEnd()
     {
-        return _tokenEndAndEof & int32.MaxValue;
+        return _tokenEnd;
     }
 
     private bool HasSyntheticEof()
     {
-        return _tokenEndAndEof < 0;
+        return _syntheticEof;
     }
 
     private int32 GetTokenCount()
@@ -222,6 +226,9 @@ mut class ScalarFrontendState
         _thirdType = 0;
         _parameterCount = 0;
         _outParameterMask = 0;
+        Host.Frontend[18] = 0;
+        Host.Frontend[19] = 0;
+        Host.Frontend[20] = 0;
         _functionReturnType = 0;
         _isPublic = false;
         _localCount = 0;
@@ -235,6 +242,66 @@ mut class ScalarFrontendState
     public bool HasStructuredStatements()
     {
         return _hasStructuredStatement;
+    }
+
+    public bool HasGroupedExpression(ScalarFrontendResult result, Span<Token> tokenView)
+    {
+        return ContainsGroupedExpression(result.WhenTrue.Span, false, tokenView)
+            || result.HasCondition
+                && (ContainsGroupedExpression(result.Condition.Span, true, tokenView)
+                    || ContainsGroupedExpression(result.WhenFalse.Span, false, tokenView));
+    }
+
+    private bool ContainsGroupedExpression(SourceRange span, bool hasStructuralParentheses,
+        Span<Token> tokenView)
+    {
+        if (span.Length == 0)
+        {
+            return false;
+        }
+
+        mut int32 first = -1;
+        mut int32 last = -1;
+        for (mut int32 index = 0; index < GetTokenCount(); index = index + 1)
+        {
+            require TryGetToken(tokenView, index, init var token);
+            if (token.Kind == 0 || token.Range.Start < span.Start
+                || token.Range.End > span.End)
+            {
+                continue;
+            }
+            if (first < 0) { first = index; }
+            last = index;
+            if (token.Kind == 46 || token.Kind == 47)
+            {
+                return true;
+            }
+        }
+        if (first < 0 || last < first)
+        {
+            return false;
+        }
+
+        mut int32 openingGroups = 0;
+        mut int32 cursor = first - 1;
+        while (cursor >= 0
+            && TryGetToken(tokenView, cursor, init var opening)
+            && opening.Kind == 46)
+        {
+            openingGroups = openingGroups + 1;
+            cursor = cursor - 1;
+        }
+        mut int32 closingGroups = 0;
+        cursor = last + 1;
+        while (cursor < GetTokenCount()
+            && TryGetToken(tokenView, cursor, init var closing)
+            && closing.Kind == 47)
+        {
+            closingGroups = closingGroups + 1;
+            cursor = cursor + 1;
+        }
+        int32 structuralGroups = hasStructuralParentheses ? 1 : 0;
+        return openingGroups == closingGroups && openingGroups > structuralGroups;
     }
 
     internal mut bool TryInventoryHeader(init ref<ScalarFrontendResult> result,
@@ -253,7 +320,7 @@ mut class ScalarFrontendState
         }
         if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
             selected, _parameterCount, _firstType, _secondType, _thirdType,
-            _outParameterMask & 63, name, _first.Range, _second.Range, _third.Range,
+            _outParameterMask & 255, name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out var created))
         {
             return false;
@@ -342,6 +409,11 @@ mut class ScalarFrontendState
             return false;
         }
         if (_parameterCount > 1 && SameTokenSpelling(_second, parameter))
+        {
+            FailAt(4, parameter.Range);
+            return false;
+        }
+        if (_parameterCount > 2 && SameTokenSpelling(_third, parameter))
         {
             FailAt(4, parameter.Range);
             return false;
@@ -484,6 +556,17 @@ mut class ScalarFrontendState
             type = _thirdType;
             return true;
         }
+        if (_parameterCount > 3)
+        {
+            require SourceRange.TryCreate(Host.Frontend[19],
+                Host.Frontend[20], init var fourth);
+            if (SameTokenSpelling(new Token(2, fourth), token))
+            {
+                index = 4;
+                type = Host.Frontend[18];
+                return true;
+            }
+        }
         return false;
     }
 
@@ -496,7 +579,7 @@ mut class ScalarFrontendState
     private bool IsInitRefParameter(int32 slot)
     {
         return slot >= 1 && slot <= _parameterCount
-            && (_outParameterMask & (1 << (slot + 2))) != 0;
+            && (_outParameterMask & (1 << (slot + 3))) != 0;
     }
 
     private bool IsOutputParameter(int32 slot)
@@ -1701,7 +1784,7 @@ mut class ScalarFrontendState
             _firstType = firstType;
             _first = first;
             if (firstIsOut) { _outParameterMask = _outParameterMask | 1; }
-            if (firstIsInitRef) { _outParameterMask = _outParameterMask | 8; }
+            if (firstIsInitRef) { _outParameterMask = _outParameterMask | 16; }
             _parameterCount = 1;
             require TryGetToken(tokenView, _at, init var comma);
             if (comma.Kind == 53)
@@ -1715,7 +1798,7 @@ mut class ScalarFrontendState
                 _secondType = secondType;
                 _second = second;
                 if (secondIsOut) { _outParameterMask = _outParameterMask | 2; }
-                if (secondIsInitRef) { _outParameterMask = _outParameterMask | 16; }
+                if (secondIsInitRef) { _outParameterMask = _outParameterMask | 32; }
                 _parameterCount = 2;
                 require TryGetToken(tokenView, _at, init var thirdComma);
                 if (thirdComma.Kind == 53)
@@ -1729,8 +1812,30 @@ mut class ScalarFrontendState
                     _thirdType = thirdType;
                     _third = third;
                     if (thirdIsOut) { _outParameterMask = _outParameterMask | 4; }
-                    if (thirdIsInitRef) { _outParameterMask = _outParameterMask | 32; }
+                    if (thirdIsInitRef) { _outParameterMask = _outParameterMask | 64; }
                     _parameterCount = 3;
+                    require TryGetToken(tokenView, _at, init var fourthComma);
+                    if (fourthComma.Kind == 53)
+                    {
+                        _at = _at + 1;
+                        if (!ParseParameter(init var fourthType, init var fourth,
+                                init var fourthIsOut, init var fourthIsInitRef, tokenView))
+                        {
+                            return false;
+                        }
+                        Host.Frontend[18] = fourthType;
+                        Host.Frontend[19] = fourth.Range.Start;
+                        Host.Frontend[20] = fourth.Range.Length;
+                        if (fourthIsOut) { _outParameterMask = _outParameterMask | 8; }
+                        if (fourthIsInitRef) { _outParameterMask = _outParameterMask | 128; }
+                        _parameterCount = 4;
+                        require TryGetToken(tokenView, _at, init var extraComma);
+                        if (extraComma.Kind == 53)
+                        {
+                            FailAt(1, extraComma.Range);
+                            return false;
+                        }
+                    }
                 }
             }
         }
@@ -1745,22 +1850,28 @@ mut class ScalarFrontendState
         return true;
     }
 
+    private int32 TreeNodeOffset(int32 node)
+    {
+        if (node < 32) { return 42 + node * 8; }
+        return 392 + (node - 32) * 8;
+    }
+
     private int32 TreeWord(int32 node, int32 field)
     {
-        return Host.Frontend[42 + node * 8 + field];
+        return Host.Frontend[TreeNodeOffset(node) + field];
     }
 
     private mut bool AddTreeNode(int32 operation, int32 type, int32 start, int32 end,
         int32 left, int32 right, int32 low, int32 high, init ref<int32> node, Span<Token> tokenView)
     {
         int32 count = Host.Frontend[37];
-        if (count >= 32)
+        if (count >= 64)
         {
             Fail(1, tokenView);
             return false;
         }
         node = count;
-        int32 offset = 42 + count * 8;
+        int32 offset = TreeNodeOffset(count);
         Host.Frontend[offset] = operation;
         Host.Frontend[offset + 1] = type;
         Host.Frontend[offset + 2] = start;
@@ -2248,11 +2359,6 @@ mut class ScalarFrontendState
             }
             else if (next.Kind == 33 || next.Kind == 34)
             {
-                if (nearestLoop < 0)
-                {
-                    FailAt(1, next.Range);
-                    return false;
-                }
                 if (!ParseTreeTransfer(next, nearestLoop, tokenView)) { return false; }
             }
             else if (next.Kind == 41 || next.Kind == 19 && _structuredReturnType >= 0)
@@ -2387,6 +2493,16 @@ mut class ScalarFrontendState
     {
         _at = _at + 1;
         require TryGetToken(tokenView, _at, init var next);
+        if (keyword.Kind == 34 && (next.Kind == 81 || next.Kind == 3
+            || next.Kind == 57 || next.Kind == 58 || next.Kind == 46))
+        {
+            return ParseTreeSwitchTransfer(keyword, next, tokenView);
+        }
+        if (nearest < 0)
+        {
+            FailAt(1, keyword.Range);
+            return false;
+        }
         mut int32 target = nearest;
         mut int32 kind = keyword.Kind == 33 ? 6 : 7;
         if (next.Kind == 2)
@@ -2404,6 +2520,64 @@ mut class ScalarFrontendState
         return AddTreeStatement(kind, target, -1, keyword.Range.Start, semicolon.Range.End, tokenView);
     }
 
+    private mut bool ParseTreeSwitchTransfer(Token keyword, Token first, Span<Token> tokenView)
+    {
+        int32 nearestSwitch = FindTreeSwitch();
+        if (nearestSwitch < 0)
+        {
+            FailAt(1, keyword.Range);
+            return false;
+        }
+        mut int32 root = -1;
+        if (first.Kind == 81)
+        {
+            _at = _at + 1;
+        }
+        else
+        {
+            // Only grouped constants admit expressions; a bare identifier is a loop label.
+            if (first.Kind != 46)
+            {
+                int32 literalAt = first.Kind == 3 ? _at : _at + 1;
+                if (!TryGetToken(tokenView, literalAt, init var literal) || literal.Kind != 3
+                    || !TryGetToken(tokenView, literalAt + 1, init var end) || end.Kind != 52)
+                {
+                    FailAt(1, first.Range);
+                    return false;
+                }
+            }
+            int32 selector = TreeStatementWord(nearestSwitch, 2);
+            int32 type = TreeWord(selector, 1);
+            if (!ParseTreeExpression(type, 1, 0, init var value, tokenView)
+                || !TreeConstantExpression(value)
+                || !ResolveTreeLiteral(value, type, false, tokenView))
+            {
+                if (_error == 0) { FailAt(1, first.Range); }
+                return false;
+            }
+            if (TreeWord(value, 1) != type) { return FailTreeType(value); }
+            root = value;
+        }
+        if (!Take(52, init var semicolon, tokenView)) { return false; }
+        return AddTreeStatement(40, nearestSwitch, root,
+            keyword.Range.Start, semicolon.Range.End, tokenView);
+    }
+
+    private int32 FindTreeSwitch()
+    {
+        // An open switch has not yet published its end statement index.
+        mut int32 header = _statementCount - 1;
+        while (header >= 0)
+        {
+            if (TreeStatementWord(header, 0) == 38 && TreeStatementWord(header, 1) == 0)
+            {
+                return header;
+            }
+            header = header - 1;
+        }
+        return -1;
+    }
+
     private int32 TreeReturnEnd(Span<Token> tokenView)
     {
         require TryGetToken(tokenView, _at - 1, init var semicolon);
@@ -2418,7 +2592,7 @@ mut class ScalarFrontendState
         {
             int32 header = cursor;
             int32 kind = TreeStatementKind(cursor);
-            mut bool returns = kind == 8 || kind == 6 || kind == 7 || kind == 22;
+            mut bool returns = kind == 8 || kind == 6 || kind == 7 || kind == 22 || kind == 40;
             if (kind == 21) { returns = TreeLiteralBoolean(TreeStatementWord(cursor, 2)) == 0; }
             if (kind == 14)
             {
@@ -2545,7 +2719,7 @@ mut class ScalarFrontendState
                 return true;
             }
             if (kind == 6) { return false; }
-            if (kind == 8 || kind == 7) { return false; }
+            if (kind == 8 || kind == 7 || kind == 40) { return false; }
             if (kind == 14)
             {
                 int32 blockEnd = TreeStatementWord(cursor, 1);
@@ -2631,7 +2805,7 @@ mut class ScalarFrontendState
             for (mut int32 index = 0; index < _statementCount; index = index + 1)
             {
                 int32 kind = TreeStatementKind(index);
-                if (kind == 11 || kind == 12 || kind == 21)
+                if (kind == 11 || kind == 12 || kind == 21 || kind == 40)
                 {
                     hasTerminatingStatement = true;
                 }
@@ -2656,8 +2830,8 @@ mut class ScalarFrontendState
         Host.Frontend[39] = -1;
         Host.Frontend[40] = -1;
         if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
-            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask & 63,
-            name, _first.Range, _second.Range, _third.Range,
+            returnType, _parameterCount, _firstType, _secondType, _thirdType,
+            _outParameterMask & 255, name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out var created))
         {
             return false;
@@ -3261,7 +3435,7 @@ mut class ScalarFrontendState
 
     private mut bool ResolveTreeLiteral(int32 node, int32 type, bool minimum, Span<Token> tokenView)
     {
-        int32 offset = 42 + node * 8;
+        int32 offset = TreeNodeOffset(node);
         int32 operation = TreeWord(node, 0);
         if (operation == 84 && TreeWord(node, 1) == 0)
         {
@@ -3275,6 +3449,11 @@ mut class ScalarFrontendState
         }
         if (operation == 3)
         {
+            // A projected floating leaf already has final bits, even when its source is a conversion expression.
+            if ((type == 7 || type == 8) && TreeWord(node, 1) == type)
+            {
+                return true;
+            }
             int32 start = TreeWord(node, 2);
             mut int32 tokenIndex = 0;
             while (TryGetToken(tokenView, tokenIndex, init var token)
@@ -3379,7 +3558,7 @@ mut class ScalarFrontendState
     private mut bool ParseTreeSelfCall(Token functionName, int32 depth,
         init ref<int32> node, Span<Token> tokenView)
     {
-        bool program = Host.FrontendProgram[0] == 85;
+        bool program = Host.FrontendProgram[0] == 88;
         mut int32 callee = -1;
         mut int32 argumentCount = _parameterCount;
         mut int32 returnType = _functionReturnType;
@@ -3387,7 +3566,7 @@ mut class ScalarFrontendState
         {
             callee = FindScalarProgramFunction(functionName);
             if (callee < 0) { FailAt(3, functionName.Range); return false; }
-            int32 header = 4 + callee * 428 + 4;
+            int32 header = 4 + callee * 780 + 4;
             argumentCount = Host.FrontendProgram[header + 6];
             returnType = Host.FrontendProgram[header + 5];
         }
@@ -3419,6 +3598,7 @@ mut class ScalarFrontendState
         mut int32 first = -1;
         mut int32 second = -1;
         mut int32 third = -1;
+        mut int32 fourth = -1;
         mut int32 nextPositionalParameter = 0;
         mut int32 assignedParameters = 0;
         mut int32 parameterMapping = 0;
@@ -3482,20 +3662,29 @@ mut class ScalarFrontendState
                 return false;
             }
             assignedParameters = assignedParameters | (1 << parameter);
-            parameterMapping = parameterMapping | (parameter << (2 + ordinal * 2));
+            if (program)
+            {
+                parameterMapping = parameterMapping | (parameter << (ordinal * 2));
+            }
+            else
+            {
+                parameterMapping = parameterMapping | (parameter << (2 + ordinal * 2));
+            }
             mut int32 expectedType = _firstType;
             if (program)
             {
-                int32 header = 4 + callee * 428 + 4;
-                int32 field = parameter == 0 ? 7 : (parameter == 1 ? 8 : 34);
+                int32 header = 4 + callee * 780 + 4;
+                int32 field = parameter == 0 ? 7 : (parameter == 1 ? 8
+                    : (parameter == 2 ? 34 : 18));
                 expectedType = Host.FrontendProgram[header + field];
             }
             else if (parameter == 1) { expectedType = _secondType; }
             else if (parameter == 2) { expectedType = _thirdType; }
+            else if (parameter == 3) { expectedType = Host.Frontend[18]; }
             mut int32 outputMode = 0;
             if (program)
             {
-                int32 header = 4 + callee * 428 + 4;
+                int32 header = 4 + callee * 780 + 4;
                 if ((Host.FrontendProgram[header + 16] & (1 << parameter)) != 0)
                 {
                     outputMode = 1;
@@ -3609,14 +3798,26 @@ mut class ScalarFrontendState
             }
             if (ordinal == 0) { first = argument; }
             else if (ordinal == 1) { second = argument; }
-            else { third = argument; }
+            else if (ordinal == 2) { third = argument; }
+            else { fourth = argument; }
         }
         if (!Take(47, init var close, tokenView))
         {
             return false;
         }
         mut int32 callMetadata = argumentCount;
-        if (hasNamedArguments) { callMetadata = 256 + argumentCount + parameterMapping; }
+        if (program)
+        {
+            if (hasNamedArguments)
+            {
+                callMetadata = callMetadata | (parameterMapping << 3) | 2048;
+            }
+            if (argumentCount == 4) { callMetadata = callMetadata | ((fourth + 1) << 12); }
+        }
+        else if (hasNamedArguments)
+        {
+            callMetadata = 256 + argumentCount + parameterMapping;
+        }
         if (!AddTreeNode(program ? 105 : 102, returnType, functionName.Range.Start,
             close.Range.End, first, second, third, callMetadata, init var added, tokenView))
         {
@@ -3624,7 +3825,8 @@ mut class ScalarFrontendState
         }
         if (program)
         {
-            Host.FrontendProgram[4 + Host.FrontendProgram[3] * 428 + 396 + added] = callee;
+            Host.FrontendProgram[4 + Host.FrontendProgram[3] * 780
+                + 4 + 712 + added] = callee;
         }
         node = added;
         return true;
@@ -3635,11 +3837,12 @@ mut class ScalarFrontendState
     {
         if (program)
         {
-            int32 header = 4 + callee * 428 + 4;
+            int32 header = 4 + callee * 780 + 4;
             int32 count = Host.FrontendProgram[header + 6];
             for (mut int32 index = 0; index < count; index = index + 1)
             {
-                int32 field = index == 0 ? 11 : (index == 1 ? 13 : 35);
+                int32 field = index == 0 ? 11 : (index == 1 ? 13
+                    : (index == 2 ? 35 : 19));
                 require SourceRange.TryCreate(Host.FrontendProgram[header + field],
                     Host.FrontendProgram[header + field + 1], init var parameterName);
                 if (SameTokenSpelling(new Token(2, parameterName), name))
@@ -3664,6 +3867,16 @@ mut class ScalarFrontendState
         {
             parameter = 2;
             return true;
+        }
+        if (_parameterCount > 3)
+        {
+            require SourceRange.TryCreate(Host.Frontend[19],
+                Host.Frontend[20], init var fourth);
+            if (SameTokenSpelling(new Token(2, fourth), name))
+            {
+                parameter = 3;
+                return true;
+            }
         }
         return false;
     }
@@ -3737,7 +3950,7 @@ mut class ScalarFrontendState
                 FailAt(1, opening.Range);
                 return false;
             }
-            if (Host.FrontendProgram[0] == 85 && FindScalarProgramFunction(token) >= 0)
+            if (Host.FrontendProgram[0] == 88 && FindScalarProgramFunction(token) >= 0)
             {
                 if (!ParseTreeSelfCall(token, depth, init var callNode, tokenView))
                 {
@@ -3746,8 +3959,21 @@ mut class ScalarFrontendState
                 node = callNode;
                 return true;
             }
-            if (!TryGetPrimitiveScalarType(token, init var target)
-                || target == 5)
+            if (!TryGetPrimitiveScalarType(token, init var target))
+            {
+                if (Host.FrontendProgram[0] == 88 || SameTokenSpelling(_function, token))
+                {
+                    if (!ParseTreeSelfCall(token, depth, init var callNode, tokenView))
+                    {
+                        return false;
+                    }
+                    node = callNode;
+                    return true;
+                }
+                FailAt(1, token.Range);
+                return false;
+            }
+            if (target == 5)
             {
                 if (SameTokenSpelling(_function, token))
                 {
@@ -3793,6 +4019,39 @@ mut class ScalarFrontendState
             {
                 FailTreeType(operand);
                 return false;
+            }
+            if ((target == 7 || target == 8) && sourceType == 6
+                && TreeWord(operand, 0) == 83
+                && TreeWord(operand, 4) + 1 == operand
+                && TreeWord(operand, 5) == -1
+                && TreeWord(operand, 1) == 6
+                && TreeWord(operand, 4) >= 0
+                && TreeWord(TreeWord(operand, 4), 0) == 3
+                && TreeWord(TreeWord(operand, 4), 1) == 6
+                && Host.Frontend[37] == operand + 1)
+            {
+                int32 literal = TreeWord(operand, 4);
+                uint32 codeUnit = uint32(TreeWord(literal, 6));
+                mut int32 low = 0;
+                mut int32 high = 0;
+                if (target == 7)
+                {
+                    low = EncodeWord(Char16ToFloat32Bits(char16(codeUnit)));
+                }
+                else
+                {
+                    uint64 bits = Char16ToFloat64Bits(char16(codeUnit));
+                    low = EncodeWord(uint32(bits & uint64(uint32.MaxValue)));
+                    high = EncodeWord(uint32(bits >> 32));
+                }
+                Host.Frontend[37] = literal;
+                int32 literalOffset = TreeNodeOffset(operand);
+                for (mut int32 word = 0; word < 8; word = word + 1)
+                {
+                    Host.Frontend[literalOffset + word] = 0;
+                }
+                return AddTreeNode(3, target, token.Range.Start, close.Range.End,
+                    -1, -1, low, high, init node, tokenView);
             }
             return AddTreeNode(83, target, token.Range.Start, close.Range.End,
                 operand, -1, 0, 0, init node, tokenView);
@@ -4312,8 +4571,8 @@ mut class ScalarFrontendState
         Host.Frontend[40] = whenFalse;
         if (expressionBody) { Host.Frontend[41] = 1; }
         if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
-            returnType, _parameterCount, _firstType, _secondType, _thirdType, _outParameterMask & 63,
-            name, _first.Range, _second.Range, _third.Range,
+            returnType, _parameterCount, _firstType, _secondType, _thirdType,
+            _outParameterMask & 255, name, _first.Range, _second.Range, _third.Range,
             hasCondition, hasFallthrough, absent, absent, absent, out var created))
         {
             return false;
@@ -4334,11 +4593,7 @@ mut class ScalarFrontendState
         mut ScalarFrontendExpression whenTrue = absent;
         mut ScalarFrontendExpression whenFalse = absent;
 
-        if (GetTokenCount() > 64)
-        {
-            Fail(1, tokenView);
-        }
-        else if (ParseHeader(init var selectedReturnType, init var foundName, tokenView)
+        if (ParseHeader(init var selectedReturnType, init var foundName, tokenView)
             && Take(48, init var openBody, tokenView))
         {
             returnType = selectedReturnType;
@@ -4399,7 +4654,8 @@ mut class ScalarFrontendState
             return TryCreateScalarFrontendError(_error, _errorSpan, init result);
         }
         if (!ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty, returnType, _parameterCount,
-            _firstType, _secondType, _thirdType, _outParameterMask, name, _first.Range, _second.Range, _third.Range,
+            _firstType, _secondType, _thirdType, _outParameterMask, name,
+            _first.Range, _second.Range, _third.Range,
             hasCondition, hasFallthrough, condition, whenTrue, whenFalse, out var created))
         {
             return false;
@@ -4453,12 +4709,6 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, init ref<ScalarFrontendResult>
     require SourceRange.TryCreate(0, 0, init var empty);
     int32 count = tokens.GetCount();
     Span<Token> tokenView = tokens.AsSpan();
-    if (count > 64)
-    {
-        require TryGetScalarWindowToken(tokenView, 0, count, false, 64,
-            init var excess);
-        return TryCreateScalarFrontendError(1, excess.Range, init result);
-    }
     var spacing = tokens.GetScalarOperatorSpacingError();
     if (spacing.Length != 0)
     {
@@ -4485,10 +4735,6 @@ bool TryParseScalarFrontendWindow(Span<Token> tokenView, int32 tokenStart,
         return false;
     }
     int32 physicalCount = tokenEnd - tokenStart;
-    if (physicalCount > 64 || syntheticEof && physicalCount == 64)
-    {
-        return false;
-    }
     mut int32 count = physicalCount;
     if (syntheticEof) { count = count + 1; }
     if (count < 1)
@@ -4504,7 +4750,8 @@ bool TryParseScalarFrontendWindow(Span<Token> tokenView, int32 tokenStart,
     {
         return false;
     }
-    if (legacy.IsValid && legacy.OutParameterMask == 0 && Host.Frontend[2] == 0)
+    if (legacy.IsValid && legacy.OutParameterMask == 0 && Host.Frontend[2] == 0
+        && !state.HasGroupedExpression(legacy, tokenView))
     {
         result = legacy;
         return true;

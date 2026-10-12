@@ -475,6 +475,9 @@ public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, 
 
     /// <summary>Whether the first condition follows the first body execution.</summary>
     public bool IsPostTested { get; init; }
+
+    // A source-audited scalar switch dispatcher, not a trusted termination certificate.
+    internal int SwitchArmVariable { get; init; } = -1;
 }
 
 /// <summary>Exits an enclosing loop after leaving its nested lexical regions.</summary>

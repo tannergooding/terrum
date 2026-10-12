@@ -18,6 +18,485 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
+    private static void AssertCurrentScalarFrontendVersion(JsonElement result)
+    {
+        Assert.Equal(result.TryGetProperty("functions", out _) ? 88 : 87,
+            result.GetProperty("projectionVersion").GetInt32());
+    }
+
+    [Fact]
+    public async Task ScalarFrontendSupportsOneFileScopedNamespaceInCompleteProgramsAsync()
+    {
+        const string source = "namespace Demo.Tools; alias Scalar = int32; "
+            + "Scalar Main() { return Add(20, 22); } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left + right; }";
+        var root = RepositoryRoot();
+        var directory = Path.Combine(root, "self-host");
+        var namespaceStart = source.IndexOf("Demo.Tools", StringComparison.Ordinal);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (scanExit, scanOutput, scanError) = await RunAsync(input,
+                "scan-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(0, scanExit);
+            Assert.Empty(scanError);
+            using (var scan = JsonDocument.Parse(scanOutput))
+            {
+                Assert.Contains(scan.RootElement.GetProperty("tokens").EnumerateArray(),
+                    static token => token.GetProperty("kind").GetString() == "NamespaceKeyword");
+            }
+
+            var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
+            Assert.Empty(componentError);
+            using (var component = JsonDocument.Parse(componentOutput))
+            {
+                var result = component.RootElement.GetProperty("result");
+                AssertCurrentScalarFrontendVersion(result);
+                var functions = result.GetProperty("functions");
+                Assert.Equal(2, functions.GetArrayLength());
+                foreach (var function in functions.EnumerateArray())
+                {
+                    var span = function.GetProperty("namespaceNameSpan");
+                    Assert.Equal(namespaceStart, span.GetProperty("start").GetInt32());
+                    Assert.Equal("Demo.Tools".Length, span.GetProperty("length").GetInt32());
+                    Assert.StartsWith("Demo.Tools.", function.GetProperty("qualifiedName").GetString(),
+                        StringComparison.Ordinal);
+                }
+            }
+
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+                "frontend-run", directory, "-", "--runtime", policy, "--json");
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                "jit", "-", "--runtime", policy, "--json");
+            Assert.Equal(42, frontendExit);
+            Assert.Equal(hostedExit, frontendExit);
+            Assert.Empty(frontendOutput);
+            Assert.Empty(hostedOutput);
+            Assert.Empty(frontendError);
+            Assert.Empty(hostedError);
+
+            var nativeLibrary = Path.Combine(Path.GetTempPath(),
+                $"terrum-namespace-native-{Guid.NewGuid():N}.dll");
+            var hostedLibrary = Path.Combine(Path.GetTempPath(),
+                $"terrum-namespace-hosted-{Guid.NewGuid():N}.dll");
+            try
+            {
+                var (nativeLibraryExit, _, nativeLibraryError) = await RunAsync(input,
+                    "frontend-build-library", directory, "-", "-o", nativeLibrary,
+                    "--runtime", policy, "--json");
+                var (hostedLibraryExit, _, hostedLibraryError) = await RunAsync(input,
+                    "build-library", "-", "--export", "Demo.Tools.Add", "-o", hostedLibrary,
+                    "--runtime", policy, "--json");
+                Assert.Equal(0, nativeLibraryExit);
+                Assert.Equal(0, hostedLibraryExit);
+                Assert.Empty(nativeLibraryError);
+                Assert.Empty(hostedLibraryError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedLibrary),
+                    await File.ReadAllBytesAsync(nativeLibrary));
+            }
+            finally
+            {
+                File.Delete(nativeLibrary);
+                File.Delete(hostedLibrary);
+            }
+        }
+
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task ScalarFrontendSupportsOneNamespaceBlockInCompleteProgramsAsync()
+    {
+        const string source = "namespace Demo.Tools { alias Scalar = int32; "
+            + "Scalar Main() { return Add(20, 22); } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left + right; } }";
+        const string hostedSource = "namespace Demo.Tools; alias Scalar = int32; "
+            + "Scalar Main() { return Add(20, 22); } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left + right; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var namespaceStart = source.IndexOf("Demo.Tools", StringComparison.Ordinal);
+        var nativePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-namespace-block-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-namespace-block-{Guid.NewGuid():N}.hosted.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var hostedInput = Encoding.UTF8.GetBytes(hostedSource);
+                var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                    "frontend-component", directory, "-", "--runtime", policy, "--json");
+                Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
+                Assert.Empty(componentError);
+                using (var component = JsonDocument.Parse(componentOutput))
+                {
+                    var result = component.RootElement.GetProperty("result");
+                    Assert.Equal(88, result.GetProperty("projectionVersion").GetInt32());
+                    var functions = result.GetProperty("functions");
+                    Assert.Equal(2, functions.GetArrayLength());
+                    Assert.Equal(new[] { "Demo.Tools.Main", "Demo.Tools.Add" },
+                        functions.EnumerateArray().Select(static function =>
+                            function.GetProperty("qualifiedName").GetString()).ToArray());
+                    foreach (var function in functions.EnumerateArray())
+                    {
+                        var span = function.GetProperty("namespaceNameSpan");
+                        Assert.Equal(namespaceStart, span.GetProperty("start").GetInt32());
+                        Assert.Equal("Demo.Tools".Length, span.GetProperty("length").GetInt32());
+                    }
+                }
+
+                var (nativeBuildExit, nativeBuildOutput, nativeBuildError) = await RunAsync(input,
+                    "frontend-build", directory, "-", "-o", nativePath,
+                    "--runtime", policy, "--json");
+                var (hostedBuildExit, hostedBuildOutput, hostedBuildError) = await RunAsync(hostedInput,
+                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.True(nativeBuildExit == 0, $"{nativeBuildOutput}{nativeBuildError}");
+                Assert.True(hostedBuildExit == 0, $"{hostedBuildOutput}{hostedBuildError}");
+                Assert.Empty(nativeBuildError);
+                Assert.Empty(hostedBuildError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(hostedPath));
+
+                var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+                    "frontend-run", directory, "-", "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(hostedInput,
+                    "jit", "-", "--runtime", policy, "--json");
+                Assert.Equal(42, frontendExit);
+                Assert.Equal(hostedExit, frontendExit);
+                Assert.Empty(frontendOutput);
+                Assert.Empty(hostedOutput);
+                Assert.Empty(frontendError);
+                Assert.Empty(hostedError);
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+
+    }
+
+    [Fact]
+    public async Task ScalarFrontendSupportsNestedNamespaceBlockInCompleteProgramsAsync()
+    {
+        const string source = "namespace Demo.Tools { namespace Inner { "
+            + "alias Scalar = int32; Scalar Main() { Scalar result = Add(20, 22); return result; } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left + right; } } }";
+        const string hostedSource = "namespace Demo.Tools.Inner; "
+            + "alias Scalar = int32; Scalar Main() { Scalar result = Add(20, 22); return result; } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left + right; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var namespaceStart = source.IndexOf("Inner", StringComparison.Ordinal);
+        var nativePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-nested-namespace-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-nested-namespace-{Guid.NewGuid():N}.hosted.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var hostedInput = Encoding.UTF8.GetBytes(hostedSource);
+                var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                    "frontend-component", directory, "-", "--runtime", policy, "--json");
+                Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
+                Assert.Empty(componentError);
+                using (var component = JsonDocument.Parse(componentOutput))
+                {
+                    var result = component.RootElement.GetProperty("result");
+                    Assert.Equal(88, result.GetProperty("projectionVersion").GetInt32());
+                    var functions = result.GetProperty("functions");
+                    Assert.Equal(new[] { "Demo.Tools.Inner.Main", "Demo.Tools.Inner.Add" },
+                        functions.EnumerateArray().Select(static function =>
+                            function.GetProperty("qualifiedName").GetString()).ToArray());
+                    foreach (var function in functions.EnumerateArray())
+                    {
+                        var span = function.GetProperty("namespaceNameSpan");
+                        Assert.Equal(namespaceStart, span.GetProperty("start").GetInt32());
+                        Assert.Equal("Inner".Length, span.GetProperty("length").GetInt32());
+                    }
+                }
+
+                var (nativeBuildExit, nativeBuildOutput, nativeBuildError) = await RunAsync(input,
+                    "frontend-build", directory, "-", "-o", nativePath,
+                    "--runtime", policy, "--json");
+                var (hostedBuildExit, hostedBuildOutput, hostedBuildError) = await RunAsync(hostedInput,
+                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.True(nativeBuildExit == 0, $"{nativeBuildOutput}{nativeBuildError}");
+                Assert.True(hostedBuildExit == 0, $"{hostedBuildOutput}{hostedBuildError}");
+                Assert.Empty(nativeBuildError);
+                Assert.Empty(hostedBuildError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
+
+                var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+                    "frontend-run", directory, "-", "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(hostedInput,
+                    "jit", "-", "--runtime", policy, "--json");
+                Assert.Equal(42, frontendExit);
+                Assert.Equal(hostedExit, frontendExit);
+                Assert.Empty(frontendOutput);
+                Assert.Empty(hostedOutput);
+                Assert.Empty(frontendError);
+                Assert.Empty(hostedError);
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("alias Scalar = int32; alias Scalar = int64; Scalar Main() { return 42; }")]
+    [InlineData("alias Scalar = Missing; Scalar Main() { return 42; }")]
+    [InlineData("alias Scalar = Count; alias Count = Scalar; Scalar Main() { return 42; }")]
+    public async Task ScalarFrontendRejectsInvalidAliasesInNestedNamespaceLeafAsync(string declarations)
+    {
+        var source = Encoding.UTF8.GetBytes(
+            $"namespace Demo.Tools {{ namespace Inner {{ {declarations} }} }}");
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(source,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        }
+    }
+
+    [Theory]
+    [InlineData(12, true)]
+    [InlineData(13, false)]
+    public async Task ScalarFrontendPreservesNestedNamespaceAliasLimitAsync(
+        int aliasCount, bool expectedSuccess)
+    {
+        var aliases = string.Join(' ', Enumerable.Range(0, aliasCount)
+            .Select(index => $"alias Alias{index} = {(index == 0 ? "int32" : $"Alias{index - 1}")};"));
+        var source = Encoding.UTF8.GetBytes(
+            $"namespace Demo.Tools {{ namespace Inner {{ {aliases} Alias{aliasCount - 1} Main() {{ return 42; }} }} }}");
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(source,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(expectedSuccess ? 0 : 1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal(expectedSuccess, document.RootElement.GetProperty("success").GetBoolean());
+            if (expectedSuccess)
+            {
+                Assert.Equal("Demo.Tools.Inner.Main",
+                    document.RootElement.GetProperty("result").GetProperty("functions")[0]
+                        .GetProperty("qualifiedName").GetString());
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(8)]
+    public async Task ScalarFrontendSupportsNestedNamespaceBlockChainsAsync(int depth)
+    {
+        var namespaceNames = Enumerable.Range(0, depth)
+            .Select(static index => $"Scope{index}").ToArray();
+        var opening = string.Join(' ', namespaceNames.Select(static name => $"namespace {name} {{"));
+        var closing = string.Concat(Enumerable.Repeat(" }", depth));
+        var text = opening
+            + " alias Scalar = int32; Scalar Main() { return Add(20, 22); } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left + right; }"
+            + closing;
+        var source = Encoding.UTF8.GetBytes(text);
+        var qualifiedNamespace = string.Join('.', namespaceNames);
+        var hostedSource = Encoding.UTF8.GetBytes(
+            $"namespace {qualifiedNamespace}; alias Scalar = int32; "
+            + "Scalar Main() { return Add(20, 22); } "
+            + "public Scalar Add(Scalar left, Scalar right) { return left + right; }");
+        var leafStart = text.IndexOf(namespaceNames[^1], StringComparison.Ordinal);
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(source,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(0, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            var functions = document.RootElement.GetProperty("result").GetProperty("functions");
+            Assert.Equal(new[] { qualifiedNamespace + ".Main", qualifiedNamespace + ".Add" },
+                functions.EnumerateArray().Select(static function =>
+                    function.GetProperty("qualifiedName").GetString()).ToArray());
+            foreach (var function in functions.EnumerateArray())
+            {
+                var span = function.GetProperty("namespaceNameSpan");
+                Assert.Equal(leafStart, span.GetProperty("start").GetInt32());
+                Assert.Equal(namespaceNames[^1].Length, span.GetProperty("length").GetInt32());
+            }
+
+            var nativePath = Path.Combine(Path.GetTempPath(),
+                $"terrum-namespace-chain-{policy}-{Guid.NewGuid():N}.native.exe");
+            var hostedPath = Path.Combine(Path.GetTempPath(),
+                $"terrum-namespace-chain-{policy}-{Guid.NewGuid():N}.hosted.exe");
+            try
+            {
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(source,
+                    "frontend-build", directory, "-", "-o", nativePath,
+                    "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(hostedSource,
+                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0, $"{hostedOutput}{hostedError}");
+                Assert.Empty(nativeError);
+                Assert.Empty(hostedError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
+            }
+            finally
+            {
+                File.Delete(nativePath);
+                File.Delete(hostedPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendRejectsNamespaceBlockChainsBeyondDepthLimitAsync()
+    {
+        const int depth = 9;
+        var opening = string.Join(' ', Enumerable.Range(0, depth)
+            .Select(static index => $"namespace Scope{index} {{"));
+        var source = Encoding.UTF8.GetBytes(opening
+            + " int32 Main() { return 42; } int32 Other() { return 0; }"
+            + string.Concat(Enumerable.Repeat(" }", depth)));
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(source,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendSupportsRepeatedSameNameNamespaceBlocksAsync()
+    {
+        const string source = "namespace /* first */ Demo.\U00010400 { "
+            + "int32 Main() { return Add(20, 22); } } "
+            + "namespace Demo.\U00010400 { public int32 Add(int32 left, int32 right) "
+            + "{ return left + right; } } namespace Demo.\U00010400 { }";
+        const string hostedSource = "namespace Demo.\U00010400; "
+            + "int32 Main() { return Add(20, 22); } "
+            + "public int32 Add(int32 left, int32 right) { return left + right; }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var firstNamespaceStart = source.IndexOf("Demo.\U00010400", StringComparison.Ordinal);
+        var secondNamespaceStart = source.IndexOf("Demo.\U00010400", firstNamespaceStart + 1,
+            StringComparison.Ordinal);
+
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var hostedInput = Encoding.UTF8.GetBytes(hostedSource);
+            var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
+            Assert.Empty(componentError);
+            using (var component = JsonDocument.Parse(componentOutput))
+            {
+                var result = component.RootElement.GetProperty("result");
+                Assert.Equal(88, result.GetProperty("projectionVersion").GetInt32());
+                var functions = result.GetProperty("functions");
+                Assert.Equal(new[] { "Demo.\U00010400.Main", "Demo.\U00010400.Add" },
+                    functions.EnumerateArray().Select(static function =>
+                        function.GetProperty("qualifiedName").GetString()).ToArray());
+                var spans = functions.EnumerateArray()
+                    .Select(static function => function.GetProperty("namespaceNameSpan")
+                        .GetProperty("start").GetInt32())
+                    .ToArray();
+                Assert.Equal(new[] { firstNamespaceStart, secondNamespaceStart }, spans);
+            }
+
+            var (frontendExit, frontendOutput, frontendError) = await RunAsync(input,
+                "frontend-run", directory, "-", "--runtime", policy, "--json");
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(hostedInput,
+                "jit", "-", "--runtime", policy, "--json");
+            Assert.Equal(42, frontendExit);
+            Assert.Equal(hostedExit, frontendExit);
+            Assert.Empty(frontendOutput);
+            Assert.Empty(hostedOutput);
+            Assert.Empty(frontendError);
+            Assert.Empty(hostedError);
+
+            var nativePath = Path.Combine(Path.GetTempPath(),
+                $"terrum-repeated-namespace-{policy}-{Guid.NewGuid():N}.native.exe");
+            var hostedPath = Path.Combine(Path.GetTempPath(),
+                $"terrum-repeated-namespace-{policy}-{Guid.NewGuid():N}.hosted.exe");
+            try
+            {
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                    "frontend-build", directory, "-", "-o", nativePath,
+                    "--runtime", policy, "--json");
+                var (hostedBuildExit, hostedBuildOutput, hostedBuildError) = await RunAsync(hostedInput,
+                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{nativeOutput}{nativeError}");
+                Assert.True(hostedBuildExit == 0, $"{hostedBuildOutput}{hostedBuildError}");
+                Assert.Empty(nativeError);
+                Assert.Empty(hostedBuildError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(hostedPath));
+            }
+            finally
+            {
+                File.Delete(nativePath);
+                File.Delete(hostedPath);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("namespace Demo.Tools { int32 Main() { return 42; } } namespace Other { int32 Next() { return 0; } }")]
+    [InlineData("namespace Demo.Tools { alias Scalar = int32; int32 Main() { return 42; } } namespace Demo.Tools { int32 Next() { return 0; } }")]
+    [InlineData("namespace Demo.Tools { alias Scalar = int32; namespace Inner { Scalar Main() { return 42; } } }")]
+    [InlineData("namespace Demo.Tools { namespace Other { int32 Main() { return 42; } } int32 Root() { return 0; } }")]
+    [InlineData("namespace Demo { namespace Tools { int32 Main() { return 42; } } namespace Other { int32 Next() { return 0; } } }")]
+    [InlineData("namespace Demo { int32 Root() { return 0; } namespace Tools { int32 Main() { return 42; } } }")]
+    [InlineData("namespace Demo { namespace Tools { int32 Main() { return 42; } } int32 Root() { return 0; } }")]
+    [InlineData("namespace Demo.Tools { using Other; int32 Main() { return 42; } }")]
+    [InlineData("namespace Demo.Tools { import Other; int32 Main() { return 42; } }")]
+    [InlineData("int32 Before() { return 0; } namespace Demo.Tools { int32 Main() { return 42; } }")]
+    [InlineData("namespace Demo.Tools { int32 Main() { return 42; } } int32 After() { return 0; }")]
+    [InlineData("namespace Demo; namespace Other; int32 Main() { return 42; }")]
+    [InlineData("using Demo; namespace Demo; int32 Main() { return 42; }")]
+    [InlineData("namespace Demo; using Other; int32 Main() { return 42; }")]
+    [InlineData("int32 Before() { return 0; } namespace Demo; int32 Main() { return 42; }")]
+    public async Task ScalarFrontendRejectsUnsupportedNamespaceAndImportFormsAsync(string source)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        }
+    }
+
     [Theory]
     [InlineData("void Main() {} void Other() {}", 0)]
     [InlineData("void Main() => require true; void Other() {}", 0)]
@@ -41,7 +520,7 @@ public sealed partial class CliTests
                 Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
                 using var component = JsonDocument.Parse(componentOutput);
                 var result = component.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Equal(2, result.GetProperty("functions").GetArrayLength());
 
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
@@ -61,6 +540,89 @@ public sealed partial class CliTests
             File.Delete(native);
             File.Delete(hosted);
         }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendProjectsCompleteProgramsBeyondSingleFunctionTokenWindowAsync()
+    {
+        var emptyReturns = string.Join(" ", Enumerable.Range(0, 9)
+            .Select(static index => $"void Empty{index}() {{ return; }}"));
+        var source = $"alias Number = int32; Number Main() {{ return 42; }} {emptyReturns}";
+        Assert.True(Lexer.Lex(SourceText.From(source)).Tokens.Length > 64);
+
+        var input = Encoding.UTF8.GetBytes(source);
+        var (componentExit, componentOutput, componentError) = await RunAsync(input,
+            "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
+            "--runtime", "fail-fast", "--json");
+        Assert.True(componentExit == 0, $"{componentOutput}{componentError}");
+        using (var component = JsonDocument.Parse(componentOutput))
+        {
+            var result = component.RootElement.GetProperty("result");
+            AssertCurrentScalarFrontendVersion(result);
+            Assert.Equal(10, result.GetProperty("functions").GetArrayLength());
+        }
+
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task ScalarFrontendProjectsSingleFunctionsBeyond64TokensWithinBudgetsAsync()
+    {
+        var castDepth = string.Concat(Enumerable.Repeat("int32(", 11));
+        var casts = castDepth + "42" + new string(')', 11);
+        var source = $"int32 Main() => true ? {casts} : {casts};";
+        Assert.True(Lexer.Lex(SourceText.From(source)).Tokens.Length > 64);
+
+        var input = Encoding.UTF8.GetBytes(source);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
+                "--runtime", policy, "--json");
+            Assert.Equal(0, componentExit);
+            Assert.Empty(componentError);
+            using var component = JsonDocument.Parse(componentOutput);
+            var result = component.RootElement.GetProperty("result");
+            AssertCurrentScalarFrontendVersion(result);
+            Assert.True(result.GetProperty("valid").GetBoolean());
+        }
+
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task ScalarFrontendProjectsLongFunctionAlongsideOtherProgramFunctionsAsync()
+    {
+        var declarations = string.Concat(Enumerable.Range(0, 8)
+            .Select(static index => $"mut int32 x{index} = {index}; "));
+        var expression = string.Concat(new string('(', 15), "42", new string(')', 15),
+            " + 0 + 0 + 0 + 0 + 0 + 0");
+        var longFunction = $"int32 Main() {{ {{ {declarations}return {expression} + Zero(); }} }}";
+        Assert.True(Lexer.Lex(SourceText.From(longFunction)).Tokens.Length > 64);
+        var source = $"int32 Other() => 0; int32 Zero() => 0; {longFunction}";
+        Assert.True(Lexer.Lex(SourceText.From(source)).Tokens.Length > 64);
+
+        var input = Encoding.UTF8.GetBytes(source);
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
+                "--runtime", policy, "--json");
+            Assert.Equal(0, componentExit);
+            Assert.Empty(componentError);
+            using var component = JsonDocument.Parse(componentOutput);
+            var result = component.RootElement.GetProperty("result");
+            AssertCurrentScalarFrontendVersion(result);
+            var functions = result.GetProperty("functions");
+            Assert.Equal(3, functions.GetArrayLength());
+            var nodes = functions[2].GetProperty("nodes");
+            Assert.InRange(nodes.GetArrayLength(), 33, 64);
+            var callNode = Enumerable.Range(0, nodes.GetArrayLength())
+                .Single(index => nodes[index].GetProperty("operation").GetInt32() == 105);
+            Assert.InRange(callNode, 32, nodes.GetArrayLength() - 1);
+        }
+
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
     }
 
     [Theory]
@@ -216,8 +778,8 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData(64, true)]
-    [InlineData(65, false)]
-    public async Task ScalarFrontendEnforcesGlobalScannerTokenLimitAndPreservesLaterFrameIndexesAsync(
+    [InlineData(65, true)]
+    public async Task ScalarFrontendAcceptsProgramsBeyondThePreviousWindowAndPreservesLaterFrameIndexesAsync(
         int scannerTokens, bool valid)
     {
         var firstModifier = scannerTokens == 65 ? "public " : "";
@@ -263,6 +825,43 @@ public sealed partial class CliTests
         }
     }
 
+    [Theory]
+    [InlineData(64, true)]
+    [InlineData(65, false)]
+    public async Task ScalarFrontendProgramRetainsExactExpressionNodeCapacityAsync(int nodeCount, bool valid)
+    {
+        var terms = new string[nodeCount == 64 ? 32 : 33];
+        Array.Fill(terms, "x");
+        if (nodeCount == 64)
+        {
+            terms[0] = "(x)";
+        }
+        var expression = string.Join(" + ", terms);
+        var source = $"int32 First(int32 x) => {expression}; int32 Main() => 42;";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.Equal(valid ? 0 : 1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            var root = document.RootElement;
+            Assert.Equal(valid, root.GetProperty("success").GetBoolean());
+            if (!valid)
+            {
+                continue;
+            }
+
+            var result = root.GetProperty("result");
+            AssertCurrentScalarFrontendVersion(result);
+            var functions = result.GetProperty("functions");
+            Assert.Equal(2, functions.GetArrayLength());
+            Assert.Equal(nodeCount, functions[0].GetProperty("nodes").GetArrayLength());
+        }
+    }
+
     [Fact]
     public async Task ScalarFrontendCrossFunctionVoidStatementCliUsesCurrentProjectionAsync()
     {
@@ -275,7 +874,7 @@ public sealed partial class CliTests
         using (var document = JsonDocument.Parse(output))
         {
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
             var main = result.GetProperty("functions")[0];
             Assert.Contains(main.GetProperty("nodes").EnumerateArray(),
                 static node => node.GetProperty("operation").GetInt32() == 105
@@ -302,7 +901,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Equal(2, result.GetProperty("functions").GetArrayLength());
             }
             var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
@@ -327,7 +926,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 var main = result.GetProperty("functions")[0];
                 Assert.Equal(0, main.GetProperty("outParameterMask").GetInt32());
                 Assert.Equal(6, result.GetProperty("functions")[1]
@@ -357,7 +956,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Equal(1, result.GetProperty("functions")[1]
                     .GetProperty("outParameterMask").GetInt32());
             }
@@ -391,7 +990,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
                     .EnumerateArray(), static node => node.GetProperty("operation").GetInt32() == 104);
             }
@@ -439,7 +1038,7 @@ public sealed partial class CliTests
             {
                 var result = document.RootElement.GetProperty("result");
                 Assert.NotEqual(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Contains(result.GetProperty("functions")[0].GetProperty("nodes")
                     .EnumerateArray(), node => node.GetProperty("operation").GetInt32() == operation);
             }
@@ -467,7 +1066,7 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
             Assert.Equal(2, result.GetProperty("outParameterMask").GetInt32());
             Assert.Equal(0, result.GetProperty("initRefParameterMask").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
@@ -517,7 +1116,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
                     node.GetProperty("operation").GetInt32() == 104);
             }
@@ -557,7 +1156,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Equal(0, result.GetProperty("functions")[0]
                     .GetProperty("initRefParameterMask").GetInt32());
                 Assert.Equal(2, result.GetProperty("functions")[1]
@@ -592,7 +1191,7 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{exit}: {output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
             Assert.Equal(0, result.GetProperty("outParameterMask").GetInt32());
             Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
@@ -632,7 +1231,7 @@ public sealed partial class CliTests
             Assert.True(exit == 0, $"{runtime}: {exit}: {output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
             Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
             Assert.Contains(result.GetProperty("nodes").EnumerateArray(), static node =>
                 node.GetProperty("operation").GetInt32() == 107);
@@ -672,7 +1271,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 Assert.Equal(1, result.GetProperty("functions")[1]
                     .GetProperty("initRefParameterMask").GetInt32());
                 Assert.Equal(1, result.GetProperty("functions")[2]
@@ -722,7 +1321,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 var functions = result.GetProperty("functions");
                 Assert.Equal(2, functions.GetArrayLength());
                 Assert.Equal(0, functions[0].GetProperty("index").GetInt32());
@@ -772,6 +1371,85 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("int32 Main() { return Add(Next(Identity(20)), Next(Identity(21))) - 1; } int32 Next(int32 value) => value + 1; int32 Identity(int32 value) => value; int32 Add(int32 first, int32 second) => first + second;")]
+    [InlineData("int32 Main() { return Sum(Identity(20), Identity(21)) == 41 ? 42 : 0; } int32 Identity(int32 value) => value; int32 Sum(int32 first, int32 second) => first + second;")]
+    public async Task ScalarFrontendNestedValueCallsMatchHostedAsync(string source)
+    {
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Fact]
+    public async Task ScalarFrontendNestedCallsPreserveSourceOrderAsync()
+    {
+        const string source = "int32 Set(out int32 trace) { trace = 3; return trace; } int32 Pair(int32 first, int32 second) => first + second; int32 Main() { mut int32 trace = 0; return Pair(Set(out trace), trace) == 6 ? 42 : 0; }";
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendFourParameterCliProjectsFourthSignatureAndCallRootAsync(
+        string runtime)
+    {
+        const string source = "public int32 Main() => Sum(fourth: 12, second: 10, first: 10, third: 10); int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;";
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
+            "--runtime", runtime, "--json");
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.Equal(88, result.GetProperty("projectionVersion").GetInt32());
+        var functions = result.GetProperty("functions");
+        Assert.Equal(2, functions.GetArrayLength());
+        Assert.Equal(4, functions[1].GetProperty("parameterCount").GetInt32());
+        Assert.Equal(1, functions[1].GetProperty("fourthType").GetInt32());
+        Assert.Equal(source.IndexOf("int32 fourth", StringComparison.Ordinal) + "int32 ".Length,
+            functions[1].GetProperty("fourthName").GetProperty("start").GetInt32());
+        var call = Assert.Single(functions[0].GetProperty("nodes").EnumerateArray(),
+            static node => node.GetProperty("operation").GetInt32() == 105);
+        Assert.InRange(call.GetProperty("fourthArgumentRoot").GetInt32(), 0, 31);
+        Assert.Equal(new[] { 3, 1, 0, 2 },
+            call.GetProperty("argumentParameterIndices").EnumerateArray()
+                .Select(static parameter => parameter.GetInt32()));
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Theory]
+    [InlineData("public int32 Main() { init int32 result; Initialize(third: 3, second: 2, first: 1, output: init result); return result; } int32 Initialize(int32 first, int32 second, int32 third, init ref<int32> output) { output = 42; return 6; }")]
+    [InlineData("public int32 Main() { int32 status = Initialize(third: 3, second: 2, first: 1, output: out var result); return result + status; } int32 Initialize(int32 first, int32 second, int32 third, out int32 output) { output = 36; return 6; }")]
+    public async Task ScalarFrontendFourParameterCliProjectsFourthOutputAndRunsAsync(string source)
+    {
+        await AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(source);
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return Identity(IsReady()); } int32 Identity(int32 value) => value; bool IsReady() => true;", "IsReady()", 2)]
+    [InlineData("int32 Main() { return Identity(Missing()); } int32 Identity(int32 value) => value;", "Missing", 3)]
+    public async Task ScalarFrontendRejectsInvalidNestedCallsWithSourceSpansAsync(
+        string source, string offending, int errorCode)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(errorCode, result.GetProperty("errorCode").GetInt32());
+        var span = result.GetProperty("errorSpan");
+        var expectedStart = source.IndexOf(offending, StringComparison.Ordinal);
+        Assert.Equal(expectedStart, span.GetProperty("start").GetInt32());
+        Assert.Equal(offending.Length, span.GetProperty("length").GetInt32());
+
+        var hosted = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(hosted.HasErrors);
+        Assert.Contains(hosted.Diagnostics, diagnostic => diagnostic.Span.Start == expectedStart
+            && diagnostic.Span.Length == offending.Length);
+    }
+
+    [Theory]
     [InlineData(BoundRuntimePolicy.FailFast, "fail-fast")]
     [InlineData(BoundRuntimePolicy.CheckedExceptions, "checked-exceptions")]
     public async Task ScalarFrontendNamedCallsPreserveSourceOrderAndFormalMappingAsync(
@@ -795,7 +1473,7 @@ public sealed partial class CliTests
         using (var document = JsonDocument.Parse(componentOutput))
         {
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
             Assert.Contains(result.GetProperty("functions")[2].GetProperty("nodes").EnumerateArray(),
                 static node => node.GetProperty("operation").GetInt32() == 105);
         }
@@ -848,7 +1526,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(componentOutput))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                AssertCurrentScalarFrontendVersion(result);
                 var functions = result.GetProperty("functions");
                 Assert.Contains(functions[functions.GetArrayLength() - 1].GetProperty("nodes").EnumerateArray(),
                     static node => node.GetProperty("operation").GetInt32() == 105);
@@ -884,8 +1562,7 @@ public sealed partial class CliTests
         Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
         using (var document = JsonDocument.Parse(componentOutput))
         {
-            Assert.Equal(85, document.RootElement.GetProperty("result")
-                .GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(document.RootElement.GetProperty("result"));
         }
 
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
@@ -918,7 +1595,7 @@ public sealed partial class CliTests
         using (var document = JsonDocument.Parse(componentOutput))
         {
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
         }
         var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
             directory, "-", "--runtime", "fail-fast", "--json");
@@ -939,7 +1616,7 @@ public sealed partial class CliTests
         using (var document = JsonDocument.Parse(componentOutput))
         {
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
         }
         var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
             directory, "-", "--runtime", "fail-fast", "--json");
@@ -976,7 +1653,7 @@ public sealed partial class CliTests
         Assert.True(exit == 0, $"{exit}: {output}{error}");
         using var document = JsonDocument.Parse(output);
         var result = document.RootElement.GetProperty("result");
-        Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        AssertCurrentScalarFrontendVersion(result);
         Assert.Contains(result.GetProperty("nodes").EnumerateArray(),
             static node => node.GetProperty("operation").GetInt32() == 102);
     }
@@ -993,7 +1670,7 @@ public sealed partial class CliTests
         using (var document = JsonDocument.Parse(componentOutput))
         {
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
         }
         var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
             directory, "-", "--runtime", "fail-fast", "--json");
@@ -1015,7 +1692,7 @@ public sealed partial class CliTests
         using (var document = JsonDocument.Parse(componentOutput))
         {
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+            AssertCurrentScalarFrontendVersion(result);
         }
         var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
             directory, "-", "--runtime", "fail-fast", "--json");

@@ -737,9 +737,11 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task CompilerInputPermitsNoDecodedIntegersAsync(NativeRuntimePolicy policy)
+    [InlineData("alpha", NativeRuntimePolicy.FailFast)]
+    [InlineData("alpha", NativeRuntimePolicy.CheckedExceptions)]
+    [InlineData("1.5", NativeRuntimePolicy.FailFast)]
+    [InlineData("1.5", NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CompilerInputPermitsNoDecodedIntegersAsync(string text, NativeRuntimePolicy policy)
     {
         const string Entry = """
             using Terrum.CodeAnalysis;
@@ -753,7 +755,7 @@ public sealed partial class ManagedScannerComponentTests
                 return 42;
             }
             """;
-        var program = await CompileAsync("alpha", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        var program = await CompileAsync(text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
         Assert.Equal(42, NativeJit.Execute(program, policy));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
@@ -768,23 +770,34 @@ public sealed partial class ManagedScannerComponentTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
-                if (tokens.GetCount() != 4 || integers.GetCount() != 2
+                if (tokens.GetCount() != 8 || integers.GetCount() != 4
                     || integers.TryFind(-1, init var negativeOverflow, init var negativeLow,
                         init var negativeHigh)
                     || integers.TryFind(1, init var floatingOverflow, init var floatingLow,
                         init var floatingHigh)
-                    || integers.TryFind(3, init var eofOverflow, init var eofLow,
+                    || integers.TryFind(2, init var exponentOverflow, init var exponentLow,
+                        init var exponentHigh)
+                    || integers.TryFind(3, init var hexFloatOverflow, init var hexFloatLow,
+                        init var hexFloatHigh)
+                    || integers.TryFind(7, init var eofOverflow, init var eofLow,
                         init var eofHigh)) { return 1; }
                 require integers.TryFind(0, init var firstOverflow, init var firstLow,
                     init var firstHigh);
-                require integers.TryFind(2, init var lastOverflow, init var lastLow,
+                require integers.TryFind(4, init var hexIntegerOverflow,
+                    init var hexIntegerLow, init var hexIntegerHigh);
+                require integers.TryFind(5, init var binaryIntegerOverflow,
+                    init var binaryIntegerLow, init var binaryIntegerHigh);
+                require integers.TryFind(6, init var lastOverflow, init var lastLow,
                     init var lastHigh);
                 if (firstOverflow || firstLow != 1 || firstHigh != 0
+                    || hexIntegerOverflow || hexIntegerLow != 0x1E2 || hexIntegerHigh != 0
+                    || binaryIntegerOverflow || binaryIntegerLow != 2 || binaryIntegerHigh != 0
                     || lastOverflow || lastLow != 42 || lastHigh != 0) { return 2; }
                 return 42;
             }
             """;
-        var program = await CompileAsync("1 1.5 42", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        var program = await CompileAsync("1 1.5 1e2 0x1p1 0x1e2 0b10 42", Entry,
+            (BoundRuntimePolicy)policy).ConfigureAwait(true);
         Assert.Equal(42, NativeJit.Execute(program, policy));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
@@ -3410,22 +3423,21 @@ public sealed partial class ManagedScannerComponentTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task ScannerOwnedScalarFrontendBoundsTokenStorageAsync(NativeRuntimePolicy policy)
+    public async Task ScannerOwnedScalarFrontendRejectsTrailingTokensAsync(NativeRuntimePolicy policy)
     {
         var text = "int32 Value(int32 x) { return x; } " + string.Join(' ', Enumerable.Repeat("extra", 65));
-        var excess = SyntaxTree.Parse(text).Tokens[64].Span;
+        var excess = SyntaxTree.Parse(text).Tokens.First(token => token.Text == "extra").Span;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
                 require TokenSnapshot.TryScan(init var tokens);
                 require TryParseScalarFrontend(move tokens, init var result);
-                if (result.IsValid || result.ErrorCode != 1
-                    || result.ErrorSpan.Start != {{excess.Start}}
-                    || result.ErrorSpan.Length != {{excess.Length}}
-                    || result.ReturnType != 0 || result.ParameterCount != 0)
-                {
-                    return 1;
-                }
+                if (result.IsValid) { return 1; }
+                if (result.ErrorCode != 1) { return 2; }
+                if (result.ErrorSpan.Start != {{excess.Start}}) { return 3; }
+                if (result.ErrorSpan.Length != {{excess.Length}}) { return 4; }
+                if (result.ReturnType != 0) { return 5; }
+                if (result.ParameterCount != 0) { return 6; }
                 return 42;
             }
             """;
@@ -3558,7 +3570,7 @@ public sealed partial class ManagedScannerComponentTests
     {
         var source = SourceText.From("int32 Value(int32 x) { return x; }");
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[5] = 1;
         words[6] = 1;
@@ -3579,7 +3591,7 @@ public sealed partial class ManagedScannerComponentTests
         Assert.True(ScalarFrontendHost.ReadResult(source, bytes).IsValid);
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 2);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4), value);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
     }
@@ -3601,12 +3613,14 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
         var result = ScalarFrontendHost.ReadResult(source, bytes);
         Assert.Equal(3, result.ParameterCount);
-        Assert.Equal(operation, result.WhenTrue.Operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            result.WhenTrue.Operation);
         Assert.Equal("z", text.Substring(result.ThirdName.Start, result.ThirdName.Length));
-        foreach (var word in new[] { 0, 6, 23, 34, 35, 36 })
+        foreach (var word in new[] { 0, 6, expressionWords.Operation, 34, 35, 36 })
         {
             var offset = word * sizeof(int);
             var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
@@ -3615,15 +3629,17 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)),
-            operation - 40000);
+        int operationWord = expressionWords.Operation;
+        int operationOffset = operationWord * sizeof(int);
+        int actualOperation = result.WhenTrue.Operation;
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation - 40000);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        foreach (var forged in new[] { operation + 100, operation + 200, operation + 40000 })
+        foreach (var forged in new[] { actualOperation + 100, actualOperation + 200, actualOperation + 40000 })
         {
-            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)), forged);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), forged);
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         }
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)), operation);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation);
         var changed = text.ToCharArray();
         changed[text.LastIndexOf('z')] = 'x';
         Assert.Throws<ArgumentException>(() =>
@@ -3635,7 +3651,6 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("int32 Value(int32 x, int32 y, int32 y) { return x; }", 4)]
     [InlineData("int32 Value(int32 x, int32 y, int32 z) { return missing; }", 3)]
     [InlineData("int32 Value(int32 x, int32 y, bool z) { return z; }", 2)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z, int32 w) { return z; }", 1)]
     public async Task ScalarFrontendThirdParameterRejectsInvalidSourceAsync(
         string text, int error)
     {
@@ -3703,7 +3718,7 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(42, native.ExitCode);
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.True(BinaryPrimitives.ReadInt32LittleEndian(bytes) == 85,
+            Assert.True(BinaryPrimitives.ReadInt32LittleEndian(bytes) == 87,
                 $"Status {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(int)))}, error {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(2 * sizeof(int)))} at {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(3 * sizeof(int)))}+{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4 * sizeof(int)))}");
             Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))));
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
@@ -3724,7 +3739,7 @@ public sealed partial class ManagedScannerComponentTests
                 Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                     bytes, (BoundRuntimePolicy)policy));
             }
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(17 * sizeof(int)), 1);
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                 bytes, (BoundRuntimePolicy)policy));
@@ -3748,7 +3763,7 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(42, native.ExitCode);
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
             Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(16 * sizeof(int))));
 
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
@@ -3787,7 +3802,7 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(42, native.ExitCode);
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
             Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))));
 
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
@@ -3826,7 +3841,7 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(42, native.ExitCode);
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
             Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
             Assert.Contains(result.Nodes, static node => node.Operation == 104);
@@ -3882,7 +3897,7 @@ public sealed partial class ManagedScannerComponentTests
     public void ScalarFrontendProjectionRejectsForgedBodyShape(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[5] = 1;
         words[6] = 1;
@@ -3992,7 +4007,7 @@ public sealed partial class ManagedScannerComponentTests
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
         Assert.Equal(42, native.ExitCode);
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex])));
         if (comments)
         {
@@ -4126,8 +4141,9 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var word in new[] { 0, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4177,13 +4193,13 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(char16 x) { return 0xFFFF != x; }",
         PrimitiveType.Char16, 1L, 366)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return ((x)) >= (42); }",
-        PrimitiveType.Int32, 42L, 170)]
+        PrimitiveType.Int32, 42L, 70)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (42) < ((x)); }",
-        PrimitiveType.Int32, 43L, 367)]
+        PrimitiveType.Int32, 43L, 67)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x < -5; }",
         PrimitiveType.Int32, -6L, 1367)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (-5) < x; }",
-        PrimitiveType.Int32, 42L, 1567)]
+        PrimitiveType.Int32, 42L, 67)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return x == -2147483648; }",
         PrimitiveType.Int32, int.MinValue, 1365)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x == -0xFFFFFFFF; }",
@@ -4191,7 +4207,7 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x < +42; }",
         PrimitiveType.Int32, 41L, 1767)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (+42) < x; }",
-        PrimitiveType.Int32, 43L, 1967)]
+        PrimitiveType.Int32, 43L, 67)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(uint64 x) { return x == +42; }",
         PrimitiveType.UInt64, 42L, 1765)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int64 x) { return x != -9223372036854775808; }",
@@ -4210,12 +4226,13 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         if (operation >= 1200)
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)),
                 operation - (operation >= 1600 ? 1600 : 1200));
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
@@ -4281,12 +4298,13 @@ public sealed partial class ManagedScannerComponentTests
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         if (operation == 658)
         {
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 6);
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         }
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4360,16 +4378,19 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
-        var operationOffset = 23 * sizeof(int);
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation + 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
+        var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
+        var operationOffset = expressionWords.Operation * sizeof(int);
+        var originalOperation = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(operationOffset));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation + 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation);
-        var operandOffset = 24 * sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation);
+        var operandOffset = expressionWords.Left * sizeof(int);
         var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(operandOffset));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operandOffset), original ^ 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
@@ -4433,8 +4454,9 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(658, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, 658),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var call = new BoundCall(0, [], PrimitiveType.Int64, default);
         var matches = new BoundBinary(TokenKind.EqualsEquals, call,
@@ -4468,22 +4490,25 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
+        var actualOperation = ExpectedScalarFrontendOperation(source, bytes, operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
-        var operationOffset = 23 * sizeof(int);
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation + 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
+        var operationOffset = expressionWords.Operation * sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation + 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation);
         if (version == 15)
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), 4067);
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
-            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), actualOperation);
         }
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text.Replace("x < y", "y < x", StringComparison.Ordinal)), bytes));
@@ -4520,15 +4545,18 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 8);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
-        var operationOffset = 23 * sizeof(int);
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation + 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
+        var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
+        var operationOffset = expressionWords.Operation * sizeof(int);
+        var originalOperation = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(operationOffset));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation + 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), originalOperation);
         foreach (var word in new[] { 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4571,11 +4599,12 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 9);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         var offset = 24 * sizeof(int);
         var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
@@ -4675,7 +4704,8 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var (word, value) in new[] { (0, 2), (24, 2), (25, 22) })
         {
             var offset = word * sizeof(int);
@@ -4719,7 +4749,8 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var (word, value) in new[] { (0, 2), (23, operation == 1172 ? 1174 : 1166),
             (24, 22), (25, 22) })
         {
@@ -4751,7 +4782,8 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4789,7 +4821,8 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
+            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4828,7 +4861,7 @@ public sealed partial class ManagedScannerComponentTests
         var result = ScalarFrontendHost.ReadResult(source, bytes);
         Assert.True(result.HasCondition);
         Assert.True(result.HasFallthrough);
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
         foreach (var (word, value) in new[] { (0, 3), (15, 0), (15, 1) })
         {
             var offset = word * sizeof(int);
@@ -4840,7 +4873,7 @@ public sealed partial class ManagedScannerComponentTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(15 * sizeof(int)), 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 85);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(15 * sizeof(int)), 2);
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var call = new BoundCall(0, [new BoundConstant(input ? 1 : 0, PrimitiveType.Bool, default)],
@@ -4875,7 +4908,7 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
         var result = ScalarFrontendHost.ReadResult(source, bytes);
         Assert.Equal(2, result.Locals.Length);
         Assert.Equal(6, result.Statements.Length);
@@ -4920,6 +4953,141 @@ public sealed partial class ManagedScannerComponentTests
     private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 
+    private static int ExpectedScalarFrontendOperation(SourceText source, byte[] bytes,
+        int compactOperation)
+    {
+        var offsets = ScalarFrontendExpressionWordOffsets(bytes);
+        return offsets.IsTree ? TreeRootOperation(source) : compactOperation;
+    }
+
+    private static (bool IsTree, int Type, int Operation, int Left, int Right)
+        ScalarFrontendExpressionWordOffsets(byte[] bytes)
+    {
+        var nodeCount = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(37 * sizeof(int)));
+        if (nodeCount == 0)
+        {
+            return (false, 22, 23, 24, 25);
+        }
+        if (nodeCount is < 1 or > 64)
+        {
+            throw new InvalidOperationException("The scalar frontend tree node count is invalid.");
+        }
+
+        var root = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(39 * sizeof(int)));
+        if (root < 0 || root >= nodeCount)
+        {
+            throw new InvalidOperationException("The scalar frontend true-expression root is invalid.");
+        }
+
+        var offset = root < 32 ? 42 + root * 8 : 392 + (root - 32) * 8;
+        return (true, offset + 1, offset, offset + 4, offset + 5);
+    }
+
+    private static int TreeRootOperation(SourceText source)
+    {
+        var tokens = Lexer.Lex(source).Tokens;
+        var returnIndex = 0;
+        while (returnIndex < tokens.Length && tokens[returnIndex].Kind != TokenKind.ReturnKeyword)
+        {
+            returnIndex++;
+        }
+        if (returnIndex + 1 >= tokens.Length)
+        {
+            throw new InvalidOperationException("The scalar frontend test source has no return expression.");
+        }
+
+        var start = returnIndex + 1;
+        var end = start;
+        var depth = 0;
+        while (end < tokens.Length)
+        {
+            var kind = tokens[end].Kind;
+            if (kind == TokenKind.OpenParen)
+            {
+                depth++;
+            }
+            else if (kind == TokenKind.CloseParen)
+            {
+                depth--;
+            }
+            else if (kind == TokenKind.Semicolon && depth == 0)
+            {
+                break;
+            }
+            end++;
+        }
+        if (end == tokens.Length)
+        {
+            throw new InvalidOperationException("The scalar frontend test return expression is unterminated.");
+        }
+
+        while (start < end && tokens[start].Kind == TokenKind.OpenParen
+            && tokens[end - 1].Kind == TokenKind.CloseParen)
+        {
+            var enclosingDepth = 0;
+            var enclosesExpression = true;
+            for (var index = start; index < end; index++)
+            {
+                if (tokens[index].Kind == TokenKind.OpenParen)
+                {
+                    enclosingDepth++;
+                }
+                else if (tokens[index].Kind == TokenKind.CloseParen)
+                {
+                    enclosingDepth--;
+                }
+                if (enclosingDepth == 0 && index < end - 1)
+                {
+                    enclosesExpression = false;
+                    break;
+                }
+            }
+            if (!enclosesExpression)
+            {
+                break;
+            }
+            start++;
+            end--;
+        }
+
+        var first = tokens[start].Kind;
+        if (first is TokenKind.Bang or TokenKind.Minus or TokenKind.Plus or TokenKind.Tilde)
+        {
+            return (int)first;
+        }
+
+        depth = 0;
+        for (var index = start; index < end; index++)
+        {
+            var kind = tokens[index].Kind;
+            if (kind == TokenKind.OpenParen)
+            {
+                depth++;
+            }
+            else if (kind == TokenKind.CloseParen)
+            {
+                depth--;
+            }
+            else if (depth == 0 && IsBinaryScalarOperator(kind))
+            {
+                return (int)kind;
+            }
+        }
+        return first switch {
+            TokenKind.Identifier => 0,
+            TokenKind.NumericLiteral => 3,
+            TokenKind.TrueKeyword or TokenKind.FalseKeyword => (int)first,
+            _ => throw new InvalidOperationException("The scalar frontend tree root has no operator."),
+        };
+
+        static bool IsBinaryScalarOperator(TokenKind kind) => kind is
+            TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent
+            or TokenKind.EqualsEquals or TokenKind.BangEquals or TokenKind.Less or TokenKind.LessEquals
+            or TokenKind.Greater or TokenKind.GreaterEquals or TokenKind.Ampersand
+            or TokenKind.AmpersandAmpersand or TokenKind.Pipe or TokenKind.PipePipe or TokenKind.Caret
+            or TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned;
+    }
+
     private static async Task<BoundProgram> CompileAsync(string text, string entry,
         BoundRuntimePolicy policy, string? parserName = null, bool includeSourceLines = false)
     {
@@ -4932,12 +5100,14 @@ public sealed partial class ManagedScannerComponentTests
         {
             names = parserName == "ScalarFrontendProjection"
                 ? [.. names, "HexDigitValue", "BasedIntegerFloatLiteral",
-                    "HexFloatLiteral", "DecimalFloatLiteral", "ScalarParserTypes",
+                    "HexFloatLiteral", "DecimalFloatLiteral", "IntegerFloatConversion",
+                    "Char16FloatConversion", "ScalarParserTypes",
                     "ScalarFrontend", "TokenCursor",
-                    "ScalarFrontendProgram", parserName]
+                    "ScalarFrontendProgram", parserName, "ScalarFrontendProgramReader"]
                 : parserName == "ScalarFrontend"
                     ? [.. names, "HexDigitValue", "BasedIntegerFloatLiteral",
-                        "HexFloatLiteral", "DecimalFloatLiteral", "ScalarParserTypes",
+                        "HexFloatLiteral", "DecimalFloatLiteral", "IntegerFloatConversion",
+                        "Char16FloatConversion", "ScalarParserTypes",
                         parserName, "TokenCursor",
                         "ScalarFrontendProgram", "ScalarFrontendProjection"]
                     : [.. names, "ScalarParserTypes", parserName];

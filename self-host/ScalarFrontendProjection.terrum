@@ -1,17 +1,19 @@
 namespace Terrum.CodeAnalysis;
 
-// V85 is the only published projection tag. The 392-word buffer retains both
-// compact expression records and postorder tree/statement records; publication
-// chooses the layout already populated by the bounded source parser.
+// Standalone compact/tree projections use v87. Complete-program frames use
+// v88 and add the fourth signature slot to the 64-node projection.
 // Tree words 37..41 hold node count, condition/true/false roots (-1 when absent),
-// and expression-body flag. Each of 32 nodes uses eight words: opcode, type,
-// span start/length, child/parameter, right child, and magnitude low/high.
+// and expression-body flag. Nodes 0..31 use words 42..297; nodes 32..63 use
+// words 392..647. Each node uses eight words: opcode, type, span start/length,
+// child/parameter, right child, and magnitude low/high.
 // Words 298/299 count statements/locals; 300..331 hold eight local declarations
 // (type, flags, name start/length); flag 8 marks a switch selector local.
 // Words 332..391 hold twelve ordered statements
 // (kind, slot, root, span start/length). Header flags in word 2 are public,
 // NoThrow, DoesNotReturn, and caller-unsafe; words 16/17 hold out/init-ref masks
 // in the tree layout. Kinds 38/39 identify source-audited switch headers/arms.
+// Kind 40 carries a cross-arm transfer: slot is its enclosing switch header,
+// root is a constant target expression or -1 for the unguarded wildcard.
 // Calls retain source-order roots and packed formal maps.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
@@ -25,14 +27,14 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
 
 bool TryPublishScalarFrontend()
 {
-    if (Host.FrontendProgram.Length != 4284) { return false; }
+    if (Host.FrontendProgram.Length != 25025) { return false; }
     if (!TokenSnapshot.TryScan(init var tokens)) { return false; }
     int32 count = tokens.GetCount();
     var spacing = tokens.GetScalarOperatorSpacingError();
     Span<Token> tokenView = tokens.AsSpan();
     if (!TryPublishScalarFrontendProgram(tokenView, count, spacing, init var handled)) { return false; }
     if (handled) { return true; }
-    if (Host.Frontend.Length != 392
+    if (Host.Frontend.Length != 2274
         || count < 1
         || !TokenIntegerSnapshot.TryValidate(count)
         || !TryParseScalarFrontendWindow(tokenView, 0, count, false, init var result))
@@ -40,7 +42,7 @@ bool TryPublishScalarFrontend()
         return false;
     }
 
-    Host.Frontend[0] = 85;
+    Host.Frontend[0] = 87;
     if (!result.IsValid)
     {
         Host.Frontend[2] = result.ErrorCode;
@@ -50,7 +52,16 @@ bool TryPublishScalarFrontend()
         return true;
     }
 
-    WriteScalarFrontendHeader(result);
+    if (result.ParameterCount > 3)
+    {
+        Host.Frontend[2] = 1;
+        Host.Frontend[3] = Host.Frontend[19];
+        Host.Frontend[4] = Host.Frontend[20];
+        Host.Frontend[1] = 2;
+        return true;
+    }
+
+    WriteScalarFrontendHeader(result, false);
     Host.Frontend[5] = result.ReturnType;
     if (result.ReturnType == 0 || Host.Frontend[37] != 0 || Host.Frontend[298] != 0)
     {
@@ -74,7 +85,7 @@ bool TryPublishScalarFrontend()
     return true;
 }
 
-void WriteScalarFrontendHeader(ScalarFrontendResult result)
+void WriteScalarFrontendHeader(ScalarFrontendResult result, bool program)
 {
     if (result.IsPublic) { Host.Frontend[2] = Host.Frontend[2] | 1; }
     Host.Frontend[6] = result.ParameterCount;
@@ -86,9 +97,25 @@ void WriteScalarFrontendHeader(ScalarFrontendResult result)
     Host.Frontend[12] = result.FirstName.Length;
     Host.Frontend[13] = result.SecondName.Start;
     Host.Frontend[14] = result.SecondName.Length;
-    Host.Frontend[16] = result.OutParameterMask & 7;
-    Host.Frontend[17] = (result.OutParameterMask >> 3) & 7;
+    if (program)
+    {
+        Host.Frontend[16] = result.OutParameterMask & 15;
+        Host.Frontend[17] = (result.OutParameterMask >> 4) & 15;
+    }
+    else
+    {
+        int32 legacyModeMask = (result.OutParameterMask & 7)
+            | (((result.OutParameterMask >> 4) & 7) << 3);
+        Host.Frontend[16] = legacyModeMask & 7;
+        Host.Frontend[17] = (legacyModeMask >> 3) & 7;
+    }
     Host.Frontend[34] = result.ThirdType;
     Host.Frontend[35] = result.ThirdName.Start;
     Host.Frontend[36] = result.ThirdName.Length;
+    if (!program)
+    {
+        Host.Frontend[18] = 0;
+        Host.Frontend[19] = 0;
+        Host.Frontend[20] = 0;
+    }
 }

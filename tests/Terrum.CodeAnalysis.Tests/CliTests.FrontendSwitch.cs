@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -52,7 +53,7 @@ public sealed partial class CliTests
                 Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
                 using (var component = JsonDocument.Parse(componentOutput))
                 {
-                    Assert.Equal(85, component.RootElement.GetProperty("result")
+                    Assert.Equal(88, component.RootElement.GetProperty("result")
                         .GetProperty("projectionVersion").GetInt32());
                 }
 
@@ -77,6 +78,99 @@ public sealed partial class CliTests
         {
             File.Delete(nativePath);
             File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendSwitchCompletionAndLoopTransfersMatchHostedAsync(string policy)
+    {
+        var cases = new (string Name, string Source, string HostedEquivalent, int ExpectedResult)[] {
+            ("arm-completion", """
+                public int32 Main() {
+                    mut int32 selector = 1;
+                    mut int32 effects = 0;
+                    switch (selector++) {
+                        0 => { effects = effects + 1; },
+                        1 => { effects = effects + 10; },
+                        _ => { effects = effects + 100; },
+                    }
+                    return effects * 10 + selector;
+                }
+                """, """
+                public int32 Main() {
+                    mut int32 selector = 1;
+                    mut int32 effects = 0;
+                    int32 choice = selector++;
+                    if (choice == 0) {
+                        effects = effects + 1;
+                    } else if (choice == 1) {
+                        effects = effects + 10;
+                    } else {
+                        effects = effects + 100;
+                    }
+                    return effects * 10 + selector;
+                }
+                """, 102),
+            ("continue-enclosing-loop", """
+                public int32 Main() {
+                    mut int32 total = 0;
+                    for (mut int32 index = 0; index < 4; index = index + 1) {
+                        switch (index) {
+                            0 => { continue; },
+                            1 => { total = total + 10; },
+                            _ => { total = total + 1; },
+                        }
+                    }
+                    return total;
+                }
+                """, """
+                public int32 Main() {
+                    mut int32 total = 0;
+                    for (mut int32 index = 0; index < 4; index = index + 1) {
+                        int32 choice = index;
+                        if (choice == 0) {
+                            continue;
+                        } else if (choice == 1) {
+                            total = total + 10;
+                        } else {
+                            total = total + 1;
+                        }
+                    }
+                    return total;
+                }
+                """, 12),
+        };
+        var root = RepositoryRoot();
+        var directory = Path.Combine(root, "self-host");
+        foreach (var testCase in cases)
+        {
+            var nativePath = Path.Combine(root,
+                $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.native.exe");
+            var hostedPath = Path.Combine(root,
+                $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.hosted.exe");
+            try
+            {
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(testCase.Source), "frontend-build", directory, "-",
+                    "-o", nativePath, "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(
+                    Encoding.UTF8.GetBytes(testCase.HostedEquivalent), "build", "-",
+                    "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0,
+                    $"{testCase.Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0,
+                    $"{testCase.Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
+                Assert.Equal(testCase.ExpectedResult, await ExecuteNativeImageAsync(nativePath));
+                Assert.Equal(testCase.ExpectedResult, await ExecuteNativeImageAsync(hostedPath));
+            }
+            finally
+            {
+                File.Delete(nativePath);
+                File.Delete(hostedPath);
+            }
         }
     }
 
@@ -318,5 +412,57 @@ public sealed partial class CliTests
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendSwitchSeparatorDiagnosticRetainsTheOffendingSpanAsync(string policy)
+    {
+        const string source = "void Main() { switch (0) { 0 => {} _ => {} } }";
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        var result = document.RootElement.GetProperty("result");
+        Assert.Equal(1, result.GetProperty("errorCode").GetInt32());
+        var errorSpan = result.GetProperty("errorSpan");
+        Assert.Equal(source.IndexOf("_ =>", StringComparison.Ordinal),
+            errorSpan.GetProperty("start").GetInt32());
+        Assert.Equal(1, errorSpan.GetProperty("length").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScalarFrontendSwitchRetainsTheTwelveStatementBudgetAsync(string policy)
+    {
+        static string SourceWithCases(int count)
+        {
+            var cases = string.Join(", ", Enumerable.Range(0, count)
+                .Select(static value => $"{value} => {{}}"));
+            return $"void Main() {{ switch (0) {{ {cases}, _ => {{}} }} }}";
+        }
+
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var (atLimitExit, atLimitOutput, atLimitError) = await RunAsync(
+            Encoding.UTF8.GetBytes(SourceWithCases(10)),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.True(atLimitExit == 0, $"{atLimitExit}: {atLimitOutput}{atLimitError}");
+        using (var atLimit = JsonDocument.Parse(atLimitOutput))
+        {
+            Assert.True(atLimit.RootElement.GetProperty("success").GetBoolean());
+        }
+
+        var (overLimitExit, overLimitOutput, overLimitError) = await RunAsync(
+            Encoding.UTF8.GetBytes(SourceWithCases(11)),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.Equal(1, overLimitExit);
+        Assert.Empty(overLimitError);
+        using var overLimit = JsonDocument.Parse(overLimitOutput);
+        Assert.False(overLimit.RootElement.GetProperty("success").GetBoolean());
     }
 }

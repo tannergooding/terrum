@@ -72,7 +72,7 @@ public sealed partial class CliTests
                     "frontend-component", frontend, "-", "--runtime", policy, "--json");
                 Assert.True(projectionExit == 0, $"{policy}: {source}: {projectionOutput}{projectionError}");
                 using var projection = JsonDocument.Parse(projectionOutput);
-                Assert.Equal(85, projection.RootElement.GetProperty("result")
+                Assert.Equal(87, projection.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
@@ -305,7 +305,7 @@ public sealed partial class CliTests
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var projection = JsonDocument.Parse(output);
                 var result = projection.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(nodes, result.GetProperty("nodes").GetArrayLength());
                 Assert.DoesNotContain(result.GetProperty("statements").EnumerateArray(),
                     statement => statement.GetProperty("kind").GetInt32() == 8);
@@ -356,7 +356,7 @@ public sealed partial class CliTests
     }
 
     [Fact]
-    public async Task NativeLoopBoundsStayFixedAsync()
+    public async Task NativeStructuralBoundsStayFixedAndProvisionalNodeCapacityIs64Async()
     {
         var frontend = Path.Combine(RepositoryRoot(), "self-host");
         var sixLevels = "int32 Main() { "
@@ -380,6 +380,9 @@ public sealed partial class CliTests
         var thirtyThreeNodes = "int32 Main() { do { return "
             + "+" + string.Join(" + ", Enumerable.Repeat("1", 16)) + "; } while (false); }";
         var thirtyTwoNodes = thirtyThreeNodes.Replace("return +", "return ", StringComparison.Ordinal);
+        var sixtyFiveNodes = "int32 Main() { do { return "
+            + "+" + string.Join(" + ", Enumerable.Repeat("1", 32)) + "; } while (false); }";
+        var sixtyFourNodes = sixtyFiveNodes.Replace("return +", "return ", StringComparison.Ordinal);
         var fifteenGroups = "int32 Main() { do { return "
             + new string('(', 15) + "42" + new string(')', 15)
             + "; } while (false); }";
@@ -410,7 +413,7 @@ public sealed partial class CliTests
         {
             foreach (var valid in new[] {
                 sixLevels, sixForLevels, eightLocals, twelveStatements, twelveForStatements,
-                fifteenGroups, thirtyTwoNodes,
+                fifteenGroups, thirtyTwoNodes, thirtyThreeNodes, sixtyFourNodes, tooManyTokens,
             })
             {
                 var (validExit, validOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(valid),
@@ -422,16 +425,34 @@ public sealed partial class CliTests
                     Assert.Equal(32, projection.RootElement.GetProperty("result")
                         .GetProperty("nodes").GetArrayLength());
                 }
+                if (valid == thirtyThreeNodes)
+                {
+                    using var projection = JsonDocument.Parse(validOutput);
+                    Assert.Equal(33, projection.RootElement.GetProperty("result")
+                        .GetProperty("nodes").GetArrayLength());
+                }
+                if (valid == sixtyFourNodes)
+                {
+                    using var projection = JsonDocument.Parse(validOutput);
+                    Assert.Equal(64, projection.RootElement.GetProperty("result")
+                        .GetProperty("nodes").GetArrayLength());
+                }
                 if (valid == twelveForStatements)
                 {
                     using var projection = JsonDocument.Parse(validOutput);
                     Assert.Equal(12, projection.RootElement.GetProperty("result")
                         .GetProperty("statements").GetArrayLength());
                 }
+                if (valid == tooManyTokens)
+                {
+                    using var projection = JsonDocument.Parse(validOutput);
+                    Assert.Equal(11, projection.RootElement.GetProperty("result")
+                        .GetProperty("statements").GetArrayLength());
+                }
             }
             foreach (var source in new[] {
-                sevenLevels, sevenForLevels, nineLocals, thirtyThreeNodes, sixteenGroups,
-                thirteenStatements, thirteenForStatements, tooManyTokens,
+                sevenLevels, sevenForLevels, nineLocals, sixtyFiveNodes, sixteenGroups,
+                thirteenStatements, thirteenForStatements,
             })
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),

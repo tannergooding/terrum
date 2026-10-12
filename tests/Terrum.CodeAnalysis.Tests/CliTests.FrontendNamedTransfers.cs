@@ -48,7 +48,7 @@ public sealed partial class CliTests
                     Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
                 var (hostExit, hostOutput, hostError) = await RunAsync(input,
                     "build", "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{policy}: {hostOutput}{hostError}");
@@ -268,19 +268,19 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData(32, true)]
-    [InlineData(33, false)]
-    public Task NativeNamedTransfersRetainExpressionNodeLimitAsync(int count, bool valid)
+    [InlineData(33, true)]
+    public Task NativeNamedTransfersAcceptProvisionalExpressionNodeExtensionAsync(int count, bool valid)
         => CheckNativeNamedBoundaryAsync("int32 Main() { a: do { break a; } while (false); return "
             + (count == 33 ? "+" : "") + string.Join(" + ", Enumerable.Repeat("1", 16)) + "; }", valid, nodes: count);
 
     [Theory]
     [InlineData(64, true)]
-    [InlineData(65, false)]
-    public async Task NativeNamedTransfersRetainExactTokenLimitAsync(int count, bool valid)
+    [InlineData(65, true)]
+    public async Task NativeNamedTransfersAcceptTokensBeyondThePreviousWindowAsync(int count, bool valid)
     {
         var source = "int32 Main() { " + string.Concat(Enumerable.Repeat("{} ", 8))
             + "a: do { while (true) { break a; } } while (false); return +"
-            + new string('(', 9) + (valid ? "42" : "+42") + new string(')', 9) + "; }";
+            + new string('(', 9) + (count == 64 ? "42" : "+42") + new string(')', 9) + "; }";
         Assert.Equal(count, Lexer.Lex(SourceText.From(source)).Tokens.Length);
         await CheckNativeNamedBoundaryAsync(source, valid, checkTokens: false);
     }
@@ -316,7 +316,7 @@ public sealed partial class CliTests
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 if (locals is int localCount) { Assert.Equal(localCount, result.GetProperty("locals").GetArrayLength()); }
                 if (statements is int statementCount) { Assert.Equal(statementCount, result.GetProperty("statements").GetArrayLength()); }
                 if (nodes is int nodeCount) { Assert.Equal(nodeCount, result.GetProperty("nodes").GetArrayLength()); }

@@ -43,6 +43,17 @@ whether each run completes. Compare repeated-proof work and hot methods before
 changing the limit or considering a component boundary. An early budget
 failure is not a like-for-like throughput baseline.
 
+The bootstrap return-component selection later reproduced `TRM3016` in nine
+`CheckedExceptions` cases under both Debug and Release, even with the
+implementation ceiling temporarily at 100,500 visits. The published ceiling is
+100,000; the temporary implementation setting was out of sync and did not
+change the contract. The short-circuit verifier now computes left-side
+feasibility once before RHS analysis and reuses that result for the failure-edge
+gate and outcome merge; the implementation guard is again 100,000. The focused
+frontend PE integration passes all 18 cases under both policies in Debug and
+Release at that ceiling. The full return-component selection now passes all
+1,445 cases in both configurations at 100,000 visits, with no failures or skips.
+
 ## Deferred option
 
 Do not split the frontend or add an internal phase handoff merely to bypass

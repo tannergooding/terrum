@@ -15,14 +15,14 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class ManagedScannerComponentTests
 {
     [Fact]
-    public async Task ScalarFrontendSwitchUsesV85AndReaderRejectsTamperedRecordsAsync()
+    public async Task ScalarFrontendSwitchUsesV86AndReaderRejectsTamperedRecordsAsync()
     {
         const string text = "public int32 Main() { int32 value = 1; switch (value) { 1 => { return 11; }, _ => { return 33; } } }";
         var source = SourceText.From(text);
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+            Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
 
             var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
                 (BoundRuntimePolicy)policy);
@@ -36,6 +36,23 @@ public sealed partial class ManagedScannerComponentTests
                 static statement => statement.Kind == 38);
             Assert.Equal(new TextSpan(text.IndexOf(switchText, StringComparison.Ordinal),
                 switchText.Length), switchStatement.Span);
+            var arms = function.Statements.Where(static statement => statement.Kind == 39).ToArray();
+            Assert.Equal(2, arms.Length);
+            const string caseArmText = "1 => { return 11; }";
+            const string defaultArmText = "_ => { return 33; }";
+            const string caseBodyText = "{ return 11; }";
+            const string defaultBodyText = "{ return 33; }";
+            Assert.Equal(new TextSpan(text.IndexOf(caseArmText, StringComparison.Ordinal),
+                caseArmText.Length), arms[0].Span);
+            Assert.Equal(new TextSpan(text.IndexOf(defaultArmText, StringComparison.Ordinal),
+                defaultArmText.Length), arms[1].Span);
+            Assert.Equal(new TextSpan(text.IndexOf(caseBodyText, StringComparison.Ordinal),
+                caseBodyText.Length), arms[0].BodySpan);
+            Assert.Equal(new TextSpan(text.IndexOf(defaultBodyText, StringComparison.Ordinal),
+                defaultBodyText.Length), arms[1].BodySpan);
+            Assert.Equal(new TextSpan(text.IndexOf("1 =>", StringComparison.Ordinal), 1),
+                function.Nodes[arms[0].Root].Span);
+            Assert.Equal(-1, arms[1].Root);
 
             var functionIndex = Array.FindIndex(read.Projection.Functions.ToArray(),
                 static projected => projected.Statements.Any(statement => statement.Kind == 38));

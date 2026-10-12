@@ -50,7 +50,7 @@ public sealed partial class CliTests
                     "-", "-o", native, "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"{output}{error}");
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build", "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
                 var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component", Path.Combine(root, "self-host"),
@@ -207,7 +207,7 @@ public sealed partial class CliTests
                     var result = document.RootElement.GetProperty("result");
                     Assert.True(result.GetProperty("valid").GetBoolean());
                     Assert.True(result.GetProperty("noThrow").GetBoolean());
-                    Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 }
 
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
@@ -260,7 +260,7 @@ public sealed partial class CliTests
                     var result = document.RootElement.GetProperty("result");
                     Assert.True(result.GetProperty("valid").GetBoolean());
                     Assert.True(result.GetProperty("doesNotReturn").GetBoolean());
-                    Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 }
 
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
@@ -311,12 +311,13 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData(64, true)]
-    [InlineData(65, false)]
-    public async Task NativeFunctionEffectsAttributeTokensCountAgainstExistingLimitAsync(int count, bool valid)
+    [InlineData(65, true)]
+    public async Task NativeFunctionEffectsAcceptAttributeTokensBeyondThePreviousWindowAsync(int count, bool valid)
     {
         var source = "[NoThrow] public void @await(bool a, bool b, bool c) { require "
             + new string('(', 15) + "true" + new string(')', 15)
-            + "; require true; require true; require true; require " + (valid ? "true" : "!false") + "; }";
+            + "; require true; require true; require true; require "
+            + (count == 64 ? "true" : "!false") + "; }";
         Assert.Equal(count, Lexer.Lex(SourceText.From(source)).Tokens.Length);
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "frontend-component",
             Path.Combine(RepositoryRoot(), "self-host"), "-", "--runtime", "fail-fast", "--json");
@@ -400,8 +401,8 @@ public sealed partial class CliTests
     [InlineData("records", 13, false)]
     [InlineData("locals", 8, true)]
     [InlineData("locals", 9, false)]
-    [InlineData("nodes", 32, true)]
-    [InlineData("nodes", 33, false)]
+    [InlineData("nodes", 64, true)]
+    [InlineData("nodes", 65, false)]
     [InlineData("expression", 16, true)]
     [InlineData("expression", 17, false)]
     [InlineData("depth", 6, true)]
@@ -411,7 +412,8 @@ public sealed partial class CliTests
         var body = resource switch {
             "records" => string.Concat(Enumerable.Repeat("require true;", count)),
             "locals" => string.Concat(Enumerable.Repeat("_ = true;", count)),
-            "nodes" => "_ = !false || " + (valid ? "" : "!") + string.Join(" || ", Enumerable.Repeat("true", 15)) + ";",
+            "nodes" => "_ = !false || " + (valid ? "" : "!")
+                + string.Join(" || ", Enumerable.Repeat("true", (count - 2) / 2)) + ";",
             "expression" => "require " + new string('(', count - 1) + "true" + new string(')', count - 1) + ";",
             "depth" => new string('{', count) + "require true;" + new string('}', count),
             _ => "require true;",
@@ -422,7 +424,10 @@ public sealed partial class CliTests
             text += " /*" + new string('x', count - text.Length - 5) + "*/";
             Assert.Equal(count, text.Length);
         }
-        Assert.True(Lexer.Lex(SourceText.From(text)).Tokens.Length <= 64);
+        if (resource != "nodes")
+        {
+            Assert.True(Lexer.Lex(SourceText.From(text)).Tokens.Length <= 64);
+        }
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(text), "frontend-component",
@@ -432,7 +437,7 @@ public sealed partial class CliTests
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 if (resource == "nodes") { Assert.Equal(count, result.GetProperty("nodes").GetArrayLength()); }
                 if (resource == "records") { Assert.Equal(count, result.GetProperty("statements").GetArrayLength()); }
                 if (resource == "locals") { Assert.Equal(count, result.GetProperty("locals").GetArrayLength()); }

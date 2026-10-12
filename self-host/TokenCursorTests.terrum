@@ -37,6 +37,13 @@ public bool CheckTokenCursor()
         passed = false;
     }
 
+    init Token remaining;
+    if (!cursor.TryGet(0, init remaining)
+        || remaining.Kind != 3 || remaining.Range.Start != 6 || remaining.Range.Length != 2)
+    {
+        passed = false;
+    }
+
     if (!cursor.TryRead(init var second)
         || second.Kind != 3 || second.Range.Start != 6 || second.Range.Length != 2)
     {

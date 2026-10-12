@@ -46,7 +46,7 @@ public sealed partial class CliTests
                     $"{type} {operation} {policy}: {projectionExit}: {projectionOutput}{projectionError}");
                 Assert.Empty(projectionError);
                 using var document = JsonDocument.Parse(projectionOutput);
-                Assert.Equal(85, document.RootElement.GetProperty("result")
+                Assert.Equal(87, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var (runExit, runOutput, runError) = await RunAsync(input,
                     "frontend-run", frontend, "-", "--runtime", policy, "--json");
@@ -145,7 +145,7 @@ public sealed partial class CliTests
                 Assert.Empty(projectionError);
                 using var document = JsonDocument.Parse(projectionOutput);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.True(result.GetProperty("expressionBody").GetBoolean());
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o",
@@ -376,9 +376,9 @@ public sealed partial class CliTests
             var beyondStatements = "int32 Main() { mut int32 x = 0; "
                 + string.Concat(Enumerable.Repeat("x++; ", 12)) + "return x; }";
             var withinNodes = "int32 Main() { mut int32 x = 0; return +("
-                + string.Join(" + ", Enumerable.Repeat("x++", 10)) + "); }";
+                + string.Join(" + ", Enumerable.Repeat("x++", 20)) + "); }";
             var beyondNodes = "int32 Main() { mut int32 x = 0; return "
-                + string.Join(" + ", Enumerable.Repeat("x++", 11)) + "; }";
+                + string.Join(" + ", Enumerable.Repeat("x++", 22)) + "; }";
             foreach (var source in new[] { withinStatements, withinNodes })
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -387,8 +387,8 @@ public sealed partial class CliTests
                 Assert.Empty(error);
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(source == withinNodes ? 32 : 12,
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(source == withinNodes ? 62 : 12,
                     result.GetProperty(source == withinNodes ? "nodes" : "statements").GetArrayLength());
             }
             foreach (var source in new[] { beyondStatements, beyondNodes })

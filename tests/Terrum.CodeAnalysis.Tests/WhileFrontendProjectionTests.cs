@@ -16,7 +16,7 @@ public sealed class WhileFrontendProjectionTests
         const string text = "public int32 Value() { mut int32 x = 0; while (x < 2) { while (x < 1) { x = x + 1; } x = x + 1; } return x; }";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

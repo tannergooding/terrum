@@ -44,7 +44,8 @@ internal static partial class Program
             "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
             "WideIntegerFacts", "IntegerParsing", "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
             "CharacterLiteral", "HexDigitValue", "BasedIntegerFloatLiteral", "HexFloatLiteral",
-            "DecimalFloatLiteral", "ScalarFrontend", "TokenCursor",
+            "DecimalFloatLiteral", "IntegerFloatConversion", "Char16FloatConversion",
+            "ScalarFrontend", "TokenCursor",
             "ScalarFrontendProgram", "ScalarFrontendProjection"];
         try
         {
@@ -120,7 +121,7 @@ internal static partial class Program
                 {
                     throw new ArgumentException("The frontend failed without lexical diagnostics.");
                 }
-                WriteFrontendOutput(args[0], json, false, null, diagnostics, outputPath);
+                WriteFrontendOutput(args[0], source, json, false, null, diagnostics, outputPath);
                 return 1;
             }
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
@@ -145,7 +146,10 @@ internal static partial class Program
             {
                 var functions = result.Functions.IsDefault ? ImmutableArray.Create(result) : result.Functions;
                 var exports = functions.Where(static function => function.IsPublic)
-                    .Select(function => IdentifierName.GetName(source.Text.Substring(function.Name.Start, function.Name.Length)))
+                    .Select(function => function.QualifiedName.Length != 0
+                        ? function.QualifiedName
+                        : IdentifierName.GetName(source.Text.Substring(function.Name.Start,
+                            function.Name.Length)))
                     .ToImmutableArray();
                 var entryIndex = -1;
                 for (var i = 0; i < functions.Length; i++)
@@ -223,7 +227,8 @@ internal static partial class Program
                     return 2;
                 }
             }
-            WriteFrontendOutput(args[0], json, result.IsValid, result, [], build ? outputPath : null);
+            WriteFrontendOutput(args[0], source, json, result.IsValid, result, [],
+                build ? outputPath : null);
             return result.IsValid ? 0 : 1;
         }
         catch (ArgumentException exception)
@@ -265,7 +270,7 @@ internal static partial class Program
         return true;
     }
 
-    private static void WriteFrontendOutput(string command, bool json, bool success,
+    private static void WriteFrontendOutput(string command, SourceText source, bool json, bool success,
         ScalarFrontendResult? result, ImmutableArray<ScannerDiagnostic> diagnostics,
         string? outputPath = null)
     {
@@ -290,6 +295,13 @@ internal static partial class Program
                 writer.WriteBoolean("doesNotReturn", frontend.DoesNotReturn);
                 writer.WriteNumber("errorCode", frontend.ErrorCode);
                 WriteFrontendSpan(writer, "errorSpan", frontend.ErrorSpan);
+                if (!frontend.IsValid)
+                {
+                    writer.WriteStartObject("errorRange");
+                    WritePosition(writer, "start", source.GetLinePosition(frontend.ErrorSpan.Start));
+                    WritePosition(writer, "end", source.GetLinePosition(frontend.ErrorSpan.End));
+                    writer.WriteEndObject();
+                }
                 if (!frontend.Functions.IsDefault)
                 {
                     writer.WriteStartArray("functions");
@@ -307,10 +319,14 @@ internal static partial class Program
                         writer.WriteNumber("firstType", function.FirstType);
                         writer.WriteNumber("secondType", function.SecondType);
                         writer.WriteNumber("thirdType", function.ThirdType);
+                        writer.WriteNumber("fourthType", function.FourthType);
+                        WriteFrontendSpan(writer, "namespaceNameSpan", function.NamespaceNameSpan);
+                        writer.WriteString("qualifiedName", function.QualifiedName);
                         WriteFrontendSpan(writer, "name", function.Name);
                         WriteFrontendSpan(writer, "firstName", function.FirstName);
                         WriteFrontendSpan(writer, "secondName", function.SecondName);
                         WriteFrontendSpan(writer, "thirdName", function.ThirdName);
+                        WriteFrontendSpan(writer, "fourthName", function.FourthName);
                         writer.WriteBoolean("expressionBody", function.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", function.ConditionRoot);
                         writer.WriteNumber("trueRoot", function.TrueRoot);
@@ -330,6 +346,19 @@ internal static partial class Program
                             if (node.Operation == 105)
                             {
                                 writer.WriteNumber("function", function.CallTargets[nodeIndex]);
+                            }
+                            if (node.Operation is 102 or 105)
+                            {
+                                writer.WriteNumber("fourthArgumentRoot", node.FourthArgumentRoot);
+                                if (!node.ArgumentParameterIndices.IsDefault)
+                                {
+                                    writer.WriteStartArray("argumentParameterIndices");
+                                    foreach (var parameter in node.ArgumentParameterIndices)
+                                    {
+                                        writer.WriteNumberValue(parameter);
+                                    }
+                                    writer.WriteEndArray();
+                                }
                             }
                             writer.WriteEndObject();
                         }
@@ -372,9 +401,13 @@ internal static partial class Program
                     writer.WriteNumber("parameterCount", frontend.ParameterCount);
                     writer.WriteNumber("firstType", frontend.FirstType);
                     writer.WriteNumber("secondType", frontend.SecondType);
+                    writer.WriteNumber("thirdType", frontend.ThirdType);
+                    writer.WriteNumber("fourthType", frontend.FourthType);
                     WriteFrontendSpan(writer, "name", frontend.Name);
                     WriteFrontendSpan(writer, "firstName", frontend.FirstName);
                     WriteFrontendSpan(writer, "secondName", frontend.SecondName);
+                    WriteFrontendSpan(writer, "thirdName", frontend.ThirdName);
+                    WriteFrontendSpan(writer, "fourthName", frontend.FourthName);
                     writer.WriteBoolean("hasCondition", frontend.HasCondition);
                     if (frontend.HasFallthrough)
                     {
@@ -388,7 +421,7 @@ internal static partial class Program
                     WriteFrontendExpression(writer, "whenTrue", frontend.WhenTrue);
                     if (!frontend.Nodes.IsDefault)
                     {
-                        writer.WriteNumber("projectionVersion", 85);
+                        writer.WriteNumber("projectionVersion", frontend.Functions.IsDefault ? 87 : 88);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);
                         writer.WriteNumber("trueRoot", frontend.TrueRoot);
@@ -408,6 +441,19 @@ internal static partial class Program
                             if (node.Operation == 105)
                             {
                                 writer.WriteNumber("function", frontend.CallTargets[nodeIndex]);
+                            }
+                            if (node.Operation is 102 or 105)
+                            {
+                                writer.WriteNumber("fourthArgumentRoot", node.FourthArgumentRoot);
+                                if (!node.ArgumentParameterIndices.IsDefault)
+                                {
+                                    writer.WriteStartArray("argumentParameterIndices");
+                                    foreach (var parameter in node.ArgumentParameterIndices)
+                                    {
+                                        writer.WriteNumberValue(parameter);
+                                    }
+                                    writer.WriteEndArray();
+                                }
                             }
                             writer.WriteEndObject();
                         }
@@ -446,6 +492,10 @@ internal static partial class Program
                 writer.WriteStartObject();
                 writer.WriteString("code", diagnostic.Code);
                 WriteFrontendSpan(writer, "span", diagnostic.Span);
+                writer.WriteStartObject("range");
+                WritePosition(writer, "start", source.GetLinePosition(diagnostic.Span.Start));
+                WritePosition(writer, "end", source.GetLinePosition(diagnostic.Span.End));
+                writer.WriteEndObject();
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
@@ -458,19 +508,23 @@ internal static partial class Program
                 Console.Out.WriteLine(outputPath is null
                     ? frontend.Functions.IsDefault
                         ? $"Scalar function at [{frontend.Name.Start}..{frontend.Name.End}), {frontend.ParameterCount} parameters."
-                        : $"Scalar program with {frontend.Functions.Length} functions (projection 74)."
+                        : $"Scalar program with {frontend.Functions.Length} functions (projection 86)."
                     : $"{outputPath}: native scalar {(command == "frontend-build" ? "executable" : "library")}");
             }
             else
             {
-                Console.Error.WriteLine($"Frontend {frontend.ErrorCode} at [{frontend.ErrorSpan.Start}..{frontend.ErrorSpan.End}).");
+                var position = source.GetLinePosition(frontend.ErrorSpan.Start);
+                Console.Error.WriteLine(FormattableString.Invariant(
+                    $"{source.Path}({position.Line + 1},{position.Character + 1}): Frontend {frontend.ErrorCode} at [{frontend.ErrorSpan.Start}..{frontend.ErrorSpan.End})."));
             }
         }
         else
         {
             foreach (var diagnostic in diagnostics)
             {
-                Console.Error.WriteLine($"{diagnostic.Code} at [{diagnostic.Span.Start}..{diagnostic.Span.End}).");
+                var position = source.GetLinePosition(diagnostic.Span.Start);
+                Console.Error.WriteLine(FormattableString.Invariant(
+                    $"{source.Path}({position.Line + 1},{position.Character + 1}): {diagnostic.Code} at [{diagnostic.Span.Start}..{diagnostic.Span.End})."));
             }
         }
     }

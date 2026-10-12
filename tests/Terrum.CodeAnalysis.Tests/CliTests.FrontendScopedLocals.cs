@@ -50,7 +50,7 @@ public sealed partial class CliTests
                 Assert.True(componentExit == 0,
                     $"{policy}: {componentExit}: {componentOutput}{componentError}");
                 using var document = JsonDocument.Parse(componentOutput);
-                Assert.Equal(85, document.RootElement.GetProperty("result")
+                Assert.Equal(87, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
@@ -158,7 +158,7 @@ public sealed partial class CliTests
                 using var document = JsonDocument.Parse(componentOutput);
                 Assert.NotEqual(projectionVersion, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(85, document.RootElement.GetProperty("result")
+                Assert.Equal(87, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
 
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
@@ -211,7 +211,7 @@ public sealed partial class CliTests
             using var document = JsonDocument.Parse(componentOutput);
             Assert.NotEqual(projectionVersion, document.RootElement.GetProperty("result")
                 .GetProperty("projectionVersion").GetInt32());
-            Assert.Equal(85, document.RootElement.GetProperty("result")
+            Assert.Equal(87, document.RootElement.GetProperty("result")
                 .GetProperty("projectionVersion").GetInt32());
 
             var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
@@ -275,7 +275,7 @@ public sealed partial class CliTests
                 var result = document.RootElement;
                 Assert.True(result.GetProperty("success").GetBoolean());
                 Assert.Equal(frontendPath, result.GetProperty("output").GetString());
-                Assert.Equal(85, result.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("result").GetProperty("projectionVersion").GetInt32());
             }
             using (var document = JsonDocument.Parse(hostedOutput))
             {
@@ -422,7 +422,7 @@ public sealed partial class CliTests
                 if (expected != -1)
                 {
                     var result = document.RootElement.GetProperty("result");
-                    Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                     Assert.Equal(expected, result.GetProperty("locals").GetArrayLength());
                 }
             }

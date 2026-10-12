@@ -403,7 +403,7 @@ public sealed partial class CliTests
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
         var result = document.RootElement.GetProperty("result");
-        Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
         var locals = result.GetProperty("locals");
         Assert.Equal(1, locals.GetArrayLength());
         Assert.Equal(1, locals[0].GetProperty("type").GetInt32());

@@ -15,7 +15,7 @@ public sealed class ConditionalFrontendProjectionTests
     {
         const string text = "public int32 Value(bool b) { if (b ? true : false) { return b ? 1 : 2; } return b ? 3 : 4; }";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -113,7 +113,7 @@ public sealed class ConditionalFrontendProjectionTests
     {
         const string text = "public uint64 Value(bool b) => uint64(b ? 1 : 2);";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 4;

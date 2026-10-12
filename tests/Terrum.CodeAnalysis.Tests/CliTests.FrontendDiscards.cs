@@ -55,7 +55,7 @@ public sealed partial class CliTests
                     Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
                 var (hostExit, hostOutput, hostError) = await RunAsync(input,
                     "build", "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{policy}: {hostOutput}{hostError}");
@@ -258,18 +258,18 @@ public sealed partial class CliTests
             if (valid)
             {
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
             }
         }
     }
 
     [Theory]
     [InlineData(64, true)]
-    [InlineData(65, false)]
-    public async Task ScalarDiscardsRetainExactTokenLimitAsync(int tokens, bool valid)
+    [InlineData(65, true)]
+    public async Task ScalarDiscardsAcceptTokensBeyondThePreviousWindowAsync(int tokens, bool valid)
     {
         var declarations = string.Concat(Enumerable.Range(0, 7).Select(i => $"int32 x{i} = {i}; "));
-        var expression = valid ? "+(((((((42)))))))" : "+(((((((+42)))))))";
+        var expression = tokens == 64 ? "+(((((((42)))))))" : "+(((((((+42)))))))";
         var source = $"int32 Main() {{ {declarations}_ = true; return {expression}; }}";
         Assert.Equal(tokens, Lexer.Lex(SourceText.From(source)).Tokens.Length);
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

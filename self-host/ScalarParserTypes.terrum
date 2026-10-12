@@ -14,7 +14,7 @@ bool TryGetScalarType(Token type, init ref<int32> scalarType)
         scalarType = primitive;
         return true;
     }
-    if (type.Kind != 2 || Host.FrontendProgram.Length != 4284)
+    if (type.Kind != 2 || Host.FrontendProgram.Length != 25025)
     {
         return false;
     }

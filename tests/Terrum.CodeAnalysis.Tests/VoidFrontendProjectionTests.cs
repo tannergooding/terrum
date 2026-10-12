@@ -182,7 +182,7 @@ public sealed class VoidFrontendProjectionTests
     private static int[] Projection(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = words[2] = 1;
         words[9] = text.IndexOf("@await", StringComparison.Ordinal);
         words[10] = 6;

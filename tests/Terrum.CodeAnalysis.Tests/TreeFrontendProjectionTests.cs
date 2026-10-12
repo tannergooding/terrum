@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
 using Xunit;
 
@@ -15,7 +16,7 @@ public sealed class TreeFrontendProjectionTests
     {
         const string text = "public bool Value() => 1 < 2;";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 5;
@@ -49,7 +50,7 @@ public sealed class TreeFrontendProjectionTests
         const string text = "public int32 Value(int32 x) => x + (x * 2);";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -120,5 +121,141 @@ public sealed class TreeFrontendProjectionTests
             }
             return bytes;
         }
+    }
+
+    [Theory]
+    [InlineData(false, 64, true)]
+    [InlineData(false, 65, false)]
+    [InlineData(true, 64, true)]
+    [InlineData(true, 65, false)]
+    public void ReadersEnforceThe64NodeLimitForStandaloneAndCompleteProgramLayouts(
+        bool completeProgram, int nodeCount, bool valid)
+    {
+        var source = SourceText.From(ExpressionFunctionText());
+        var words = ExpressionFunction(source.Text, completeProgram ? 88 : 87);
+        words[37] = nodeCount;
+
+        if (!valid)
+        {
+            _ = Assert.Throws<ArgumentException>(() => ReadProjection(source, words, completeProgram));
+            return;
+        }
+
+        var result = ReadProjection(source, words, completeProgram);
+        Assert.True(result.IsValid);
+        Assert.Equal(64, result.Nodes.Length);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReadersRejectOutOfRangeNodeReferencesWithoutReturningAProjection(bool completeProgram)
+    {
+        var source = SourceText.From(ExpressionFunctionText());
+        var words = ExpressionFunction(source.Text, completeProgram ? 88 : 87);
+        words[NodeWordOffset(63) + 5] = 64;
+
+        _ = Assert.Throws<ArgumentException>(() => ReadProjection(source, words, completeProgram));
+    }
+
+    private static ScalarFrontendResult ReadProjection(SourceText source, int[] words,
+        bool completeProgram)
+    {
+        if (!completeProgram)
+        {
+            return ScalarFrontendHost.ReadResult(source, Bytes(words));
+        }
+
+        var program = new int[ScalarFrontendHost.ProgramWordCount];
+        program[0] = 88;
+        program[1] = 1;
+        program[2] = 1;
+        var tokens = Lexer.Lex(source).Tokens;
+        var end = 0;
+        while (tokens[end++].Kind != TokenKind.Semicolon)
+        {
+        }
+        var declaration = new TextSpan(tokens[0].Span.Start,
+            tokens[end - 1].Span.End - tokens[0].Span.Start);
+        program[4] = 0;
+        program[5] = end;
+        program[6] = declaration.Start;
+        program[7] = declaration.Length;
+        words.AsSpan(0, ScalarFrontendHost.ProgramBodyWordCount).CopyTo(program.AsSpan(8));
+        program.AsSpan(8 + ScalarFrontendHost.ProgramBodyWordCount, 64).Fill(-1);
+        return ScalarFrontendHost.ReadProgram(source, Bytes(new int[ScalarFrontendHost.WordCount]),
+            Bytes(program), BoundRuntimePolicy.FailFast).Projection;
+    }
+
+    private static string ExpressionFunctionText()
+    {
+        var terms = new string[32];
+        Array.Fill(terms, "x");
+        terms[0] = "(x)";
+        return $"int32 Value(int32 x) => {string.Join(" + ", terms)};";
+    }
+
+    private static int[] ExpressionFunction(string text, int version)
+    {
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = version;
+        words[1] = 1;
+        words[5] = 1;
+        words[6] = 1;
+        words[7] = 1;
+        words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+        words[10] = "Value".Length;
+        words[11] = text.IndexOf('x', StringComparison.Ordinal);
+        words[12] = 1;
+        words[37] = 64;
+        words[38] = -1;
+        words[39] = 63;
+        words[40] = -1;
+        words[41] = 1;
+
+        var expressionStart = text.IndexOf("(x)", StringComparison.Ordinal);
+        var node = 0;
+        WriteNode(0, expressionStart + 1, 1, 1, -1);
+        var root = node - 1;
+        WriteNode(46, expressionStart, 3, root, -1);
+        root = node - 1;
+        var next = expressionStart + 3;
+        for (var term = 1; term < 32; term++)
+        {
+            var x = text.IndexOf('x', next, StringComparison.Ordinal);
+            WriteNode(0, x, 1, 1, -1);
+            var leaf = node - 1;
+            WriteNode(57, expressionStart, x + 1 - expressionStart, root, leaf);
+            root = node - 1;
+            next = x + 1;
+        }
+        Assert.Equal(64, node);
+        Assert.Equal(63, root);
+        return words;
+
+        void WriteNode(int operation, int start, int length, int left, int right)
+        {
+            var offset = NodeWordOffset(node++);
+            words[offset] = operation;
+            words[offset + 1] = 1;
+            words[offset + 2] = start;
+            words[offset + 3] = length;
+            words[offset + 4] = left;
+            words[offset + 5] = right;
+        }
+    }
+
+    private static int NodeWordOffset(int node) => node < 32
+        ? 42 + (node * 8)
+        : 392 + ((node - 32) * 8);
+
+    private static byte[] Bytes(int[] words)
+    {
+        var bytes = new byte[words.Length * sizeof(int)];
+        for (var index = 0; index < words.Length; index++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * sizeof(int)), words[index]);
+        }
+        return bytes;
     }
 }

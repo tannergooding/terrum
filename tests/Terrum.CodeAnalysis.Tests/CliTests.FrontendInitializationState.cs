@@ -15,12 +15,12 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class CliTests
 {
     [Theory]
-    [InlineData("public int32 Main() { init int32 value; if (value is init) { return 0; } value = 42; return value is init ? value : 0; }", 80, 42, 2)]
-    [InlineData("public int32 Main() { init uint32 value; return value is init ? 42 : 0; }", 80, 0, 1)]
-    [InlineData("public int32 Main() { init int64 value; return value is init ? 42 : 0; }", 80, 0, 1)]
-    [InlineData("public int32 Main() { init uint64 value; return value is init ? 42 : 0; }", 80, 0, 1)]
-    [InlineData("public int32 Main() { init bool value; return value is init ? 42 : 0; }", 80, 0, 1)]
-    [InlineData("public int32 Main() { init char16 value; return value is init ? 42 : 0; }", 80, 0, 1)]
+    [InlineData("public int32 Main() { init int32 value; if (value is init) { return 0; } value = 42; return value is init ? value : 0; }", 80, 87, 42, 2)]
+    [InlineData("public int32 Main() { init uint32 value; return value is init ? 42 : 0; }", 80, 87, 0, 1)]
+    [InlineData("public int32 Main() { init int64 value; return value is init ? 42 : 0; }", 80, 87, 0, 1)]
+    [InlineData("public int32 Main() { init uint64 value; return value is init ? 42 : 0; }", 80, 87, 0, 1)]
+    [InlineData("public int32 Main() { init bool value; return value is init ? 42 : 0; }", 80, 87, 0, 1)]
+    [InlineData("public int32 Main() { init char16 value; return value is init ? 42 : 0; }", 80, 87, 0, 1)]
     [InlineData("""
         public int32 Main() => Ready(42) ? 42 : 0;
         bool Ready(int32 value)
@@ -30,9 +30,10 @@ public sealed partial class CliTests
             local = value;
             return local is init && value is init;
         }
-        """, 81, 42, 3)]
+        """, 81, 88, 42, 3)]
     public async Task ScalarFrontendNamedInitializationTestsUseCurrentProjectionAsync(
-        string text, int projectionVersion, int expected, int expectedInitializationTests)
+        string text, int projectionVersion, int expectedCurrentProjectionVersion,
+        int expected, int expectedInitializationTests)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var input = Encoding.UTF8.GetBytes(text);
@@ -45,7 +46,8 @@ public sealed partial class CliTests
             {
                 var result = document.RootElement.GetProperty("result");
                 Assert.NotEqual(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(expectedCurrentProjectionVersion,
+                    result.GetProperty("projectionVersion").GetInt32());
                 var initializationTestCount = 0;
                 if (result.TryGetProperty("functions", out var functions))
                 {

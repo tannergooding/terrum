@@ -50,7 +50,7 @@ public sealed partial class CliTests
                     Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(85, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build",
                     "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
@@ -214,21 +214,21 @@ public sealed partial class CliTests
     [InlineData("depth", 7, false)]
     [InlineData("expression", 16, true)]
     [InlineData("expression", 17, false)]
-    [InlineData("nodes", 32, true)]
-    [InlineData("nodes", 33, false)]
+    [InlineData("nodes", 64, true)]
+    [InlineData("nodes", 65, false)]
     [InlineData("source", 16384, true)]
     [InlineData("source", 16385, false)]
     [InlineData("tokens", 64, true)]
-    [InlineData("tokens", 65, false)]
-    public async Task NativeVoidRetainsExactResourceCapsAsync(string resource, int count, bool valid)
+    [InlineData("tokens", 65, true)]
+    public async Task NativeVoidRetainsOtherResourceCapsAsync(string resource, int count, bool valid)
     {
         var body = resource switch {
             "records" => string.Concat(Enumerable.Repeat("return; ", count)),
             "locals" => string.Concat(Enumerable.Repeat("_ = true; ", count)),
             "depth" => new string('{', count) + "return;" + new string('}', count),
             "expression" => "return " + new string('(', count) + new string(')', count) + ";",
-            "nodes" => "require " + (count == 33 ? "!" : "")
-                + string.Join(" && ", Enumerable.Repeat("true", 16)) + "; _ = true;",
+            "nodes" => "require " + (count == 65 ? "!" : "")
+                + string.Join(" && ", Enumerable.Repeat("true", count / 2)) + "; _ = true;",
             "tokens" => string.Concat(Enumerable.Range(0, 7).Select(i => $"int32 x{i} = {i}; "))
                 + "require !true; return " + new string('(', 8) + new string(')', 8) + ";",
             _ => "",
@@ -241,7 +241,7 @@ public sealed partial class CliTests
         }
         if (resource == "tokens")
         {
-            if (!valid) { source = source.Replace("x0 = 0", "x0 = +0", StringComparison.Ordinal); }
+            if (count == 65) { source = source.Replace("x0 = 0", "x0 = +0", StringComparison.Ordinal); }
             Assert.Equal(count, Lexer.Lex(SourceText.From(source)).Tokens.Length);
         }
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -253,11 +253,36 @@ public sealed partial class CliTests
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 if (resource == "locals") { Assert.Equal(count, result.GetProperty("locals").GetArrayLength()); }
                 if (resource == "records") { Assert.Equal(count, result.GetProperty("statements").GetArrayLength()); }
-                if (resource == "nodes") { Assert.Equal(count, result.GetProperty("nodes").GetArrayLength()); }
+                if (resource == "nodes")
+                {
+                    Assert.True(Lexer.Lex(SourceText.From(source)).Tokens.Length > 64);
+                    Assert.Equal(count, result.GetProperty("nodes").GetArrayLength());
+                }
             }
+        }
+    }
+
+    [Fact]
+    public async Task NativeVoidParsesFunctionsBeyondThePreviousTokenWindowAsync()
+    {
+        var longCondition = "require " + new string('(', 15) + "true" + new string(')', 15) + "; ";
+        var source = "void Main() { " + longCondition
+            + string.Concat(Enumerable.Repeat("require true; ", 11)) + "}";
+        Assert.True(Lexer.Lex(SourceText.From(source)).Tokens.Length > 64);
+
+        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(exit == 0, $"{policy}: {output}{error}");
+            using var document = JsonDocument.Parse(output);
+            var result = document.RootElement.GetProperty("result");
+            Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
+            Assert.Equal(12, result.GetProperty("statements").GetArrayLength());
         }
     }
 }

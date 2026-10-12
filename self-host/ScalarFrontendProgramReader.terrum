@@ -1,0 +1,1010 @@
+namespace Terrum.CodeAnalysis;
+
+bool ScalarProgramReaderZero(int32 start, int32 end)
+{
+    if (start < 0 || end < start || end > Host.FrontendProgram.Length) { return false; }
+    for (mut int32 index = start; index < end; index = index + 1)
+    {
+        if (Host.FrontendProgram[index] != 0) { return false; }
+    }
+    return true;
+}
+
+bool ScalarProgramReaderPublicationZero()
+{
+    if (Host.Frontend.Length != 2274) { return false; }
+    for (mut int32 index = 0; index < Host.Frontend.Length; index = index + 1)
+    {
+        if (Host.Frontend[index] != 0) { return false; }
+    }
+    return true;
+}
+
+int32 ScalarProgramReaderNodeOffset(int32 body, int32 node)
+{
+    if (node < 32) { return body + 42 + node * 8; }
+    return body + 392 + (node - 32) * 8;
+}
+
+bool ScalarProgramReaderRange(int32 start, int32 length, int32 limit)
+{
+    return start >= 0 && start <= limit && length >= 0
+        && length <= limit - start;
+}
+
+bool ScalarProgramReaderFrameRange(int32 start, int32 length,
+    int32 frameStart, int32 frameLength, int32 limit)
+{
+    return ScalarProgramReaderRange(start, length, limit)
+        && start >= frameStart
+        && start - frameStart <= frameLength
+        && length <= frameLength - (start - frameStart);
+}
+
+bool ScalarProgramReaderIdentifierSpan(int32 tokenStart, int32 tokenEnd,
+    int32 spanStart, int32 spanLength)
+{
+    return ScalarProgramReaderTokenSpan(tokenStart, tokenEnd, spanStart, spanLength, 2);
+}
+
+bool ScalarProgramReaderNodeTokenSpan(int32 tokenStart, int32 tokenEnd,
+    int32 operation, int32 spanStart, int32 spanLength)
+{
+    if (operation == 0)
+    {
+        return ScalarProgramReaderIdentifierSpan(tokenStart, tokenEnd, spanStart, spanLength);
+    }
+    if (operation == 3)
+    {
+        return ScalarProgramReaderTokenSpan(tokenStart, tokenEnd, spanStart, spanLength, 3)
+            || ScalarProgramReaderTokenSpan(tokenStart, tokenEnd, spanStart, spanLength, 103);
+    }
+    if (operation == 20 || operation == 21)
+    {
+        return ScalarProgramReaderTokenSpan(tokenStart, tokenEnd,
+            spanStart, spanLength, operation);
+    }
+    return true;
+}
+
+bool ScalarProgramReaderNamespaceKeyword(int32 start, int32 nameStart)
+{
+    if (start < 0 || start > nameStart || 9 > nameStart - start
+        || !ScalarProgramReaderRange(start, 9, Host.Source.Length))
+    {
+        return false;
+    }
+    return Host.Source[start] == 'n'
+        && Host.Source[start + 1] == 'a'
+        && Host.Source[start + 2] == 'm'
+        && Host.Source[start + 3] == 'e'
+        && Host.Source[start + 4] == 's'
+        && Host.Source[start + 5] == 'p'
+        && Host.Source[start + 6] == 'a'
+        && Host.Source[start + 7] == 'c'
+        && Host.Source[start + 8] == 'e';
+}
+
+bool ScalarProgramReaderNamespaceNameTokens(int32 start, int32 end,
+    int32 nameStart, int32 nameEnd)
+{
+    if (start < 0 || end <= start || nameStart < 0 || nameEnd < nameStart
+        || nameEnd > Host.Source.Length)
+    {
+        return false;
+    }
+    mut int32 previousEnd = nameStart;
+    for (mut int32 token = start; token < end; token = token + 1)
+    {
+        int32 offset = token * 3;
+        int32 kind = Host.Tokens[offset];
+        int32 tokenStart = Host.Tokens[offset + 1];
+        int32 tokenLength = Host.Tokens[offset + 2];
+        if (kind != 2 && kind != 54 || tokenLength <= 0
+            || kind == 54 && tokenLength != 1
+            || !ScalarProgramReaderRange(tokenStart, tokenLength, Host.Source.Length)
+            || tokenStart < previousEnd || tokenStart < nameStart
+            || tokenStart + tokenLength > nameEnd
+            || token == start && tokenStart != nameStart
+            || token == end - 1 && tokenStart + tokenLength != nameEnd)
+        {
+            return false;
+        }
+        if (kind == 54 && Host.Source[tokenStart] != 46)
+        {
+            return false;
+        }
+        previousEnd = tokenStart + tokenLength;
+    }
+    return true;
+}
+
+bool ScalarProgramReaderNamespaceSpan(int32 spanStart, int32 spanLength,
+    int32 functionSourceStart)
+{
+    int32 tokenLimit = Host.Tokens.Length / 3;
+    mut int32 eof = 0;
+    while (eof < tokenLimit && Host.Tokens[eof * 3] != 0)
+    {
+        eof = eof + 1;
+    }
+    if (eof >= tokenLimit
+        || Host.Tokens[eof * 3 + 1] != Host.Source.Length
+        || Host.Tokens[eof * 3 + 2] != 0
+        || spanStart < 0 || spanLength < 0
+        || spanLength > Host.Source.Length - spanStart
+        || functionSourceStart < 0 || functionSourceStart > Host.Source.Length)
+    {
+        return false;
+    }
+    for (mut int32 trailing = eof + 1; trailing < tokenLimit; trailing = trailing + 1)
+    {
+        int32 offset = trailing * 3;
+        if (Host.Tokens[offset] != 0 || Host.Tokens[offset + 1] != 0
+            || Host.Tokens[offset + 2] != 0)
+        {
+            return false;
+        }
+    }
+    if (spanLength == 0)
+    {
+        if (spanStart != 0) { return false; }
+        for (mut int32 token = 0; token < eof; token = token + 1)
+        {
+            if (Host.Tokens[token * 3] == 6) { return false; }
+        }
+        return true;
+    }
+    mut int32 at = 0;
+    mut bool matchesFunctionBlock = false;
+    mut int32 namespaces = 0;
+    while (at < eof)
+    {
+        if (Host.Tokens[at * 3] != 6)
+        {
+            return false;
+        }
+        int32 nameStart = at + 1;
+        if (nameStart >= eof || Host.Tokens[nameStart * 3] != 2)
+        {
+            return false;
+        }
+        mut int32 nameEnd = nameStart + 1;
+        while (nameEnd < eof && Host.Tokens[nameEnd * 3] == 54)
+        {
+            nameEnd = nameEnd + 1;
+            if (nameEnd >= eof || Host.Tokens[nameEnd * 3] != 2)
+            {
+                return false;
+            }
+            nameEnd = nameEnd + 1;
+        }
+        int32 nameStartOffset = Host.Tokens[nameStart * 3 + 1];
+        int32 lastName = nameEnd - 1;
+        int32 nameEndOffset = Host.Tokens[lastName * 3 + 1]
+            + Host.Tokens[lastName * 3 + 2];
+        if (nameStartOffset < 0 || nameEndOffset < nameStartOffset
+            || nameEndOffset > Host.Source.Length)
+        {
+            return false;
+        }
+        int32 namespaceTokenOffset = at * 3;
+        int32 namespaceKeywordStart = Host.Tokens[namespaceTokenOffset + 1];
+        if (!ScalarProgramReaderNamespaceKeyword(namespaceKeywordStart, nameStartOffset)
+            || !ScalarProgramReaderNamespaceNameTokens(
+                nameStart, nameEnd, nameStartOffset, nameEndOffset))
+        {
+            return false;
+        }
+        namespaces = namespaces + 1;
+        if (nameEnd >= eof)
+        {
+            return false;
+        }
+        int32 terminator = Host.Tokens[nameEnd * 3];
+        int32 terminatorStart = Host.Tokens[nameEnd * 3 + 1];
+        int32 terminatorLength = Host.Tokens[nameEnd * 3 + 2];
+        if (terminatorLength != 1
+            || terminatorStart < nameEndOffset
+            || !ScalarProgramReaderRange(terminatorStart, terminatorLength, Host.Source.Length))
+        {
+            return false;
+        }
+        if (terminator == 52)
+        {
+            if (namespaces != 1 || nameStartOffset != spanStart
+                || nameEndOffset - nameStartOffset != spanLength
+                || functionSourceStart < terminatorStart + terminatorLength)
+            {
+                return false;
+            }
+            for (mut int32 remaining = nameEnd + 1; remaining < eof; remaining = remaining + 1)
+            {
+                if (Host.Tokens[remaining * 3] == 6) { return false; }
+            }
+            return true;
+        }
+        if (terminator != 48)
+        {
+            return false;
+        }
+        if (Host.Source[terminatorStart] != '{')
+        {
+            return false;
+        }
+        int32 bodyStart = terminatorStart + terminatorLength;
+        mut int32 cursor = nameEnd + 1;
+        mut int32 namespaceDepth = 1;
+        mut bool hasNestedNamespace = false;
+        mut int32 leafNameStartOffset = nameStartOffset;
+        mut int32 leafNameLength = nameEndOffset - nameStartOffset;
+        mut int32 leafBodyStart = bodyStart;
+        while (cursor < eof && Host.Tokens[cursor * 3] == 6)
+        {
+            if (namespaceDepth >= 8)
+            {
+                return false;
+            }
+            int32 nestedNameStart = cursor + 1;
+            if (nestedNameStart >= eof || Host.Tokens[nestedNameStart * 3] != 2)
+            {
+                return false;
+            }
+            mut int32 nestedNameEnd = nestedNameStart + 1;
+            while (nestedNameEnd < eof && Host.Tokens[nestedNameEnd * 3] == 54)
+            {
+                nestedNameEnd = nestedNameEnd + 1;
+                if (nestedNameEnd >= eof || Host.Tokens[nestedNameEnd * 3] != 2)
+                {
+                    return false;
+                }
+                nestedNameEnd = nestedNameEnd + 1;
+            }
+            int32 nestedNameStartOffset = Host.Tokens[nestedNameStart * 3 + 1];
+            int32 nestedLastName = nestedNameEnd - 1;
+            int32 nestedNameEndOffset = Host.Tokens[nestedLastName * 3 + 1]
+                + Host.Tokens[nestedLastName * 3 + 2];
+            int32 nestedKeywordStart = Host.Tokens[cursor * 3 + 1];
+            if (nestedNameStartOffset < 0
+                || nestedNameEndOffset < nestedNameStartOffset
+                || nestedNameEndOffset > Host.Source.Length
+                || !ScalarProgramReaderNamespaceKeyword(
+                    nestedKeywordStart, nestedNameStartOffset)
+                || !ScalarProgramReaderNamespaceNameTokens(
+                    nestedNameStart, nestedNameEnd,
+                    nestedNameStartOffset, nestedNameEndOffset))
+            {
+                return false;
+            }
+            int32 nestedOpeningOffset = nestedNameEnd * 3;
+            int32 nestedOpeningStart = Host.Tokens[nestedOpeningOffset + 1];
+            int32 nestedOpeningLength = Host.Tokens[nestedOpeningOffset + 2];
+            if (Host.Tokens[nestedOpeningOffset] != 48
+                || nestedOpeningLength != 1
+                || nestedOpeningStart < nestedNameEndOffset
+                || !ScalarProgramReaderRange(
+                    nestedOpeningStart, nestedOpeningLength, Host.Source.Length)
+                || Host.Source[nestedOpeningStart] != '{')
+            {
+                return false;
+            }
+            hasNestedNamespace = true;
+            namespaceDepth = namespaceDepth + 1;
+            leafNameStartOffset = nestedNameStartOffset;
+            leafNameLength = nestedNameEndOffset - nestedNameStartOffset;
+            leafBodyStart = nestedOpeningStart + nestedOpeningLength;
+            cursor = nestedNameEnd + 1;
+        }
+        mut int32 depth = namespaceDepth;
+        mut int32 leafCloseStart = 0;
+        while (cursor < eof && depth != 0)
+        {
+            int32 kind = Host.Tokens[cursor * 3];
+            if (hasNestedNamespace && depth < namespaceDepth && kind != 49
+                || kind == 6 || kind == 5
+                || kind == 102 && (hasNestedNamespace ? depth != namespaceDepth : depth != 1))
+            {
+                return false;
+            }
+            if (kind == 48 || kind == 49)
+            {
+                int32 offset = cursor * 3;
+                int32 tokenStart = Host.Tokens[offset + 1];
+                int32 tokenLength = Host.Tokens[offset + 2];
+                if (tokenLength != 1
+                    || !ScalarProgramReaderRange(tokenStart, tokenLength, Host.Source.Length)
+                    || kind == 48 && Host.Source[tokenStart] != '{'
+                    || kind == 49 && Host.Source[tokenStart] != '}')
+                {
+                    return false;
+                }
+                if (kind == 48) { depth = depth + 1; }
+                else
+                {
+                    if (depth == namespaceDepth)
+                    {
+                        leafCloseStart = tokenStart;
+                    }
+                    depth = depth - 1;
+                }
+            }
+            cursor = cursor + 1;
+        }
+        if (depth != 0)
+        {
+            return false;
+        }
+        int32 close = cursor - 1;
+        int32 closeStart = Host.Tokens[close * 3 + 1];
+        if (hasNestedNamespace
+            && leafNameStartOffset == spanStart && leafNameLength == spanLength
+            && functionSourceStart >= leafBodyStart
+            && functionSourceStart < leafCloseStart
+            || !hasNestedNamespace
+            && nameStartOffset == spanStart && nameEndOffset - nameStartOffset == spanLength
+            && functionSourceStart >= bodyStart && functionSourceStart < closeStart)
+        {
+            matchesFunctionBlock = true;
+        }
+        at = cursor;
+        if (at < eof && Host.Tokens[at * 3] != 6)
+        {
+            return false;
+        }
+    }
+    return matchesFunctionBlock;
+}
+
+bool ScalarProgramReaderTokenSpan(int32 tokenStart, int32 tokenEnd,
+    int32 spanStart, int32 spanLength, int32 tokenKind)
+{
+    for (mut int32 token = tokenStart; token < tokenEnd; token = token + 1)
+    {
+        int32 offset = token * 3;
+        if (Host.Tokens[offset] == tokenKind
+            && Host.Tokens[offset + 1] == spanStart
+            && Host.Tokens[offset + 2] == spanLength)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ScalarProgramReaderKnownNodeOperation(int32 operation)
+{
+    return operation == 0 || operation == 3 || operation == 20 || operation == 21
+        || operation == 46 || operation == 57 || operation == 58 || operation == 59
+        || operation == 60 || operation == 61 || operation == 62 || operation == 63
+        || operation >= 65 && operation <= 75
+        || operation == 83 || operation == 84 || operation == 86 || operation == 87
+        || operation >= 88 && operation <= 101
+        || operation == 103 || operation == 104 || operation == 105
+        || operation == 107 || operation == 108 || operation == 109 || operation == 110;
+}
+
+bool ScalarProgramReaderCallRoot(int32 root, int32 node)
+{
+    return root >= 0 && root < node;
+}
+
+bool ScalarProgramReaderNodeShape(int32 body, int32 operation,
+    int32 type, int32 node, int32 parameterCount, int32 localCount)
+{
+    int32 offset = ScalarProgramReaderNodeOffset(body, node);
+    int32 left = Host.FrontendProgram[offset + 4];
+    int32 right = Host.FrontendProgram[offset + 5];
+    int32 third = Host.FrontendProgram[offset + 6];
+    int32 high = Host.FrontendProgram[offset + 7];
+    int32 leftType = left >= 0 && left < node
+        ? Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, left) + 1] : -1;
+    int32 rightType = right >= 0 && right < node
+        ? Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, right) + 1] : -1;
+    int32 thirdType = third >= 0 && third < node
+        ? Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, third) + 1] : -1;
+    if (operation == 0 || operation == 103 || operation == 104
+        || operation == 107 || operation == 108)
+    {
+        if (right != -1 || third != 0 || high != 0
+            || !ScalarProgramReaderSlotType(body, parameterCount, localCount,
+                left, init var slotType))
+        {
+            return false;
+        }
+        return type == slotType;
+    }
+    if (operation == 3)
+    {
+        return left == -1 && right == -1;
+    }
+    if (operation == 20 || operation == 21)
+    {
+        return type == 5 && left == -1 && right == -1 && third == 0 && high == 0;
+    }
+    if (operation == 105)
+    {
+        return true;
+    }
+    if (operation == 84)
+    {
+        return ScalarProgramReaderCallRoot(left, node)
+            && ScalarProgramReaderCallRoot(right, node)
+            && ScalarProgramReaderCallRoot(third, node)
+            && leftType == 5 && rightType == type && thirdType == type
+            && high == 0;
+    }
+    if (operation == 109)
+    {
+        return ScalarProgramReaderCallRoot(left, node)
+            && type == 5 && right == -1 && third == 0 && high == 0;
+    }
+    if (operation == 57 || operation == 58)
+    {
+        if (right == -1)
+        {
+            return ScalarProgramReaderCallRoot(left, node)
+                && type == leftType && third == 0 && high == 0;
+        }
+        return ScalarProgramReaderCallRoot(left, node)
+            && ScalarProgramReaderCallRoot(right, node)
+            && type == leftType && leftType == rightType
+            && third == 0 && high == 0;
+    }
+    if (operation == 46 || operation == 63 || operation == 83
+        || operation == 86 || operation == 87 || operation == 110)
+    {
+        return ScalarProgramReaderCallRoot(left, node)
+            && (operation == 83 || type == leftType)
+            && right == -1 && third == 0 && high == 0;
+    }
+    if (operation == 62)
+    {
+        return ScalarProgramReaderCallRoot(left, node)
+            && type == 5 && leftType == 5
+            && right == -1 && third == 0 && high == 0;
+    }
+    if (operation == 65 || operation == 66 || operation == 67 || operation == 68
+        || operation == 69 || operation == 70)
+    {
+        return ScalarProgramReaderCallRoot(left, node)
+            && ScalarProgramReaderCallRoot(right, node)
+            && type == 5 && leftType == rightType
+            && third == 0 && high == 0;
+    }
+    if (operation == 72 || operation == 74)
+    {
+        return ScalarProgramReaderCallRoot(left, node)
+            && ScalarProgramReaderCallRoot(right, node)
+            && type == 5 && leftType == 5 && rightType == 5
+            && third == 0 && high == 0;
+    }
+    if (operation >= 88 && operation <= 90)
+    {
+        return ScalarProgramReaderCallRoot(left, node)
+            && ScalarProgramReaderCallRoot(right, node)
+            && type == leftType && rightType == 1
+            && third == 0 && high == 0;
+    }
+    return ScalarProgramReaderCallRoot(left, node)
+        && ScalarProgramReaderCallRoot(right, node)
+        && type == leftType && leftType == rightType
+        && third == 0 && high == 0;
+}
+
+bool ScalarProgramReaderReturnRoot(int32 body, int32 root, int32 nodeCount, int32 returnType)
+{
+    return root == -1 || root >= 0 && root < nodeCount
+        && returnType >= 1 && returnType <= 8
+        && Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, root) + 1] == returnType;
+}
+
+bool ScalarProgramReaderConditionRoot(int32 body, int32 root, int32 nodeCount)
+{
+    return root >= 0 && root < nodeCount
+        && Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, root) + 1] == 5;
+}
+
+bool ScalarProgramReaderVoidCallStatement(int32 body, int32 node, int32 statementCount)
+{
+    for (mut int32 statement = 0; statement < statementCount; statement = statement + 1)
+    {
+        int32 offset = body + 332 + statement * 5;
+        if (Host.FrontendProgram[offset] == 37
+            && Host.FrontendProgram[offset + 2] == node)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ScalarProgramReaderSlotType(int32 body, int32 parameterCount, int32 localCount,
+    int32 slot, init ref<int32> type)
+{
+    if (slot <= 0 || slot > parameterCount + localCount)
+    {
+        return false;
+    }
+    if (slot <= parameterCount)
+    {
+        int32 field = slot == 1 ? 7 : (slot == 2 ? 8 : (slot == 3 ? 34 : 18));
+        type = Host.FrontendProgram[body + field];
+    }
+    else
+    {
+        int32 local = slot - parameterCount - 1;
+        type = Host.FrontendProgram[body + 300 + local * 4];
+    }
+    return type >= 1 && type <= 8;
+}
+
+bool ScalarProgramReaderValidateCall(int32 body, int32 node, int32 target)
+{
+    int32 offset = ScalarProgramReaderNodeOffset(body, node);
+    int32 left = Host.FrontendProgram[offset + 4];
+    int32 right = Host.FrontendProgram[offset + 5];
+    int32 third = Host.FrontendProgram[offset + 6];
+    int32 high = Host.FrontendProgram[offset + 7];
+    int32 argumentCount = high & 7;
+    int32 mapping = (high >> 3) & 255;
+    int32 namedMarker = high & 2048;
+    int32 fourthRootPlusOne = (high >> 12) & 63;
+    if ((high >> 18) != 0 || argumentCount > 4
+        || argumentCount == 0 && namedMarker != 0)
+    {
+        return false;
+    }
+    if (namedMarker == 0 && mapping != 0)
+    {
+        return false;
+    }
+    mut int32 assignedParameters = 0;
+    for (mut int32 ordinal = 0; ordinal < 4; ordinal = ordinal + 1)
+    {
+        int32 parameter = (mapping >> (ordinal * 2)) & 3;
+        if (ordinal >= argumentCount)
+        {
+            if (parameter != 0) { return false; }
+        }
+        else if (namedMarker != 0)
+        {
+            if (parameter >= argumentCount
+                || (assignedParameters & (1 << parameter)) != 0)
+            {
+                return false;
+            }
+            assignedParameters = assignedParameters | (1 << parameter);
+        }
+    }
+    if ((argumentCount > 0
+            ? !ScalarProgramReaderCallRoot(left, node)
+            : left != -1)
+        || (argumentCount > 1
+            ? !ScalarProgramReaderCallRoot(right, node)
+            : right != -1)
+        || (argumentCount > 2
+            ? !ScalarProgramReaderCallRoot(third, node)
+            : third != -1)
+        || (argumentCount == 4
+            ? fourthRootPlusOne == 0
+                || !ScalarProgramReaderCallRoot(fourthRootPlusOne - 1, node)
+            : fourthRootPlusOne != 0))
+    {
+        return false;
+    }
+
+    int32 callee = 8 + target * 780;
+    int32 returnType = Host.FrontendProgram[callee + 5];
+    if (Host.FrontendProgram[callee + 6] != argumentCount
+        || returnType < 0 || returnType > 8
+        || Host.FrontendProgram[offset + 1] != returnType)
+    {
+        return false;
+    }
+    for (mut int32 ordinal = 0; ordinal < argumentCount; ordinal = ordinal + 1)
+    {
+        int32 parameter = namedMarker == 0 ? ordinal
+            : (mapping >> (ordinal * 2)) & 3;
+        int32 field = parameter == 0 ? 7 : (parameter == 1 ? 8
+            : (parameter == 2 ? 34 : 18));
+        int32 parameterType = Host.FrontendProgram[callee + field];
+        int32 root = ordinal == 0 ? left : (ordinal == 1 ? right
+            : (ordinal == 2 ? third : fourthRootPlusOne - 1));
+        int32 argument = ScalarProgramReaderNodeOffset(body, root);
+        int32 operation = Host.FrontendProgram[argument];
+        bool expectsOut = (Host.FrontendProgram[callee + 16] & (1 << parameter)) != 0;
+        bool expectsInitRef = (Host.FrontendProgram[callee + 17] & (1 << parameter)) != 0;
+        if (parameterType < 1 || parameterType > 8
+            || Host.FrontendProgram[argument + 1] != parameterType
+            || expectsOut != (operation == 103 || operation == 104)
+            || expectsInitRef != (operation == 107 || operation == 108))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ScalarProgramReaderValidateFrame(int32 function,
+    int32 previousTokenEnd, int32 previousSourceEnd,
+    int32 maximumTokenEnd,
+    init ref<int32> nextTokenEnd, init ref<int32> nextSourceEnd)
+{
+    int32 frame = 4 + function * 780;
+    int32 body = frame + 4;
+    int32 tokenStart = Host.FrontendProgram[frame];
+    int32 tokenEnd = Host.FrontendProgram[frame + 1];
+    int32 sourceStart = Host.FrontendProgram[frame + 2];
+    int32 sourceLength = Host.FrontendProgram[frame + 3];
+    int32 sourceLengthLimit = Host.Source.Length;
+    int32 namespaceNameStart = Host.FrontendProgram[body + 21];
+    int32 namespaceNameLength = Host.FrontendProgram[body + 22];
+    if (tokenStart < previousTokenEnd || tokenStart < 0 || tokenEnd <= tokenStart
+        || tokenEnd > maximumTokenEnd || tokenEnd > Host.Tokens.Length / 3
+        || sourceStart < previousSourceEnd || sourceLength <= 0
+        || !ScalarProgramReaderRange(sourceStart, sourceLength, sourceLengthLimit)
+        || !ScalarProgramReaderNamespaceSpan(namespaceNameStart, namespaceNameLength, sourceStart)
+        || namespaceNameLength > 0
+            && (!ScalarProgramReaderRange(namespaceNameStart, namespaceNameLength, sourceLengthLimit)
+                || namespaceNameStart + namespaceNameLength > sourceStart)
+        || Host.FrontendProgram[body] != 88 || Host.FrontendProgram[body + 1] != 1
+        || Host.FrontendProgram[body + 2] < 0 || Host.FrontendProgram[body + 2] > 15
+        || Host.FrontendProgram[body + 3] != 0 || Host.FrontendProgram[body + 4] != 0
+        || Host.FrontendProgram[body + 5] < 0 || Host.FrontendProgram[body + 5] > 15
+        || Host.FrontendProgram[body + 6] < 0 || Host.FrontendProgram[body + 6] > 4
+        || Host.FrontendProgram[body + 7] < 0 || Host.FrontendProgram[body + 7] > 15
+        || Host.FrontendProgram[body + 8] < 0 || Host.FrontendProgram[body + 8] > 15
+        || Host.FrontendProgram[body + 16] < 0 || Host.FrontendProgram[body + 16] > 15
+        || Host.FrontendProgram[body + 17] < 0 || Host.FrontendProgram[body + 17] > 15
+        || Host.FrontendProgram[body + 18] < 0 || Host.FrontendProgram[body + 18] > 15
+        || !ScalarProgramReaderZero(body + 23, body + 34)
+        || Host.FrontendProgram[body + 34] < 0 || Host.FrontendProgram[body + 34] > 15)
+    {
+        return false;
+    }
+
+    int32 parameterCount = Host.FrontendProgram[body + 6];
+    int32 functionNameStart = Host.FrontendProgram[body + 9];
+    int32 functionNameLength = Host.FrontendProgram[body + 10];
+    if (functionNameLength <= 0
+        || !ScalarProgramReaderFrameRange(functionNameStart, functionNameLength,
+            sourceStart, sourceLength, sourceLengthLimit)
+        || !ScalarProgramReaderIdentifierSpan(tokenStart, tokenEnd,
+            functionNameStart, functionNameLength))
+    {
+        return false;
+    }
+    for (mut int32 parameter = 0; parameter < 4; parameter = parameter + 1)
+    {
+        int32 nameStart = parameter == 0 ? Host.FrontendProgram[body + 11]
+            : (parameter == 1 ? Host.FrontendProgram[body + 13]
+                : (parameter == 2 ? Host.FrontendProgram[body + 35]
+                    : Host.FrontendProgram[body + 19]));
+        int32 nameLength = parameter == 0 ? Host.FrontendProgram[body + 12]
+            : (parameter == 1 ? Host.FrontendProgram[body + 14]
+                : (parameter == 2 ? Host.FrontendProgram[body + 36]
+                    : Host.FrontendProgram[body + 20]));
+        if (parameter < parameterCount)
+        {
+            if (nameLength <= 0
+                || !ScalarProgramReaderFrameRange(nameStart, nameLength,
+                    sourceStart, sourceLength, sourceLengthLimit)
+                || !ScalarProgramReaderIdentifierSpan(tokenStart, tokenEnd,
+                    nameStart, nameLength))
+            {
+                return false;
+            }
+        }
+        else if (nameStart != 0 || nameLength != 0)
+        {
+            return false;
+        }
+    }
+
+    int32 parameterMask = (1 << parameterCount) - 1;
+    int32 outMask = Host.FrontendProgram[body + 16];
+    int32 initRefMask = Host.FrontendProgram[body + 17];
+    for (mut int32 parameter = 0; parameter < 4; parameter = parameter + 1)
+    {
+        int32 parameterType = parameter == 0 ? Host.FrontendProgram[body + 7]
+            : (parameter == 1 ? Host.FrontendProgram[body + 8]
+                : (parameter == 2 ? Host.FrontendProgram[body + 34]
+                    : Host.FrontendProgram[body + 18]));
+        if (parameter < parameterCount
+                && (parameterType < 1 || parameterType > 8)
+            || parameter >= parameterCount && parameterType != 0)
+        {
+            return false;
+        }
+    }
+    if ((outMask & parameterMask) != outMask
+        || (initRefMask & parameterMask) != initRefMask
+        || (outMask & initRefMask) != 0)
+    {
+        return false;
+    }
+
+    int32 nodeCount = Host.FrontendProgram[body + 37];
+    int32 statementCount = Host.FrontendProgram[body + 298];
+    int32 localCount = Host.FrontendProgram[body + 299];
+    if (nodeCount < 0 || nodeCount > 64
+        || statementCount < 0 || statementCount > 12
+        || localCount < 0 || localCount > 8
+        || !ScalarProgramReaderZero(body + 42
+            + (nodeCount < 32 ? nodeCount : 32) * 8, body + 298)
+        || !ScalarProgramReaderZero(body + 392
+            + (nodeCount > 32 ? nodeCount - 32 : 0) * 8, body + 648)
+        || !ScalarProgramReaderZero(body + 648, body + 712)
+        || !ScalarProgramReaderZero(body + 300 + localCount * 4, body + 332)
+        || !ScalarProgramReaderZero(body + 332 + statementCount * 5, body + 392))
+    {
+        return false;
+    }
+    for (mut int32 local = 0; local < localCount; local = local + 1)
+    {
+        int32 offset = body + 300 + local * 4;
+        int32 localType = Host.FrontendProgram[offset];
+        int32 flags = Host.FrontendProgram[offset + 1];
+        int32 nameStart = Host.FrontendProgram[offset + 2];
+        int32 nameLength = Host.FrontendProgram[offset + 3];
+        bool nameIsToken = flags == 8
+            ? ScalarProgramReaderTokenSpan(tokenStart, tokenEnd, nameStart, nameLength, 35)
+            : ScalarProgramReaderIdentifierSpan(tokenStart, tokenEnd, nameStart, nameLength);
+        if (localType < 1 || localType > 8
+            || flags != 0 && flags != 1 && flags != 2 && flags != 4 && flags != 8
+            || nameLength <= 0
+            || !ScalarProgramReaderFrameRange(nameStart, nameLength,
+                sourceStart, sourceLength, sourceLengthLimit)
+            || !nameIsToken)
+        {
+            return false;
+        }
+    }
+
+    for (mut int32 node = 0; node < nodeCount; node = node + 1)
+    {
+        int32 offset = ScalarProgramReaderNodeOffset(body, node);
+        int32 operation = Host.FrontendProgram[offset];
+        int32 type = Host.FrontendProgram[offset + 1];
+        int32 spanStart = Host.FrontendProgram[offset + 2];
+        int32 spanLength = Host.FrontendProgram[offset + 3];
+        int32 target = Host.FrontendProgram[frame + 4 + 712 + node];
+        if (!ScalarProgramReaderKnownNodeOperation(operation)
+            || type < 0 || type > 8
+            || spanLength <= 0
+            || !ScalarProgramReaderFrameRange(spanStart, spanLength,
+                sourceStart, sourceLength, sourceLengthLimit)
+            || !ScalarProgramReaderNodeTokenSpan(tokenStart, tokenEnd,
+                operation, spanStart, spanLength)
+            || !ScalarProgramReaderNodeShape(body, operation, type, node,
+                parameterCount, localCount)
+            || type == 0 && (operation != 105
+                || !ScalarProgramReaderVoidCallStatement(body, node, statementCount)))
+        {
+            return false;
+        }
+        if (operation == 105)
+        {
+            if (target < 0 || target >= Host.FrontendProgram[2]
+                || !ScalarProgramReaderValidateCall(body, node, target))
+            {
+                return false;
+            }
+        }
+        else if (operation == 102 || target != -1)
+        {
+            return false;
+        }
+    }
+    for (mut int32 node = nodeCount; node < 64; node = node + 1)
+    {
+        if (Host.FrontendProgram[frame + 4 + 712 + node] != -1)
+        {
+            return false;
+        }
+    }
+    for (mut int32 statement = 0; statement < statementCount; statement = statement + 1)
+    {
+        int32 offset = body + 332 + statement * 5;
+        int32 kind = Host.FrontendProgram[offset];
+        if (kind == 1 || kind == 27 || kind == 28)
+        {
+            int32 slot = Host.FrontendProgram[offset + 1];
+            int32 root = Host.FrontendProgram[offset + 2];
+            if (slot <= parameterCount
+                || !ScalarProgramReaderSlotType(body, parameterCount, localCount,
+                    slot, init var localType)
+                || root < 0 || root >= nodeCount)
+            {
+                return false;
+            }
+            if (Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, root) + 1]
+                != localType)
+            {
+                return false;
+            }
+        }
+        else if (kind == 2 || kind == 9)
+        {
+            int32 slot = Host.FrontendProgram[offset + 1];
+            int32 root = Host.FrontendProgram[offset + 2];
+            if (!ScalarProgramReaderSlotType(body, parameterCount, localCount,
+                    slot, init var slotType)
+                || root < 0 || root >= nodeCount
+                || Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, root) + 1]
+                    != slotType)
+            {
+                return false;
+            }
+            if (slot <= parameterCount)
+            {
+                int32 mask = kind == 2 ? outMask | initRefMask : outMask;
+                if ((mask & (1 << (slot - 1))) == 0)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+
+    int32 returnType = Host.FrontendProgram[body + 5];
+    if (returnType < 0 || returnType > 8
+        || !ScalarProgramReaderReturnRoot(body, Host.FrontendProgram[body + 39],
+            nodeCount, returnType)
+        || !ScalarProgramReaderReturnRoot(body, Host.FrontendProgram[body + 40],
+            nodeCount, returnType))
+    {
+        return false;
+    }
+    int32 returnStatementCount = Host.FrontendProgram[body + 298];
+    for (mut int32 statement = 0; statement < returnStatementCount; statement = statement + 1)
+    {
+        int32 offset = body + 332 + statement * 5;
+        if (Host.FrontendProgram[offset] == 8)
+        {
+            int32 root = Host.FrontendProgram[offset + 2];
+            if (root == -1
+                || !ScalarProgramReaderReturnRoot(body, root, nodeCount, returnType))
+            {
+                return false;
+            }
+        }
+        else if (Host.FrontendProgram[offset] == 22
+            && (returnType != 0 || Host.FrontendProgram[offset + 2] != -1))
+        {
+            return false;
+        }
+    }
+    for (mut int32 statement = 0; statement < statementCount; statement = statement + 1)
+    {
+        int32 offset = body + 332 + statement * 5;
+        int32 encodedKind = Host.FrontendProgram[offset];
+        // v88 stores labeled loop/transfer variants in a separate raw tag range.
+        int32 kind = encodedKind == 16 ? 3 : (encodedKind == 17 ? 11
+            : (encodedKind == 18 ? 12 : (encodedKind == 19 ? 6
+                : (encodedKind == 20 ? 7 : encodedKind))));
+        int32 slot = Host.FrontendProgram[offset + 1];
+        int32 root = Host.FrontendProgram[offset + 2];
+        int32 spanStart = Host.FrontendProgram[offset + 3];
+        int32 spanLength = Host.FrontendProgram[offset + 4];
+        bool hasStatementEnd = kind == 3 || kind == 4 || kind == 5 || kind == 11
+            || kind == 12 || kind == 14 || kind == 23 || kind == 29 || kind == 30
+            || kind == 31 || kind == 32 || kind == 33 || kind == 34
+            || kind == 38 || kind == 39;
+        bool refersToPreviousStatement = kind == 6 || kind == 7 || kind == 40;
+        bool requiresZeroSlot = kind == 8 || kind == 10 || kind == 13 || kind == 21
+            || kind == 22 || kind == 35 || kind == 36 || kind == 37;
+        bool assignment = kind == 2 || kind == 9;
+        bool rootIsAbsent = kind == 5 || kind == 6 || kind == 7 || kind == 13
+            || kind == 14 || kind == 22 || kind == 23 || kind == 24 || kind == 25
+            || kind == 26 || kind == 29 || kind == 30 || kind == 31 || kind == 32
+            || kind == 33 || kind == 34;
+        bool rootIsOptional = kind == 12 || kind == 39 || kind == 40;
+        bool requiresCondition = kind == 3 || kind == 4 || kind == 11
+            || kind == 35 || kind == 36;
+        bool optionalCondition = kind == 12;
+        if (kind < 1 || kind > 40
+            || spanLength <= 0
+            || !ScalarProgramReaderFrameRange(spanStart, spanLength,
+                sourceStart, sourceLength, sourceLengthLimit)
+            || hasStatementEnd && (slot <= statement || slot > statementCount)
+            || refersToPreviousStatement && (slot < 0 || slot >= statement)
+            || requiresZeroSlot && slot != 0
+            || !hasStatementEnd && !refersToPreviousStatement && !requiresZeroSlot
+                && !assignment
+                && (slot <= parameterCount || slot > parameterCount + localCount)
+            || rootIsAbsent && root != -1
+            || rootIsOptional && root != -1 && (root < 0 || root >= nodeCount)
+            || !rootIsAbsent && !rootIsOptional && (root < 0 || root >= nodeCount)
+            || requiresCondition && !ScalarProgramReaderConditionRoot(body, root, nodeCount)
+            || optionalCondition && root != -1
+                && !ScalarProgramReaderConditionRoot(body, root, nodeCount))
+        {
+            return false;
+        }
+    }
+
+    int32 conditionKind = Host.FrontendProgram[body + 15];
+    int32 conditionRoot = Host.FrontendProgram[body + 38];
+    if (conditionKind < 0 || conditionKind > 2
+        || (conditionKind == 0
+            ? conditionRoot != -1
+            : !ScalarProgramReaderConditionRoot(body, conditionRoot, nodeCount)))
+    {
+        return false;
+    }
+
+    nextTokenEnd = tokenEnd;
+    nextSourceEnd = sourceStart + sourceLength;
+    return true;
+}
+
+bool TryDecodeScalarFrontendProgram(int32 recordWordCount, int32 maximumTokenEnd)
+{
+    if (recordWordCount != 25025 || Host.FrontendProgram.Length != 25025
+        || !ScalarProgramReaderPublicationZero()
+        || maximumTokenEnd < 0
+        || Host.FrontendProgram[0] != 88 || Host.FrontendProgram[1] != 1
+        || Host.FrontendProgram[2] < 1 || Host.FrontendProgram[2] > 32
+        || Host.FrontendProgram[3] != 0
+        || !ScalarProgramReaderZero(4 + Host.FrontendProgram[2] * 780,
+            Host.FrontendProgram.Length))
+    {
+        return false;
+    }
+
+    mut int32 previousTokenEnd = 0;
+    mut int32 previousSourceEnd = 0;
+    for (mut int32 function = 0; function < Host.FrontendProgram[2]; function = function + 1)
+    {
+        if (!ScalarProgramReaderValidateFrame(function, previousTokenEnd, previousSourceEnd,
+                maximumTokenEnd,
+                init var nextTokenEnd, init var nextSourceEnd))
+        {
+            return false;
+        }
+        previousTokenEnd = nextTokenEnd;
+        previousSourceEnd = nextSourceEnd;
+    }
+
+    for (mut int32 index = 0; index < Host.Frontend.Length; index = index + 1)
+    {
+        Host.Frontend[index] = 0;
+    }
+    Host.Frontend[0] = 88;
+    Host.Frontend[1] = 1;
+    for (mut int32 function = 0; function < Host.FrontendProgram[2]; function = function + 1)
+    {
+        int32 frame = 4 + function * 780;
+        int32 body = frame + 4;
+        int32 entry = 2 + function * 7;
+        int32 parameterCount = Host.FrontendProgram[body + 6];
+        int32 signature = Host.FrontendProgram[body + 5]
+            | (Host.FrontendProgram[body + 7] << 4)
+            | (Host.FrontendProgram[body + 8] << 8)
+            | (Host.FrontendProgram[body + 34] << 12)
+            | (Host.FrontendProgram[body + 18] << 16)
+            | (Host.FrontendProgram[body + 2] << 20)
+            | (parameterCount << 24)
+            | (Host.FrontendProgram[body + 16] << 27);
+        Host.Frontend[entry] = Host.FrontendProgram[frame];
+        Host.Frontend[entry + 1] = Host.FrontendProgram[frame + 1];
+        Host.Frontend[entry + 2] = Host.FrontendProgram[frame + 2];
+        Host.Frontend[entry + 3] = Host.FrontendProgram[frame + 3];
+        Host.Frontend[entry + 4] = signature;
+        Host.Frontend[entry + 5] = Host.FrontendProgram[body + 37];
+        Host.Frontend[entry + 6] = Host.FrontendProgram[body + 298]
+            | (Host.FrontendProgram[body + 299] << 4)
+            | (Host.FrontendProgram[body + 17] << 8);
+        for (mut int32 node = 0; node < 64; node = node + 1)
+        {
+            int32 operation = Host.FrontendProgram[ScalarProgramReaderNodeOffset(body, node)];
+            int32 target = Host.FrontendProgram[frame + 4 + 712 + node];
+            if (node < Host.FrontendProgram[body + 37] && operation == 105)
+            {
+                Host.Frontend[226 + function * 64 + node] = target + 1;
+            }
+        }
+    }
+    return true;
+}

@@ -385,7 +385,7 @@ public sealed class OperatorRunTests
                 ? "public int32 Value(int32 x) => " + unary + ";"
                 : "public int32 Value(int32 x) { do { return " + unary + "; } while (false); }";
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = 85; words[1] = 1; words[2] = 1; words[5] = 1;
+            words[0] = 87; words[1] = 1; words[2] = 1; words[5] = 1;
             words[6] = 1; words[7] = 1;
             words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
             words[11] = text.IndexOf("x)", StringComparison.Ordinal); words[12] = 1;

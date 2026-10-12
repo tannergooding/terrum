@@ -62,7 +62,7 @@ public sealed partial class CliTests
                     "frontend-component", frontend, "-", "--runtime", policy, "--json");
                 Assert.True(componentExit == 0, $"{policy}: {componentOutput}{componentError}");
                 using var document = JsonDocument.Parse(componentOutput);
-                Assert.Equal(85, document.RootElement.GetProperty("result")
+                Assert.Equal(87, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
@@ -265,7 +265,7 @@ public sealed partial class CliTests
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(nodes, result.GetProperty("nodes").GetArrayLength());
                 Assert.DoesNotContain(result.GetProperty("statements").EnumerateArray(),
                     statement => statement.GetProperty("kind").GetInt32() == 8);
@@ -283,20 +283,66 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData(64, true)]
+    [InlineData(64, false)]
     [InlineData(65, false)]
-    public async Task StandaloneBlocksRetainTheExactSixtyFourTokenBudgetAsync(int count, bool valid)
+    [InlineData(82, false)]
+    [InlineData(90, true)]
+    public async Task StandaloneBlocksAtAndBeyondPreviousWindowMatchHostedExecutablesAndJitAsync(
+        int count, bool mutableLocals)
     {
-        var declarations = string.Concat(Enumerable.Range(0, 8).Select(i => $"int32 x{i} = {i}; "));
-        var expression = count == 64 ? "((((((42))))))" : "+((((((42))))))";
-        var source = $"int32 Main() {{ {{ {declarations} return {expression}; }} }}";
+        var mutability = mutableLocals ? "mut " : string.Empty;
+        var declarations = string.Concat(Enumerable.Range(0, 8)
+            .Select(i => $"{mutability}int32 x{i} = {i}; "));
+        var expression = count switch {
+            64 => "((((((42))))))",
+            65 => "+((((((42))))))",
+            82 or 90 => string.Concat(new string('(', 15), "42", new string(')', 15)),
+            _ => throw new ArgumentOutOfRangeException(nameof(count)),
+        };
+        var source = $"int32 Main() {{ {{ {declarations}return {expression}; }} }}";
         Assert.Equal(count, Lexer.Lex(SourceText.From(source)).Tokens.Length);
-        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        var root = RepositoryRoot();
+        var frontend = Path.Combine(root, "self-host");
+        var nativePath = Path.Combine(root, $"blocks-window-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = Path.Combine(root, $"blocks-window-{Guid.NewGuid():N}.hosted.exe");
+        var scannerPath = Path.Combine(root, $"blocks-window-{Guid.NewGuid():N}.scanner.exe");
+        try
         {
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
-                "--runtime", policy, "--json");
-            Assert.True(exit == (valid ? 0 : 1), $"{policy}: {output}{error}");
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (componentExit, componentOutput, componentError) = await RunAsync(input,
+                    "frontend-component", frontend, "-", "--runtime", policy, "--json");
+                Assert.True(componentExit == 0, $"{policy}: {componentOutput}{componentError}");
+                using var document = JsonDocument.Parse(componentOutput);
+                Assert.Equal(87, document.RootElement.GetProperty("result")
+                    .GetProperty("projectionVersion").GetInt32());
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                    "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
+                var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                    "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.True(nativeExit == 0, $"{policy}: {nativeOutput}{nativeError}");
+                Assert.True(hostedExit == 0, $"{policy}: {hostedOutput}{hostedError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
+                var (scannerExit, scannerOutput, scannerError) = await RunAsync(input,
+                    "build-component", frontend, "-", "-o", scannerPath,
+                    "--runtime", policy, "--json");
+                Assert.True(scannerExit == 0, $"{policy}: {scannerOutput}{scannerError}");
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(scannerPath));
+                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
+                var (runExit, runOutput, runError) = await RunAsync(input,
+                    "frontend-run", frontend, "-", "--runtime", policy, "--json");
+                var (jitExit, jitOutput, jitError) = await RunAsync(input,
+                    "jit", "-", "--runtime", policy, "--json");
+                Assert.True(runExit == 42, $"{policy}: {runOutput}{runError}");
+                Assert.True(jitExit == 42, $"{policy}: {jitOutput}{jitError}");
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+            File.Delete(scannerPath);
         }
     }
 
@@ -393,7 +439,7 @@ public sealed partial class CliTests
             if (valid)
             {
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(85, document.RootElement.GetProperty("result")
+                Assert.Equal(87, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
             }
         }

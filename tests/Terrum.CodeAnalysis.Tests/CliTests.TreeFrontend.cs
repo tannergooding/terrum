@@ -145,7 +145,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var operands = new string[18];
+        var operands = new string[34];
         Array.Fill(operands, "x");
         var source = "public int32 Value(int32 x) => "
             + string.Join(" + ", operands) + ";";
@@ -172,7 +172,7 @@ public sealed partial class CliTests
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
         var result = document.RootElement.GetProperty("result");
-        Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+        Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
         Assert.True(result.GetProperty("expressionBody").GetBoolean());
         Assert.Equal(-1, result.GetProperty("conditionRoot").GetInt32());
         var nodes = result.GetProperty("nodes");

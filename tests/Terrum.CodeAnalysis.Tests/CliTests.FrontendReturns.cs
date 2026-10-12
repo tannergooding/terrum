@@ -41,7 +41,7 @@ public sealed partial class CliTests
                 Assert.Empty(projectionError);
                 using var document = JsonDocument.Parse(projectionOutput);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(3, result.GetProperty("statements").EnumerateArray()
                     .Count(statement => statement.GetProperty("kind").GetInt32() == 8));
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
@@ -209,17 +209,17 @@ public sealed partial class CliTests
             Assert.False(failure.RootElement.GetProperty("success").GetBoolean());
 
             var maximumNodes = "int32 Main() { while (false) { return 0; } return +1"
-                + string.Concat(Enumerable.Repeat(" + 1", 14)) + "; }";
+                + string.Concat(Enumerable.Repeat(" + 1", 30)) + "; }";
             var (nodesExit, nodesOutput, nodesError) = await RunAsync(Encoding.UTF8.GetBytes(maximumNodes),
                 "frontend-component", frontend, "-", "--runtime", policy, "--json");
             Assert.True(nodesExit == 0,
                 $"frontend-component {policy} exited {nodesExit}: {nodesOutput}{nodesError}");
             Assert.Empty(nodesError);
             using var nodesDocument = JsonDocument.Parse(nodesOutput);
-            Assert.Equal(32, nodesDocument.RootElement.GetProperty("result")
+            Assert.Equal(64, nodesDocument.RootElement.GetProperty("result")
                 .GetProperty("nodes").GetArrayLength());
             var tooManyNodes = "int32 Main() { while (false) { return 0; } return +1"
-                + string.Concat(Enumerable.Repeat(" + 1", 15)) + "; }";
+                + string.Concat(Enumerable.Repeat(" + 1", 31)) + "; }";
             var (extraExit, extraOutput, extraError) = await RunAsync(Encoding.UTF8.GetBytes(tooManyNodes),
                 "frontend-component", frontend, "-", "--runtime", policy, "--json");
             Assert.True(extraExit == 1,

@@ -21,7 +21,7 @@ public sealed class FloatingLiteralProjectionTests
             : $"public {TypeName(type)} Value() {{ return 0.1; }}";
         var source = SourceText.From(text);
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = type;

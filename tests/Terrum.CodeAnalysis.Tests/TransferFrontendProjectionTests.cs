@@ -23,7 +23,7 @@ public sealed class TransferFrontendProjectionTests
         var otherwise = text.IndexOf("else", StringComparison.Ordinal);
         var branchEnd = text.IndexOf("} } return", StringComparison.Ordinal) + 1;
         var loopEnd = text.IndexOf("} return", StringComparison.Ordinal) + 1;
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -120,7 +120,7 @@ public sealed class TransferFrontendProjectionTests
         var inner = text.IndexOf("while", outer + 1, StringComparison.Ordinal);
         var exit = text.IndexOf("break;", StringComparison.Ordinal);
         var next = text.IndexOf("continue;", StringComparison.Ordinal);
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -152,7 +152,7 @@ public sealed class TransferFrontendProjectionTests
         var outsideLoop = outside.IndexOf("while", StringComparison.Ordinal);
         var outsideBreak = outside.IndexOf("break;", StringComparison.Ordinal);
         var insideBreak = outside.IndexOf("break;", outsideBreak + 1, StringComparison.Ordinal);
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

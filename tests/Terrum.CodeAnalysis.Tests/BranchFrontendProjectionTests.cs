@@ -22,7 +22,7 @@ public sealed class BranchFrontendProjectionTests
         var inner = text.IndexOf(keyword + " (false)", StringComparison.Ordinal);
         var otherwise = text.IndexOf("else", StringComparison.Ordinal);
         var end = text.IndexOf("} return", StringComparison.Ordinal) + 1;
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;
@@ -76,7 +76,7 @@ public sealed class BranchFrontendProjectionTests
         var branch = text.IndexOf("if (", StringComparison.Ordinal);
         var otherwise = text.IndexOf("else", StringComparison.Ordinal);
         var number = text.IndexOf("42", StringComparison.Ordinal);
-        words[0] = 85;
+        words[0] = 87;
         words[1] = 1;
         words[2] = 1;
         words[5] = 1;

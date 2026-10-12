@@ -57,7 +57,7 @@ public sealed partial class CliTests
                 else
                 {
                     Assert.NotEqual(version, projected.GetProperty("projectionVersion").GetInt32());
-                    Assert.Equal(85, projected.GetProperty("projectionVersion").GetInt32());
+                    Assert.Equal(87, projected.GetProperty("projectionVersion").GetInt32());
                 }
                 var (nativeExit, _, nativeError) = await RunAsync(input,
                     "frontend-build-library", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");

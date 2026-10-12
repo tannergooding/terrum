@@ -51,7 +51,7 @@ public sealed partial class CliTests
                 Assert.True(exit == 0, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.True(result.GetProperty("expressionBody").GetBoolean());
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build",
                     "-", "-o", hosted, "--runtime", policy, "--json");
@@ -222,20 +222,20 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("nodes", 32, true)]
-    [InlineData("nodes", 33, false)]
+    [InlineData("nodes", 64, true)]
+    [InlineData("nodes", 65, false)]
     [InlineData("tokens", 64, true)]
-    [InlineData("tokens", 65, false)]
+    [InlineData("tokens", 65, true)]
     [InlineData("source", 16384, true)]
     [InlineData("source", 16385, false)]
     [InlineData("expression", 16, true)]
     [InlineData("expression", 17, false)]
-    public async Task NativeVoidExpressionRetainsExactResourceCapsAsync(string resource, int count, bool valid)
+    public async Task NativeVoidExpressionRetainsOtherResourceCapsAsync(string resource, int count, bool valid)
     {
         var source = resource switch {
             "nodes" => "void Main() => require !true && " + (valid ? "" : "!")
-                + string.Join(" && ", Enumerable.Repeat("true", 15)) + ";",
-            "tokens" => (valid ? "" : "public ") + "void Main(bool a) => require "
+                + string.Join(" && ", Enumerable.Repeat("true", (count - 2) / 2)) + ";",
+            "tokens" => (count == 64 ? "" : "public ") + "void Main(bool a) => require "
                 + string.Join(" + ", Enumerable.Repeat("int32(1)", 10)) + " == int32(10);",
             "expression" => "void Main() => require " + new string('(', count - 1)
                 + "true" + new string(')', count - 1) + ";",
@@ -256,7 +256,7 @@ public sealed partial class CliTests
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Single(result.GetProperty("statements").EnumerateArray());
                 if (resource == "nodes") { Assert.Equal(count, result.GetProperty("nodes").GetArrayLength()); }
             }

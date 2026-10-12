@@ -62,6 +62,38 @@ bool TryGetIntegerRecordCount(int32 tokenCount, init ref<int32> count)
     return true;
 }
 
+bool IsFloatingPointToken(int32 tokenIndex)
+{
+    int32 tokenOffset = tokenIndex * 3;
+    int32 start = Host.Tokens[tokenOffset + 1];
+    int32 length = Host.Tokens[tokenOffset + 2];
+    if (start < 0 || length <= 0 || start > Host.Source.Length
+        || length > Host.Source.Length - start)
+    {
+        return false;
+    }
+
+    bool hexadecimal = length >= 2 && Host.Source[start] == char16(48)
+        && (Host.Source[start + 1] == char16(120)
+            || Host.Source[start + 1] == char16(88));
+    bool binary = length >= 2 && Host.Source[start] == char16(48)
+        && (Host.Source[start + 1] == char16(98)
+            || Host.Source[start + 1] == char16(66));
+    // Hexadecimal integers use e/E as digits; only p/P introduces their exponent.
+    for (mut int32 offset = 0; offset < length; offset = offset + 1)
+    {
+        char16 unit = Host.Source[start + offset];
+        if (unit == char16(46)
+            || hexadecimal && (unit == char16(112) || unit == char16(80))
+            || !hexadecimal && !binary && (unit == char16(101) || unit == char16(69)))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool IsValidIntegerRecord(int32 tokenIndex, int32 recordedIndex, int32 status,
     int32 low, int32 high, int32 tag)
 {
@@ -143,7 +175,7 @@ public unique struct TokenIntegerSnapshot
         mut int32 recordIndex = 0;
         for (mut int32 tokenIndex = 0; tokenIndex < tokenCount - 1; tokenIndex = tokenIndex + 1)
         {
-            if (Host.Tokens[tokenIndex * 3] != 3)
+            if (Host.Tokens[tokenIndex * 3] != 3 || IsFloatingPointToken(tokenIndex))
             {
                 continue;
             }
@@ -178,7 +210,7 @@ public unique struct TokenIntegerSnapshot
         mut int32 recordIndex = 0;
         for (mut int32 tokenIndex = 0; tokenIndex < tokenCount - 1; tokenIndex = tokenIndex + 1)
         {
-            if (Host.Tokens[tokenIndex * 3] != 3)
+            if (Host.Tokens[tokenIndex * 3] != 3 || IsFloatingPointToken(tokenIndex))
             {
                 continue;
             }

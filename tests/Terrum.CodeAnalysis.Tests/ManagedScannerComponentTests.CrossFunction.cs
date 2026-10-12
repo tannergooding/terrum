@@ -16,6 +16,299 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class ManagedScannerComponentTests
 {
     [Theory]
+    [InlineData("int32 Main() => Later(); int32 Later() => 42;", 2)]
+    [InlineData("int32 Recur(int32 value) => value == 0 ? 42 : Recur(value - 1); int32 Main() => Recur(1);", 2)]
+    [InlineData("int32 First(int32 value) => value == 0 ? 42 : Second(value - 1); int32 Second(int32 value) => First(value);", 2)]
+    [InlineData("int32 Main() { int32 value = 40; return Next(value); } int32 Next(int32 value) => value + 2;", 2)]
+    [InlineData("bool Main(int32 value) { if (value > 0) { return Next(value); } else { return false; } } bool Next(int32 value) => value > 0;", 2)]
+    [InlineData("void Main() { Step(); } void Step() { }", 2)]
+    [InlineData("public int32 Main() { mut int32 value = 0; Fill(out value); return value; } void Fill(out int32 value) { value = 42; }", 2)]
+    [InlineData("int32 Main() { outer: while (true) { break outer; } return 42; } int32 Next() => 0;", 2)]
+    [InlineData("namespace Demo.Tools; int32 Main() => Later(); int32 Later() => 42;", 2)]
+    [InlineData(
+        "void F0() { } void F1() { } void F2() { } void F3() { } void F4() { } "
+        + "void F5() { } void F6() { } void F7() { } void F8() { } void F9() { }",
+        10)]
+    public async Task ScalarFrontendProgramDecoderSummarizesForwardSelfAndMutualCallsAsync(
+        string text, int functionCount)
+    {
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var stage = await CompileAsync(text, """
+                using Terrum.CodeAnalysis;
+                int32 Main() {
+                    if (!TryPublishScalarFrontend()) { return 1; }
+                    if (!TryDecodeScalarFrontendProgram(
+                        Host.FrontendProgram.Length, 63)) { return 2; }
+                    return 42;
+                }
+                """, (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(stage, policy);
+            Assert.Equal(42, native.ExitCode);
+            await ExecuteAotAsync(stage, policy).ConfigureAwait(true);
+
+            var programBytes = native.Data.AsSpan(
+                native.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
+                ScalarFrontendHost.ProgramWordCount * sizeof(int)).ToArray();
+            var summaryBytes = native.Data.AsSpan(
+                native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int));
+            var summary = new int[ScalarFrontendHost.WordCount];
+            for (var word = 0; word < summary.Length; word++)
+            {
+                summary[word] = BinaryPrimitives.ReadInt32LittleEndian(
+                    summaryBytes.Slice(word * sizeof(int), sizeof(int)));
+            }
+
+            var originalPublicationBytes = new byte[ScalarFrontendHost.WordCount * sizeof(int)];
+            var hosted = ScalarFrontendHost.ReadProgram(source,
+                originalPublicationBytes, programBytes,
+                (BoundRuntimePolicy)policy);
+            var functions = hosted.Projection.Functions;
+            Assert.True(hosted.Projection.IsValid);
+            Assert.Equal(functionCount, functions.Length);
+            if (text.StartsWith("namespace Demo.Tools;", StringComparison.Ordinal))
+            {
+                var namespaceName = new TextSpan(text.IndexOf("Demo.Tools", StringComparison.Ordinal),
+                    "Demo.Tools".Length);
+                foreach (var function in functions)
+                {
+                    Assert.Equal(namespaceName, function.NamespaceNameSpan);
+                    Assert.StartsWith("Demo.Tools.", function.QualifiedName,
+                        StringComparison.Ordinal);
+                }
+            }
+            Assert.Equal(88, summary[0]);
+            Assert.Equal(1, summary[1]);
+
+            var previousTokenEnd = 0;
+            var previousSourceEnd = 0;
+            for (var functionIndex = 0; functionIndex < functions.Length; functionIndex++)
+            {
+                var function = functions[functionIndex];
+                var entry = 2 + functionIndex * 7;
+                var tokenStart = summary[entry];
+                var tokenEnd = summary[entry + 1];
+                var sourceStart = summary[entry + 2];
+                var sourceLength = summary[entry + 3];
+                Assert.InRange(tokenStart, previousTokenEnd, 62);
+                Assert.InRange(tokenEnd, tokenStart + 1, 63);
+                Assert.InRange(sourceStart, previousSourceEnd, source.Length);
+                Assert.InRange(sourceLength, 1, source.Length - sourceStart);
+                Assert.InRange(function.Name.Start, sourceStart,
+                    sourceStart + sourceLength - function.Name.Length);
+
+                var flags = (function.IsPublic ? 1 : 0)
+                    | (function.IsNoThrow ? 2 : 0)
+                    | (function.DoesNotReturn ? 4 : 0)
+                    | (function.RequiresUnsafeCaller ? 8 : 0);
+                var signature = function.ReturnType
+                    | (function.FirstType << 4)
+                    | (function.SecondType << 8)
+                    | (function.ThirdType << 12)
+                    | (function.FourthType << 16)
+                    | (flags << 20)
+                    | (function.ParameterCount << 24)
+                    | (function.OutParameterMask << 27);
+                Assert.Equal(signature, summary[entry + 4]);
+                Assert.Equal(function.Nodes.Length, summary[entry + 5]);
+                Assert.Equal(function.Statements.Length | (function.Locals.Length << 4)
+                    | (function.InitRefParameterMask << 8),
+                    summary[entry + 6]);
+                for (var node = 0; node < 64; node++)
+                {
+                    var target = node < function.Nodes.Length
+                        && function.Nodes[node].Operation == 105
+                            ? function.CallTargets[node] + 1
+                            : 0;
+                    Assert.Equal(target,
+                        summary[ScalarFrontendHost.SummaryTargetOffset + functionIndex * 64 + node]);
+                }
+                previousTokenEnd = tokenEnd;
+                previousSourceEnd = sourceStart + sourceLength;
+            }
+            for (var functionIndex = functions.Length;
+                functionIndex < ScalarFrontendHost.MaximumFunctions; functionIndex++)
+            {
+                Assert.All(summary.AsSpan(2 + functionIndex * 7, 7).ToArray(),
+                    static word => Assert.Equal(0, word));
+                Assert.All(summary.AsSpan(
+                    ScalarFrontendHost.SummaryTargetOffset + functionIndex * 64, 64).ToArray(),
+                    static word => Assert.Equal(0, word));
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("Host.FrontendProgram[1] = 0;")]
+    [InlineData("Host.FrontendProgram[5] = 0;")]
+    [InlineData("Host.FrontendProgram[9] = 0;")]
+    [InlineData("Host.FrontendProgram[10] = 16;")]
+    [InlineData("Host.FrontendProgram[14] = 4;")]
+    [InlineData("Host.FrontendProgram[45] = 65;")]
+    [InlineData("Host.FrontendProgram[721] = 2;")]
+    [InlineData("Host.Frontend[1] = 1;")]
+    public async Task ScalarFrontendProgramDecoderRejectsMalformedPublicationAndUnsafeEncodingsAsync(
+        string mutation)
+    {
+        const string text = "int32 Main() => Next(41); int32 Next(int32 value) => value;";
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TryPublishScalarFrontend()) { return 1; }
+                {{mutation}}
+                if (TryDecodeScalarFrontendProgram(
+                    Host.FrontendProgram.Length, 63)) { return 2; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, policy, "ScalarFrontendProjection")
+                .ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
+            Assert.Equal(42, native.ExitCode);
+            var publication = native.Data.AsSpan(
+                native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int));
+            var expectedPublication = new byte[publication.Length];
+            if (mutation == "Host.Frontend[1] = 1;")
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(expectedPublication.AsSpan(sizeof(int)), 1);
+            }
+            Assert.Equal(expectedPublication, publication.ToArray());
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Main(int32 value) => value + 1; int32 Next() => 42;", "Host.FrontendProgram[67] = 5;", false)]
+    [InlineData("int32 Main() => Next(); int32 Next() => 42;", "Host.FrontendProgram[23] = 1;", false)]
+    [InlineData("int32 Main() { int32 value = 41; return Next(value); } int32 Next(int32 value) => value;", "Host.FrontendProgram[341] = 2147483647;", false)]
+    [InlineData("int32 Main(int32 value) => value; int32 Next() => 42;", "Host.FrontendProgram[50] = 103;", true)]
+    [InlineData("int32 Main() { mut int32 value = 0; Fill(out value); return value; } void Fill(out int32 value) { value = 42; }", "Host.FrontendProgram[309] = 0;", true)]
+    [InlineData("int32 Main() { outer: while (true) { break outer; } return 42; } int32 Next() => 0;", "Host.FrontendProgram[341] = 1;", true)]
+    [InlineData("int32 Main() { outer: while (true) { break outer; } return 42; } int32 Next() => 0;", "Host.FrontendProgram[346] = 1;", false)]
+    [InlineData("int32 Main() => Pair(1, 2); int32 Pair(int32 left, int32 right) => left + right;", "Host.FrontendProgram[70] = 1; Host.FrontendProgram[71] = 0;", true)]
+    [InlineData("int32 Main() => Next(); int32 Next() => 42; int32 Other() => 43;",
+        "Host.FrontendProgram[720] = 2;", true)]
+    [InlineData("int32 Main() => Next(); int32 Next() => 42;", "Host.FrontendProgram[10] = 2;", true)]
+    public async Task ScalarFrontendProgramDecoderDoesNotTreatSemanticCorruptionAsVerifiedAsync(
+        string text, string mutation, bool summaryReaderAccepts)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TryPublishScalarFrontend()) { return 1; }
+                {{mutation}}
+                if (!TryDecodeScalarFrontendProgram(
+                    Host.FrontendProgram.Length, 63)) { return 2; }
+                return 42;
+            }
+            """;
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, policy, "ScalarFrontendProjection")
+                .ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
+            Assert.Equal(summaryReaderAccepts ? 42 : 2, native.ExitCode);
+            var programBytes = native.Data.AsSpan(
+                native.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
+                ScalarFrontendHost.ProgramWordCount * sizeof(int)).ToArray();
+            var summaryBytes = native.Data.AsSpan(
+                native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int));
+            if (summaryReaderAccepts)
+            {
+                Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(summaryBytes));
+                Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(
+                    summaryBytes[sizeof(int)..]));
+            }
+            else
+            {
+                Assert.All(summaryBytes.ToArray(), static value => Assert.Equal(0, value));
+            }
+
+            var originalPublicationBytes = new byte[ScalarFrontendHost.WordCount * sizeof(int)];
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+                originalPublicationBytes, programBytes, policy));
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Main() => Pick(third: 3, first: 1, fourth: 4, second: 2); " +
+        "int32 Pick(int32 first, int32 second, int32 third, int32 fourth) => first;",
+        "Host.FrontendProgram[89] = 2580;")]
+    [InlineData("int32 Main() => Pick(third: 3, first: 1, second: 2); " +
+        "int32 Pick(int32 first, int32 second, int32 third) => first;",
+        "Host.FrontendProgram[81] = 2331;")]
+    public async Task ScalarFrontendProgramDecoderRejectsMalformedNamedArgumentMappingsAsync(
+        string text, string mutation)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TryPublishScalarFrontend()) { return 1; }
+                {{mutation}}
+                if (!TryDecodeScalarFrontendProgram(
+                    Host.FrontendProgram.Length, 63)) { return 2; }
+                return 42;
+            }
+            """;
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, policy, "ScalarFrontendProjection")
+                .ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
+            Assert.Equal(2, native.ExitCode);
+            var programBytes = native.Data.AsSpan(
+                native.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
+                ScalarFrontendHost.ProgramWordCount * sizeof(int)).ToArray();
+            var originalPublicationBytes = new byte[ScalarFrontendHost.WordCount * sizeof(int)];
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source,
+                originalPublicationBytes, programBytes, policy));
+        }
+    }
+
+    [Fact]
+    public async Task ScalarFrontendProgramDecoderRejectsTruncatedPublicationAsync()
+    {
+        const string text = "int32 Main() => Next(); int32 Next() => 42;";
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TryPublishScalarFrontend()) { return 1; }
+                if (TryDecodeScalarFrontendProgram(4283, 63)) { return 2; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(text, entry, BoundRuntimePolicy.FailFast,
+            "ScalarFrontendProjection").ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendProgramDecoderRejectsFramePastTokenBufferAsync(BoundRuntimePolicy policy)
+    {
+        const string text = "int32 Main() => Next(); int32 Next() => 42;";
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!TryPublishScalarFrontend()) { return 1; }
+                Host.FrontendProgram[45] = 2147483647;
+                if (TryDecodeScalarFrontendProgram(Host.FrontendProgram.Length, 2147483647)) { return 2; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(text, entry, policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+    }
+
+    [Theory]
     [InlineData("public int32 Main() => Next(41); int32 Next(int32 value) => value + 1;", 42)]
     [InlineData("public int32 Main() => Select(true, 42); int32 Select(bool choose, uint64 value) => choose ? int32(value) : 0;", 42)]
     [InlineData("public int32 Main() => Pack(Id(4), Id(2)); int32 Pack(int32 a, int32 b) => a * 10 + b; int32 Id(int32 value) => value;", 42)]
@@ -40,6 +333,13 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("[NoThrow] public void Main() { Step(); } [NoThrow] void Step() { }", 0)]
     [InlineData("public int32 Main() => Next(42); [NoThrow] int32 Next(int32 value) => value;", 42)]
     [InlineData("public int32 Main() { int32 result = Next(41); return result; } int32 Next(int32 value) { return value + 1; }", 42)]
+    [InlineData("public int32 Main() { mut int32 result = 0; Set(second: 2, first: 4, result: out result); return result; } void Set(int32 first, int32 second, out int32 result) { result = first * 10 + second; }", 42)]
+    [InlineData("public int32 Main() => Sum(10, 10, 10, 12); int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;", 42)]
+    [InlineData("public int32 Main() => Sum(0, 0, 0, Identity(41)) + 1; int32 Identity(int32 value) => value; int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;", 42)]
+    [InlineData("public int32 Main() => Sum(fourth: 12, second: 10, first: 10, third: 10); int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;", 42)]
+    [InlineData("public int32 Main() => ReadFourth(0, 0, 0, 42); int32 ReadFourth(int32 first, int32 second, int32 third, int32 fourth) { int32 local = fourth; return local; }", 42)]
+    [InlineData("public int32 Main() { mut int32 result = 0; Fill(10, 10, 10, out result); return result; } void Fill(int32 first, int32 second, int32 third, out int32 fourth) { fourth = first + second + third + 12; }", 42)]
+    [InlineData("public int32 Main() { Fill(10, 10, 10, init var result); return result; } void Fill(int32 first, int32 second, int32 third, init ref<int32> fourth) { fourth = first + second + third + 12; }", 42)]
     [InlineData("public int32 Main() { { int32 Next = 1; } return Next(); } int32 Next() => 42;", 42)]
     [InlineData("public int32 Main() => @await(41); int32 @await(int32 value) => value + 1;", 42)]
     [InlineData("public int32 Main() => int32(41); int32 int32(int32 value) => value + 1;", 42)]
@@ -74,6 +374,109 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Equal(expected, NativeJit.Execute(hosted with { EntryPoint = entry }, policy));
             await ExecuteAotAsync(stage, policy);
         }
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendProgramRoutesOneFourParameterFunctionThroughCompleteContextAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string text = "public int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;";
+        var source = SourceText.From(text);
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, (NativeRuntimePolicy)policy);
+        var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes, policy);
+
+        Assert.True(read.Projection.IsValid);
+        var function = Assert.Single(read.Projection.Functions);
+        Assert.Equal(4, function.ParameterCount);
+        Assert.Equal(1, function.FourthType);
+        Assert.Equal(new TextSpan(text.IndexOf("fourth", StringComparison.Ordinal), "fourth".Length),
+            function.FourthName);
+        var actual = Assert.IsType<BoundProgram>(read.Program);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Sum"], (NativeRuntimePolicy)policy),
+            NativeEmitter.EmitLibrary(actual, ["Sum"], (NativeRuntimePolicy)policy));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendFourParameterReaderRejectsMalformedProjectionAndSourceAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string text = "int32 Main() => Sum(fourth: 4, second: 2, first: 1, third: 3); int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;";
+        var source = SourceText.From(text);
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, (NativeRuntimePolicy)policy);
+        var publication = new byte[ScalarFrontendHost.WordCount * sizeof(int)];
+        var read = ScalarFrontendHost.ReadProgram(source, publication, programBytes, policy);
+        Assert.True(read.Projection.IsValid);
+        var callIndex = read.Projection.Functions[0].Nodes.IndexOf(
+            Assert.Single(read.Projection.Functions[0].Nodes,
+                static node => node.Operation == 105));
+        var callHighWord = 4 + 4 + 42 + callIndex * 8 + 7;
+        var rawHigh = BinaryPrimitives.ReadInt32LittleEndian(
+            programBytes.AsSpan(callHighWord * sizeof(int), sizeof(int)));
+        foreach (var invalidHigh in new[] {
+            rawHigh | (1 << 18),
+            rawHigh ^ (1 << 11),
+            rawHigh ^ (3 << 5),
+            rawHigh ^ (1 << 12),
+        })
+        {
+            var forged = programBytes.ToArray();
+            BinaryPrimitives.WriteInt32LittleEndian(
+                forged.AsSpan(callHighWord * sizeof(int), sizeof(int)), invalidHigh);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(
+                source, publication, forged, policy));
+        }
+
+        const string positionalText = "int32 Main() => Sum(1, 2, 3, 4); int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;";
+        var positionalSource = SourceText.From(positionalText);
+        var (_, positionalProgramBytes, _) = await ProduceScalarProgramAsync(
+            positionalText, (NativeRuntimePolicy)policy);
+        var positionalRead = ScalarFrontendHost.ReadProgram(positionalSource, publication,
+            positionalProgramBytes, policy);
+        Assert.True(positionalRead.Projection.IsValid);
+        var positionalCall = positionalRead.Projection.Functions[0].Nodes.IndexOf(
+            Assert.Single(positionalRead.Projection.Functions[0].Nodes,
+                static node => node.Operation == 105));
+        var positionalHighWord = 4 + 4 + 42 + positionalCall * 8 + 7;
+        var positionalHigh = BinaryPrimitives.ReadInt32LittleEndian(
+            positionalProgramBytes.AsSpan(positionalHighWord * sizeof(int), sizeof(int)));
+        Assert.Equal(0, positionalHigh & (0xFF << 3));
+        var nonzeroPositionalMapping = positionalProgramBytes.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            nonzeroPositionalMapping.AsSpan(positionalHighWord * sizeof(int), sizeof(int)),
+            positionalHigh | (1 << 3));
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(
+            positionalSource, publication, nonzeroPositionalMapping, policy));
+
+        var sumFramePayload = 4 + ScalarFrontendHost.ProgramFrameWordCount + 4;
+        foreach (var (word, value) in new[] {
+            (sumFramePayload + 6, 3),
+            (sumFramePayload + 16, 1 << 3),
+            (sumFramePayload + 17, 1 << 3),
+            (sumFramePayload + 18, 2),
+            (sumFramePayload + 19, BinaryPrimitives.ReadInt32LittleEndian(
+                programBytes.AsSpan((sumFramePayload + 19) * sizeof(int), sizeof(int))) + 1),
+        })
+        {
+            var forged = programBytes.ToArray();
+            BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(word * sizeof(int), sizeof(int)), value);
+            var exception = Record.Exception(() => {
+                _ = ScalarFrontendHost.ReadProgram(source, publication, forged, policy);
+            });
+            Assert.True(exception is ArgumentException,
+                $"Corruption at Sum frame word {word} was accepted or threw {exception?.GetType().Name ?? "no exception"}.");
+        }
+
+        var changedSource = SourceText.From(text.Replace(
+            "int32 fourth) =>", "int32 lastxx) =>", StringComparison.Ordinal));
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(
+            changedSource, publication, programBytes, policy));
     }
 
     [Theory]
@@ -219,6 +622,10 @@ public sealed partial class ManagedScannerComponentTests
     [InlineData("public alias Scalar = int32; int32 Main() => 42;", "alias", false)]
     [InlineData("alias Identity<T> = T; int32 Main() => 42;", "<", false)]
     [InlineData("alias Scalar = int32; int32 Main() => Scalar(42);", "=>", false)]
+    [InlineData("alias A0 = int32; alias A1 = int32; alias A2 = int32; alias A3 = int32; "
+        + "alias A4 = int32; alias A5 = int32; alias A6 = int32; alias A7 = int32; "
+        + "alias A8 = int32; alias A9 = int32; alias A10 = int32; alias A11 = int32; "
+        + "alias A12 = int32; int32 Main() => 42;", "alias", true)]
     public async Task ScalarFrontendRejectsUnsupportedOrInvalidAliasesAsync(string text,
         string expectedSpanText, bool expectLastOccurrence)
     {
@@ -247,9 +654,11 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Fact]
-    public async Task ScalarFrontendPreservesTenFunctionLimitWithoutAliasesAsync()
+    public async Task ScalarFrontendPreservesThirtyTwoFunctionLimitWithoutAliasesAsync()
     {
-        const string text = "void A() {} void B() {} void C() {} void D() {} void E() {} void F() {} void G() {} void H() {} void I() {} public int32 Main() => 42;";
+        var text = string.Join(' ', Enumerable.Range(0, ScalarFrontendHost.MaximumFunctions - 1)
+            .Select(index => $"void F{index}() {{ }}"))
+            + " public int32 Main() => 42;";
         var source = SourceText.From(text);
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text,
             NativeRuntimePolicy.FailFast);
@@ -258,12 +667,63 @@ public sealed partial class ManagedScannerComponentTests
             BoundRuntimePolicy.FailFast);
 
         Assert.True(read.Projection.IsValid);
-        Assert.Equal(10, read.Projection.Functions.Length);
+        Assert.Equal(ScalarFrontendHost.MaximumFunctions, read.Projection.Functions.Length);
         var program = Assert.IsType<BoundProgram>(read.Program);
         var entry = program.Functions.IndexOf(program.Functions.Single(
             static function => function.Name == "Main"));
         Assert.Equal(42, NativeJit.Execute(program with { EntryPoint = entry },
             NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public async Task ScalarFrontendPlacesMaximumAliasScratchAfterThirtyTwoFramesAsync()
+    {
+        var aliases = string.Join(' ', Enumerable.Range(0, ScalarFrontendHost.MaximumAliases)
+            .Select(index => $"alias Alias{index} = {(index == 0 ? "int32" : $"Alias{index - 1}")};"));
+        var functions = string.Join(' ', Enumerable.Range(0, ScalarFrontendHost.MaximumFunctions - 1)
+            .Select(index => $"void F{index}() {{ }}"));
+        var text = $"{aliases} {functions} public Alias{ScalarFrontendHost.MaximumAliases - 1} Main() => 42;";
+        var source = SourceText.From(text);
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text,
+            NativeRuntimePolicy.FailFast);
+
+        var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
+            BoundRuntimePolicy.FailFast);
+
+        Assert.True(read.Projection.IsValid);
+        Assert.Equal(ScalarFrontendHost.MaximumFunctions, read.Projection.Functions.Length);
+        var program = Assert.IsType<BoundProgram>(read.Program);
+        var entry = program.Functions.IndexOf(program.Functions.Single(
+            static function => function.Name == "Main"));
+        Assert.Equal(42, NativeJit.Execute(program with { EntryPoint = entry },
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendReportsDuplicateFunctionAtItsTokenAtMaximumFunctionCountAsync(
+        NativeRuntimePolicy policy)
+    {
+        var names = Enumerable.Range(0, ScalarFrontendHost.MaximumFunctions - 2)
+            .Select(static index => $"F{index}").Append("@await").Append("@await").ToArray();
+        var text = string.Join(' ', names.Select(name => $"void {name}() {{ }}"));
+        var lexical = Lexer.Lex(SourceText.From(text));
+        Assert.Empty(lexical.Diagnostics);
+        Assert.Equal(ScalarFrontendHost.MaximumFunctions * 6 + 1, lexical.Tokens.Length);
+
+        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+        var duplicateName = new TextSpan(text.LastIndexOf("@await", StringComparison.Ordinal),
+            "@await".Length);
+
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(int))));
+        Assert.Equal(4, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(2 * sizeof(int))));
+        Assert.Equal(duplicateName.Start,
+            BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(3 * sizeof(int))));
+        Assert.Equal(duplicateName.Length,
+            BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4 * sizeof(int))));
+        Assert.All(programBytes, static value => Assert.Equal(0, value));
     }
 
     [Fact]
@@ -274,7 +734,7 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var (bytes, programBytes, stage) = await ProduceScalarProgramAsync(text, policy);
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+            Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
 
             var result = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
                 (BoundRuntimePolicy)policy);
@@ -313,7 +773,7 @@ public sealed partial class ManagedScannerComponentTests
     public async Task ScalarFrontendProgramRejectsCallerUnsafeCallsWithoutExplicitScopeAsync(string text)
     {
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+        Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
             bytes, programBytes, BoundRuntimePolicy.FailFast));
     }
@@ -329,7 +789,7 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var (bytes, programBytes, stage) = await ProduceScalarProgramAsync(text, policy);
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+            Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
             var result = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
                 (BoundRuntimePolicy)policy);
             Assert.True(result.Projection.IsValid);
@@ -379,7 +839,7 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var (bytes, _, _) = await ProduceScalarProgramAsync(text, policy);
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
             var projection = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
             Assert.True(projection.IsValid);
             if (text.Contains("unsafe(", StringComparison.Ordinal))
@@ -428,7 +888,7 @@ public sealed partial class ManagedScannerComponentTests
         const string text = "public unsafe int32 Recur() { if (false) { return Recur(); } return 42; }";
         var source = SourceText.From(text);
         var (bytes, _, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
         Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(source, bytes, BoundRuntimePolicy.FailFast));
     }
@@ -458,7 +918,7 @@ public sealed partial class ManagedScannerComponentTests
                     + $"{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(3 * sizeof(int)))}:"
                     + $"{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4 * sizeof(int)))}; "
                     + $"single status {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(int)))}");
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(0, sizeof(int))));
+            Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(0, sizeof(int))));
             var result = ScalarFrontendHost.ReadResult(source, bytes, programBytes, (BoundRuntimePolicy)policy);
             Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
             Assert.Equal(1, result.Functions[1].InitRefParameterMask);
@@ -489,7 +949,7 @@ public sealed partial class ManagedScannerComponentTests
             {
                 var (incompleteBytes, incompleteProgramBytes, _) = await ProduceScalarProgramAsync(
                     incompleteText, policy);
-                Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(incompleteProgramBytes));
+                Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(incompleteProgramBytes));
                 Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(
                     SourceText.From(incompleteText), incompleteBytes, incompleteProgramBytes,
                     (BoundRuntimePolicy)policy));
@@ -541,6 +1001,35 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("bool", "true", "fourth ? 42 : 0")]
+    [InlineData("char16", "char16(42)", "int32(fourth)")]
+    [InlineData("int32", "42", "int32(fourth)")]
+    [InlineData("uint32", "uint32(42)", "int32(fourth)")]
+    [InlineData("int64", "int64(42)", "int32(fourth)")]
+    [InlineData("uint64", "uint64(42)", "int32(fourth)")]
+    [InlineData("float32", "float32(42)", "int32(fourth)")]
+    [InlineData("float64", "float64(42)", "int32(fourth)")]
+    public async Task ScalarFrontendCrossFunctionFourthFormalScalarTypesAsync(
+        string type, string argument, string result)
+    {
+        var text = $"public int32 Main() => ReadFourth(0, 0, 0, {argument}); "
+            + $"public int32 ReadFourth(int32 first, int32 second, int32 third, {type} fourth) => {result};";
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            var source = SourceText.From(text);
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["ReadFourth"], policy),
+                NativeEmitter.EmitLibrary(actual, ["ReadFourth"], policy));
+            Assert.Equal(42, NativeJit.Execute(actual with { EntryPoint = 0 }, policy));
+            Assert.Equal(42, NativeJit.Execute(hosted with { EntryPoint = 0 }, policy));
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() => Next(); int32 Next(int32 value) => value;")]
     [InlineData("int32 Main() => Next(1, 2); int32 Next(int32 value) => value;")]
     [InlineData("int32 Main() => Next(true); int32 Next(int32 value) => value;")]
@@ -577,13 +1066,18 @@ public sealed partial class ManagedScannerComponentTests
     {
         var source = SourceText.From(text);
         Assert.InRange(Lexer.Lex(source).Tokens.Length, 1, 64);
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        var result = ScalarFrontendHost.ReadResult(source, bytes, programBytes, BoundRuntimePolicy.FailFast);
-        Assert.False(result.IsValid);
-        Assert.Equal(1, result.ErrorCode);
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            var result = ScalarFrontendHost.ReadResult(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            Assert.False(result.IsValid);
+            Assert.Equal(1, result.ErrorCode);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.BindLibrary(source, bytes,
+                programBytes, (BoundRuntimePolicy)policy));
+        }
     }
 
     [Fact]
@@ -633,7 +1127,7 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
-            Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+            Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, programBytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -648,7 +1142,7 @@ public sealed partial class ManagedScannerComponentTests
                 Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                     bytes, programBytes, (BoundRuntimePolicy)policy));
             }
-            BinaryPrimitives.WriteInt32LittleEndian(programBytes, 85);
+            BinaryPrimitives.WriteInt32LittleEndian(programBytes, 88);
 
             var effectOffset = (4 + ScalarFrontendHost.ProgramFrameWordCount + 4 + 2) * sizeof(int);
             var effects = BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(effectOffset));
@@ -665,7 +1159,7 @@ public sealed partial class ManagedScannerComponentTests
         const string text = "public int32 Main() { mut int32 result = 0; if (Set(out result)) { return result; } return 0; } bool Set(out int32 value) { value = 42; return true; }";
         var source = SourceText.From(text);
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+        Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
         Assert.True(ScalarFrontendHost.ReadResult(source, bytes, programBytes,
             BoundRuntimePolicy.FailFast).IsValid);
         var modeOffset = (4 + ScalarFrontendHost.ProgramFrameWordCount + 4 + 16) * sizeof(int);
@@ -677,7 +1171,7 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                 bytes, programBytes, BoundRuntimePolicy.FailFast));
         }
-        BinaryPrimitives.WriteInt32LittleEndian(programBytes, 85);
+        BinaryPrimitives.WriteInt32LittleEndian(programBytes, 88);
         BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(modeOffset), 0);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
             bytes, programBytes, BoundRuntimePolicy.FailFast));
@@ -689,7 +1183,7 @@ public sealed partial class ManagedScannerComponentTests
         const string text = "public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }";
         var source = SourceText.From(text);
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.Equal(85, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
+        Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(programBytes));
         var result = ScalarFrontendHost.ReadResult(source, bytes, programBytes,
             BoundRuntimePolicy.FailFast);
         Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
@@ -706,7 +1200,7 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
                 bytes, programBytes, BoundRuntimePolicy.FailFast));
         }
-        BinaryPrimitives.WriteInt32LittleEndian(programBytes, 85);
+        BinaryPrimitives.WriteInt32LittleEndian(programBytes, 88);
         BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(modeOffset), 0);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
             bytes, programBytes, BoundRuntimePolicy.FailFast));
@@ -729,9 +1223,12 @@ public sealed partial class ManagedScannerComponentTests
             (frame, 1), (frame + 1, 1), (frame + 2, 1), (frame + 3, 1),
             (frame + 4, 73), (frame + 4 + 5, 5), (frame + 4 + 6, 1),
             (frame + 4 + 9, 1), (frame + 4 + 16, 1),
-            (frame + 396 + call, -1), (frame + 396 + call, 0),
-            (frame + 396 + call, 2), (frame + 396 + call, 3),
-            (frame + 396, 1), (frame + 427, 0),
+            (frame + 4 + ScalarFrontendHost.WordCount + call, -2),
+            (frame + 4 + ScalarFrontendHost.WordCount + call, 0),
+            (frame + 4 + ScalarFrontendHost.WordCount + call, 2),
+            (frame + 4 + ScalarFrontendHost.WordCount + call, 3),
+            (frame + 4 + ScalarFrontendHost.WordCount, 1),
+            (frame + ScalarFrontendHost.ProgramFrameWordCount - 1, 0),
             (frame + 4 + 42 + call * 8, 102),
             (frame + 4 + 42 + call * 8 + 1, 5),
             (frame + 4 + 42 + call * 8 + 2, 0),
@@ -745,8 +1242,9 @@ public sealed partial class ManagedScannerComponentTests
             var offset = word * sizeof(int);
             var previous = BinaryPrimitives.ReadInt32LittleEndian(programBytes.AsSpan(offset));
             BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(offset), value);
-            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes,
+            var error = Record.Exception(() => ScalarFrontendHost.ReadResult(source, bytes,
                 programBytes, BoundRuntimePolicy.FailFast));
+            Assert.True(error is ArgumentException, $"Program word {word}: {previous} -> {value}: {error}");
             BinaryPrimitives.WriteInt32LittleEndian(programBytes.AsSpan(offset), previous);
         }
         // Same signature does not authorize substituting another source target.
@@ -783,7 +1281,7 @@ public sealed partial class ManagedScannerComponentTests
         Set(offset, 83);
         Set(offset + 6, 0);
         Set(offset + 7, 0);
-        Set(4 + 396 + call, -1);
+        Set(4 + 4 + ScalarFrontendHost.WordCount + call, -1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes, programBytes,
             BoundRuntimePolicy.FailFast));
 
@@ -838,7 +1336,7 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Fact]
-    public async Task ScalarFrontendProgramReaderEnforcesMaximumSourceLengthAsync()
+    public async Task ScalarFrontendHostReadProgramEnforcesMaximumSourceLengthAsync()
     {
         const string program = "public int32 Main() => 42;";
         var text = program + new string(' ', ScannerHost.MaximumSourceLength - program.Length);
@@ -861,10 +1359,31 @@ public sealed partial class ManagedScannerComponentTests
         string text, NativeRuntimePolicy policy)
     {
         var stage = await CompileAsync(text,
-            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            "using Terrum.CodeAnalysis; int32 Main() { if (!TryPublishScalarFrontend()) { return 1; } return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection");
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        if (native.ExitCode != 42)
+        {
+            var frontend = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                5 * sizeof(int));
+            var program = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
+                50 * sizeof(int));
+            var frontendWords = new int[5];
+            var programWords = new int[50];
+            for (var index = 0; index < frontendWords.Length; index++)
+            {
+                frontendWords[index] = BinaryPrimitives.ReadInt32LittleEndian(
+                    frontend.Slice(index * sizeof(int), sizeof(int)));
+            }
+            for (var index = 0; index < programWords.Length; index++)
+            {
+                programWords[index] = BinaryPrimitives.ReadInt32LittleEndian(
+                    program.Slice(index * sizeof(int), sizeof(int)));
+            }
+            Assert.True(false,
+                $"Native entry returned {native.ExitCode}; frontend=[{string.Join(',', frontendWords)}]; "
+                    + $"program=[{string.Join(',', programWords)}].");
+        }
         return (native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray(),
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],

@@ -268,7 +268,7 @@ public sealed class ElseIfFrontendProjectionTests
 
     private static void Header(int[] words, string text, int type)
     {
-        words[0] = 85;
+        words[0] = 87;
         words[1] = words[2] = 1;
         words[5] = type;
         words[9] = text.IndexOf("@await", StringComparison.Ordinal);

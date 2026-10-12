@@ -35,7 +35,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(88, result.GetProperty("projectionVersion").GetInt32());
                 var functions = result.GetProperty("functions");
                 Assert.Contains(functions[0].GetProperty("nodes").EnumerateArray(),
                     static node => node.GetProperty("operation").GetInt32() == 57
@@ -63,7 +63,7 @@ public sealed partial class CliTests
             Assert.Empty(error);
             using (var document = JsonDocument.Parse(json))
             {
-                Assert.Equal(85, document.RootElement.GetProperty("result")
+                Assert.Equal(88, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
             }
             var (hostedExit, hostedJson, hostedError) = await RunAsync(Encoding.UTF8.GetBytes(Source),
@@ -159,7 +159,7 @@ public sealed partial class CliTests
                 Assert.True(result.GetProperty("valid").GetBoolean());
                 if (result.TryGetProperty("projectionVersion", out var projectionVersion))
                 {
-                    Assert.Equal(85, projectionVersion.GetInt32());
+                    Assert.Equal(87, projectionVersion.GetInt32());
                 }
                 Assert.Equal(expectedOperation,
                     result.GetProperty("whenTrue").GetProperty("operation").GetInt32());
@@ -588,7 +588,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(2, result.GetProperty("outParameterMask").GetInt32());
                 Assert.Equal(0, result.GetProperty("initRefParameterMask").GetInt32());
             }
@@ -636,7 +636,7 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(85, result.GetProperty("projectionVersion").GetInt32());
+                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
                 Assert.Equal(0, result.GetProperty("outParameterMask").GetInt32());
                 Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
             }
@@ -673,8 +673,70 @@ public sealed partial class CliTests
         }
 
         Assert.Equal(1, matches);
-        return (ulong)(uint)literal.GetProperty("low").GetInt32()
-            | ((ulong)(uint)literal.GetProperty("high").GetInt32() << 32);
+        return (ulong)unchecked((uint)literal.GetProperty("low").GetInt32())
+            | ((ulong)unchecked((uint)literal.GetProperty("high").GetInt32()) << 32);
+    }
+
+    private static void AssertProjectedChar16FloatLiterals(
+        string json, string source, int projectionVersion)
+    {
+        using var document = JsonDocument.Parse(json);
+        var result = document.RootElement.GetProperty("result");
+        Assert.Equal(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
+        var expressions = new (string Text, int Type, int CodeUnit)[] {
+            ("float32(char16(0))", 7, 0),
+            ("float32(char16(55296))", 7, 55296),
+            ("float32(char16(0xFFFF))", 7, 65535),
+            ("float64(char16(0))", 8, 0),
+            ("float64(char16(55296))", 8, 55296),
+            ("float64(char16(0xFFFF))", 8, 65535),
+        };
+        var matches = new int[expressions.Length];
+
+        void Inspect(JsonElement owner)
+        {
+            foreach (var node in owner.GetProperty("nodes").EnumerateArray())
+            {
+                if (node.GetProperty("operation").GetInt32() != 3)
+                {
+                    continue;
+                }
+                var span = node.GetProperty("span");
+                var start = span.GetProperty("start").GetInt32();
+                var length = span.GetProperty("length").GetInt32();
+                var text = source.Substring(start, length);
+                for (var index = 0; index < expressions.Length; index++)
+                {
+                    var expected = expressions[index];
+                    if (text != expected.Text)
+                    {
+                        continue;
+                    }
+                    Assert.Equal(expected.Type, node.GetProperty("type").GetInt32());
+                    var bits = expected.Type == 7
+                        ? BitConverter.SingleToUInt32Bits((float)expected.CodeUnit)
+                        : BitConverter.DoubleToUInt64Bits((double)expected.CodeUnit);
+                    Assert.Equal(unchecked((int)(uint)bits), node.GetProperty("low").GetInt32());
+                    Assert.Equal(expected.Type == 8 ? unchecked((int)(uint)(bits >> 32)) : 0,
+                        node.GetProperty("high").GetInt32());
+                    matches[index]++;
+                }
+            }
+        }
+
+        if (result.TryGetProperty("functions", out var functions))
+        {
+            foreach (var function in functions.EnumerateArray())
+            {
+                Inspect(function);
+            }
+        }
+        else
+        {
+            Inspect(result);
+        }
+
+        Assert.All(matches, static count => Assert.Equal(1, count));
     }
 
     [Theory]
@@ -682,17 +744,50 @@ public sealed partial class CliTests
     [InlineData("checked-exceptions")]
     public async Task ScalarFrontendExecutesChar16FloatingConversionsAsync(string policy)
     {
-        const string Source = """
+        const string StandaloneSource = """
             int32 Main() { return
-                (int32(float32(char16(55296))) == 55296
-                    && int32(float64(char16(65535))) == 65535) ? 42 : 1;
+                (float32(char16(0)) == 0
+                    && float32(char16(55296)) == 55296
+                    && float32(char16(0xFFFF)) == 65535
+                    && float64(char16(0)) == 0
+                    && float64(char16(55296)) == 55296
+                    && float64(char16(0xFFFF)) == 65535) ? 42 : 1;
+            }
+            """;
+        const string ProgramSource = """
+            int32 Main() {
+                return Verify() == 42 && VerifyCalls() == 42 ? 42 : 1;
+            }
+            float32 Echo32(float32 value) => value;
+            float64 Echo64(float64 value) => value;
+            int32 Verify() { return
+                (float32(char16(0)) == 0
+                    && float32(char16(55296)) == 55296
+                    && float32(char16(0xFFFF)) == 65535
+                    && float64(char16(0)) == 0
+                    && float64(char16(55296)) == 55296
+                    && float64(char16(0xFFFF)) == 65535) ? 42 : 1;
+            }
+            int32 VerifyCalls() { return
+                (Echo32(float32(char16(1))) == 1
+                    && Echo64(float64(char16(2))) == 2) ? 42 : 1;
             }
             """;
         var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
-            "frontend-run", directory, "-", "--runtime", policy);
-        Assert.True(exit == 42, $"{policy}: {output}{error}");
-        Assert.Empty(error);
+        foreach (var source in new[] { StandaloneSource, ProgramSource })
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (projectionExit, projectionJson, projectionError) = await RunAsync(input,
+                "frontend-component", directory, "-", "--runtime", policy, "--json");
+            Assert.True(projectionExit == 0, $"{policy}: {projectionJson}{projectionError}");
+            AssertProjectedChar16FloatLiterals(projectionJson, source,
+                source == StandaloneSource ? 87 : 88);
+
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-run", directory, "-", "--runtime", policy);
+            Assert.True(exit == 42, $"{policy}: {output}{error}");
+            Assert.Empty(error);
+        }
     }
 
     [Theory]

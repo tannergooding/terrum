@@ -120,7 +120,7 @@ public sealed class NamedTransferFrontendProjectionTests
             var words = Projection(text, false);
             if (effects)
             {
-                words[0] = 85;
+                words[0] = 87;
                 words[2] = 3;
             }
             if (invalid)
@@ -195,7 +195,7 @@ public sealed class NamedTransferFrontendProjectionTests
     private static int[] Projection(string text, bool continuing)
     {
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 85;
+        words[0] = 87;
         words[1] = words[2] = words[5] = 1;
         words[9] = text.IndexOf("Value", StringComparison.Ordinal);
         words[10] = 5;

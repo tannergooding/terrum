@@ -49,7 +49,7 @@ public sealed partial class CliTests
                 using var document = JsonDocument.Parse(projectionOutput);
                 Assert.NotEqual(version, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(85, document.RootElement.GetProperty("result")
+                Assert.Equal(87, document.RootElement.GetProperty("result")
                     .GetProperty("projectionVersion").GetInt32());
 
                 var (nativeExit, _, nativeError) = await RunAsync(input,
