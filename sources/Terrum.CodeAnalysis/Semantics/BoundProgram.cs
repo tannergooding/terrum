@@ -54,6 +54,20 @@ public enum PrimitiveType
     NativeUtf16ZPointer,
     /// <summary>A closed Windows x64 HWND carrier, restricted to a catalogued no-owner argument.</summary>
     NativeWindowHandle,
+    /// <summary>A source function's native callback address.</summary>
+    NativeCallbackAddress,
+    /// <summary>A catalog-described fixed native array carrier.</summary>
+    NativeFixedArray,
+    /// <summary>A compiler-owned UTF-8-NUL image address, restricted to reviewed no-escape imports.</summary>
+    NativeUtf8ZPointer,
+    /// <summary>A restricted null pointer value for reviewed native imports.</summary>
+    NativeNullPointer,
+    /// <summary>A writable address that receives an owned native COM interface.</summary>
+    NativeComInterfaceOutputAddress,
+    /// <summary>A checked address into catalogued native storage.</summary>
+    NativeStorageAddress,
+    /// <summary>A catalog-described native storage record.</summary>
+    NativeStorageRecord,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -209,6 +223,12 @@ public enum BoundIntrinsic
     NodeCollect,
     /// <summary>Allocates and constructs a source class, publishing its handle only on success.</summary>
     ClassTryCreate,
+    /// <summary>Invokes a catalogued COM method through its interface vtable.</summary>
+    NativeComVTableCall,
+    /// <summary>Releases a uniquely owned COM interface.</summary>
+    NativeComOwnerClose,
+    /// <summary>Clones a COM owner only when its catalogued interface supports AddRef.</summary>
+    NativeComOwnerTryClone,
 }
 
 /// <summary>The verified behavior of compiler-generated checked failures.</summary>
@@ -320,6 +340,11 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
     internal TrRmScalarGraph? IndexedBody { get; init; }
+    internal NativeComMethodDefinition? NativeComMethod { get; init; }
+    internal string? NativeComAcquisitionMethodIdentity { get; init; }
+    internal ImmutableArray<NativeComBoundParameterMapping> NativeComParameterMappings { get; init; }
+    internal ImmutableArray<NativeImportBoundParameterMapping> NativeImportParameterMappings { get; init; }
+    internal ImmutableArray<NativeComHiddenParameter> NativeComHiddenParameters { get; init; }
     /// <summary>The declared property member name, distinct from the callable implementation's name.</summary>
     public string? PropertyName { get; init; }
 
@@ -390,6 +415,9 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
 {
     /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
     public bool IsOut { get; init; }
+    internal BoundNativeFixedArrayLayout? NativeFixedArrayLayout { get; init; }
+    internal NativeStorageRecordLayoutDefinition? NativeStorageRecordLayout { get; init; }
+    internal NativeStorageRecordFacts? NativeStorageRecordFacts { get; init; }
 
     /// <summary>Whether this source parameter uses the vacant initialization loan mode.</summary>
     public bool IsInit { get; init; }

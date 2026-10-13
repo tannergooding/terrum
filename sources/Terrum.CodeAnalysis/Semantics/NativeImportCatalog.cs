@@ -253,9 +253,34 @@ public sealed class NativeImportCatalog
             builder.Add(import.Key, import);
         }
 
+        var callbackTypeNames = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+        foreach (var import in builder.Values)
+        {
+            foreach (var callbackParameter in import.CallbackParameters)
+            {
+                if (callbackParameter is not null)
+                {
+                    _ = callbackTypeNames.Add(callbackParameter.SourceTypeName);
+                }
+            }
+        }
         Identity = identity;
         IsForTesting = isForTesting;
         _imports = builder.ToImmutable();
+        _callbackTypeNames = callbackTypeNames.ToImmutable();
+        _comInterfaces = (comInterfaces.IsDefault ? [] : comInterfaces)
+            .ToImmutableDictionary(static definition => definition.NominalIdentity, StringComparer.Ordinal);
+        _comOwners = (comOwners.IsDefault ? [] : comOwners)
+            .ToImmutableDictionary(static definition => definition.BoundOwnerName, StringComparer.Ordinal);
+        _comMethods = (comMethods.IsDefault ? [] : comMethods)
+            .ToImmutableDictionary(static definition => definition.Identity, StringComparer.Ordinal);
+        ComInterfaces = comInterfaces.IsDefault ? [] : comInterfaces;
+        ComOwners = comOwners.IsDefault ? [] : comOwners;
+        ComMethods = comMethods.IsDefault ? [] : comMethods;
+        ComBaseEdges = comBaseEdges.IsDefault ? [] : comBaseEdges;
+        ComSignatureTypes = signatureTypes;
+        _fixedArrayStorageLayouts = storageLayouts;
+        _storageRecordLayouts = storageRecordLayouts;
     }
 
     /// <summary>Gets the immutable reviewed Windows x64 system-import catalog.</summary>
@@ -528,6 +553,11 @@ internal sealed record NativeImportDefinition(string Key, string DllName, string
     bool RequiresUnsafeCaller, bool DoesNotReturn, NativeImportDeploymentPolicy DeploymentPolicy)
 {
     internal ImmutableArray<NativeImportParameterContract> ParameterContracts { get; init; } = [];
+    internal ImmutableArray<NativeCallbackParameterDefinition> CallbackParameters { get; init; } = [];
+    internal ImmutableArray<NativeStorageParameterDefinition> StorageParameters { get; init; } = [];
+    internal ImmutableArray<NativeAggregateStorageParameterDefinition> AggregateStorageParameters { get; init; } = [];
+    internal ImmutableArray<NativeStorageRecordParameterDefinition> StorageRecordParameters { get; init; } = [];
+    internal ImmutableArray<NativeComOutputDefinition> ComOutputs { get; init; } = [];
 }
 
 internal enum NativeImportParameterContract
@@ -536,6 +566,11 @@ internal enum NativeImportParameterContract
     ReadonlyUtf16ZNoEscape,
     ReadonlyUtf8ZNoEscape,
     NoOwnerWindowHandle,
+    NullPointerOnly,
+    NativeCallback,
+    ReadonlyNativeStorageNoEscape,
+    WritableNativeStorageNoEscape,
+    OwnedNativeComInterfaceOutput,
 }
 
 internal static class NativeWindowHandleContract
