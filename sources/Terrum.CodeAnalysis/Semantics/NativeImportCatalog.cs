@@ -286,6 +286,87 @@ public sealed class NativeImportCatalog
 
     internal static NativeImportAttributeDefinition AttributeDefinition => s_attributeDefinition;
 
+    internal bool SupportsNativeFixedArrayStorage => !_fixedArrayStorageLayouts.IsEmpty
+        || _imports.Values.Any(static import => import.StorageParameters.Any(parameter =>
+            parameter is not null && parameter.AddressType == PrimitiveType.NativeStorageAddress
+                && NativeFixedArrayContract.IsCarrier(parameter.CarrierType)));
+
+    internal bool SupportsFixedArrayStorage(PrimitiveType carrierType) =>
+        _imports.Values.Any(import => import.StorageParameters.Any(parameter =>
+            parameter is not null && parameter.AddressType == PrimitiveType.NativeStorageAddress
+                && parameter.CarrierType == carrierType));
+
+    internal bool SupportsFixedArrayStorage(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures)
+        => HasFixedArrayStorageLayout(layout, structures, static _ => true);
+
+    internal bool AllowsEmptyFixedArrayInitialization(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures) =>
+        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsEmptyInitialization);
+
+    internal bool AllowsMutableFixedArrayLocal(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures) =>
+        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsMutableLocal);
+
+    internal bool AllowsFixedArrayElementWrites(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures) =>
+        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsElementWrites);
+
+    internal bool AllowsFixedArrayUInt32Indices(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures) =>
+        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsUInt32Indices);
+
+    internal bool AllowsCheckedFixedArrayAccess(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures) =>
+        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsCheckedRuntimeAccess);
+
+    internal bool AllowsReadonlyUtf16ZFixedArrayLoan(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures) =>
+        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsReadonlyUtf16ZLoan);
+
+    private bool HasFixedArrayStorageLayout(BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures, Func<NativeFixedArrayStorageLayoutDefinition, bool> predicate)
+    {
+        var elementTypeName = NativeFixedArrayContract.ElementTypeName(layout.ElementType, structures);
+        return elementTypeName is not null
+            && (_fixedArrayStorageLayouts.Any(definition =>
+                    predicate(definition) && definition.ElementTypeName == elementTypeName
+                    && definition.ElementCount == layout.ElementCount
+                    && definition.ElementStride == layout.ElementStride
+                    && definition.ElementAlignment == layout.Alignment
+                    && definition.ByteExtent == layout.ByteExtent
+                    && NativeFixedArrayContract.MatchesElementFields(
+                        layout.ElementType, structures, definition.ElementFields))
+                || _imports.Values.Any(import => !import.StorageParameters.IsDefaultOrEmpty
+                    && import.StorageParameters.Any(parameter => parameter is not null
+                        && parameter.AddressType == PrimitiveType.NativeStorageAddress
+                        && parameter.CarrierType == layout.CarrierType
+                        && parameter.ElementTypeName == elementTypeName
+                        && parameter.ElementCount == layout.ElementCount
+                        && parameter.ElementStride == layout.ElementStride
+                        && parameter.ElementAlignment == layout.Alignment
+                        && parameter.ByteExtent == layout.ByteExtent
+                        && NativeFixedArrayContract.MatchesElementFields(
+                            layout.ElementType, structures, parameter.ElementFields)
+                        && predicate(new NativeFixedArrayStorageLayoutDefinition(
+                            parameter.ElementTypeName, parameter.ElementCount, parameter.ElementStride,
+                            parameter.ElementAlignment, parameter.ByteExtent) {
+                            ElementFields = parameter.ElementFields,
+                            AllowsMutableLocal = !parameter.IsReadonly,
+                            AllowsElementWrites = !parameter.IsReadonly,
+                        }))));
+    }
+
+    internal bool SupportsFixedArrayElement(string elementTypeName, int elementStride, int elementAlignment) =>
+        _fixedArrayStorageLayouts.Any(definition => definition.ElementTypeName == elementTypeName
+            && definition.ElementStride == elementStride && definition.ElementAlignment == elementAlignment)
+        || _imports.Values.Any(import => import.StorageParameters.Any(parameter =>
+            parameter is not null && parameter.AddressType == PrimitiveType.NativeStorageAddress
+                && parameter.CarrierType == PrimitiveType.NativeFixedArray
+                && parameter.ElementTypeName == elementTypeName
+                && parameter.ElementStride == elementStride
+                && parameter.ElementAlignment == elementAlignment));
+
     internal bool TryGetImport(string key, out NativeImportDefinition? definition)
         => _imports.TryGetValue(key, out definition);
 

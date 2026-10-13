@@ -20,6 +20,8 @@ internal sealed record NativeComCallFacts(
 
 internal static class NativeComCallContract
 {
+    internal const int MissingSuccessfulOutputHResult = unchecked((int)0x8000FFFF);
+
     internal static bool IsCataloguedOwnerName(string name, NativeImportCatalog? catalog) =>
         !string.IsNullOrWhiteSpace(name) && catalog is not null && catalog.TryGetComOwner(name, out _);
 

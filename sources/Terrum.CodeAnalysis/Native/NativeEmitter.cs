@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading;
@@ -59,8 +60,10 @@ public static class NativeEmitter
         }
 
         var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
-        foreach (var function in program.Functions)
+        var system32ImportPaths = new Dictionary<int, string>();
+        for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
+            var function = program.Functions[functionIndex];
             if (!function.IsExternal)
             {
                 continue;
@@ -76,15 +79,38 @@ public static class NativeEmitter
                     nameof(program));
             }
             bindings.Add(new NativeImportBinding(function.Name, definition.DllName, definition.ExportName));
+            if (definition.DeploymentPolicy == NativeImportDeploymentPolicy.System32)
+            {
+                system32ImportPaths.Add(functionIndex, System32ImportPath(definition.DllName));
+            }
         }
 
-        if (bindings.Count == 0)
+        if (bindings.Count == 0 && !catalog.SupportsNativeFixedArrayStorage)
         {
             throw new ArgumentException("The program selects a native import catalog but contains no imports.",
                 nameof(program));
         }
-        return EmitWithImportUsage(program, bindings.ToImmutable(), runtimePolicy, cancellationToken,
-            allowNativeImports: true).Image;
+        var code = CompileWithImports(program, bindings.ToImmutable(), runtimePolicy, cancellationToken,
+            allowNativeImports: true).Code;
+        return PeImage.Build(code with {
+            NativeImports = [
+                .. code.NativeImports.Select(import =>
+                    import.DeclarationIndex >= 0
+                        && system32ImportPaths.TryGetValue(import.DeclarationIndex, out var path)
+                            ? import with { DllName = path } : import),
+            ],
+        });
+    }
+
+    private static string System32ImportPath(string dllName)
+    {
+        var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        if (!OperatingSystem.IsWindows() || !Path.IsPathFullyQualified(systemDirectory)
+            || systemDirectory.Any(static character => character is < ' ' or > '~'))
+        {
+            throw new NotSupportedException("System32 native imports require an ASCII Windows system directory.");
+        }
+        return Path.Combine(systemDirectory, dllName);
     }
 
     internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
@@ -861,7 +887,7 @@ internal sealed partial class PeCompiler
                 at += (IsIndirect(function.Variables[variable].Type)
                     || function.Variables[variable].Type is PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView)
-                    && !function.Variables[variable].IsOut ? 16 : 8);
+                    && !function.Variables[variable].IsOut ? 16 : 8;
                 at = (at + 7) & ~7;
             }
             _slots[i] = slots;
@@ -3988,6 +4014,7 @@ internal sealed partial class PeCompiler
                 }
                 if (hasOut)
                 {
+                    var nativeComOutputs = NativeImportComOutputs(call);
                     var conditionalOutputs = call.Type == PrimitiveType.Bool;
                     var skip = -1;
                     if (conditionalOutputs)
@@ -4003,6 +4030,7 @@ internal sealed partial class PeCompiler
                     {
                         if (call.Arguments[i] is BoundOutArgument output)
                         {
+                            var nativeComOutput = NativeImportComOutput(nativeComOutputs, call, i);
                             var scratch = Spill(auxiliarySpills[i]);
                             var destination = _program.Functions[_currentFunction].Variables[output.Variable].IsOut
                                 ? OutSlot(output.Variable) : Slot(output.Variable);
@@ -4030,12 +4058,28 @@ internal sealed partial class PeCompiler
                             {
                                 SetManagedRoot(destination, active: true);
                             }
-                            if (IsUnique(output.Type))
+                            if (IsUnique(output.Type) && nativeComOutput is null)
                             {
                                 _code.Set(_liveSlots[_currentFunction][output.Variable]);
                             }
                             SetInitializationFlag(output.Variable, initialized: true);
                         }
+                    }
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        if (call.Arguments[i] is BoundOutArgument output
+                            && NativeImportComOutput(nativeComOutputs, call, i) is NativeComOutputDefinition nativeComOutput
+                            && IsUnique(output.Type))
+                        {
+                            EmitNativeImportComOutputOwnership(output.Variable, output.Type, nativeComOutput,
+                                Spill(spill));
+                        }
+                    }
+                    if (call.Type == PrimitiveType.Int32
+                        && nativeComOutputs.Any(static output =>
+                            output.Effects.HasFlag(NativeComEffects.SignedHResult)))
+                    {
+                        EmitNativeImportComOutputSuccessValidation(call, nativeComOutputs, Spill(spill));
                     }
                     if (conditionalOutputs)
                     {

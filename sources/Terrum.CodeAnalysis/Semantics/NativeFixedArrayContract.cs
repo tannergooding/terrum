@@ -14,7 +14,7 @@ internal static class NativeFixedArrayContract
     internal static bool IsCarrier(PrimitiveType type) => type == PrimitiveType.NativeFixedArray;
 
     internal static bool MatchesCatalog(NativeImportCatalog? catalog) =>
-        catalog is { IsForTesting: true } && catalog.SupportsCataloguedFixedArrayStorage;
+        catalog?.SupportsNativeFixedArrayStorage == true;
 
     internal static bool MatchesProgram(BoundProgram program) =>
         (MatchesCatalog(program.NativeImportCatalog)

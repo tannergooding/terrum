@@ -125,7 +125,7 @@ internal sealed partial class Binder
         _reference = reference;
         _runtimePolicy = runtimePolicy;
         _nativeImportCatalog = nativeImportCatalog;
-        _usesNativeImportCatalog = nativeImportCatalog?.SupportsCataloguedFixedArrayStorage == true;
+        _usesNativeImportCatalog = nativeImportCatalog?.SupportsNativeFixedArrayStorage == true;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null

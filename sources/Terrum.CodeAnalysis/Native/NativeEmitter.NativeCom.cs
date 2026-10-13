@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -330,7 +331,116 @@ internal sealed partial class PeCompiler
         }
 
         _code.Load64(Slot(0));
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var absent = _code.JumpIf(0x84);
         EmitNativeComRelease(method);
+        _code.PatchRelative(absent, _code.Position);
+    }
+
+    private ImmutableArray<NativeComOutputDefinition> NativeImportComOutputs(BoundCall call)
+    {
+        var function = _program.Functions[call.Function];
+        if (!function.IsExternal || function.NativeImportKey is not string key
+            || _program.NativeImportCatalog is not NativeImportCatalog catalog
+            || !catalog.TryGetImport(key, out var import) || import is null)
+        {
+            return [];
+        }
+        return import.ComOutputs;
+    }
+
+    private static NativeComOutputDefinition? NativeImportComOutput(
+        ImmutableArray<NativeComOutputDefinition> outputs, BoundCall call, int argumentIndex)
+    {
+        var parameterIndex = call.ParameterIndex(argumentIndex);
+        foreach (var output in outputs)
+        {
+            if (output.ParameterIndex == parameterIndex)
+            {
+                return output;
+            }
+        }
+        return null;
+    }
+
+    private void EmitNativeImportComOutputOwnership(int variable, PrimitiveType type,
+        NativeComOutputDefinition output, int result)
+    {
+        if (!output.Effects.HasFlag(NativeComEffects.SignedHResult))
+        {
+            EmitNativeImportComOutputLiveState(variable);
+            return;
+        }
+
+        _code.Load(result);
+        _code.Bytes(0x85, 0xC0);
+        var failed = _code.JumpIf(0x88);
+        EmitNativeImportComOutputLiveState(variable);
+        var done = _code.Jump();
+
+        _code.PatchRelative(failed, _code.Position);
+        if (output.Effects.HasFlag(NativeComEffects.OutputMayBeWrittenOnFailure))
+        {
+            EmitNativeImportComOutputLiveState(variable);
+        }
+        else
+        {
+            ZeroStruct(OwnerPlace(variable), Size(type));
+            _code.Clear(_liveSlots[_currentFunction][variable]);
+        }
+        _code.PatchRelative(done, _code.Position);
+    }
+
+    private void EmitNativeImportComOutputLiveState(int variable)
+    {
+        var live = _liveSlots[_currentFunction][variable];
+        _code.Load64(OwnerPlace(variable));
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var absent = _code.JumpIf(0x84);
+        _code.Set(live);
+        var done = _code.Jump();
+        _code.PatchRelative(absent, _code.Position);
+        _code.Clear(live);
+        _code.PatchRelative(done, _code.Position);
+    }
+
+    private void EmitNativeImportComOutputSuccessValidation(
+        BoundCall call, ImmutableArray<NativeComOutputDefinition> outputs, int result)
+    {
+        _code.Load(result);
+        _code.Bytes(0x85, 0xC0);
+        var failed = _code.JumpIf(0x88);
+        foreach (var output in outputs)
+        {
+            if (!output.Effects.HasFlag(NativeComEffects.SignedHResult))
+            {
+                continue;
+            }
+            var argumentIndex = call.ArgumentIndex(output.ParameterIndex);
+            if (call.Arguments[argumentIndex] is not BoundOutArgument owner
+                || !IsUnique(owner.Type))
+            {
+                throw new InvalidOperationException("A catalogued COM output must target a unique owner.");
+            }
+            _code.Load64(OwnerPlace(owner.Variable));
+            _code.Bytes(0x48, 0x85, 0xC0);
+            var present = _code.JumpIf(0x85);
+            EmitMissingNativeComOutputFailure();
+            _code.PatchRelative(present, _code.Position);
+        }
+        _code.PatchRelative(failed, _code.Position);
+    }
+
+    private void EmitMissingNativeComOutputFailure()
+    {
+        for (var index = _cleanups.Count - 1; index >= 0; index--)
+        {
+            CallCleanup(_cleanups[index]);
+        }
+        _code.Byte(0xB9);
+        _code.Int32(NativeComCallContract.MissingSuccessfulOutputHResult);
+        _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "ExitProcess"));
+        _code.Bytes(0x0F, 0x0B);
     }
 
     private void EmitNativeComOwnerTryClone(BoundFunction function)
