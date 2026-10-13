@@ -103,7 +103,7 @@ or new scanner semantics. Successful scanner-module execution alone does not pas
 
 ## Provisional implementation record (not approval)
 
-Revision 56 persists the current `ScannerHost.InvocationProfileIdentity` and
+Current development modules persist `ScannerHost.InvocationProfileIdentity` and
 the ten canonical buffer descriptors in ordinal order. The identity
 fingerprints the component/schema and source bound, descriptor names, types,
 mutability and capacity formulas, readonly table contents, and token/trivia/

@@ -8,10 +8,13 @@ host.
 The current design favors explicit writable access, checked initialization and
 cleanup, and target-defined behavior. Places are readonly by default; `mut`
 marks writable places or receivers, while `write` grants writable
-reference/view access. Legacy `bool`/`out` and vacancy-only `bool`/
-`init ref<T>` outputs have distinct caller contracts. These spellings and
-their rules are defined by the [source grammar](specs/grammar-spec.md) and
-[language contracts](specs/language-contracts.md).
+reference/view access. `init ref<T>` lends a vacant initialization destination
+under its [declared publication contract](specs/language-contracts.md#22-declared-outcome-relationships).
+The [source grammar](specs/grammar-spec.md)
+and [reference model](specs/language/references.md) define canonical signatures;
+parameter-only `out T` is not an alternate form. The compiler's retained legacy
+`out` modes are tracked separately in the
+[hosted output profiles](implementation/output-profiles.md).
 
 Use the [specification index](specs/README.md) for accepted language,
 runtime, metadata, and native contracts. See the

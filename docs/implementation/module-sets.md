@@ -56,7 +56,7 @@ declaration for type or cleanup contracts does not itself create an IAT entry.
 
 The set is intentionally leaf-only: it does not model transitive graphs,
 cycles, arbitrary version roll-forward, hot servicing, resilient layouts,
-or the future general `TRRM` semantic-IL format. Semantic v32 permits a
+or the future general `TRRM` semantic-IL format. Current modules permit a
 native-set consumer to retain private managed state, but image boundaries
 remain limited to scalar and
 public handle-free `Copy` value contracts, including existing conditional

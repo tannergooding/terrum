@@ -226,7 +226,7 @@ $LASTEXITCODE # 44
 $LASTEXITCODE # 44
 ```
 
-Semantic v31 also lets a managed-backed leaf export a public handle-free
+The current contract also lets a managed-backed leaf export a public handle-free
 compact `Copy` value without exporting its private class or managed handles.
 The original and replacement below expose the same `Snapshot` type and
 `ReadSnapshot`, `TryReadSnapshot` and `ReadTotal` signatures. The unchanged

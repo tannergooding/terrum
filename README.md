@@ -21,16 +21,17 @@ implemented.
 
 The bounded [Terrum-authored scalar source frontend](self-host/README.md)
 projects one snapshot of global functions with unique names and direct scalar
-calls, including forward calls and recursion. Its v74/v75 multi-function
-reader audits source-order target identities, with v75 adding void calls as
-statement roots, before using the hosted verifier/emitter. This is separate
+calls, including forward calls and recursion. Its source-bound multi-function
+reader audits target identities and void-call statement roots before using
+the hosted verifier/emitter. This is separate
 from source-free TRRM support and is not a bootstrap compiler.
 
 The [grammar](docs/specs/grammar-spec.md) and design documents specify target
 contracts independently of compiler support. Places default to readonly,
 `mut` qualifies writable places/receivers, and `write` grants writable
-reference/view access. Legacy `bool`/`out` and vacancy-only `bool`/`init ref<T>`
-outputs have distinct caller rules. `samples\design` and library proposals are
+reference/view access. The implementation retains legacy `bool`/`out` beside
+distinct vacancy-only `bool`/`init ref<T>` outputs; `out T` is not canonical
+target syntax. `samples\design` and library proposals are
 informative, not implemented APIs.
 
 ## Build

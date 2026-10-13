@@ -29,20 +29,18 @@ as `x+++y` diagnose instead of being reinterpreted, while trivia distinguishes
 `x++ +y` from `x+ ++y`. In generic type
 context, the parser partitions `>>`/`>>>` into CST closers, retaining leading
 trivia on the first part; `SyntaxTree.Tokens` keeps the original lexical
-stream. The internal match reserves three width bits for `>>>=`; published
-records remain unchanged through scanner-5.
+stream. The internal match reserves three width bits for `>>>=`.
 
-Scanner-6/schema-6 supports generalized ordinary and documentation comment
+The current scanner-10/schema-10 component supports generalized ordinary and documentation comment
 fences. Maximal opening star runs select
 whole equal-length closing runs with one slash for ordinary blocks and two
 for documentation blocks. Shorter runs and missing slash suffixes are payload;
 overlong runs with the required suffix diagnose `TRM0010`. Payload is opaque,
 not nested, and extra closer slashes remain for later lexing.
-Trivia IDs 0–3 retain their meanings; 4/5 append documentation line/block
-comments. Diagnostic 10 is added without changing any record width, token ID,
-source/token budget or native/semantic protocol.
+Trivia IDs 0–3 identify ordinary trivia; 4/5 identify documentation line/block
+comments. Diagnostic 10 identifies an overlong suffixed fence.
 
-Scanner-7/schema-7 supports contiguous `@keyword` identifiers. The escape
+The component supports contiguous `@keyword` identifiers. The escape
 catalog is grammar §2's exact reserved and
 contextual vocabulary, independent of legacy unescaped classification.
 It includes future unsupported words without implementing their constructs,
@@ -55,8 +53,7 @@ is a one-unit Bad token and does not consume following trivia.
 Raw token text, spans and trivia retain `@`. Name lookup uses the shared
 identifier identity; escaping suppresses syntactic contextual recognition.
 The compiled scanner consults a separate read-only host escape catalog,
-not a host re-lexing fallback. No token IDs, record widths, integer magnitudes,
-frontend projection versions or resource budgets change.
+not a host re-lexing fallback.
 
 The shared operator catalog includes `=>` for expression bodies; no scanner
 record or schema revision is needed. Attached numeric width suffixes diagnose
@@ -67,21 +64,20 @@ are untagged, while recognized rejected suffixes retain their tag value in the
 existing integer-record field for diagnostic fidelity. For example,
 `0x1f32` is an untagged hexadecimal integer; `0x1u32` is rejected as a
 width-suffixed token. This error metadata is not valid target syntax or a type
-selector. The five-word integer record shape is unchanged; component and
-schema identifiers advance to scanner-5/schema-5. The executable numeric
+selector. Integer records use the five-word shape below. The executable numeric
 decoder handles decimal, hexadecimal and binary integers with digit
 separators. It precomputes each token's `uint64` overflow cutoff by radix, so
 digit accumulation does not repeat a division or make a per-digit helper
 call. The hosted binder separately constructs `float32`/`float64` literals;
 decimal and valid hexadecimal floating tokens retain their source spelling
-in the compiled scanner but produce no integer value record. Floating
-arithmetic/comparisons, typed floating conversions, custom literal parsing,
-registered string targets and `[ConstEval]` remain unsupported.
+in the compiled scanner but produce no integer value record. Arithmetic,
+typed conversions and constant evaluation are not scanner operations; their
+hosted support is tracked in the [implementation reference](implementation.md).
+Custom literal parsing and registered string-target binding remain outside
+the implemented pipeline.
 
-Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` as
-token kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` as kind
-103. Existing token IDs, record widths, diagnostic IDs and integer records
-remain unchanged. These punctuators are lexically recognized; parser
+`CharacterLiteral` is token kind 103; `DotDot`, `DotDotCaret`, and
+`QuestionDot` are kinds 104–106. These punctuators are lexically recognized; parser
 consumption and binding remain separate support boundaries. The component
 diagnoses empty or multi-scalar character literals with `TRM0001`,
 unterminated literals with `TRM0002` and invalid escapes with `TRM0005`; it
@@ -178,11 +174,11 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 | `Host.IntegerValues` | `int32` | Read/write | Initialized count and unsigned integer-magnitude decoder records |
 | `Host.EscapeKeywords` | `int32` | Read-only | Closed canonical escape spellings, packed in the same kind/length/code-unit format with Identifier kind |
 
-The first nine grants retain their indices; the appended escape catalog is
-grant 9. The scalar frontend output grant follows at index 10, without changing
-its 392-word projection or historical payload versions.
-V74/V75 append `Host.FrontendProgram` at index 11 for complete multi-function
-snapshots; scanner grants and records are unchanged.
+The first nine grants have indices 0–8; the escape catalog is grant 9.
+The scalar frontend adds its 392-word output grant at index 10 and
+`Host.FrontendProgram` at index 11 for complete multi-function snapshots.
+Current projection layouts and reader bounds are in the
+[self-host inventory](../self-host/README.md); scanner grants and records are separate.
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.
@@ -215,9 +211,9 @@ Leading trivia remains attached to EOF when there is no following token.
 `Host.Diagnostics[0]` contains
 the diagnostic count; subsequent triples are numeric code (1–12 maps to
 `TRM0001`–`TRM0012`), UTF-16 start and UTF-16 length, in reporting order.
-Scanner-8/schema-8 introduced diagnostic identities 11 for an invalid maximal
-punctuation run and 12 for a defined but unsupported spelling; Scanner-10
-retains those identities and record widths. Raw buffers have no schema marker; adapters
+Diagnostic identities 11 and 12 identify an invalid maximal punctuation run
+and a defined but unsupported spelling, respectively.
+Raw buffers have no schema marker; adapters
 interpret them with current record identities and validate the current source
 profile without replacing supplied classifications.
 Overlong suffixed fences report their whole run plus the required suffix;
@@ -259,8 +255,8 @@ Untagged integer magnitudes are not assigned a default type; minus remains a
 separate operator. `ReadLexResult` does not consume this side table by itself. `build-component`
 passes both results to `SyntaxTree.Parse`, which requires a record for every
 integer-form numeric token and binds from those decoded magnitudes. Numeric
-forms without integer records (such as floats) remain unsupported in the
-native profile. This is not full self-hosting.
+forms without integer records retain their hosted binding path; the scanner
+does not supply floating payloads. This is not full self-hosting.
 The reader accepts either `ImmutableArray<ScannerToken>` or the
 `ImmutableArray<SyntaxToken>` already produced by `ReadLexResult`; neither
 overload re-lexes or duplicates the token stream.
@@ -284,16 +280,16 @@ diagnostics.
 
 Scanner-10 classifies maximal ASCII punctuation runs in the compiled scanner.
 Unlisted runs are one Bad token with whole-run `TRM0011`; `..`, `..^` and `?.`
-are recognized as single tokens, while their parser consumption and binding
-remain unsupported. Other defined-but-unsupported spellings remain one Bad
+are recognized as single tokens. The hosted parser/binder supports absolute
+and end-relative bounds for the bounded host-buffer/readonly owned-buffer
+paths; `?.` remains token-only. These forms do not establish general indexing
+or scalar-frontend support. Other defined-but-unsupported spellings remain one Bad
 token with `TRM0012`. Deferred `>`/`?`
 type-boundary candidates retain existing splitting only when actual hosted
 parser consumption certifies them; missing/recovery tokens cannot certify a
 boundary, and repeated optional marking retains `TRM1005`. Native scalar
 snapshots check whole runs before spacing/fallback, with no type exemptions.
-Scanner-10/schema-10 retains Scanner-8's diagnostic identities 11/12 and
-appends token IDs 104–106; record widths, projections, bounds and semantic/native
-ABI remain fixed. Raw buffer records are interpreted only with the current
+Raw buffer records are interpreted only with the current
 identities and shapes. See the
 [implementation reference](implementation.md) for current parser and
 unsupported-spelling boundaries.
@@ -362,7 +358,7 @@ numeric forms; repeated scans reset the published count.
 spelling against the same fixed immutable `Host.Source` grant. It is not a new
 scanner side table or a runtime `Text` implementation. `StringLiteral.TryCreate`
 checks the complete range, delimiters, raw scalars and escapes before publishing
-a compact spelling/count value. `TryReadScalar(position, out scalar, out next)`
+a compact spelling/count value. `TryReadScalar(position, init scalar, init next)`
 returns an `int32` Unicode scalar and the next absolute UTF-16 offset only at a
 scalar boundary. Opening/closing quotes, offsets inside escapes or surrogate
 pairs, and out-of-range positions fail without publishing outputs.
@@ -379,7 +375,7 @@ native decoded values/offsets with explicit spelling/scalar pairs under both
 runtime policies. They inspect every offset, repeat construction and reading,
 and check failed-output use is rejected. Arbitrary-position reads rescan the
 prefix to establish boundaries. `StringLiteralCursor.Create(literal)` and
-`cursor.TryRead(out scalar, out next)` provide linear sequential traversal;
+`cursor.TryRead(init scalar, init next)` provide linear sequential traversal;
 each next cursor is constructed only from a validated scalar boundary. Both
 forms agree on every scalar and source offset. This bounded compiler component
 is not an indexed or allocated string library. It retains no borrowed address

@@ -89,30 +89,20 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
-Persisted development semantic modules currently write and accept only revision 76. The
-semantic v24-v32 labels below are historical module revisions and implementation
-milestones, not reader-compatibility promises; those revisions are retired and
-rejected instead of normalized.
-The historical revision-55 experiment carried the provisional `Host.Source`
-requirement for a semantic-module JIT adapter. This is not an accepted
-module contract; accepted semantic-module execution remains source-independent.
-It does not make source-dependent native DLL or persisted AOT images executable.
-Semantic version 24 carries the validated class/`ManagedNode` access
-capability contract. Semantic version 25 adds the distinct `MutReceiver`
-contract for persisted, non-exported mutating methods on non-owning compact
-structs. Semantic version 26 adds nested mutable-field loan expressions.
-Semantic version 27 permits ordinary mutating methods on named unique owners.
-Semantic version 28 extends nested mutable-field loans through fully
-initialized unique roots and children, preserving ownership and cleanup.
-Semantic version 29 admits writable owning-buffer field loans for `Set`,
-`TryAppend` and `Clear`, with no physical ABI change.
-Semantic version 30 extends lexical `SliceMutable` acquisition to those fields.
+Persisted development semantic modules write and accept only revision 76;
+older revisions reject rather than being upgraded. The current format retains
+class/`ManagedNode` access contracts, non-exported compact-struct `MutReceiver`
+contracts and nested mutable-field loans, including fully initialized unique
+roots and children. Writable owning-buffer fields support `Set`, `TryAppend`,
+`Clear` and lexical `SliceMutable` acquisition without transferring ownership.
 Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Current artifacts
 record the validated access and receiver contracts directly; all use semantic
 module revision 76 regardless of which supported constructs they contain.
-Older revisions are not upgraded while reading.
+The provisional `Host.Source` semantic-module JIT adapter is a separate,
+unapproved extension; accepted module execution remains source-independent.
+It does not establish source-dependent native packages or persisted AOT.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
@@ -125,12 +115,13 @@ width suffixes diagnose as `TRM0006`; missing hexadecimal/binary digits and
 malformed separators diagnose as `TRM0007`–`TRM0009`. Based literals construct
 target-width bit patterns; decimal literals retain numeric range semantics.
 Based integers can also construct directly as floating values. Float-format
-conversions follow IEEE-754 nearest/ties-to-even behavior; integer/floating
-conversions, floating arithmetic/comparisons, custom literal parsing and
-registered literal targets remain outside this executable profile.
-The provisional hosted `char16`-to-floating projection remains outside this
-executable profile and does not add a supported native scalar or source-free
-TRRM operation.
+conversions follow IEEE-754 nearest/ties-to-even behavior.
+The hosted compiler and bounded frontend also project same-format floating
+arithmetic/comparisons and integer/floating conversions; `char16`-to-floating
+and floating-to-integer frontend projections remain provisional. The
+[conversion inventory](conversion-profiles.md) and source-free TRRM inventory
+below distinguish those implementation paths from complete conformance.
+Custom literal parsing and registered literal targets remain unsupported.
 
 The hosted compiler supports internal scalar `[ConstEval]` functions,
 required `const T name = expression;` locals and nested scalar `const`
@@ -149,8 +140,8 @@ It supports named loop transfers, but not optional types or managed handles;
 those belong to the hosted compiler's broader native profiles. The scalar
 frontend adds a bounded direct scalar-call subset: complete-program projection
 supports self/global calls, single-function projection supports self-calls,
-and v85 maps named by-value arguments while preserving source evaluation order.
-Named output arguments, overload selection, attribute targets, general
+and v85 maps named by-value and scalar `out`/`init ref<T>` arguments while
+preserving source evaluation order. Overload selection, attribute targets, general
 binding, indexing, generics and dot-bearing forms remain excluded. Its `?`/`:`
 spellings are conditional connectors only. Supported function headers and
 scalar type calls require attached delimiters. String and format interiors
@@ -179,19 +170,16 @@ native-profile contracts remain separate; frontend projection tags are internal
 implementation details, not product versions.
 Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
-The v41 feature milestone added retained conditional nodes, not a new native ABI.
 Managed-handle `??` and statement-form `??=` use a single value/place evaluation
 and lazy fallback. Optional assignment requires an initialized mutable local
 or writable mutable class field; computed receivers remain rooted through
 fallback calls and checked failure. Results retain existing nullability and
-readonly/write contracts. The v42 feature milestone added retained nodes, with no native
-ABI change or scalar/unique optional representation.
+readonly/write contracts, without implementing scalar/unique source optionals.
 Prefix/postfix integer updates save the old value and commit a checked
 replacement only on success. Supported mutable local, compact-field,
 writable class-field and host-buffer places retain receiver/index
 single evaluation, access checks and managed-root cleanup. Prefix returns
-the replacement; postfix returns the saved value. Primitive update nodes
-were added at the v43 feature milestone without changing the native ABI.
+the replacement; postfix returns the saved value.
 The hosted compiler also supports nominal static `++`/`--` calls for the
 eligible writable `Copy`-struct place envelope. These preserve the same
 single-evaluation and checked-writeback behavior: operator failure prevents
@@ -200,8 +188,7 @@ equal the operand type, unlike other unary operators. Existing static
 requirements, self/no-self protocols, constrained generic definition proofs
 and witness identity apply; there is no C# instance mutation, owning-value
 update, arbitrary `char16` arithmetic, equality/default protocol or witness
-ABI. Nominal calls were added at the v44 feature milestone after primitive
-updates at v43. Private operator bodies and closed generic specializations can
+ABI. Private operator bodies and closed generic specializations can
 be replaced behind unchanged semantic/native consumers. Cross-module
 source-operator discovery and public generic witnesses are not added.
 Nominal updates diagnose in required constant work: the ConstEval interpreter
@@ -220,10 +207,8 @@ effects are not rolled back on failure. These operations reuse existing
 update-place/root machinery; they introduce no destination-loan form.
 Primitive scalar-slot compound assignments are available in bounded ConstEval.
 Nominal compounds are rejected despite binary operator support; `char16` and
-unique-value update destinations remain unsupported. Shift and
-compound-assignment nodes were added at the v45 feature milestone (compound expression tag 26,
-admitted only in statement position).
-This adds no native ABI or profile version.
+unique-value update destinations remain unsupported. Retained compound
+expression tag 26 is admitted only in statement position.
 
 The executable native scalar frontend adopts these primitive operations in
 current projection v85: ordinary integer shifts, all eleven compound assignments and
@@ -263,339 +248,80 @@ emission remain separate from semantic opcode allocation.
 Only v85 is produced or accepted for single-function and complete-program
 scalar frontend projections, every function frame and diagnostic records.
 V1–v84 tags reject before body auditing. Compact expression and tree/statement
-layouts, source mapping, type/mode/unsafe/named-call audits and the hosted
-verifier/emitter boundary are unchanged; no version is bumped for this cleanup.
-The following older projection labels document retired feature milestones and
-their former restrictions, not supported input tags or compatibility readers.
+layouts retain source mapping, type/mode/unsafe/named-call audits and the hosted
+verifier/emitter boundary.
 The current reader has no historical-version selectors or feature-version
 gates. Compact and tree layouts are both actively produced; no older layout is
 kept merely for comparison.
 
-Projection v50 additionally admits initialized scalar declarations inside the
-component's existing braced branch/loop bodies. Lexical visibility, sequential
-initialization, enclosing-name collision checks and writable authority are
-validated independently of globally unique local slots. Loop reinitialization,
-outer writes and scope exits reuse existing verified block/native lowering
-under both policies. The eight-local function-wide identity budget and all
-other component limits remain unchanged; v1–49 servicing and the native ABI
-are preserved. No standalone blocks, vacant locals or general calls are added.
+## Current scalar frontend projection
 
-Projection v51 adds bounded braced scalar `do`/`for` loops. Shared lowering
-preserves first-iteration and condition order, for-header scope and one-time
-initialization, iterator execution on normal completion/nearest continue, and
-break/return bypass. The independent source-bound reader validates clause roles
-and local visibility before native execution. Proven non-fallthrough loops
-need no synthetic return; reachable non-void fallthrough rejects. Both policies,
-all existing upper bounds and v1–50 servicing remain; no ABI/profile/scanner
-change, named transfers, standalone blocks or richer values are added.
+The single-function buffer supports bounded self-calls. The complete-program
+buffer inventories uniquely named top-level functions before parsing bodies,
+resolving forward calls and self/mutual recursion without overload search.
+Each function has zero through three scalar parameters, including retained
+`out` and canonical `init ref<T>` modes. Named arguments map to formal
+parameters without changing source evaluation order; visible locals and
+parameters still take precedence over function names.
 
-Provisional projection v52 adds standalone lexical blocks using existing
-brace syntax as statement kind 14: `slot` is the exclusive body-end index,
-`root` is `-1`, and the span covers both
-braces, with child statements in preorder. An independent source-bound audit
-checks extents and scope before lowering to the existing managed `BoundBlock`;
-failed validation publishes no partial projection. Versions 1–51 retain their
-feature restrictions. The 392-word shape, record widths, existing bounds,
-scanner IDs and semantic/native ABI remain unchanged. See the
-[implementation reference](../implementation.md) for name resolution and scope
-rules. Projection v54 supports named transfers to enclosing loop headers; the
-source-free indexed TRRM path uses its separate routing protocol, which remains
-fail-fast-only and unchanged.
+An independent source-bound reader audits declarations, bodies, target
+identities, argument modes/types and all expression roots before constructing
+the hosted `BoundProgram`. Void calls are direct statement roots, including
+supported `for` clauses, never synthetic values. The source/token budget is
+16,384 UTF-16 units and 64 tokens; ten function frames cover even six-token
+empty void declarations. Per-function limits are eight named/hidden local
+identities, 12 statements, 32 expression nodes, 16 expression-recursion levels
+and six structural levels.
 
-Provisional projection v53 appends non-void standalone `_ = expression;`
-statements for the existing six primitive scalar types. Discard has no
-contextual target type, so `_ = 1;` rejects while `_ = int32(1);` is valid.
-The independently audited hidden readonly local preserves the expression's
-existing single-evaluation, checked-failure and lazy-effect behavior and
-counts toward the existing eight-identity limit. Versions 1–52 retain their
-prior shapes and do not admit discard records; later projections may carry
-kind 15 alongside newer kinds. This appends only a provisional frontend feature
-version: source grammar (host language version 44), scanner-10/schema-10,
-diagnostic/token inventories, semantic/ISA/Contract/TRRM formats, native
-formats and ABI do not change. The exact record and publication contract is
-in the [implementation reference](../implementation.md).
+The [implementation summary](../implementation.md#persistent-and-self-hosted-components)
+records component support independently of the
+[source grammar](../specs/grammar-spec.md#33-statements-and-local-declarations)
+and [publication contracts](../specs/language-contracts.md#22-declared-outcome-relationships).
 
-Projection v55 adds standalone `require condition;` to the bounded native
-scalar frontend. It uses the existing Boolean binding and checked-require
-behavior, under both runtime policies, without a hidden local or new source
-scope. Versions 1–54 retain their prior shapes; later projections may carry
-kind 21 with earlier feature kinds. It does not extend the source-free
-indexed-TRRM contract; see the [implementation reference](../implementation.md)
-for the bounded audit and flow rules.
+| Current construct | Record/audit boundary |
+|---|---|
+| Initialized scalar locals, branches and loops | Lexical visibility, enclosing-name collisions, sequential/per-iteration initialization and writable authority are checked independently of globally unique slots. `do`/`for` preserve condition/iterator ordering, header scope and named transfer cleanup through shared lowering. |
+| Standalone lexical blocks | Kind 14 records an exclusive body-end slot, root `-1`, brace span and preorder children; extents and scope are audited before `BoundBlock` lowering. |
+| Non-void `_ = expression;` | Kind 15 uses an audited hidden readonly local, counted against the eight-identity limit. The discard supplies no contextual target type: `_ = 1;` rejects while `_ = int32(1);` is valid. |
+| Boolean requirements | Kind 21 retains checked-require behavior under either runtime policy without a hidden local or new source scope. |
+| Structured returns and void completion | Tree/statement scalar returns use kind 8 with a typed root and keyword-through-semicolon span; their terminal header words 38–40 are `-1`. Terminal-expression envelopes remain a separate current form. All roots are consumed and reachable non-void fallthrough rejects. Void bodies permit empty/implicit completion and bare or grouped unit returns; a parameterless void entry exits zero. |
+| Else-if chains | False arms lower to nested conditionals without synthetic lexical blocks, retaining source coverage, local scopes and structural limits. |
+| `[NoThrow]` and `[DoesNotReturn]` | Exact declaration flags/spellings and body effects are audited. Shared verification owns failure/completion proofs; DoesNotReturn requires void and removes implicit normal completion. General attributes are not enabled. |
+| Named local lifetime ending | Kind 24 retains the slot, root `-1` and statement span. Parameters, unknown/inactive names and non-local places reject; shared verification owns definite liveness and reinitialization. |
+| Typed/inferred vacant locals | Kind 25 carries explicit `init T`; kind 26 carries `init var`; flag `0x2` records initialization authority. Inferred type comes from the first already-typed assignment expression, not an untyped literal. Unresolved, incompatible or optional storage rejects. |
+| Typed scalar constants | Kind 27 carries a direct literal; kind 28 carries an initializer reducible to `BoundConstant`; flag `0x4` records constant authority. Selected constant branches follow source evaluation. Inferred constants, runtime-dependent evaluated work and for-initializer constants reject. |
+| Try/finally and bare recovery | Kinds 29/30 retain try/finally extents; kind 31 retains an unsafe block; kinds 32/33 retain bare try/catch inside that scope; kind 34 retains its optional NoThrow finally. Recovery requires checked-exceptions; typed catches and filters reject. |
+| Static body proofs | Kinds 35/36 carry foldable-true static require and outer-body static ensure. Scopes/anchors are audited, ensure is closed, and only proven-true conditions are erased. |
+| Direct call statements | Kind 37 owns the direct call root; void calls reject in value contexts. Complete-program operation 105 and its target table identify source-order callees and their argument roots/count/types. |
+| Scalar output modes | Header words 16/17 carry separate out/init masks; operations 107/108 encode matching existing/declared init destinations. Boolean returns use conditional publication; non-Boolean/void results require every output initialized on each normal return. |
+| Initialization tests and unsafe calls | Operation 109 audits `is init` on named scalar storage; kind 110 audits `unsafe(expr)`. Explicit unsafe scopes authorize caller-unsafe calls; an unsafe declaration does not authorize its own body. |
+| Complete-program switches | Kinds 38/39 and hidden-selector flag 8 retain one selector evaluation, distinct constant arms and a final default. The reader independently matches source before ordered hosted lowering; guards/patterns/fallthrough and single-function switches reject. |
 
-Projection v56 adopts existing braced `void` function contracts in the bounded
-native frontend: empty bodies, implicit completion, and bare or grouped
-unit-literal returns. It reuses null-return lowering under both policies;
-parameterless `void Main()` exits zero, and public void exports retain the
-existing primitive-parameter ABI. The six-primitive expression, local and
-parameter domains are unchanged. Versions 1–55 retain their void restrictions.
-These v56 payloads do not admit void expression bodies; general calls remain
-excluded. The
-[implementation reference](../implementation.md) specifies exact source auditing
-and completion behavior. This does not widen source-free indexed TRRM.
-
-Projection v57 adds void arrow bodies containing exactly one existing
-requirement or non-void scalar discard statement. It preserves hosted
-statement/body/function spans, managed lexical wrapping and implicit null
-completion at the semicolon under both policies. Earlier versions retain their
-arrow restrictions, and braced void functions without `else if` remain v56. It adds no unit
-expression domain, calls, assignment/update arrows or ABI change; the
-[implementation reference](../implementation.md) defines the exact record and
-source-audit boundary.
-
-Projection v58 adds existing `else if` chains to braced scalar and void
-functions. False arms lower directly to nested conditionals without synthetic
-lexical blocks; selected conditions, local scopes, loop targets and checked
-failures retain hosted behavior under both policies. Existing structural,
-record and expression limits still apply to each nested conditional. Versions
-1–57 retain their restrictions, and arrow bodies are not widened. The
-[implementation reference](../implementation.md) specifies marker association,
-source coverage and feature precedence. Source-free indexed TRRM and the
-native ABI are unchanged.
-
-Projection v59 adds exact `[NoThrow]` and `[DoesNotReturn]` declaration
-contracts over the current top-level scalar/void braced and arrow forms,
-including supported primitive-parameter forms. Existing shared folding and
-effect verification remain authoritative under both policies; DoesNotReturn
-requires void and removes implicit normal completion. Source audits preserve
-raw spelling, distinct flags, all source coverage, hosted spans/scopes and
-conservative failure proofs. Normalized exports retain the existing
-primitive-parameter ABI. Versions 1–58 keep their restrictions, all resource
-limits remain, and general attributes/calls are not added. The
-[implementation reference](../implementation.md) specifies header bits and body
-shapes; source-free indexed TRRM is unchanged.
-
-Projection v60 adds explicit lifetime ending for a visible named scalar local.
-Kind 24 stores the local slot, root `-1`, and source span through the
-semicolon; a `for` clause omits its delimiter as usual. The independent
-source-bound reader rejects parameters, unknown or inactive names and
-non-local targets. Shared semantic verification still enforces definite
-liveness and hosted cleanup/reinitialization rules; mutable locals retain
-their existing reassignment authority. Version 60 composes with v59 effects.
-It adds no ABI or native profile operation; older projection tags are
-validation details, not compatibility requirements.
-
-Projection v61 adds explicit `init T name;` for six scalar types. Kind 25
-declares a vacant local with root `-1`, and local flag `0x2` records its
-initialization authority. Existing assignment records initialize the local
-through shared hosted verification; source audits validate the declared type,
-name and lexical visibility, including `for` initializers. Inferred `init var`
-and nullable local inference remain unsupported in v61, with no ABI or
-source-free TRRM change.
-
-Projection v62 adds bounded `init var name;` scalar locals. Kind 26 marks the
-inferred declaration; the producer fixes its scalar type from the first
-assignment whose expression already has a known type, and the source-bound
-reader verifies the `init var` spelling and resolved local type. Untyped
-numeric literals do not establish the type, and unresolved or incompatible
-initializations remain errors. Nullable locals and other vacant storage remain
-outside this bounded frontend. These provisional projections change no native
-ABI, source-free TRRM or semantic-module format.
-
-Projection v63 adds block-local `const T name = literal;` declarations for the
-six scalar types. Kind 27 marks the declaration and local flag `0x4` records
-constant authority. The source-bound reader accepts only a direct scalar
-literal initializer and inlines later reads as its verified constant value;
-constant expressions, inferred const locals and `for`-initializer const
-declarations remain outside this bounded subset. The projection adds no native
-ABI, source-free TRRM or semantic-module format.
-
-Projection v64 adds kind 28 for typed scalar `const` initializers whose
-expression tree the bounded constant folder reduces to a `BoundConstant`.
-Direct literals remain projection v63 kind 27; folded initializers may use
-earlier constant locals. Constant-selected conditional arms and Boolean
-short-circuit paths follow only the evaluated branch. Runtime-dependent
-evaluated expressions, unsupported forms, inferred const locals and
-`for`-initializer const declarations remain outside this bounded subset. The
-projection adds no native ABI, source-free TRRM or semantic-module format.
-
-Projection v65 adds kinds 29 and 30 for nested scalar
-`try { ... } finally { ... }` regions. The source-bound reader verifies both
-block extents and lexical visibility before lowering to `BoundTryFinally`;
-`catch` remains unsupported. Shared verification enforces the existing NoThrow
-cleanup and control-flow restrictions under both runtime policies. This
-remains a bounded frontend projection that depends on the hosted verifier and
-emitter, not a standalone compiler or a native ABI/schema change.
-
-Projection v66 adds kind 31 for explicit `unsafe` blocks and kinds 32 and 33
-for bounded bare `try`/`catch` recovery inside them. Catch recovery is
-available only with the checked-exceptions runtime policy; typed catches,
-filters and `finally` on a catching region remain unsupported. The reader
-audits both extents and lowers to the hosted `BoundUnsafe`/`BoundTryCatch`
-verifier and emitter path. This remains a bounded projection, not a standalone
-compiler or a native ABI/schema change.
-
-Projection v67 adds kind 34 for an optional NoThrow `finally` after a supported
-bare catch. The reader audits its separate extent, while shared verification
-checks failure edges and cleanup under the checked-exceptions policy. Typed
-catches and filters remain outside the bounded frontend; no native ABI or
-schema changes.
-
-Projection v68 adds kinds 35 and 36 for foldable-true body `static require` and
-outer-body `static ensure` proofs. The reader validates the scopes and source
-anchors, then erases only proven-true conditions; `static ensure` must be
-closed, and unsupported or unestablished proofs reject. This does not add a
-native ABI, source-free TRRM or semantic-module format.
-
-Projection v69 adds a three-bit parameter-mode mask for scalar `out`
-declarations. The source-bound reader audits each mode against the declaration
-tokens and lowers it to the shared verifier as a mutable output parameter.
-Hosted Boolean-return and definite-publication rules still apply; general
-`out` call sites and general `init ref<T>` migration remain scheduled; the
-later multi-function projections add only the existing scalar output modes.
-
-Projection v70 adds direct calls from the one projected function to itself,
-including existing mutable local or output-parameter destinations for `out`
-arguments. Projection v71 adds `out var` destinations to those self-calls.
-The reader audits the function name, argument order and modes, then lowers
-the expression to the shared verifier/emitter as a recursive call. Other call
-targets and `init ref<T>` arguments remain outside this subset; it does not
-complete general `out` call-site migration.
-
-Projection v72 also permits those direct self-calls as expression statements
-when their result type is non-void. The source-bound reader verifies the
-statement's call root and source spelling before lowering; void self-calls
-remain unsupported. General call targets and unresolved `init ref<T>`
-call-site metadata remain outside this frontend boundary.
-
-Projection v73 permits void-returning direct self-calls only as expression
-statements. Their zero-typed call node must be the root of kind 37; the shared
-verifier/emitter continue to define call behavior. Void call values and other
-call targets remain unsupported.
-
-Projection v74 separately adds complete snapshots of top-level global
-functions with unique normalized names and zero through three positional
-by-value scalar parameters. Calls resolve against all declarations, including
-forward calls and self/mutual recursion; visible locals and parameters
-take precedence over function names. A distinct operation 105 and target table
-carry each call's zero-based source-order function identity and callee-specific
-argument roots/count/types. The independent reader audits every declaration,
-body and call against the complete source before constructing a multi-function
-`BoundProgram`. The single-function buffer is a separate projection surface;
-its historical tags are not compatibility targets.
-The existing 16K-source-unit/64-token snapshot bound is retained; body limits
-apply per function. Ten function frames cover even the six-token empty void
-declaration under that bound.
-
-V74 admits only scalar-returning callees, including when the caller returns
-void. It does not add non-self void calls, namespaces/imports, members,
-templates, external bindings, callable values, overload/conversion search,
-named/default/params arguments or reference parameters. V74–v76 exclude output
-parameters, and v74/v75 exclude `[DoesNotReturn]` support in multi-function
-snapshots. Hosted verification and
-emission remain authoritative for execution under both runtime policies;
-source-free TRRM checked exceptions and bootstrap gates are unchanged.
-
-Program projection v75 keeps the v74 framing and target table, selecting
-version 75 only when an operation-105 target returns void. Void calls are
-allowed only as direct kind-37 expression-statement roots, including supported
-`for` clauses; they are still rejected in value contexts. The reader checks
-the callee return type and statement-root ownership before lowering. Version
-74 continues to admit scalar-returning callees only. Earlier single-function
-tags are implementation/validation details, not compatibility guarantees.
-
-Program projection v76 admits the existing void-only `[DoesNotReturn]`
-contract in complete snapshots. Its exact declaration effect is source-audited,
-its body is rechecked by the hosted verifier, and direct kind-37 calls preserve
-the contract's normal-completion effect. V76 is selected only when a declaration
-uses the contract; ordinary void calls still require statement roots. This
-does not imply `[NoThrow]`, change v74/v75 payloads or add source-free TRRM
-checked-exception support.
-
-Program projection v77 carries existing scalar `out` parameter modes through
-complete declarations and direct operation-105 calls. Explicit destinations
-and `out var` are accepted only for matching `bool`-returning scalar `out`
-parameters; the independent reader audits the target mode and source argument,
-then the hosted verifier retains definite-publication authority. V74–v76
-continue to reject output parameters in multi-function snapshots.
-
-Program projection v78 adds a separate mask for the existing scalar
-`init ref<T>` parameter mode and matching `init name`/`init var name`
-destinations. It is limited to the six scalar types and complete multi-function
-snapshots; the independent reader audits each mode and the hosted verifier
-retains the true-publishes/false-vacant contract. V74–v77 reject init-ref
-modes. Single-function v81 and complete-program v82 additionally admit scalar
-init-ref declarations with non-Boolean or void results, requiring publication
-on every normal return. This does not add general reference arguments,
-source-free TRRM support or standalone compiler support.
-
-Single-function projection v79 carries the existing scalar `init ref<T>` and
-non-Boolean scalar `out` modes through bounded self-calls. Header word 17
-stores the init-ref mask separately from the `out` mask in word 16;
-operations 107/108 encode matching existing and declared `init`/`init var`
-destinations. Non-Boolean `out` accepts matching explicit or `out var`
-destinations in recursive self-calls. Source auditing and hosted
-definite-publication verification remain in force; this is not general
-reference migration or standalone compiler support.
-
-Complete-program projection v80 adds scalar `out` parameters on
-non-Boolean/void-returning functions with matching existing or `out var`
-destinations. The hosted verifier requires initialization on every normal
-return, and the emitter publishes the output after successful completion
-without treating the function's result as a success flag. V85 is the only
-current reader boundary; V74–v78 tags themselves are rejected.
-Non-scalar outputs and standalone compilation remain unsupported. This does
-not widen the separate managed-module export shape for output parameters.
-
-Single-function v79 uses the same non-Boolean/void output contract as v80 for
-bounded recursive self-calls. It supports explicit and `out var` destinations
-and requires normal-return initialization.
-Single-function projection v80 and complete-program projection v81 also admit
-operation 109 for `is init` on named scalar locals and parameters. The reader
-audits the named storage source, while the shared hosted verifier and emitter
-continue to own flow narrowing and runtime-state tracking; this remains a
-bounded hosted-backed projection, not standalone compiler support.
-Single-function v81 and complete-program v82 also project non-Boolean/void
-scalar `init ref<T>` completion through the same hosted definite-publication
-verification and result-independent publication path.
-
-Single-function v82 source-audits kind 110 for `unsafe(expr)`, while
-single-function v83 also carries the caller-unsafe callable flag and
-source-audits call authorization against enclosing explicit unsafe scopes.
-These tags are local to the single-function buffer and do not change the
-complete-program v82/v83 meanings; verification and emission remain hosted.
-
-Complete-program projection v83 adds source-audited caller-unsafe top-level
-callable declarations. Its existing header flags record the declaration
-requirement, and only calls enclosed by an explicit `unsafe { ... }` block are
-authorized in the projected body. Version 84 adds a source-audited kind-110
-wrapper for `unsafe(expr)` and authorizes calls contained by that expression.
-The hosted verifier and emitter remain authoritative; unsafe declarations do
-not implicitly authorize their own bodies, and persisted caller-safety metadata
-and standalone compilation remain unsupported by this bounded projection.
+Braced and supported arrow bodies preserve hosted spans and completion
+behavior. These records do not establish namespaces/imports, members,
+templates, external bindings, callable values, general reference arguments,
+default/params arguments or standalone compilation. Supported aliases and
+the scalar expression domain are tracked in the
+[self-host inventory](../../self-host/README.md).
+Source-free TRRM has its separate fail-fast indexed routing/Body contract;
+frontend projection support does not extend it.
 
 The current hosted parser enforces single same-line loop-label attachment in
 hosted/scanner parsing, the native snapshot and successful projection audits.
 Newlines inside comments also detach a label. Existing label lookup, transfer
-and cleanup semantics, historical semantic/module payloads, projection
-versions and native ABI remain unchanged.
+and cleanup semantics retain their existing source-bound checks.
 
-The native scalar frontend's provisional projection v48 represents scalar
-returns as structured body statements: kind 8, slot 0, a typed result root and
-the keyword-through-semicolon span. Header words 38–40 are `-1`; the source
-reader consumes every expression root and uses verifier continuation rules to
-reject reachable non-void fallthrough. Structured returns are available in
-branches and loops. Projections v1–47 retain their existing terminal return
-shapes, and v48 does not use hosted-parser fallback or synthesize a terminal
-return. It adds no body-local declarations, general calls or native updates.
-Its 392-word buffer and limits of 64 tokens, 32 expression nodes, 12
-statements, eight locals and six structural levels are unchanged, as is the
-16-level expression-recursion limit. It still lowers through the shared
-hosted verifier/emitter; it is a compiler component, not a standalone
-self-hosted compiler.
 Standalone `init T name;` and `init var name;` declare vacant
 readonly local slots without a default value. Existing checked initialization
-controls publication, owner cleanup and managed-root activation. Semantic v40
-persists these declarations when retained; they add no native ABI operation.
+controls publication, owner cleanup and managed-root activation. Current
+semantic modules persist these declarations when retained.
 Hosted assignment to a definitely vacant `init` local uses the same checked
 AOT/JIT publication, cleanup and rooting paths. It fixes inferred storage type
 without granting live-value replacement authority; failed evaluation leaves
-vacancy. Retained initialization assignments were added at the v46 feature milestone, with local
-authority reconstructed from the vacant declaration. Conditional publication
+vacancy. Local authority is reconstructed from the vacant declaration. Conditional publication
 must be resolved before another initialization, including across loop and
 exception joins. The native scalar frontend separately supports explicit
-typed scalar vacant locals in projection v61 and bounded inferred scalar locals
-in projection v62; source-free TRRM is unchanged.
+typed and bounded inferred scalar vacant locals; source-free TRRM is separate.
 Hosted `name = _;` ends a definitely live named local value without deleting
 its declaration or changing its type. A unique value uses the existing
 scope-exit drop helper, clearing cleanup eligibility before executing cleanup;
@@ -607,31 +333,34 @@ Scalar and Copy values require no fabricated cleanup or default-value store.
 Standalone `init` and mutable locals can publish a new lifetime under their
 existing initialization authority; ordinary immutable locals cannot. Failed
 initialization leaves vacancy and does not reactivate a root or cleanup bit.
-Retained end nodes were added at the v47 feature milestone and are audited through
+Retained end nodes are audited through
 producer/reference/consumer linking and private native graphs. Both PE and
 JIT policies use the same lowering under current semantic-module revision 76,
 with no native ABI/profile or scanner change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
-guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
-are not adopted by this operation.
+guards/ARC, view rebinding and source-free TRRM are not adopted by this operation.
+The compiled scalar frontend projects only its bounded scalar local form.
 The hosted compiler also supports closed scalar `static require`/`static
 ensure` proofs, compilation-local generic substitutions and nominal operator
 protocols. Expression-bodied functions, methods, static operators,
 constructors and explicit by-value getters reuse checked return, statement and
-cleanup paths. Their source, proof and specialization boundaries are detailed
-in the [implementation reference](../implementation.md).
+cleanup paths. Source and proof limits are in
+[hosted compiler support](../implementation.md#hosted-compiler); specialization
+limits are in [bounded generic functions](../implementation.md#bounded-generic-functions).
 
 The hosted `init ref<T>` contract publishes vacant storage only on true for a
 Boolean result; a non-Boolean or void result requires complete initialization
-on every normal return. Semantic v33 persists the distinct parameter/call mode;
-exported contracts use `init:`, while older private declarations retain their
+on every normal return. Current modules persist the distinct parameter/call mode;
+exported contracts use `init:`, while retained implementation declarations may use
 legacy `out` spelling. Public scalar, handle-free Copy and eligible unique
 outputs reuse checked scratch, cleanup and the existing native ABI. Managed
 graph boundaries admit Copy outputs only; generic contracts remain
-compilation-local.
+compilation-local. These are
+[hosted output profiles](output-profiles.md), separate from the
+[canonical outcome relationships](../specs/language-contracts.md#22-declared-outcome-relationships).
 
-Explicit by-value getters use readonly receiver calls. Semantic v34 persists
-property identity and accessor effects; Core primitive getters require v38.
+Explicit by-value getters use readonly receiver calls. Current modules persist
+property identity and accessor effects, including supported Core primitive getters.
 Exports remain subject to existing public Copy-layout and image-local managed
 state boundaries. Setters, auto-properties and ref-return accessors remain
 unsupported.
@@ -639,7 +368,7 @@ unsupported.
 One-field transparent Copy wrappers over `bool`, `char16`, `int32`, `uint32`,
 `int64` and `uint64` retain nominal identity and field authority while storage
 and direct Windows x64 argument/result classification match the scalar
-carrier. Semantic v35 persists this layout intent and replacements must
+carrier. Current modules persist this layout intent and replacements must
 preserve it. Nested or owning carriers, custom packing/alignment and broader
 field-policy changes remain unsupported; see the
 [layout reference](../specs/data-layout-and-abi.md).
@@ -712,7 +441,7 @@ handle, not a pointer or a native owner. `ManagedNode.TryCreate(value, out
 var node)` returns false without publishing a handle when allocation fails;
 `node.Value`, `SetValue(value)`, `SetNext(other)`, `ClearNext()` and
 `TryGetNext(out var next)` access its scalar payload and one nullable internal
-edge. Semantic version 24 now checks these intrinsic accesses: reads use a
+edge. Current modules check these intrinsic accesses: reads use a
 readonly handle, while mutation requires explicit `write` capability and a
 writable receiver. This qualification is preserved through optional handles,
 fields, parameters, results and inference. Copying a handle shares node
@@ -742,9 +471,8 @@ This is a single-threaded, image-private AOT/JIT proof with no
 inheritance, managed user-struct
 fields, public managed-handle ABI, finalizers,
 interior pointers, pinning or generational/concurrent collection. Native DLL
-emission supports scalar by-value parameters and scalar or `void` results,
-with no `out` parameters; the v31 feature milestone adds the bounded
-handle-free `Copy` value contracts described below. Managed state is private,
+emission supports scalar and bounded handle-free `Copy` value contracts,
+including the output modes described below. Managed state is private,
 and calls must be serialized. An export does **not** collect merely because it
 returns, so a caller must explicitly invoke the image's collection proof to
 drain abandoned nodes before unloading the DLL. There is no automatic unload
@@ -758,14 +486,13 @@ return snapshots, and a native C handler that validates the private versioned
 exception record before collecting after both Terrum frames have departed.
 That fixture is evidence for frame cleanup, not a public exception ABI.
 
-Semantic module version 18 also permits a leaf producer to use private
+Current modules permit a leaf producer to use private
 `ManagedNode` storage behind scalar, by-value exports. Its exact roots and
 collector remain inside the producer DLL. A compatible replacement can add this
 private runtime without changing persisted consumer or intermediate images,
 under either AOT or root-only JIT. The leaf must explicitly collect unreachable
-objects; unloading a DLL does not run managed-heap teardown. Under the v18
-contract, managed signatures, cross-image roots and source-class metadata
-remain unsupported
+objects; unloading a DLL does not run managed-heap teardown. Managed signatures
+and cross-image roots remain unsupported
 ([replacement proof](native-graph.md)).
 
 `native-19` adds up to 256 source-defined classes with explicit constructors and
@@ -787,10 +514,8 @@ The provisional object and constructor arguments remain rooted during
 collection; zeroed but uninitialized reference slots are collector-private,
 never readable source defaults. Checked constructor failure frees the
 unpublished allocation before propagating; fatal release failure still terminates.
-Fields are readonly after construction unless declared `mut`. Through semantic
-version 23, legacy class artifacts allowed bare handles to write declared
-mutable fields and did not encode class nominal mutability. Semantic version 24
-supports `mut class`, writable `mut` class receivers, readonly bare handles,
+Fields are readonly after construction unless declared `mut`. The current
+contract supports `mut class`, writable `mut` class receivers, readonly bare handles,
 and explicit `write` authority. Writes still require both a mutable class
 contract and an accessible mutable member. A writable child handle in a field
 retains its capability when read through a readonly parent; there is no
@@ -806,29 +531,23 @@ static managed roots and managed class values in inline structs remain
 unsupported. Required references do not permit bootstrapping a cycle by leaking
 partial objects. Optional fields in `native-20` provide an explicit construction
 path for source-defined cycles.
-At semantic versions 19 and 20, class metadata is image-private: versioned
-semantic/native leaf modules retain it internally, while public DLL exports
-remain scalar-only.
+Class metadata is image-private: semantic/native modules retain it internally,
+while public DLL contracts exclude managed handles.
 Executable class payloads also admit acyclic, handle-free Copy struct fields
 of at most 16 bytes, within the same 128-byte payload bound. Whole-value reads
 and writes copy all bytes; nested field access preserves declared mutability
 and construction checks. These aggregates contribute no managed descriptor
-slots. They cannot contain managed handles, owners or views. Version 20 persists these inline fields
-and their private nested layouts; version 19 continues rejecting them rather
-than reinterpreting its existing wire contract.
+slots. They cannot contain managed handles, owners or views. Current modules
+persist these inline fields and their private nested layouts.
 Factories also accept compact Copy arguments through the same direct/indirect
 Windows x64 aggregate convention as ordinary calls. Values are snapshotted before
 later argument effects and copied into constructor parameter storage; no caller
-storage loan survives construction. Version 22 retains aggregate constructor
-signatures and private layouts, without changing the scalar native export ABI.
-Earlier semantic versions continue rejecting aggregate factory arguments.
-Version 23 admits constructor signatures with more than three inputs; earlier
-versions continue rejecting that arity. These remain private implementation
-details behind unchanged scalar exports.
+storage loan survives construction. Current modules retain aggregate constructor
+signatures and private layouts within the parameter limits above. These remain
+private implementation details behind checked handle-free exports.
 The current semantic-module revision carries the managed class/`ManagedNode`
 access contract. It records that authority directly and rejects retired
-semantic-module revisions rather than normalizing them. The semantic version 25
-milestone adds a separate
+semantic-module revisions rather than normalizing them. It carries a separate
 `MutReceiver` contract for persisted, non-exported mutating methods on
 non-owning compact structs. Methods may be source-public or private, but source
 visibility does not expose a public mutating-receiver ABI. A receiver borrows a
@@ -840,32 +559,26 @@ readonly/by-value receiver ABI is unchanged. The verifier rejects forged
 mutable receiver loans from immutable places, while nested field writes inside
 a valid receiver borrow are allowed. Public scalar entry wrappers may call
 non-exported mutating methods, including source-public methods; private helper
-methods remain usable. Older headers reject the v25 contract. Nested
-mutable-field loan expressions require semantic v26; v25 remains sufficient
-for whole-local non-owning loans. The native/public ABI is unchanged.
+methods remain usable. Whole-local and nested mutable-field loans retain the
+same native/public ABI.
 Nested paths such as `outer.Inner.Mutate()` require writable storage and
 fields throughout; calls address the original subobject rather than a
-temporary copy followed by writeback. Semantic v27 permits ordinary mutating
+temporary copy followed by writeback. The current contract permits ordinary mutating
 methods on initialized named mutable unique owners or forwarded writable
 `this`; scalar/Copy field mutation preserves the existing ownership and
-cleanup responsibility. Older headers reject those methods.
-Semantic v28 also admits nested receiver paths through fully initialized
+cleanup responsibility. It also admits nested receiver paths through fully initialized
 unique roots and children, with writable fields throughout. It preserves
 the same root reservation and recursive cleanup responsibility.
 Partially initialized roots,
 temporary receivers, managed-class-field receiver paths, rebinding `this`,
 and public mutating-receiver ABI
-remain unsupported. At semantic v28, the native physical handle ABI and
-image-private managed state were unchanged, and public exports remained
-scalar-only. Semantic v31 now permits managed-backed leaf producers to export
+remain unsupported. Managed-backed leaf producers may export
 public handle-free compact `Copy` values up to 16 bytes through the existing
 by-value parameter/result and `bool`/`out` forms, including scalar outputs.
 Those snapshots use the existing native value ABI and do not expose private
 managed storage or handles; exported managed handles, unique values, nested
 managed-containing values, views, reference modes and mutating-receiver ABI
-remain unsupported. The v31 milestone kept managed leaves from importing
-another producer. Native physical ABI/profile versions are unchanged. The v32
-milestone added private managed consumers through ordinary single-provider semantic
+remain unsupported. Private managed consumers use ordinary single-provider semantic
 consumers and native single-provider/module-set entry points. Persisted acyclic
 native graphs additionally permit managed intermediate and root producers.
 These boundaries communicate only through the established scalar and handle-free public
@@ -913,9 +626,8 @@ Descriptors include optional reference slots; tracing ignores zero without
 treating it as uninitialized source storage. The
 [cycle sample](../../samples/native/managed-optional-cycle.terrum) exercises
 source-defined cycles and snapshots across edge clearing and collection.
-Version 19 and 20 semantic modules retain optional IR and types only inside a private
-source-class leaf. Neither this nor the version 18 private-node module exposes
-an optional or managed-reference ABI. An optional-node-only module remains
+Current modules retain optional IR and types inside private source-class state.
+They do not expose an optional or managed-reference ABI. An optional-node-only module remains
 unsupported.
 For a named optional-handle local or parameter, `is var item` and `is var? item`
 first test whether its storage is initialized. The former snapshots only a
@@ -1337,15 +1049,15 @@ before the first test, and `continue` reaches that test after exited-scope
 cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
 reuse in disjoint scopes; the general source collision policy remains
-unspecified. The v39 feature milestone added post-tested loops and non-nearest
-transfer depths; current semantic-module revision 76 serializes these nodes
+unspecified. Current semantic-module revision 76 serializes post-tested loops
+and non-nearest transfer depths
 when present. Native calling conventions, cleanup funclets and public ABI do
 not change.
 
-Other integer widths, floating point, character/text literals, classes,
-optional/generic/family binding, general borrowed references, ownership/cleanup,
-exceptions, GC, async, arbitrary interop and the standard library are outside the
-profile. Their syntax may be inspectable, but a build
+Other integer widths, runtime text, inheritance, general optional/generic/family
+binding, general borrowed references, ownership graphs and exception objects,
+production GC, async, arbitrary interop and the standard library remain outside
+the bounded support described above. Their syntax may be inspectable, but a build
 must diagnose unsupported semantics. No source library is silently assumed.
 The 64-bit types are fixed-width integers, not aliases for `nint`, `nuint` or
 native pointers. Entry-point process statuses remain `int32`; a wider return
@@ -1527,7 +1239,8 @@ allocation. Checked source and entry functions carry Windows scope records,
 including filter and cleanup targets; fail-fast records retain the old shape.
 The independent generated-DLL probe executes cleanup from C, inspects its
 unwind record and unwinds through a foreign fault without consuming it:
-`dotnet run --file scripts\check-native-frame.cs`.
+the [frame probe](../../scripts/check-native-frame.cs) with an explicit built
+compiler selected through [native qualification](../building.md#native-qualification).
 
 Aggregate sizes of 1, 2, 4 and 8 bytes use integer carriers. Other supported
 sizes use pointers to caller-owned 16-byte-aligned copies. Indirect results
@@ -1579,8 +1292,9 @@ The script
 obtains function addresses from encoder ranges; the development executable
 does not advertise an exported native API.
 
-The separate checked-policy generated-DLL fixture
-(`dotnet run --file scripts\check-owned-call-abi.cs`) exercises unique
+The separate checked-policy generated-DLL
+[owned-call fixture](../../scripts/check-owned-call-abi.cs), using the same
+explicit compiler selection, exercises unique
 direct/indirect by-value parameters and returns from an independent C caller,
 including hidden-result RAX storage identity and a sixth owning argument.
 It checks owning output stack placement, true-only publication, unchanged

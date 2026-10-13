@@ -76,6 +76,56 @@ Build-time compatibility analysis is not a claim that Terrum source programs
 can already be emitted or AOT-compiled.
 
 Generated Unicode tables carry their generated-code marker and data license.
-Hand-written source conforms to the shared style; narrow analyzer suppressions
-explain intentional parser recovery/internal control flow rather than disabling
-the policy repository-wide.
+Hand-written source follows the shared style. The inherited policy includes
+global `.editorconfig` exceptions and source-category suppressions in
+`sources\Directory.Build.props`; it is not exclusively member-scoped.
+The category suppressions retain the upstream API/style baseline:
+
+| Rules | Suppressed checks |
+|---|---|
+| CA1063, CA1711, CA1724, CA1815 | Disposal API shape, identifier suffixes, type/namespace naming and value-type equality |
+| CA2000, CA2213 | Analyzer-inferred ownership and disposal of created objects or disposable fields |
+| IDE0028, IDE0221 | Collection initialization and explicit-cast style |
+
+These exceptions do not establish correct resource lifetimes or equality.
+Those obligations still require code review and relevant tests; retaining
+upstream policy is not a per-site correctness justification. Additional
+member-scoped suppressions explain intentional parser recovery and internal
+control flow. The Windows-only `scripts\check-*.cs` entry points suppress
+CA2266 because they use `dotnet run --file`, not Unix shebang execution.
+`.editorconfig` explicitly requires `var` even when a type is
+not apparent; that repository rule takes precedence over personal defaults.
+
+## Native qualification
+
+Build the intended compiler with the standard developer command, then pass
+that output explicitly to the frame, owned-call, owned-buffer and managed-node
+probes. These probes do not build the compiler or silently select Debug.
+
+```powershell
+dotnet build sources\terrumc\terrumc.csproj -c Release
+$compiler = (Resolve-Path artifacts\bin\sources\terrumc\Release\net11.0\terrumc.dll).Path
+dotnet run --file scripts\check-native-frame.cs -- --compiler $compiler
+dotnet run --file scripts\check-owned-call-abi.cs -- --compiler $compiler
+dotnet run --file scripts\check-owned-buffer-abi.cs -- --compiler $compiler
+dotnet run --file scripts\check-managed-node-abi.cs -- --compiler $compiler
+```
+
+Use the Debug output path to qualify Debug. `dotnet run -c Release` selects
+the file-based harness configuration, not the compiler consumed by these four
+probes. API-based probes with `#:project` references instead use the library
+built by their standard `dotnet run` configuration.
+The independent C callers require Visual Studio x64 C++ build tools; the
+[aggregate ABI recipe](implementation/native.md#semantic-and-target-boundaries)
+also builds its assembly/C fixture explicitly.
+
+Every probe prints a unique directory under
+`artifacts\log\native-probes\<probe>\<run>`. It retains command arguments,
+stdout, stderr, deadlines and actual/expected exit statuses on success,
+nonzero failure and timeout. Compiler/library input paths and SHA-256 hashes
+identify the exercised build; changed inputs reject completion.
+`completed.txt` is written only after every command and probe assertion
+succeeds. A missing marker denotes an incomplete or failed run; an earlier
+run's logs are not evidence for a later invocation. Probe-generated native
+outputs share that run directory so concurrent invocations do not overwrite
+them; independently prebuilt C caller fixtures remain separate inputs.

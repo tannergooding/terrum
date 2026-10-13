@@ -5,7 +5,8 @@ historical `out` modes. They do not add parameter spellings, narrow the
 language's generic/output contracts, or grant TRRM execution support.
 The canonical source model uses
 [reference descriptors and initialization destinations](../specs/language/references.md);
-[output publication](../specs/language-contracts.md) defines its semantics.
+[output publication](../specs/language-contracts.md#2-outcome-initialization-and-nullability-are-separate)
+defines its semantics.
 
 The inventory below retains the implementation's profile names and exclusions.
 Its use of "accepted" means accepted in that development implementation,

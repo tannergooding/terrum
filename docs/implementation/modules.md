@@ -20,7 +20,7 @@ text or a native DLL. It is distinct from the approved current
 [`TRRM` metadata design](../specs/il-metadata.md), whose candidate `(1, 0)`
 framing and rows are not this development semantic-module writer's output.
 The separate [`compile-trrm` execution path](../implementation.md#executable-trrm-scalar-interchange)
-now emits approved metadata and compact-linear/indexed Bodies to `.trrm` files
+emits approved metadata and compact-linear/indexed Bodies to `.trrm` files
 for a self-contained, fail-fast scalar subset with bounded branches and loops,
 integer shifts, initialized writable-local compounds/updates and direct
 module-local scalar calls. Call targets use the module's MethodDef ordinals,
@@ -57,91 +57,28 @@ source. The current format preserves verified, typed, source-mapped structured
 IR and the supported declaration, layout, initialization, cleanup, and runtime
 contracts described in this reference and the [implementation reference](../implementation.md).
 
-Revision 68 provisionally persists caller-unsafe field-value reads inside
-`unsafe(expr)` for eligible public `Copy` paths, alongside the existing
-expression-scoped call slice. Unsafe-block field mutation and supported
-mutable-field loans remain separate; expression scopes do not add mutation,
-loan, TRRM, or scalar-frontend verification/emission support. Revision 69
-additionally persists getter-only and mixed caller-unsafe getter calls inside
-`unsafe(expr)` for eligible public `Copy` owners, including recursively
-exportable `Copy` results. Getter identity remains canonical in serialized
-modules; linking permits only its established producer qualification. These
-expression scopes do not add getter mutation, loans, TRRM, or scalar-frontend
-verification/emission support. Revision 70 additionally persists eligible
-caller-unsafe readonly instance methods inside `unsafe(expr)`, with a single
-by-value receiver and recursively exportable by-value parameters/results. It
-validates an owner-relative method identifier and admits producer
-qualification only during linking. Revision 70 did not support mutable or loan
-receivers, constructors, operators, reference/output modes, TRRM, or
-scalar-frontend verification/emission. The broader
-[reference-call metadata proposal](../proposals/reference-call-metadata.md)
-remains unapproved.
+## Persisted caller-unsafe operations
 
-Revision 71 provisionally persists a mutable field-receiver loan only as
-source argument zero mapped to formal parameter zero of an ordinary
-synchronous mutable instance method inside `unsafe(expr)`. At least one field
-edge must be caller-unsafe, with each edge's declared access authority checked
-independently and existing recursive public, non-unique `Copy` layout,
-declaration-access, initialization, place, mutability, ownership and
-reservation checks enforced. The loan is nonescaping and reuses the existing
-`BoundCall`/`BoundMutableFieldLoan` representation without an ABI or
-authorization-bit change. Reordered or wrapped receivers, readonly field
-loans, caller-unsafe mutable method contracts and other reference/output modes
-remain unsupported.
+The current format provisionally retains the following bounded operations.
+Writers and readers validate complete declarations, layouts, argument mappings
+and enclosing unsafe scopes. Authorization is reconstructed from the scope,
+not persisted as an independent capability; removing the only scope rejects.
 
-Revision 72 provisionally permits the same direct receiver loan to target a
-caller-unsafe mutable instance method only when the complete call remains
-inside `unsafe(expr)`. The method's by-value explicit parameters and result
-must pass the recursive public `Copy` layout gate, and the complete argument
-mapping, `MutReceiver` body contract, receiver shape and scope are checked by
-both writer and reader. It adds no receiver ABI or authorization bit, and
-continues to reject mutable receiver imports, direct mutable-method exports,
-wrapped/remapped receiver loans, unsafe-block calls, and unsupported
-reference/output modes.
+| Operation | Current eligibility and boundary |
+|---|---|
+| Field-value reads and getters inside `unsafe(expr)` | Eligible public `Copy` paths/owners and recursively exportable results. Getter identity remains canonical; linking permits only established producer qualification. This slice does not admit field/getter mutation. |
+| Readonly instance calls inside `unsafe(expr)` | One by-value receiver with recursively exportable by-value parameters/results. The method identifier is owner-relative; producer qualification is admitted only during linking. |
+| Mutable field-receiver calls inside `unsafe(expr)` | A nonescaping receiver loan is source argument zero mapped to formal zero of an ordinary or caller-unsafe synchronous mutable method. At least one field edge is caller-unsafe; every edge's declared access and the complete `MutReceiver`, initialization, place, mutability, ownership and reservation contracts are checked. Public non-unique `Copy` layouts and explicit by-value parameters/results must be recursively exportable. Wrapped/remapped or readonly receiver loans, mutable receiver imports, direct mutable-method exports, unsafe-block calls in this slice and other reference/output modes reject. |
+| Static binary nominal operators inside `unsafe(expr)` | Two exact owner-typed by-value operands and an owner result, or `bool` for comparisons. Public non-unique `Copy` owners have recursively exportable layouts, and the complete call retains canonical positional mapping. |
+| Static unary nominal operators inside `unsafe(expr)` | Unary plus, negation, logical-not and ones-complement use one exact owner-typed by-value operand. The declared result may be a distinct recursively exportable scalar or `Copy` type; the complete call retains canonical default mapping. |
+| Nominal prefix/postfix `++` and `--` inside `unsafe(expr)` | The matching static operator has the exact owner operand/result and a public recursively exportable non-unique `Copy` owner. The place is ordinarily writable; unsafe field paths are excluded from expression update places. |
+| Instance constructors inside `unsafe(expr)` or an unsafe block | Public non-unique `Copy` owners, recursively exportable layouts and by-value explicit parameters. Receiver slots remain separate from explicit inputs, and valid named-argument mappings are retained. Managed-class factories, unique owners, unsupported parameter modes and non-exportable layouts reject. |
 
-Revision 73 provisionally persists caller-unsafe static binary nominal
-operator calls inside `unsafe(expr)` for eligible public, non-unique `Copy`
-owners with recursively exportable layouts. The exact recognized binary
-operator contract requires two by-value owner-typed operands and either the
-owner result type or `bool` for comparisons; the complete `BoundCall` must be
-inside the wrapper and retain the canonical positional argument mapping.
-Writers and readers validate the same declaration contract and reconstruct
-authorization from the expression scope. Unary operators and nominal
-updates remain outside this new expression-scope slice; existing unsafe-block
-operator support is unchanged. This adds no ABI, TRRM or scalar-frontend
-verification/emission support and does not approve the broader
-reference-call metadata proposal.
-
-Revision 74 additionally persists caller-unsafe non-update unary static
-nominal operator calls inside `unsafe(expr)` for the recognized unary
-plus, negation, logical-not and ones-complement keys. The operand must be the
-exact owner type passed by value; the result follows the existing unary
-declaration contract and may be a distinct recursively exportable scalar or
-`Copy` type. The complete call and canonical default argument mapping are
-validated by both writer and reader. Caller-unsafe `++`/`--` nominal updates
-were outside this revision's expression-scope slice; existing unsafe-block
-behavior was unchanged.
-
-Revision 75 provisionally persists caller-unsafe nominal prefix and postfix
-`++`/`--` updates when the complete update is enclosed by `unsafe(expr)`.
-Writers and readers validate the matching static operator, exact owner
-operand/result, public recursively exportable non-unique `Copy` owner and
-ordinary writable place. Unsafe field paths remain excluded from expression
-update places. Reader authorization is reconstructed from the unsafe block
-or expression scope, not persisted as a separate capability; stripping the
-only scope fails closed. This adds no ABI, TRRM or scalar-frontend
-verification/emission support and does not approve the broader
-reference-call metadata proposal.
-
-Revision 76 provisionally persists caller-unsafe instance-constructor calls
-for eligible public, non-unique `Copy` owners with recursively exportable
-layouts and by-value explicit parameters. Constructor receiver slots are
-separate from explicit inputs, and valid named-argument mappings are
-preserved. Both expression and unsafe-block scopes are retained and validated;
-the reader reconstructs authorization from the enclosing scope. Managed-class
-factories, unique owners, unsupported parameter modes and non-exportable
-layouts remain outside this slice. This adds no ABI, TRRM or scalar-frontend
-verification/emission support and does not approve the broader proposal.
+These persistence slices do not change the native ABI, add TRRM execution or
+move scalar-frontend verification/emission out of the host. They do not approve
+the broader [reference-call metadata proposal](../proposals/reference-call-metadata.md).
+Existing unsafe-block operation support remains separate from the expression
+slices above.
 
 The invocation-scoped source grant and `scanner-10` profile have provisional
 semantic-module JIT implementation support, but both proposals are deferred
@@ -626,7 +563,7 @@ Both paths use compact acyclic value layouts and the existing native value
 profile. Nested field types are retained
 transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
-order, access and declared mutation authority. Version 10 retains the checked
+order, access and declared mutation authority. The current format retains the checked
 `IsMutable` flag per field; changing it in either direction changes the
 published value contract and is rejected during replacement. Function bodies
 and public contracts store the checked `IsNoThrow` and `DoesNotReturn`

@@ -10,7 +10,9 @@ RSP-relative. Cleanup funclets borrow the source frame through RDX; ordinary
 exits call them explicitly, while checked exceptional exits dispatch them
 through native unwind.
 
-`dotnet run --file scripts\check-native-frame.cs` separately loads a
+The [frame probe](../scripts/check-native-frame.cs), invoked with an explicit
+built compiler as described in [native qualification](building.md#native-qualification),
+separately loads a
 compiler-generated DLL into a C caller. It checks normal cleanup, stack arguments
 and published outputs, then inspects and unwinds foreign faults in both a source
 function and a cleanup funclet. The latter deliberately receives an invalid parent
@@ -30,7 +32,10 @@ dotnet run --file scripts\check-native-seh.cs
 The script discovers the installed toolchain with `vswhere`, builds
 [`seh-probe.c`](../tests/native/seh-probe.c) with `/W4 /WX`, and executes it
 in a ten-second supervised child. The compiler listing and build/execution
-logs remain under `artifacts`. The C compiler is a reference for this probe,
+logs remain in the printed, invocation-specific directory under
+`artifacts\log\native-probes`. Failed commands retain both output streams;
+only a fully checked run has `completed.txt`.
+The C compiler is a reference for this probe,
 not a Terrum backend dependency.
 
 The fixture executes the same eight cases in a C `__try`/`__except`/`__finally`

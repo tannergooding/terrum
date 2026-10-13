@@ -1,16 +1,17 @@
 # Invocation-scoped source grant proposal
 
 **Status: Deferred. Accepted semantic-module execution remains
-source-independent; revision-55 `Host.Source` JIT support is provisional
+source-independent; `Host.Source` JIT support is provisional
 implementation evidence only.**
 
 ## Summary
 
 The bounded `SourceLines`, scanner and scalar-frontend components read the
 immutable UTF-16 `Host.Source` grant. Hosted compilation can bind that grant as
-a read-only `char16` host buffer. Semantic-module revision 55 now supports the
-bounded invocation-scoped source facade described below; the maintained
-compiler-primitives library and other execution paths remain source-independent.
+a read-only `char16` host buffer. The current semantic-module JIT adapter
+provisionally supports the invocation-scoped facade described below.
+The maintained source-free compiler-primitives DLL remains separate from the
+[provisional native source-grant companion](native-source-grant-library.md).
 
 This proposal concerns only how persisted modules may declare and receive the
 existing source grant. It does not change source decoding, UTF-16 coordinates,
@@ -54,13 +55,13 @@ host-buffer representation, verifies the linked program, then uses the hosted
 JIT emitter. Reusing module bytes does not require reusing generated machine
 code. This implementation shape is not an accepted execution contract.
 
-**Implemented provisionally:** Semantic-module revision 55 stores the
+**Implemented provisionally:** The current semantic-module format stores the
 requirement bit and symbolic length/read operations. References propagate the
 requirement; linking checks it; `NativeJit.ExecuteWithSourceGrant` validates
 and copies one eligible source snapshot before hosted verification/emission.
 The native emitter, graph and module-set paths reject unbound or unsupported
-source requirements. No general buffer dependency or source-aware maintained
-compiler-primitives DLL was added.
+source requirements. This profile defines neither a general buffer dependency
+nor the separate native companion ABI.
 
 The same capability also runs the bounded Terrum-authored `Utf16Scalar`,
 `CharacterLiteral` and `StringLiteral` leaf decoders and the provisional `StringRow` name and
@@ -95,74 +96,30 @@ The provisional contract for this slice is:
   or retained handle. Copied code units, scalar coordinates and `SourceRange`
   values may escape; they carry no source backing or implicit snapshot
   identity.
-- Initial support covers a single-producer semantic-module JIT execution only.
-  Source-dependent native DLLs, native packages, graphs and persisted AOT
-  images continue to reject explicitly. A reusable AOT contract requires a
+- This profile covers single-producer semantic-module JIT execution only.
+  Native packages, graphs and persisted AOT images with this dependency
+  reject explicitly. The native source-grant companion is a separate
+  provisional implementation, not execution of this module profile.
+  A reusable AOT contract requires a
   separate invocation adapter; embedding a snapshot in an executable does not
   satisfy this profile.
 
-**Acceptance evidence:** `SourceFacadeModulesBindFreshSnapshotsAndRejectInvalidGrantsAsync`
-reuses identical producer and consumer artifacts across empty, differently
-sized, malformed-surrogate and mixed-line-break snapshots. It compares the
-facade with hosted `SourceText`, checks failed-output vacancy, rejects invalid
-grants, and preserves host-neutral module behavior. The focused source,
-module, native-package, module-set and line-component selection passed 399
-tests. Persisted-index coverage also checks invocation-relative `^1` reads
-across empty and one-code-unit snapshots and resolves call-valued indexes.
-`CharacterLiteralModuleUsesFreshSourceGrantsAsync` and
-`StringLiteralModuleReadsFreshSourceGrants` additionally passed under both
-runtime policies, comparing decoded scalar results and lexical validity
-against the hosted lexer across fresh grants.
-`StringRowModuleMatchesAllFormatsAcrossFreshSourceGrants` also passed under
-both policies, comparing name and namespace row bytes for ASCII, UTF-8,
-UTF-16LE and UTF-32LE with the hosted string-table writer. It also checks
-empty namespace rows and rejects empty names, non-ASCII text under ASCII, and
-embedded zero scalars across fresh grants.
-`StringRowComparisonsUseFreshSourceGrantsAcrossModuleJit` passed under both
-policies, comparing the ordinal decoded-scalar name and namespace predicates
-with hosted ordinal string equality and checking invalid empty-name and
-embedded-zero inputs.
-`Utf16ScalarModuleDecodesFreshSourceGrants` passed under both policies,
-checking scalar values and code-unit widths for BMP and supplementary
-characters and rejection of unpaired surrogate code units.
-`CharacterFactsModuleClassifiesEveryUtf16CodeUnit` passed under both policies,
-checking the ASCII-digit and line-break predicates against independent host
-conditions for all 65,536 UTF-16 code units in four bounded fresh grants.
-`SourceLineIndexModuleIndexesFreshSourceGrants` passed under both policies,
-reusing persisted provider and consumer artifacts across empty, ordinary,
-mixed-line-break and malformed-surrogate snapshots while comparing line
-counts, content/full-break extents, position mappings, offset round-trips and
-invalid query boundaries with the hosted snapshot.
-`SourceLinesModuleQueriesFreshSourceGrants` also passed under both policies,
-reusing persisted streaming-component artifacts across fresh grants and
-comparing full line extents, positions, offsets and invalid-query results with
-the hosted snapshot.
-`StringEscapeModuleAnalyzesFreshSourceGrants` passed under both policies,
-comparing decoded scalars, consumed widths and error spans with hosted lexer
-diagnostics across fresh escape grants, including malformed Unicode escapes
-and escaped unpaired surrogates.
-`IntegerParsingModuleReadsFreshSourceGrants` passed under both policies,
-reusing the persisted decimal parser provider and consumers across fresh
-snapshots and checking signed/unsigned 32-/64-bit and `char16` results,
-boundaries, separators and rejected inputs.
-`IntegerParsingRadixModuleMatchesHostOracleAcrossFreshSourceGrantsAsync` also
-passed under both policies, comparing all five parser APIs across radices
-2–36, their type boundaries and overflows, invalid digits/radices and the
-radix-specific separator rules over fresh grants.
-`IntegerFormattingModuleMatchesFreshSourceGrantsAsync` passed under both
-policies, comparing decimal and radix-2..36 formatting for signed/unsigned
-32-/64-bit values and `char16` against a host-side oracle. Its test-only wrapper
-reads expected text from the grant; formatting remains source-independent, and
-unique output workspaces do not cross the module boundary.
-`StringLiteralEncodingModuleMatchesHostEncodersAcrossFreshSourceGrants` also
-passed under both policies, comparing encoded words and measured lengths for
-UTF-8, UTF-16 units and LE/BE bytes, strict ASCII and Latin-1, and UTF-32 LE/BE
-bytes against host encoders. Unrepresentable ASCII and Latin-1 inputs are
-rejected; this adds encoding-path evidence without changing the proposal's
-unapproved status or the frontend and persisted-AOT boundaries.
-This slice does not make the maintained
-compiler-primitives DLL source-aware or move the scalar frontend beyond the
-hosted verifier/emitter.
+## Regression evidence
+
+[Module tests](../../tests/Terrum.CodeAnalysis.Tests/ModuleTests.cs) reuse
+identical producer/consumer artifacts across fresh empty, differently sized,
+malformed-surrogate and mixed-line-break snapshots. They compare the facade
+with hosted `SourceText`, check output vacancy and invocation-relative
+end-index reads, reject invalid grants and preserve host-neutral behavior.
+
+The [self-host inventory](../../self-host/README.md) records decoder, line,
+numeric and string-row support with their component boundaries. The associated
+module regressions compare observable results with independent host oracles
+under both runtime policies. That coverage does not accept the proposal,
+make a compiler bootstrap, or move verification/emission out of the host.
+Use [module history](https://github.com/tannergooding/terrum/commits/main/sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs)
+for implementation provenance rather than treating past test totals as
+current qualification evidence.
 
 ## Alternative
 

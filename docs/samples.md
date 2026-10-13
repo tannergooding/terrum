@@ -76,7 +76,7 @@ The [private class leaf](../samples/native/graph/managed-class-leaf.terrum)
 extends that replacement proof to source-defined optional cycles and checked
 class metadata, without exposing a managed module ABI.
 The [Copy-field class leaf](../samples/native/graph/managed-copy-class-leaf.terrum)
-persists nested private Copy layouts in semantic version 20 and replaces the
+persists nested private Copy layouts and replaces the
 same unchanged consumer/intermediate images.
 The [managed Copy export original](../samples/native/graph/copy-contract-original.terrum)
 and [managed Copy export replacement](../samples/native/graph/copy-contract-managed.terrum)
@@ -84,7 +84,7 @@ share the same public `Snapshot` value contract; the replacement collects its
 private two-node managed cycle before returning the copied snapshot. The
 [unchanged consumer](../samples/native/graph/copy-contract-consumer.terrum)
 returns 40 with the original and 42 with the replacement, demonstrating
-semantic-v31 by-value and `bool`/`out` Copy exports without exposing the
+by-value and legacy `bool`/`out` Copy exports without exposing the
 producer's private managed records. Exact AOT and root-only JIT commands are
 in the [native graph guide](implementation/native-graph.md).
 The [managed Copy middle](../samples/native/graph/managed-copy-middle.terrum)
@@ -95,8 +95,8 @@ handle-free `Snapshot` and scalar values; the unchanged graph returns 42 with
 the original leaf and 44 with the managed replacement under AOT and root-only
 JIT. See the [graph commands](implementation/native-graph.md).
 The [managed Copy semantic consumer](../samples/native/modules/managed-copy-consumer.terrum)
-uses the original and managed `Snapshot` providers above through the semantic
-v32 single-provider consumer contract. Its private `Record` deliberately
+uses the original and managed `Snapshot` providers above through the current
+single-provider semantic consumer contract. Its private `Record` deliberately
 shares a name with provider-private state, and remains rooted across provider
 collection. The same persisted consumer artifact returns 42 or 44 when
 `run-module` selects the original or managed provider; each `link-module`
@@ -157,8 +157,10 @@ The calculator must reject U+0661/U+FF11 digits, U+2212 minus and U+FF0B operato
 
 Single ASCII operators/delimiters use target-typed character intent where helpful;
 casts replace per-source numeric helpers without changing the proposed output.
-Character literals, family conformance, generic constructor inference and
-builders are still design-only. Checked casts among `int32`, `uint32`,
+The hosted compiler and compiled-scanner path support character literals
+representable as `char16`; target-type checks remain separate from lexical
+scalar validation. General family conformance, generic constructor inference
+and builders are still design-only. Checked casts among `int32`, `uint32`,
 `int64`, `uint64` and `char16`, boolean `require`, and legacy bool/out
 publication for supported copy values run in the native profile. These
 sketches' richer types and cleanup still need

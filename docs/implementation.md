@@ -55,8 +55,8 @@ guarantees. Static proof support does not yet implement a general built-in
 predicate-refinement catalog for runtime values, so it does not fulfill the
 accepted v1 proof-floor scope.
 
-Current profile markers are syntax language version 45, semantic body features
-v43-v49, semantic-module revision 76, and native profiles native-10 through
+Current profile markers are syntax language version 46, semantic-module
+revision 76, and native profiles native-10 through
 native-20. These markers describe supported implementations, not approval of
 the remaining language contracts. The exact source, layout, metadata, ABI,
 and runtime contracts are in the [specification index](specs/README.md).
@@ -138,9 +138,8 @@ cross-version matrix. The opt-in command `terrumc build-native-import`
 explicitly selects this immutable catalog; ordinary `build` remains unchanged.
 Its runnable sample returns
 success only for `MessageBoxW`'s `IDOK` result. Unattended tests build and
-inspect the import without calling the modal API. The user-confirmed smoke
-displayed the expected text and caption, and OK closed the dialog; that
-observable gate is verified on this host. This is a narrow provisional slice,
+inspect the import without calling the modal API; displaying the dialog
+requires an explicitly selected interactive run. This is a narrow provisional slice,
 not general pointer, handle or foreign-function support.
 
 ## Syntax and CLI
@@ -148,8 +147,9 @@ not general pointer, handle or foreign-function support.
 The public C# syntax APIs are experimental. Syntax trees preserve source text
 and spans; edits are content-bound to the snapshot they were prepared against.
 The parser can consume a validated compiled-scanner snapshot, but the scanner
-component remains responsible for correct token classification. CLI result
-shapes and versioning are specified in the [machine protocol](specs/cli-protocol.md).
+component remains responsible for correct token classification. Current CLI
+result shapes are in the [experimental response reference](implementation/cli-protocol.md);
+the selected [machine protocol](specs/cli-protocol.md) is a separate target contract.
 
 ## Bounded generic functions
 

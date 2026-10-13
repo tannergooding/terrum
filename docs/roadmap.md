@@ -107,32 +107,15 @@ prerequisite has already been met.
 12. **Rich libraries/self-hosting — bootstrap components.** Grow the current
     bounded components toward a compiler bootstrap only as their language and
     library prerequisites are met and through the shared
-    [self-host gate](#compiler-and-self-hosting-gate). A bounded semantic-module
-    JIT path is provisionally implemented under the still-unapproved
-    [invocation-scoped source-grant proposal](proposals/invocation-scoped-source-grant.md);
-    the maintained Windows x64 build now also has an explicit opt-in,
-    provisional source-grant companion for the checked UTF-16 scalar adapter,
-    scalar source-text-length, source-code-unit, source-offset and
-    source-position queries, scalar source-line-count and source-line
-    content/including-break end queries, a scalar source-range validity
-    predicate, packed scalar string- and character-literal queries, a scalar
-    character-literal value query, scalar string-literal
-    validation/count/indexed-value/encoded-length queries and paired scalar
-    integer-parsing queries and target-typed hexadecimal-float raw-bit
-    and based-integer floating-bit queries, with selected-export
-    descriptors bound to the image hash and end-relative
-    reads based on invocation length. The source-free
-    compiler-primitives DLL remains unchanged; this does not promote the
-    unapproved ABI or establish general source-dependent DLL support. The
-    scanner and scalar frontend still rely on hosted verification/emission. A separate
-    [native source-grant library proposal](proposals/native-source-grant-library.md)
-    records the candidate per-call ABI and remaining promotion decisions; it
-    remains unapproved.
-    A scanner-specific `scanner-10` persisted semantic-module JIT profile is
-    implemented provisionally under the still-unapproved
-    [scanner invocation-profile proposal](proposals/scanner-invocation-profile.md).
-    It does not expand the source-only grant contract or establish support for
-    graphs, module sets, native DLLs or persisted AOT.
+    [self-host gate](#compiler-and-self-hosting-gate). Keep the deferred
+    [invocation-scoped source grant](proposals/invocation-scoped-source-grant.md),
+    [native source-grant ABI](proposals/native-source-grant-library.md) and
+    [scanner invocation profile](proposals/scanner-invocation-profile.md)
+    separate from accepted execution contracts. Promotion requires concrete
+    consumers and complete invocation, lifetime, size/resource and admission
+    rules; provisional implementation does not establish those contracts.
+    Current component support and the hosted verifier/emitter boundary are
+    recorded in the [self-host inventory](../self-host/README.md).
 
 These are pending contracts, not support claims. Exact grammar, metadata and
 implementation remain subject to their canonical specifications and proposals.
@@ -233,17 +216,15 @@ with that compiler, and a further rebuild plus native execution against shared
 fixtures. Require byte equality only for output whose ordering, layout and
 tie-breaking are specified; explain other differences rather than normalizing
 them away. Current scanner/library components are precursors, not evidence that
-the gate passes. The hosted compiler supports a compilation-local readonly
-`TokenCursor` over a validated `TokenSnapshot`, and the Terrum-authored scalar
-frontend now consumes that snapshot through bounded indexed parser windows.
-This does not add general stored views or move the frontend's independently
-audited result beyond the hosted verifier/emitter boundary.
+the gate passes. Compilation-local cursor support does not establish general
+stored views or an independently verified/emitted frontend; those boundaries
+remain in the [implementation reference](implementation.md).
 
 Do not translate every design sample at once or build a plugin loader first.
 Extend the verified executable corpus and semantic checks in coherent slices;
-keep diagnostics and source mappings useful on incomplete input. Bounded
-managed access, unique-owner mutation and field-view contracts are implemented;
-the bounded owned-`int32` buffer/view path preserves natural element alignment.
+keep diagnostics and source mappings useful on incomplete input. Preserve
+checked managed access, unique-owner mutation, field-view dependencies and
+natural buffer-element alignment when widening the implemented subset.
 General `out` to `init ref<T>` migration remains scheduled. The existing
 conditional-init subset is not general reference support. Bounded static
 exports do not imply `func`, general `fnptr`, tuples, callable witnesses or
