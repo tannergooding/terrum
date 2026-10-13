@@ -1,0 +1,165 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using Terrum.CodeAnalysis.Semantics;
+
+namespace Terrum.CodeAnalysis.Native;
+
+internal sealed partial class PeCompiler
+{
+    private void EmitNativeArrayElementAddress(int variable, BoundExpression index, int spill,
+        int elementCount, int elementStride)
+    {
+        Expression(index, spill);
+        _code.Byte(0x3D);
+        _code.Int32(elementCount);
+        RuntimeBranch(0x83, 3);
+        if (elementStride <= sbyte.MaxValue)
+        {
+            _code.Bytes(0x6B, 0xC0, checked((byte)elementStride));
+        }
+        else
+        {
+            _code.Bytes(0x69, 0xC0);
+            _code.Int32(elementStride);
+        }
+        _code.Bytes(0x48, 0x89, 0xC2);
+        _code.Address(Slot(variable));
+        _code.Bytes(0x48, 0x01, 0xD0);
+    }
+
+    private void EmitNativeStorageAddress(BoundNativeStorageAddress address, int spill)
+    {
+        if (address.Type != address.AddressType
+            || address.ElementCount <= 0 || address.ElementStride <= 0
+            || address.ByteExtent <= 0)
+        {
+            throw new InvalidOperationException("The native storage address has an invalid extent.");
+        }
+
+        var completeExtent = checked(address.ElementCount * address.ElementStride);
+        if (address.ByteExtent > completeExtent)
+        {
+            throw new InvalidOperationException("The native storage address exceeds its carrier.");
+        }
+        if (address.ByteExtent == completeExtent)
+        {
+            Expression(address.Index, spill);
+            _code.Byte(0x3D);
+            _code.Int32(address.ElementCount);
+            RuntimeBranch(0x83, 3);
+            _code.Bytes(0x85, 0xC0);
+            RuntimeBranch(0x85, 3);
+            _code.Address(Slot(address.Variable));
+        }
+        else
+        {
+            EmitNativeArrayElementAddress(address.Variable, address.Index, spill,
+                address.ElementCount, address.ElementStride);
+        }
+    }
+
+    private void EmitNativeStorageRecord(int variable, BoundNativeStorageRecordInitialization record)
+    {
+        var destination = Slot(variable);
+        _code.Bytes(0x31, 0xC0);
+        for (var offset = 0; offset < record.Layout.ByteExtent;)
+        {
+            var remaining = record.Layout.ByteExtent - offset;
+            var width = remaining >= sizeof(ulong) ? sizeof(ulong)
+                : remaining >= sizeof(uint) ? sizeof(uint)
+                : remaining >= sizeof(ushort) ? sizeof(ushort) : sizeof(byte);
+            _code.StoreField(destination + offset, width);
+            offset += width;
+        }
+
+        var valueIndex = 0;
+        for (var fieldIndex = 0; fieldIndex < record.Layout.Fields.Length; fieldIndex++)
+        {
+            var field = record.Layout.Fields[fieldIndex];
+            if (record.Layout.BackingPointerFieldIndex == fieldIndex)
+            {
+                if (record.DataSource is not BoundNativeStorageAddress source)
+                {
+                    throw new InvalidOperationException("The verified storage record has no backing address.");
+                }
+                _code.Address(Slot(source.Variable));
+                _code.Store64(destination + field.Offset);
+                continue;
+            }
+
+            var value = record.Fields[valueIndex++];
+            Expression(value, 0);
+            StoreValue(destination + field.Offset, field.Type);
+        }
+    }
+
+    private void EmitNativeFixedArrayElement(BoundNativeFixedArrayElement element, int spill)
+    {
+        EmitNativeArrayElementAddress(element.Variable, element.Index, spill,
+            element.Layout.ElementCount, element.Layout.ElementStride);
+        if (IsIndirect(element.Type))
+        {
+            return;
+        }
+        switch (Size(element.Type))
+        {
+            case 1:
+                _code.Bytes(0x0F, 0xB6, 0x00);
+                break;
+            case 2:
+                _code.Bytes(0x0F, 0xB7, 0x00);
+                break;
+            case 4:
+                _code.Bytes(0x8B, 0x00);
+                break;
+            case 8:
+                _code.Bytes(0x48, 0x8B, 0x00);
+                break;
+            default:
+                throw new InvalidOperationException("A fixed-array element has an unsupported native width.");
+        }
+    }
+
+    private void EmitNativeFixedArrayWrite(BoundNativeFixedArrayWrite write, int spill)
+    {
+        EmitNativeArrayElementAddress(write.Variable, write.Index, spill,
+            write.Layout.ElementCount, write.Layout.ElementStride);
+        _code.Store64(Spill(spill));
+        Expression(write.Value, spill + 1);
+        if (IsIndirect(write.Value.Type))
+        {
+            _code.Load64(Spill(spill), destinationRegister: true);
+            _code.CopyMemory(Size(write.Value.Type));
+        }
+        else
+        {
+            if (Size(write.Value.Type) == sizeof(ulong))
+            {
+                _code.Bytes(0x48, 0x89, 0xC1);
+            }
+            else
+            {
+                _code.Bytes(0x89, 0xC1);
+            }
+            _code.Load64(Spill(spill));
+            switch (Size(write.Value.Type))
+            {
+                case 1:
+                    _code.Bytes(0x88, 0x08);
+                    break;
+                case 2:
+                    _code.Bytes(0x66, 0x89, 0x08);
+                    break;
+                case 4:
+                    _code.Bytes(0x89, 0x08);
+                    break;
+                case 8:
+                    _code.Bytes(0x48, 0x89, 0x08);
+                    break;
+                default:
+                    throw new InvalidOperationException("A fixed-array element has an unsupported native width.");
+            }
+        }
+    }
+}

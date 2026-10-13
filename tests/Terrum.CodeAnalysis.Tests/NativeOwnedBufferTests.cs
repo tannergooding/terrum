@@ -129,7 +129,7 @@ public sealed class NativeOwnedBufferTests
             static function => function.Name == "Main"))];
         var mainBytes = code.Code.AsSpan(main.Start, main.End - main.Start);
         Assert.True(mainBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x44, 0x8A, 0x08 }) >= 0);
-        Assert.True(mainBytes.IndexOf(new byte[] { 0x8B, 0x04, 0x8A }) >= 0);
+        Assert.True(mainBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x04, 0x8A, 0x8B, 0x00 }) >= 0);
         Assert.True(mainBytes.IndexOf(new byte[] { 0x89, 0x04, 0x8A }) >= 0);
     }
 

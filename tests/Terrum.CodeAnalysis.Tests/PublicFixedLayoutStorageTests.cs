@@ -105,6 +105,7 @@ public sealed class PublicFixedLayoutStorageTests
     [InlineData("owner")]
     [InlineData("view")]
     [InlineData("native-handle")]
+    [InlineData("native-carrier")]
     [InlineData("unknown-type")]
     [InlineData("negative-type")]
     [InlineData("duplicate-field")]
@@ -129,6 +130,7 @@ public sealed class PublicFixedLayoutStorageTests
             "owner" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.OwnedInt32Buffer }) },
             "view" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.ReadonlyInt32BufferView }) },
             "native-handle" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeWindowHandle }) },
+            "native-carrier" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeFixedArray }) },
             "unknown-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)999 }) },
             "negative-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)int.MinValue }) },
             "duplicate-field" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Name = "Prefix" }) },
@@ -151,7 +153,7 @@ public sealed class PublicFixedLayoutStorageTests
             _ = Assert.Throws<ArgumentException>(() => FixedLayoutStorage.Validate(program.Structures));
         }
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
-        if (change == "native-handle")
+        if (change is "native-handle" or "native-carrier")
         {
             _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(program, ["Make"]));
         }

@@ -80,6 +80,46 @@ __declspec(dllexport) int32_t __cdecl NativeFfiUtf16Z(
     return 0;
 }
 
+__declspec(dllexport) int32_t __cdecl NativeFfiUtf8Z(
+    const uint8_t* first, uint32_t second, uint64_t third,
+    const uint8_t* fourth, uint32_t fifth, const uint8_t* sixth)
+{
+    static const uint8_t expectedFirst[] = { 'A', '\n', 'm', 'a', 'i', 'n', 0 };
+    static const uint8_t expectedFourth[] = { 'p', 's', '_', '4', '_', '0', 0 };
+    if (first == NULL || fourth == NULL || sixth == NULL)
+    {
+        return 1;
+    }
+    if (second != UINT32_C(324478056) || third != UINT64_C(81985529216486895)
+        || fifth != UINT32_C(610800471))
+    {
+        return 2;
+    }
+    for (size_t index = 0; index < sizeof(expectedFirst); index++)
+    {
+        if (first[index] != expectedFirst[index])
+        {
+            return 3;
+        }
+    }
+    for (size_t index = 0; index < sizeof(expectedFourth); index++)
+    {
+        if (fourth[index] != expectedFourth[index])
+        {
+            return 4;
+        }
+    }
+    if (sixth[0] != 0)
+    {
+        return 5;
+    }
+    if (first == fourth || first == sixth || fourth == sixth)
+    {
+        return 6;
+    }
+    return 0;
+}
+
 __declspec(dllexport) int32_t __cdecl NativeFfiMessageBox(
     const void* owner, const uint16_t* text, const uint16_t* caption, uint32_t flags)
 {
@@ -115,4 +155,28 @@ __declspec(dllexport) int32_t __cdecl NativeFfiMessageBox(
         }
     }
     return 1;
+}
+
+typedef intptr_t (__stdcall *NativeFfiWindowProcedure)(
+    void* window, uint32_t message, uintptr_t wParam, intptr_t lParam);
+
+__declspec(dllexport) int64_t __cdecl NativeFfiCallWindowProcedure(
+    NativeFfiWindowProcedure callback)
+{
+    if (callback == NULL)
+    {
+        return -1;
+    }
+    const int64_t result = callback((void*)(uintptr_t)0x1234, UINT32_C(324478056),
+        (uintptr_t)UINT64_C(81985529216486895), (intptr_t)-INT64_C(1234567890123));
+    if (result != INT64_C(1234567890123))
+    {
+        return -2;
+    }
+    if (callback(NULL, UINT32_C(324478056), (uintptr_t)UINT64_C(81985529216486895),
+        (intptr_t)-INT64_C(1234567890123)) != -4)
+    {
+        return -3;
+    }
+    return result;
 }

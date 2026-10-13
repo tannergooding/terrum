@@ -62,6 +62,77 @@ public sealed class ImplicitReferenceParameterTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void IndexedHostBufferLoanObservesMutationFromLaterArgument(NativeRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Replace() {
+                Host.Values[0] = 42;
+                return 0;
+            }
+            int32 Observe(implicit ref<int32> value, int32 ignored) { return value; }
+            int32 Main() { return Observe(Host.Values[0], Replace()); }
+            """),
+            [new HostBuffer("Values", PrimitiveType.Int32, [7], true)],
+            (BoundRuntimePolicy)policy);
+
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void IndexedLexicalViewLoanRetainsItsScopedBacking(NativeRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Observe(implicit ref<int32> value) { return value; }
+            int32 Read(OwnedInt32Buffer owner) {
+                ReadonlyInt32BufferView view = owner.Slice(0, owner.Count);
+                return Observe(view.Read(0));
+            }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                mut OwnedInt32Buffer value = move raw;
+                require value.TryAppend(42);
+                return Read(move value);
+            }
+            """), (BoundRuntimePolicy)policy);
+
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void NestedFieldCanBeReborrowedFromAnImplicitReference(NativeRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            public struct Pair {
+                public int32 Value;
+                public Pair(int32 value) { Value = value; }
+            }
+            int32 Observe(implicit ref<int32> value) { return value; }
+            int32 Reborrow(implicit ref<Pair> pair) { return Observe(pair.Value); }
+            int32 Main() {
+                Pair pair = new Pair(42);
+                return Reborrow(pair);
+            }
+            """), (BoundRuntimePolicy)policy);
+
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public void ReorderedNamedCallPassesTheReferenceAddressOnTheStack(NativeRuntimePolicy policy)
     {
         var source = """
@@ -253,44 +324,92 @@ public sealed class ImplicitReferenceParameterTests
             static diagnostic => diagnostic.Code == "TRM3016");
     }
 
-    [Fact]
-    public void AggregateImplicitReferenceTypesAreRejectedByTheProvisionalGate()
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void BorrowsAndMaterializesNonUniqueAggregateReferences(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            struct Pair {
-                public int32 Value;
-                public Pair(int32 value) { Value = value; }
+            struct Triple {
+                public int32 First;
+                public int32 Second;
+                public int32 Third;
+                public Triple(int32 value) {
+                    First = value;
+                    Second = value + 1;
+                    Third = value + 2;
+                }
             }
-            int32 Read(implicit ref<Pair> value) { return value.Value; }
-            int32 Main() { mut Pair value = new Pair(42); return Read(value); }
-            """));
+            struct Quad {
+                public int32 First;
+                public int32 Second;
+                public int32 Third;
+                public int32 Fourth;
+                public Quad(int32 value) {
+                    First = value;
+                    Second = value + 1;
+                    Third = value + 2;
+                    Fourth = value + 3;
+                }
+            }
+            int32 Read(implicit ref<Triple> value) {
+                return value.First + value.Second + value.Third;
+            }
+            Triple Copy(implicit ref<Triple> value) { return value; }
+            int32 Forward(implicit ref<Triple> value) { return Read(value); }
+            int32 ReadQuad(implicit ref<Quad> value) {
+                return value.First + value.Second + value.Third + value.Fourth;
+            }
+            Quad CopyQuad(implicit ref<Quad> value) { return value; }
+            int32 Main() {
+                mut Triple value = new Triple(10);
+                Triple copy = Copy(value);
+                mut Quad large = new Quad(20);
+                Quad largeCopy = CopyQuad(large);
+                return Forward(value) + Read(new Triple(40)) + copy.Third
+                    + ReadQuad(large) + largeCopy.Fourth;
+            }
+            """), (BoundRuntimePolicy)policy);
 
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3011"
-                && diagnostic.Message.Contains("requires a supported scalar",
-                    StringComparison.Ordinal));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(277, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-aggregate-test"));
+        Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
     }
 
-    [Fact]
-    public void FieldPlacesAreRejectedByTheProvisionalScalarGate()
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void StructFieldPlacesAreBorrowedAndObserveLaterArgumentWrites(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            struct Pair {
-                public int32 Value;
-                public Pair(int32 value) { Value = value; }
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
             }
-            int32 Read(implicit ref<int32> value) { return value; }
+            struct Triple {
+                public mut Inner Nested;
+                public int32 Second;
+                public int32 Third;
+                public Triple(int32 value) {
+                    Nested = new Inner(value);
+                    Second = value + 1;
+                    Third = value + 2;
+                }
+                public mut int32 Change() { Nested.Value = 99; return 0; }
+            }
+            int32 Read(implicit ref<int32> value, int32 ignored) { return value; }
             int32 Main() {
-                Pair pair = new Pair(42);
-                return Read(pair.Value);
+                mut Triple value = new Triple(40);
+                return Read(value.Nested.Value, value.Change());
             }
-            """));
+            """), (BoundRuntimePolicy)policy);
 
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3011"
-                && diagnostic.Message.Contains("cannot borrow field or indexed places",
-                    StringComparison.Ordinal));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(99, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
     }
 }

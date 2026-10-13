@@ -578,6 +578,24 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.Identifier));
         }
 
+        var isInlineArray = children.Count == 1
+            && children[0] is SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "InlineArray" };
+        if (isInlineArray && Current.Kind == TokenKind.Less)
+        {
+            children.Add(ExpectAttached(TokenKind.Less));
+            children.Add(ParseType());
+            children.Add(Expect(TokenKind.Comma));
+            children.Add(Expect(TokenKind.NumericLiteral));
+            children.Add(ExpectTypeCloser(missing));
+            if (Current.Kind is TokenKind.Question or TokenKind.QuestionQuestion)
+            {
+                children.Add(Take());
+            }
+
+            _depth--;
+            return Node(SyntaxKind.InlineArrayTypeName, children);
+        }
+
         if (Current.Kind == TokenKind.Less)
         {
             children.Add(ExpectAttached(TokenKind.Less));
@@ -1010,6 +1028,7 @@ internal sealed class Parser
 
         if (Peek(offset).Kind == TokenKind.Less)
         {
+            var inlineArrayType = Peek(offset - 1).Text == "InlineArray";
             var nesting = 0;
 
             do
@@ -1033,7 +1052,9 @@ internal sealed class Parser
                         return false;
                     }
                 }
-                else if (kind is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Comma or TokenKind.Dot or TokenKind.Question or TokenKind.QuestionQuestion))
+                else if (kind is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Comma
+                    or TokenKind.Dot or TokenKind.Question or TokenKind.QuestionQuestion)
+                    && !(inlineArrayType && nesting == 1 && kind == TokenKind.NumericLiteral))
                 {
                     return false;
                 }
@@ -1154,6 +1175,26 @@ internal sealed class Parser
         {
             expression = Node(SyntaxKind.UnsafeExpression,
                 [Take(), Expect(TokenKind.OpenParen), ParseExpression(), Expect(TokenKind.CloseParen)]);
+        }
+        else if (Current.Kind == TokenKind.OpenBracket)
+        {
+            var children = new List<SyntaxElement> { Take() };
+            while (Current.Kind is not (TokenKind.CloseBracket or TokenKind.EndOfFile))
+            {
+                var start = _position;
+                children.Add(ParseExpression());
+                if (Current.Kind != TokenKind.Comma)
+                {
+                    break;
+                }
+                children.Add(Take());
+                if (_position == start)
+                {
+                    break;
+                }
+            }
+            children.Add(Expect(TokenKind.CloseBracket));
+            expression = Node(SyntaxKind.ArrayInitializerExpression, children);
         }
         else if (Current.Kind == TokenKind.OpenParen)
         {
@@ -1289,7 +1330,7 @@ internal sealed class Parser
 
             var isOut = Current.Kind == TokenKind.OutKeyword
                 || (Current.Kind == TokenKind.Identifier && Current.Text == "init"
-                    && Peek(1).Kind is TokenKind.VarKeyword or TokenKind.Identifier);
+                    && Peek(1).Kind is TokenKind.VarKeyword or TokenKind.Identifier or TokenKind.Star);
             ParsePassingMode(argument);
 
             if (isOut && Current.Kind == TokenKind.VarKeyword)
@@ -1326,7 +1367,7 @@ internal sealed class Parser
     private void ParsePassingMode(List<SyntaxElement> children)
     {
         if (Current.Kind == TokenKind.Identifier && Current.Text == "init"
-            && Peek(1).Kind is TokenKind.VarKeyword or TokenKind.Identifier)
+            && Peek(1).Kind is TokenKind.VarKeyword or TokenKind.Identifier or TokenKind.Star)
         {
             children.Add(Take());
         }
@@ -1560,8 +1601,10 @@ internal sealed class Parser
     private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword
         or TokenKind.WriteKeyword;
 
-    private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang
-        or TokenKind.Tilde or TokenKind.MoveKeyword or TokenKind.PlusPlus or TokenKind.MinusMinus ? 13 : 0;
+    private static int UnaryPrecedence(TokenKind kind) =>
+        kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Bang
+            or TokenKind.Tilde or TokenKind.Ampersand or TokenKind.MoveKeyword
+            or TokenKind.PlusPlus or TokenKind.MinusMinus ? 13 : 0;
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Non-operator tokens have zero precedence.")]
     private static int BinaryPrecedence(TokenKind kind) => kind switch {

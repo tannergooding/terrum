@@ -193,7 +193,7 @@ public sealed class Compilation
                 return "native-20";
             }
             ownedBuffer |= function.ReturnType == PrimitiveType.OwnedInt32Buffer;
-            var functionUsesManagedNodes = function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+            var functionUsesManagedNodes = function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.ClassTryCreate
                 || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode;
             foreach (var variable in function.Variables)
             {

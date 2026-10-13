@@ -27,6 +27,8 @@ public enum SyntaxKind
     GetAccessor,
     /// <summary>A type name.</summary>
     TypeName,
+    /// <summary>The closed local-only <c>InlineArray&lt;T, N&gt;</c> fixture syntax.</summary>
+    InlineArrayTypeName,
     /// <summary>A function or constructor parameter list.</summary>
     ParameterList,
     /// <summary>A declared parameter.</summary>
@@ -81,6 +83,8 @@ public enum SyntaxKind
     MemberAccessExpression,
     /// <summary>An indexed access expression.</summary>
     IndexExpression,
+    /// <summary>A bracket initializer, admitted only by a closed local storage gate.</summary>
+    ArrayInitializerExpression,
     /// <summary>A half-open slice range used as an index argument.</summary>
     SliceRangeExpression,
     /// <summary>An intentionally omitted lower or upper slice bound.</summary>

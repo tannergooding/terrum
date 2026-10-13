@@ -9,6 +9,8 @@ namespace Terrum.CodeAnalysis.Semantics;
 internal static class ValueLayout
 {
     internal const int MaximumSize = 16;
+    // Address-based storage can exceed the value profile while remaining bounded to sixteen 64-bit fields.
+    internal const int MaximumStructureSize = 16 * sizeof(ulong);
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported values have no executable layout.")]
     internal static int Size(PrimitiveType type, IReadOnlyList<BoundStruct> structures) => type switch {
@@ -28,6 +30,10 @@ internal static class ValueLayout
 
     // Callers have established that all nested layouts are acyclic and complete.
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
+        => Alignment(type, structures, null);
+
+    internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        NativeImportCatalog? catalog)
     {
         if (ManagedClassTypes.IsManaged(type))
         {
@@ -43,10 +49,11 @@ internal static class ValueLayout
             return type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                 ? 8 : Size(type, structures);
         }
+        var structure = structures[(int)type - 100];
         var alignment = 1;
         foreach (var field in structures[(int)type - 100].Fields)
         {
-            alignment = Math.Max(alignment, Alignment(field.Type, structures));
+            alignment = Math.Max(alignment, Alignment(field.Type, structures, catalog));
         }
         return alignment;
     }

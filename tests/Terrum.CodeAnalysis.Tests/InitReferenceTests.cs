@@ -16,9 +16,9 @@ public sealed class InitReferenceTests
 {
     internal const string ScalarSource = """
         bool Fill(bool publish, init ref<int32> value) {
-            if (value is init) { return false; }
+            if (*value is init) { return false; }
             if (!publish) { return false; }
-            value = 42;
+            *value = 42;
             return true;
         }
         int32 Main() {
@@ -32,7 +32,7 @@ public sealed class InitReferenceTests
         bool Fill(bool publish, init ref<write ManagedNode> value) {
             if (!publish) { return false; }
             require ManagedNode.TryCreate(42, out var created);
-            value = created;
+            *value = created;
             return true;
         }
         int32 Main() {
@@ -142,12 +142,12 @@ public sealed class InitReferenceTests
         var source = new StringBuilder("""
             [NoThrow] bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             [NoThrow] bool Identity(bool value, init ref<int32> result) {
                 if (!value) { return false; }
-                result = 42;
+                *result = 42;
                 return true;
             }
             int32 Main() {
@@ -201,12 +201,12 @@ public sealed class InitReferenceTests
         var source = new StringBuilder("""
             [NoThrow] bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             [NoThrow] bool Identity(bool value, init ref<int32> result) {
                 if (!value) { return false; }
-                result = 42;
+                *result = 42;
                 return true;
             }
             int32 Main() {
@@ -333,9 +333,9 @@ public sealed class InitReferenceTests
     {
         const string Source = """
             bool Fill(bool publish, init ref<int32> value) {
-                if (value is init) { return false; }
+                if (*value is init) { return false; }
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             void Write(out int32 value) { value = 17; }
@@ -367,6 +367,58 @@ public sealed class InitReferenceTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void InitReferenceSeparatesDescriptorDestinationAndForwarding(NativeRuntimePolicy policy)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow] bool Write(init ref<int32> destination) {
+                if (!(destination is init) || *destination is init) { return false; }
+                *destination = 42;
+                return true;
+            }
+            [NoThrow] bool Forward(init ref<int32> destination) {
+                if (!(destination is init)) { return false; }
+                return Write(init *destination) && *destination is init && *destination == 42;
+            }
+            int32 Main() {
+                init int32 value;
+                require Forward(init value);
+                return value;
+            }
+            """), runtimePolicy: (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+    }
+
+    [Fact]
+    public void InitDestinationRemainsVacantWhenLaterArgumentEvaluationFails()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow] void Fill(init ref<int32> value, int32 ignored) { *value = 42; }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                init int32 value;
+                unsafe {
+                    try {
+                        Fill(init value, Fail());
+                    } catch {
+                        if (value is init) { return 1; }
+                        return 42;
+                    }
+                }
+                return 0;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
+            NativeRuntimePolicy.CheckedExceptions));
+    }
+
+    [Theory]
     [InlineData("1")]
     [InlineData("Get()")]
     public void IsInitRequiresNamedStorage(string operand)
@@ -385,7 +437,7 @@ public sealed class InitReferenceTests
         const string Source = """
             bool Store(bool publish, init ref<ManagedNode?> value) {
                 if (!publish) { return false; }
-                value = null;
+                *value = null;
                 return true;
             }
             int32 Main() {
@@ -425,8 +477,8 @@ public sealed class InitReferenceTests
     {
         const string Source = """
             bool Split(init ref<int32> first, init ref<int32> second) {
-                first = 40;
-                second = 2;
+                *first = 40;
+                *second = 2;
                 return true;
             }
             int32 Main() {
@@ -456,7 +508,7 @@ public sealed class InitReferenceTests
     {
         foreach (var (source, expected) in new (string Source, int Expected)[] {
             ("""
-             int32 Fill(init ref<int32> value) { value = 42; return 7; }
+             int32 Fill(init ref<int32> value) { *value = 42; return 7; }
              int32 Main() {
                  init int32 value;
                  int32 status = Fill(init value);
@@ -464,7 +516,7 @@ public sealed class InitReferenceTests
              }
              """, 49),
             ("""
-             void Fill(init ref<int32> value) { value = 42; }
+             void Fill(init ref<int32> value) { *value = 42; }
              int32 Main() {
                  init int32 value;
                  Fill(init value);
@@ -499,7 +551,7 @@ public sealed class InitReferenceTests
         const string source = """
             int32 Create(init ref<write ManagedNode> value) {
                 require ManagedNode.TryCreate(42, out var created);
-                value = created;
+                *value = created;
                 return 7;
             }
             int32 Main() {
@@ -527,7 +579,7 @@ public sealed class InitReferenceTests
         const string Library = """
             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             public int32 Read() {
@@ -569,20 +621,20 @@ public sealed class InitReferenceTests
     {
         const string Library = """
             [NoThrow] bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+                *result = value;
                 return true;
             }
             [NoThrow] int32 Publish<T>(T value, int32 status, init ref<T> result) where T : [Copy] {
-                result = value;
+                *result = value;
                 return status;
             }
             bool Fill(init ref<write ManagedNode> result) {
                 require ManagedNode.TryCreate(41, out var created);
-                return Copy(created, init result);
+                return Copy(created, init *result);
             }
             int32 Make(init ref<write ManagedNode> result) {
                 require ManagedNode.TryCreate(41, out var created);
-                return Publish(created, 7, init result);
+                return Publish(created, 7, init *result);
             }
             public int32 Read() {
                 require Fill(init var node);
@@ -656,7 +708,7 @@ public sealed class InitReferenceTests
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
-                value = 42;
+                *value = 42;
                 return true;
             }
             public int32 Read() {
@@ -681,7 +733,7 @@ public sealed class InitReferenceTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [NoThrow] bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
-                result = value;
+                *result = value;
                 return true;
             }
             int32 Main() {

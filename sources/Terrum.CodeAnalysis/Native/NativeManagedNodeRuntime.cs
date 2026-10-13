@@ -237,6 +237,9 @@ internal sealed partial class PeCompiler
                     CollectExpression(read.View, spill);
                     CollectExpression(read.Index, spill + 1);
                     break;
+                case BoundNativeMappedByteRead mappedByte:
+                    CollectExpression(mappedByte.Index, spill);
+                    break;
                 case BoundSpanAdvance advance:
                     CollectExpression(advance.View, spill);
                     break;

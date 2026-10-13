@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
 
@@ -236,6 +237,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>Validated UTF-16-NUL literals whose addresses may only be passed to reviewed imports.</summary>
     public ImmutableArray<string> NativeUtf16ZLiterals { get; init; } = [];
 
+    /// <summary>Validated ASCII UTF-8-NUL literals whose addresses may only be passed to reviewed imports.</summary>
+    public ImmutableArray<string> NativeUtf8ZLiterals { get; init; } = [];
+
     /// <summary>Whether execution requires an invocation-scoped immutable <c>Host.Source</c> grant.</summary>
     public bool RequiresSourceGrant { get; internal init; }
 
@@ -336,6 +340,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>The explicit native import key selected by a source semantic attribute, if any.</summary>
     internal string? NativeImportKey { get; init; }
+
+    /// <summary>The import that produces COM owners for this compiler-generated acquisition function.</summary>
+    internal string? NativeComAcquisitionImportKey { get; init; }
 
     /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
     public bool IsConstructor { get; init; }
@@ -554,10 +561,17 @@ public sealed record BoundReturn(BoundExpression? Value, TextSpan Span) : BoundS
 /// <summary>A typed expression, evaluated left-to-right except for short-circuit operators.</summary>
 /// <param name="Type">The result type.</param>
 /// <param name="Span">The source range.</param>
-public abstract record BoundExpression(PrimitiveType Type, TextSpan Span);
+public abstract record BoundExpression(PrimitiveType Type, TextSpan Span)
+{
+    // Composite expressions override both hooks so bounded walks and rewrites see the same children.
+    internal virtual bool HasValidNestedExpressions => true;
+    internal virtual ImmutableArray<BoundExpression> NestedExpressions => [];
+    internal virtual BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this;
+}
 
 /// <summary>A scalar constant represented by its canonical or raw-bit payload.</summary>
-/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, booleans use zero or one, and NativeUtf16ZPointer uses a compiler-owned literal index.</param>
+/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, booleans use zero or one, native UTF-NUL pointers use a compiler-owned literal index, and null-only native pointers use zero.</param>
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
@@ -681,6 +695,8 @@ public sealed record BoundConditional(BoundExpression Condition, BoundExpression
 public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arguments,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    internal NativeComCallFacts? NativeComCall { get; init; }
+
     /// <summary>Maps source-order arguments to formal argument positions when binding is non-positional.</summary>
     internal ImmutableArray<int> ArgumentParameterIndices { get; init; }
 

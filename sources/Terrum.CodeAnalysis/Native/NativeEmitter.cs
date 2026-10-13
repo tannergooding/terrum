@@ -52,6 +52,11 @@ public static class NativeEmitter
             throw new ArgumentException("The verified program does not retain its selected native import catalog.",
                 nameof(program));
         }
+        if (catalog.IsForTesting && !allowApplicationDirectory)
+        {
+            throw new ArgumentException("Test-only native import catalogs require the internal test emitter.",
+                nameof(program));
+        }
 
         var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
         foreach (var function in program.Functions)
@@ -62,10 +67,10 @@ public static class NativeEmitter
             }
             if (function.NativeImportKey is not string key
                 || !catalog.TryGetImport(key, out var definition)
-                || definition is null || !catalog.MatchesFunction(function, definition)
-                || definition.DeploymentPolicy != NativeImportDeploymentPolicy.System32
+                || definition is null || !catalog.MatchesFunction(function, definition, program.Structures)
+                || (definition.DeploymentPolicy != NativeImportDeploymentPolicy.System32
                     && !(allowApplicationDirectory
-                        && definition.DeploymentPolicy == NativeImportDeploymentPolicy.ApplicationDirectory))
+                        && definition.DeploymentPolicy == NativeImportDeploymentPolicy.ApplicationDirectory)))
             {
                 throw new ArgumentException("Every source native import must match the selected trusted catalog.",
                     nameof(program));
@@ -509,6 +514,7 @@ internal sealed partial class PeCompiler
     private readonly int[] _replacementSlots;
     private readonly int[] _cleanupArgumentSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
+    private readonly List<(int Offset, int Target)> _functionAddressFixups = [];
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<(int Offset, int Target)> _cleanupCalls = [];
     private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
@@ -520,6 +526,7 @@ internal sealed partial class PeCompiler
     private readonly List<NativeDataFixup> _dataFixups = [];
     private readonly int[] _bufferOffsets;
     private readonly int[] _nativeUtf16ZOffsets;
+    private readonly int[] _nativeUtf8ZOffsets;
     private readonly bool[]? _sourceDependent;
     private readonly int[] _sourceSlots;
     private readonly byte[] _data;
@@ -593,19 +600,20 @@ internal sealed partial class PeCompiler
         _bufferOffsets = sourceDependent is null ? new int[program.Buffers.Length] : [];
         if (sourceDependent is not null)
         {
-            if (!program.NativeUtf16ZLiterals.IsEmpty)
+            if (!program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
             {
-                throw new NotSupportedException("UTF-16-NUL image literals require AOT native-import emission.");
+                throw new NotSupportedException("Native UTF-NUL image literals require AOT native-import emission.");
             }
             // Invocation storage has no image data, address fixups, or retained runtime state.
             _data = [];
             _nativeUtf16ZOffsets = [];
+            _nativeUtf8ZOffsets = [];
             _managedRuntimeOffset = -1;
             return;
         }
-        if (!NativeUtf16ZContract.IsValidPool(program.NativeUtf16ZLiterals))
+        if (!NativeStringZPoolContract.IsValid(program.NativeUtf16ZLiterals, program.NativeUtf8ZLiterals))
         {
-            throw new InvalidOperationException("The verified UTF-16-NUL literal pool is invalid.");
+            throw new InvalidOperationException("The verified native UTF-NUL literal pools are invalid.");
         }
         var literalBytes = 0;
         _nativeUtf16ZOffsets = new int[program.NativeUtf16ZLiterals.Length];
@@ -614,6 +622,12 @@ internal sealed partial class PeCompiler
             _nativeUtf16ZOffsets[index] = literalBytes;
             literalBytes = checked(literalBytes
                 + ((program.NativeUtf16ZLiterals[index].Length + 1) * sizeof(char)));
+        }
+        _nativeUtf8ZOffsets = new int[program.NativeUtf8ZLiterals.Length];
+        for (var index = 0; index < program.NativeUtf8ZLiterals.Length; index++)
+        {
+            _nativeUtf8ZOffsets[index] = literalBytes;
+            literalBytes = checked(literalBytes + program.NativeUtf8ZLiterals[index].Length + 1);
         }
         var literalPrefixBytes = checked((literalBytes + 3) & ~3);
         var readOnlyBufferBytes = 0;
@@ -657,6 +671,16 @@ internal sealed partial class PeCompiler
             System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
                 _data.AsSpan(terminatorOffset, sizeof(char)), 0);
         }
+        for (var index = 0; index < program.NativeUtf8ZLiterals.Length; index++)
+        {
+            var literal = program.NativeUtf8ZLiterals[index];
+            var offset = _nativeUtf8ZOffsets[index];
+            for (var character = 0; character < literal.Length; character++)
+            {
+                _data[offset + character] = checked((byte)literal[character]);
+            }
+            _data[offset + literal.Length] = 0;
+        }
         for (var index = 0; index < program.Buffers.Length; index++)
         {
             var buffer = program.Buffers[index];
@@ -667,7 +691,6 @@ internal sealed partial class PeCompiler
             }
         }
     }
-
     internal NativeCode Compile()
     {
         PrepareFrames();
@@ -678,6 +701,10 @@ internal sealed partial class PeCompiler
         EmitManagedDescriptors();
 
         foreach (var (offset, target) in _calls)
+        {
+            _code.PatchRelative(offset, _starts[target]);
+        }
+        foreach (var (offset, target) in _functionAddressFixups)
         {
             _code.PatchRelative(offset, _starts[target]);
         }
@@ -834,7 +861,7 @@ internal sealed partial class PeCompiler
                 at += (IsIndirect(function.Variables[variable].Type)
                     || function.Variables[variable].Type is PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView)
-                    && !function.Variables[variable].IsOut ? 16 : 8;
+                    && !function.Variables[variable].IsOut ? 16 : 8);
                 at = (at + 7) & ~7;
             }
             _slots[i] = slots;
@@ -1385,6 +1412,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsVariablePattern pattern:
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
+            case BoundNativeWindowHandleIsNoOwner handleTest:
+                return ExpressionSpills(handleTest.Handle, ref maximumArguments);
             case BoundIsInitialized:
                 return 0;
             case BoundFieldRead field:
@@ -1415,17 +1444,19 @@ internal sealed partial class PeCompiler
                 maximumArguments = Math.Max(maximumArguments,
                     call.Arguments.Length + (IsIndirect(call.Type) ? 1 : 0)
                         + (_sourceDependent?[call.Function] == true ? 2 : 0));
-                var maximum = 1 + (call.Arguments.Length * 2);
+                var resultSpills = CallResultSpills(call);
+                var argumentSpills = CallArgumentSpills(call);
+                var expressionSpillBase = resultSpills + argumentSpills;
+                var maximum = expressionSpillBase;
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     if (call.Arguments[i] is BoundOutArgument output && HasDeclaredCleanup(output.Type))
                     {
-                        maximum = Math.Max(maximum, 1 + (call.Arguments.Length * 2)
-                            + CleanupSpills(ref maximumArguments));
+                        maximum = Math.Max(maximum, expressionSpillBase + CleanupSpills(ref maximumArguments));
                     }
                     else if (call.Arguments[i] is not BoundOutArgument)
                     {
-                        maximum = Math.Max(maximum, 1 + (call.Arguments.Length * 2)
+                        maximum = Math.Max(maximum, expressionSpillBase
                             + ExpressionSpills(call.Arguments[i], ref maximumArguments));
                     }
                 }
@@ -1439,6 +1470,32 @@ internal sealed partial class PeCompiler
     {
         maximumArguments = Math.Max(maximumArguments, 1);
         return 3;
+    }
+
+    // Spill slots are 16 bytes; indirect aggregate values can occupy multiple slots.
+    private int CallArgumentValueSpills(BoundCall call, int index)
+    {
+        var argument = call.Arguments[index];
+        var isAddress = IsImplicitReferenceArgument(call, index)
+            || argument is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                or BoundFieldLoan or BoundMutableFieldLoan;
+        return isAddress ? 1 : Math.Max(1, (Size(argument.Type) + 15) / 16);
+    }
+
+    private int CallArgumentAuxiliarySpills(BoundExpression argument) =>
+        argument is BoundOutArgument output ? Math.Max(1, (Size(output.Type) + 15) / 16) : 1;
+
+    private int CallResultSpills(BoundCall call) =>
+        IsIndirect(call.Type) ? Math.Max(1, (Size(call.Type) + 15) / 16) : 1;
+
+    private int CallArgumentSpills(BoundCall call)
+    {
+        var total = 0;
+        for (var i = 0; i < call.Arguments.Length; i++)
+        {
+            total += CallArgumentValueSpills(call, i) + CallArgumentAuxiliarySpills(call.Arguments[i]);
+        }
+        return total;
     }
 
     private static HashSet<int> InitializationTestVariables(BoundFunction function)
@@ -1656,6 +1713,22 @@ internal sealed partial class PeCompiler
         }
         if (call.Arguments[argumentIndex] is not BoundRead read)
         {
+            if (call.Arguments[argumentIndex] is BoundFieldRead field)
+            {
+                if (UpdateAddress(field, spill))
+                {
+                    throw new InvalidOperationException("A managed field cannot be borrowed by an implicit reference.");
+                }
+                return;
+            }
+            if (call.Arguments[argumentIndex] is BoundBufferRead or BoundViewRead)
+            {
+                if (UpdateAddress(call.Arguments[argumentIndex], spill))
+                {
+                    throw new InvalidOperationException("A host-buffer or lexical-view element cannot be borrowed by an implicit reference.");
+                }
+                return;
+            }
             throw new InvalidOperationException("An implicit reference argument must be an existing place or materialized value.");
         }
         if (_program.Functions[_currentFunction].Variables[read.Variable].IsImplicitRef)
@@ -1782,13 +1855,23 @@ internal sealed partial class PeCompiler
                 }
                 else
                 {
-                    _code.Address(OwnerPlace(read.Variable));
+                    if (_program.Functions[_currentFunction].Variables[read.Variable].IsImplicitRef)
+                    {
+                        _code.Load64(Slot(read.Variable));
+                    }
+                    else
+                    {
+                        _code.Address(OwnerPlace(read.Variable));
+                    }
                 }
                 return false;
             case BoundBufferRead buffer:
                 EmitBufferIndex(buffer.Buffer, buffer.Index, buffer.IsEndRelativeOffset, spill);
                 _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _bufferOffsets[buffer.Buffer]));
                 _code.Bytes(0x48, 0x8D, 0x04, 0x82); // lea rax,[rdx+rax*4]
+                return false;
+            case BoundViewRead view:
+                EmitViewElementAddress(view, spill);
                 return false;
             case BoundFieldRead field:
                 bool rooted;
@@ -1812,6 +1895,17 @@ internal sealed partial class PeCompiler
             default:
                 throw new InvalidOperationException("Verified update requires a writable place.");
         }
+    }
+
+    private void EmitViewElementAddress(BoundViewRead view, int spill)
+    {
+        Expression(view.Index, spill);
+        _code.Bytes(0x89, 0xC1); // ecx = index
+        _code.Load(Slot(view.Variable) + 8);
+        _code.Bytes(0x39, 0xC1); // unsigned index >= length also rejects negative indexes
+        RuntimeBranch(0x83, 2);
+        _code.Load64(Slot(view.Variable), destinationRegister: true);
+        _code.Bytes(0x48, 0x8D, 0x04, 0x8A); // lea rax,[rdx+rcx*4]
     }
 
     private void DropOwner(int variable)
@@ -3140,6 +3234,18 @@ internal sealed partial class PeCompiler
             case BoundNativeNoOwner:
                 _code.Bytes(0x31, 0xC0); // xor eax,eax
                 break;
+            case BoundNativeCallbackAddress callback:
+                _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+callback]
+                var callbackAddress = _code.Position;
+                _code.Int32(0);
+                _functionAddressFixups.Add((callbackAddress, callback.Function));
+                break;
+            case BoundNativeWindowHandleIsNoOwner handleTest:
+                Expression(handleTest.Handle, spill);
+                _code.Bytes(0x48, 0x85, 0xC0); // test rax,rax
+                _code.Bytes(0x0F, handleTest.IsNegated ? (byte)0x95 : (byte)0x94, 0xC0); // setne/sete al
+                _code.Bytes(0x0F, 0xB6, 0xC0); // movzx eax,al
+                break;
             case BoundConstant constant:
                 if (constant.Type == PrimitiveType.NativeUtf16ZPointer)
                 {
@@ -3149,6 +3255,16 @@ internal sealed partial class PeCompiler
                     }
                     _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
                         _nativeUtf16ZOffsets[checked((int)constant.Value)]));
+                    _code.Bytes(0x48, 0x89, 0xD0); // mov rax,rdx
+                }
+                else if (constant.Type == PrimitiveType.NativeUtf8ZPointer)
+                {
+                    if (constant.Value < 0 || constant.Value >= _nativeUtf8ZOffsets.Length)
+                    {
+                        throw new InvalidOperationException("The verified UTF-8-NUL literal index is invalid.");
+                    }
+                    _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+                        _nativeUtf8ZOffsets[checked((int)constant.Value)]));
                     _code.Bytes(0x48, 0x89, 0xD0); // mov rax,rdx
                 }
                 else if (IsWide(constant.Type))
@@ -3245,7 +3361,10 @@ internal sealed partial class PeCompiler
                 if (readVariable.IsImplicitRef)
                 {
                     _code.Load64(Slot(read.Variable));
-                    _code.LoadPointerField(0, Size(read.Type));
+                    if (!IsIndirect(read.Type))
+                    {
+                        _code.LoadPointerField(0, Size(read.Type));
+                    }
                 }
                 else if (read.Variable == 0 && IsBorrowedReceiver() && !IsUnique(read.Type))
                 {
@@ -3300,13 +3419,8 @@ internal sealed partial class PeCompiler
                 _code.Address(Spill(spill));
                 break;
             case BoundViewRead viewRead:
-                Expression(viewRead.Index, spill);
-                _code.Bytes(0x89, 0xC1); // ecx = index
-                _code.Load(Slot(viewRead.Variable) + 8);
-                _code.Bytes(0x39, 0xC1); // unsigned index >= length also rejects negative indexes
-                RuntimeBranch(0x83, 2);
-                _code.Load64(Slot(viewRead.Variable), destinationRegister: true);
-                _code.Bytes(0x8B, 0x04, 0x8A);
+                EmitViewElementAddress(viewRead, spill);
+                _code.Bytes(0x8B, 0x00); // eax = [rax]
                 break;
             case BoundMove move:
                 LoadValue(OwnerPlace(move.Variable), move.Type);
@@ -3682,7 +3796,21 @@ internal sealed partial class PeCompiler
                 Expression(unsafeExpression.Expression, spill);
                 break;
             case BoundCall call:
-                var argumentsBase = spill + 1;
+                var argumentsBase = spill + CallResultSpills(call);
+                var argumentSpills = new int[call.Arguments.Length];
+                var auxiliarySpills = new int[call.Arguments.Length];
+                var nextSpill = argumentsBase;
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    argumentSpills[i] = nextSpill;
+                    nextSpill += CallArgumentValueSpills(call, i);
+                }
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    auxiliarySpills[i] = nextSpill;
+                    nextSpill += CallArgumentAuxiliarySpills(call.Arguments[i]);
+                }
+                var argumentExpressionSpillBase = nextSpill;
                 List<(int Value, int Live, PrimitiveType Type)>? staged = null;
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
@@ -3693,8 +3821,8 @@ internal sealed partial class PeCompiler
                         continue;
                     }
                     staged ??= [];
-                    var live = Spill(argumentsBase + call.Arguments.Length + i);
-                    staged.Add((Spill(argumentsBase + i), live, call.Arguments[i].Type));
+                    var live = Spill(auxiliarySpills[i]);
+                    staged.Add((Spill(argumentSpills[i]), live, call.Arguments[i].Type));
                     _code.Clear(live);
                 }
                 var stagedBegin = _code.Position;
@@ -3708,10 +3836,10 @@ internal sealed partial class PeCompiler
                         if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                         {
                             managedSlots ??= [];
-                            managedSlots.Add(Spill(argumentsBase + i));
+                            managedSlots.Add(Spill(argumentSpills[i]));
                             if (call.Arguments[i] is BoundOutArgument)
                             {
-                                managedSlots.Add(Spill(argumentsBase + call.Arguments.Length + i));
+                                managedSlots.Add(Spill(auxiliarySpills[i]));
                             }
                         }
                     }
@@ -3732,45 +3860,45 @@ internal sealed partial class PeCompiler
                 {
                     if (call.Arguments[i] is BoundOutArgument)
                     {
-                        var scratch = Spill(argumentsBase + call.Arguments.Length + i);
+                        var scratch = Spill(auxiliarySpills[i]);
                         ZeroStruct(scratch, IsIndirect(call.Arguments[i].Type) ? Size(call.Arguments[i].Type) : 8);
                         if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                         {
                             SetManagedRoot(scratch, active: true);
                         }
                         _code.Address(scratch);
-                        _code.Store64(Spill(argumentsBase + i));
+                        _code.Store64(Spill(argumentSpills[i]));
                     }
                     else
                     {
                         if (IsImplicitReferenceArgument(call, i))
                         {
                             EmitImplicitReferenceAddress(call, i,
-                                argumentsBase + (call.Arguments.Length * 2));
+                                argumentExpressionSpillBase);
                         }
                         else
                         {
-                            Expression(call.Arguments[i], argumentsBase + (call.Arguments.Length * 2));
+                            Expression(call.Arguments[i], argumentExpressionSpillBase);
                         }
                         if (IsImplicitReferenceArgument(call, i)
                             || call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan
                             or BoundFieldLoan or BoundMutableFieldLoan)
                         {
-                            _code.Store64(Spill(argumentsBase + i));
+                            _code.Store64(Spill(argumentSpills[i]));
                         }
                         else
                         {
-                            StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
+                            StoreValue(Spill(argumentSpills[i]), call.Arguments[i].Type);
                             if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                             {
-                                SetManagedRoot(Spill(argumentsBase + i), active: true);
+                                SetManagedRoot(Spill(argumentSpills[i]), active: true);
                             }
                         }
                         if (staged is not null && IsUnique(call.Arguments[i].Type)
                             && call.Arguments[i] is not (BoundReceiverLoan or BoundMutableReceiverLoan
                                 or BoundFieldLoan or BoundMutableFieldLoan))
                         {
-                            _code.Set(Spill(argumentsBase + call.Arguments.Length + i));
+                            _code.Set(Spill(auxiliarySpills[i]));
                         }
                     }
                 }
@@ -3809,11 +3937,11 @@ internal sealed partial class PeCompiler
                         || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan)
                     {
-                        _code.Load64(Spill(argumentsBase + argumentIndex));
+                        _code.Load64(Spill(argumentSpills[argumentIndex]));
                     }
                     else
                     {
-                        LoadValue(Spill(argumentsBase + argumentIndex), call.Arguments[argumentIndex].Type);
+                        LoadValue(Spill(argumentSpills[argumentIndex]), call.Arguments[argumentIndex].Type);
                     }
                     _code.StoreOutgoing64(32 + (8 * (i + hidden - 4)));
                 }
@@ -3824,11 +3952,11 @@ internal sealed partial class PeCompiler
                         || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
                         or BoundFieldLoan or BoundMutableFieldLoan)
                     {
-                        _code.Load64(Spill(argumentsBase + argumentIndex));
+                        _code.Load64(Spill(argumentSpills[argumentIndex]));
                     }
                     else
                     {
-                        LoadValue(Spill(argumentsBase + argumentIndex), call.Arguments[argumentIndex].Type);
+                        LoadValue(Spill(argumentSpills[argumentIndex]), call.Arguments[argumentIndex].Type);
                     }
                     _code.MoveArgument(i + hidden,
                         IsImplicitReferenceArgument(call, argumentIndex)
@@ -3875,7 +4003,7 @@ internal sealed partial class PeCompiler
                     {
                         if (call.Arguments[i] is BoundOutArgument output)
                         {
-                            var scratch = Spill(argumentsBase + call.Arguments.Length + i);
+                            var scratch = Spill(auxiliarySpills[i]);
                             var destination = _program.Functions[_currentFunction].Variables[output.Variable].IsOut
                                 ? OutSlot(output.Variable) : Slot(output.Variable);
                             if (IsIndirect(output.Type))
@@ -3943,10 +4071,10 @@ internal sealed partial class PeCompiler
                 {
                     if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                     {
-                        SetManagedRoot(Spill(argumentsBase + i), active: false);
+                        SetManagedRoot(Spill(argumentSpills[i]), active: false);
                         if (call.Arguments[i] is BoundOutArgument)
                         {
-                            SetManagedRoot(Spill(argumentsBase + call.Arguments.Length + i), active: false);
+                            SetManagedRoot(Spill(auxiliarySpills[i]), active: false);
                         }
                     }
                 }
@@ -5155,6 +5283,29 @@ internal sealed class MachineCode
                 Bytes(wide ? (byte)0x49 : (byte)0x41, 0x89, 0xC1);
                 break;
         }
+    }
+
+    internal void MoveFloatingArgument(int argument, bool wide)
+    {
+        if (argument is < 0 or > 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(argument));
+        }
+        Byte(0x66);
+        if (wide)
+        {
+            Byte(0x48);
+        }
+        Bytes(0x0F, 0x6E, (byte)(0xC0 + (argument << 3)));
+    }
+    internal void MoveFloatingReturnToAccumulator(bool wide)
+    {
+        Byte(0x66);
+        if (wide)
+        {
+            Byte(0x48);
+        }
+        Bytes(0x0F, 0x7E, 0xC0);
     }
     internal byte[] ToArray() => [.. _bytes];
 }

@@ -106,14 +106,14 @@ public static partial class SemanticVerifier
                     && variableIndex - firstParameter < function.ParameterCount;
                 if (variable.IsImplicitRef
                     && (!isParameter || function.IsExternal || variable.IsOut || variable.IsInit
-                        || variable.IsInitializationLocal || !IsImplicitReferenceScalarType(variable.Type)))
+                        || variable.IsInitializationLocal || !IsImplicitReferenceType(variable.Type, program)))
                 {
                     throw InvalidEffect(variable.Span, "Ownership");
                 }
                 if (variable.IsImplicitReferenceTemporary
                     && (isParameter || function.IsExternal || variable.IsOut || variable.IsInit
                         || variable.IsImplicitRef || variable.IsInitializationLocal || variable.IsMutable
-                        || !IsImplicitReferenceScalarType(variable.Type)))
+                        || !IsImplicitReferenceType(variable.Type, program)))
                 {
                     throw InvalidEffect(variable.Span, "Ownership");
                 }
@@ -221,6 +221,10 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (IsRestrictedNativeDescriptor(field.Type))
+                {
+                    throw Invalid();
+                }
                 var width = ValueLayout.Size(field.Type, program.Structures);
                 var nested = (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
                     ? (int)field.Type - 100 : -1;
@@ -264,7 +268,8 @@ public static partial class SemanticVerifier
                     or NativeManagedNodeIntrinsics.HeapName or NativeWindowHandleContract.TypeName
                 || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
-                || structure.Fields.IsDefaultOrEmpty || structure.Size is < 1 or > ValueLayout.MaximumSize)
+                || structure.Fields.IsDefaultOrEmpty
+                || structure.Size is < 1 or > ValueLayout.MaximumStructureSize)
             {
                 throw Invalid();
             }
@@ -308,7 +313,8 @@ public static partial class SemanticVerifier
                 var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal)
-                    || width == 0 || field.Size != width || field.Offset != alignedOffset || alignedOffset + width > ValueLayout.MaximumSize)
+                    || width == 0 || field.Size != width || field.Offset != alignedOffset
+                    || alignedOffset + width > ValueLayout.MaximumStructureSize)
                 {
                     throw Invalid();
                 }
@@ -327,9 +333,12 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            var isCataloguedFixedArrayElement = NativeFixedArrayContract.IsCataloguedElement(
+                (PrimitiveType)(100 + index), program.Structures, program.NativeImportCatalog);
             if (structure.IsSequential && (!structure.IsInternal || structure.IsUnique
                 || structure.IsTransparent || structure.Fields.Any(static field => !field.IsPrivate))
-                && structure.BlittableTargetRequirement == 0)
+                && structure.BlittableTargetRequirement == 0
+                && !isCataloguedFixedArrayElement)
             {
                 throw Invalid();
             }
@@ -413,7 +422,8 @@ public static partial class SemanticVerifier
                                     or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
                                     or PrimitiveType.Int64 or PrimitiveType.UInt64
                                     or PrimitiveType.Float32 or PrimitiveType.Float64)
-                                && !IsCopyStruct(program, variable.Type)))))
+                                && !IsCopyStruct(program, variable.Type)
+                                && !IsNativeComImportOutputParameter(function, variableIndex, program)))))
                     {
                         throw Invalid();
                     }
@@ -653,9 +663,11 @@ public static partial class SemanticVerifier
                 continue;
             }
             BackingDependencies? backingDependencies;
+            Dictionary<int, int>? comOwnerAcquisitions;
             try
             {
                 backingDependencies = CreateBackingDependencies(function, program, hasSpanDependencies);
+                comOwnerAcquisitions = NativeComAcquisitions(function, program);
             }
             catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
             {
@@ -667,6 +679,7 @@ public static partial class SemanticVerifier
                     PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                     ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
                 Dependencies = backingDependencies,
+                ComOwnerAcquisitions = comOwnerAcquisitions,
             };
             if (function.IsConstructor)
             {
@@ -892,7 +905,12 @@ public static partial class SemanticVerifier
                     break;
                 case BoundSnapshotSpan:
                     break;
-                case BoundConstant or BoundNull or BoundNativeNoOwner or BoundRead or BoundMove or BoundReceiverLoan
+                case BoundNativeFixedArrayWrite write:
+                    Expression(write.Index, scope, depth + 1);
+                    Expression(write.Value, scope, depth + 1);
+                    break;
+                case BoundConstant or BoundNull or BoundNativeNoOwner or BoundNativeCallbackAddress
+                    or BoundRead or BoundMove or BoundReceiverLoan
                     or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength or BoundBufferLength:
                     break;
                 default:
@@ -1396,7 +1414,8 @@ public static partial class SemanticVerifier
                 case BoundBufferRead buffer:
                     Expression(buffer.Index, depth + 1, acquiringRoot);
                     break;
-                case BoundConstant or BoundNull or BoundNativeNoOwner or BoundRead or BoundBufferLength:
+                case BoundConstant or BoundNull or BoundNativeNoOwner or BoundNativeCallbackAddress
+                    or BoundRead or BoundBufferLength:
                     break;
                 default:
                     throw Invalid();
@@ -1439,9 +1458,15 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
+                    var enclosingNativeLocals = block.IsManagedLexicalScope && nativeLocals is not null
+                        ? new HashSet<int>(nativeLocals) : null;
                     foreach (var child in block.Statements)
                     {
                         Statement(child, depth + 1);
+                    }
+                    if (nativeLocals is not null && enclosingNativeLocals is not null)
+                    {
+                        nativeLocals.IntersectWith(enclosingNativeLocals);
                     }
                     break;
                 case BoundViewScope view:
@@ -1723,7 +1748,7 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "NativeImport");
         }
-        if (!NativeUtf16ZContract.IsValidPool(program.NativeUtf16ZLiterals))
+        if (!NativeStringZPoolContract.IsValid(program.NativeUtf16ZLiterals, program.NativeUtf8ZLiterals))
         {
             throw InvalidEffect(default, "NativeImport");
         }
@@ -1743,7 +1768,7 @@ public static partial class SemanticVerifier
             externalCount++;
             if (function.NativeImportKey is not string key
                 || !catalog.TryGetImport(key, out var definition)
-                || definition is null || !catalog.MatchesFunction(function, definition))
+                || definition is null || !catalog.MatchesFunction(function, definition, program.Structures))
             {
                 throw InvalidEffect(function.Span, "NativeImport");
             }
@@ -2161,8 +2186,8 @@ public static partial class SemanticVerifier
                 return false;
             case BoundExpressionStatement expressionStatement:
                 var effect = UnwrapUnsafeExpression(expressionStatement.Expression);
-                if (effect is not (BoundCall or BoundViewRead or BoundUpdate
-                    or BoundNominalUpdate or BoundCompoundAssignment))
+                if (effect is not (BoundCall or BoundNativeBlobGetters or BoundViewRead or BoundUpdate
+                    or BoundNominalUpdate or BoundCompoundAssignment or BoundNativeFixedArrayWrite))
                 {
                     throw Invalid();
                 }
@@ -2849,6 +2874,7 @@ public static partial class SemanticVerifier
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
         internal BackingDependencies? Dependencies { get; init; }
+        internal Dictionary<int, int>? ComOwnerAcquisitions { get; init; }
 
         internal InitializationState(int length)
             : this(length, new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
@@ -2904,6 +2930,7 @@ public static partial class SemanticVerifier
             var result = new InitializationState(Length, _canBeFacts, _flowFacts) {
                 StatementInputs = StatementInputs,
                 Dependencies = Dependencies,
+                ComOwnerAcquisitions = ComOwnerAcquisitions,
             };
             CopyTo(result);
             return result;
@@ -3086,7 +3113,8 @@ public static partial class SemanticVerifier
     {
         Count(ref remaining, depth);
         if (expression is null || !ValidType(expression.Type,
-            allowVoid: expression is BoundCall or BoundUnsafeExpression { Type: PrimitiveType.Void }, program))
+            allowVoid: expression is BoundCall or BoundUnsafeExpression { Type: PrimitiveType.Void }
+                or BoundNativeFixedArrayWrite, program))
         {
             throw Invalid();
         }
@@ -3674,12 +3702,13 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (function.IsNoThrow && checkedIntegerOperation
-                    && !ReferenceEquals(binary, cleanupCounterStep))
+                var verifiedNoThrowArithmetic = function.IsNoThrow && checkedIntegerOperation
+                    && ReferenceEquals(binary, cleanupCounterStep);
+                if (function.IsNoThrow && checkedIntegerOperation && !verifiedNoThrowArithmetic)
                 {
                     throw InvalidEffect(binary.Span);
                 }
-                if (checkedIntegerOperation)
+                if (checkedIntegerOperation && !verifiedNoThrowArithmetic)
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -3753,6 +3782,7 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                VerifyNativeComCall(call, target, program);
                 if (target.DeclaringStruct is not null && !target.IsStatic && !target.IsConstructor
                     && target.Variables[0].IsMutable
                     && (int)target.Variables[0].Type is >= 100 and < ManagedClassTypes.First
@@ -3800,6 +3830,19 @@ public static partial class SemanticVerifier
                         {
                             throw Invalid();
                         }
+                        NativeStorageRecordParameterDefinition? storageRecordParameter = null;
+                        if (storageRecordImport is not null)
+                        {
+                            _ = NativeStorageRecordContract.TryGetParameter(storageRecordImport,
+                                parameterIndex, out storageRecordParameter);
+                        }
+                        else if (storageRecordMethod is not null)
+                        {
+                            var nativeParameter = NativeComCallContract.NativeParameterIndex(
+                                target, parameterIndex, storageRecordMethod);
+                            _ = NativeStorageRecordContract.TryGetParameter(storageRecordMethod,
+                                nativeParameter, out storageRecordParameter);
+                        }
                         var implicitReferenceTemporary = call.ImplicitReferenceTemporary(i);
                         if (implicitReferenceTemporary < -1)
                         {
@@ -3808,8 +3851,9 @@ public static partial class SemanticVerifier
                         if (target.Variables[parameterSlot].IsImplicitRef)
                         {
                             if (target.IsExternal
-                                || !IsImplicitReferenceScalarType(target.Variables[parameterSlot].Type)
-                                || (implicitReferenceTemporary < 0 && argument is not BoundRead))
+                                || !IsImplicitReferenceType(target.Variables[parameterSlot].Type, program)
+                                || (implicitReferenceTemporary < 0
+                                    && !IsSupportedImplicitReferencePlace(argument, function, program)))
                             {
                                 throw InvalidEffect(argument.Span, "Ownership");
                             }
@@ -3865,12 +3909,22 @@ public static partial class SemanticVerifier
                         }
                         else
                         {
-                            if (target.Variables[parameterSlot].IsImplicitRef
-                                && implicitReferenceTemporary < 0
-                                && (argument is not BoundRead reference
-                                    || reference.Variable < 0 || reference.Variable >= function.Variables.Length
-                                    || !IsImplicitReferenceScalarType(
-                                        function.Variables[reference.Variable].Type)))
+                            _ = NativeStorageParameterContract.TryGetParameter(
+                                target, parameterIndex, program, out var storageParameter);
+                            var isAllowedStorageAddress = argument is BoundNativeStorageAddress storageAddress
+                                && storageParameter is not null
+                                && NativeStorageParameterContract.MatchesAddress(storageAddress, storageParameter);
+                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress recordAddress
+                                && storageRecordParameter is not null
+                                && NativeStorageRecordContract.MatchesAddress(recordAddress,
+                                    storageRecordParameter, program.NativeImportCatalog);
+                            NativeAggregateStorageParameterDefinition? aggregateStorageParameter = null;
+                            if (target.IsExternal && target.NativeImportKey is string aggregateImportKey
+                                && program.NativeImportCatalog is NativeImportCatalog aggregateCatalog
+                                && aggregateCatalog.TryGetImport(aggregateImportKey, out var aggregateImport)
+                                && aggregateImport is not null
+                                && NativeStorageParameterContract.TryGetAggregateParameter(aggregateImport,
+                                    parameterIndex, out var selectedAggregateStorageParameter))
                             {
                                 throw InvalidEffect(argument.Span, "Ownership");
                             }
@@ -3884,8 +3938,7 @@ public static partial class SemanticVerifier
                                     || handleDefinition is null
                                     || handleDefinition.ParameterTypes[parameterIndex]
                                         != PrimitiveType.NativeWindowHandle
-                                    || handleDefinition.ParameterContracts[parameterIndex]
-                                        != NativeImportParameterContract.NoOwnerWindowHandle)
+                                    || !validHandleArgument)
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
@@ -3956,10 +4009,19 @@ public static partial class SemanticVerifier
                             }
                             else if (argument is BoundReceiverLoan loan)
                             {
-                                if (parameterIndex != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                                VerifyNativeComLoan(call, parameterIndex, loan, initialized, function, program);
+                                var isReceiverLoan = parameterIndex == 0
+                                    && loan.Type == target.Variables[0].Type
+                                    && !target.Variables[0].IsMutable;
+                                var isCataloguedComLoan = call.NativeComCall is NativeComCallFacts comFacts
+                                    && comFacts.Loans.Any(fact => fact.ParameterIndex == parameterIndex
+                                        && fact.Variable == loan.Variable)
+                                    || (call.NativeComCall is null && target.NativeComMethod is not null
+                                        && VerifiedNativeComOwner(loan.Type, program) is not null);
+                                if ((!isReceiverLoan && !isCataloguedComLoan)
+                                    || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                     || loan.Variable < 0 || loan.Variable >= initialized.Length
-                                    || loan.Type != target.Variables[0].Type || !IsUnique(program, loan.Type)
-                                    || target.Variables[0].IsMutable
+                                    || !IsUnique(program, loan.Type)
                                     || !initialized[loan.Variable]
                                     || function.Variables[loan.Variable].Type != loan.Type)
                                 {
@@ -3983,7 +4045,7 @@ public static partial class SemanticVerifier
                             }
                             else
                             {
-                                if (target.Variables[parameterSlot].Type == PrimitiveType.NativeUtf16ZPointer)
+                                if (IsNativeUtfZPointer(target.Variables[parameterSlot].Type))
                                 {
                                     if (!target.IsExternal || target.NativeImportKey is not string pointerKey
                                         || program.NativeImportCatalog is not NativeImportCatalog pointerCatalog
@@ -4000,7 +4062,7 @@ public static partial class SemanticVerifier
                                         throw InvalidEffect(argument.Span, "NativeImport");
                                     }
                                 }
-                                else if (argument.Type == PrimitiveType.NativeUtf16ZPointer)
+                                else if (IsNativeUtfZPointer(argument.Type))
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
@@ -4016,7 +4078,11 @@ public static partial class SemanticVerifier
                                 }
                             }
                         }
-                        if (parameterIndex == 0 && loanRoot >= 0)
+                        if (loanRoot >= 0 && (parameterIndex == 0
+                            || argument is BoundReceiverLoan
+                                && call.NativeComCall is NativeComCallFacts nativeComFacts
+                                && nativeComFacts.Loans.Any(fact => fact.ParameterIndex == parameterIndex
+                                    && fact.Variable == loanRoot)))
                         {
                             reservedReceiver = loanRoot;
                         }
@@ -4040,6 +4106,16 @@ public static partial class SemanticVerifier
                         {
                             dependencies.Staged.Add(BackingOf(argument, dependencies, program, ref remaining, depth + 1));
                         }
+                    }
+                    if (storageRecordImport is not null)
+                    {
+                        VerifyNativeStorageRecordLoanGroups(call,
+                            storageRecordImport.StorageRecordParameters, storageRecordLoans);
+                    }
+                    else if (storageRecordMethod is not null)
+                    {
+                        VerifyNativeStorageRecordLoanGroups(call,
+                            storageRecordMethod.StorageRecordParameters, storageRecordLoans);
                     }
                     if (loanRoot >= 0 && !initialized[loanRoot]
                         && !(loanOfInitializedField && function.IsConstructor && loanRoot == 0))
@@ -4127,11 +4203,55 @@ public static partial class SemanticVerifier
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
+    private static bool IsImplicitReferenceType(PrimitiveType type, BoundProgram program) =>
+        IsImplicitReferenceScalarType(type) || IsCopyStruct(program, type);
+
+    private static bool IsSupportedImplicitReferencePlace(
+        BoundExpression argument,
+        BoundFunction function,
+        BoundProgram program) =>
+        argument switch
+        {
+            BoundRead read => (uint)read.Variable < (uint)function.Variables.Length
+                && function.Variables[read.Variable].Type == read.Type
+                && IsImplicitReferenceType(read.Type, program),
+            BoundFieldRead field => IsSupportedImplicitReferenceFieldPlace(field, function, program),
+            BoundBufferRead buffer => (uint)buffer.Buffer < (uint)program.Buffers.Length
+                && program.Buffers[buffer.Buffer].ElementType == buffer.Type
+                && IsImplicitReferenceType(buffer.Type, program),
+            BoundViewRead view => (uint)view.Variable < (uint)function.Variables.Length
+                && function.Variables[view.Variable].Type is PrimitiveType.ReadonlyInt32BufferView
+                    or PrimitiveType.MutableInt32BufferView
+                && IsImplicitReferenceType(view.Type, program),
+            _ => false,
+        };
+
+    private static bool IsSupportedImplicitReferenceFieldPlace(
+        BoundFieldRead field,
+        BoundFunction function,
+        BoundProgram program)
+    {
+        if (!IsImplicitReferenceType(field.Type, program)
+            || !IsCopyStruct(program, field.Receiver.Type))
+        {
+            return false;
+        }
+        return field.Receiver switch
+        {
+            BoundRead read => (uint)read.Variable < (uint)function.Variables.Length
+                && function.Variables[read.Variable].Type == read.Type
+                && IsCopyStruct(program, read.Type),
+            BoundFieldRead parent => IsSupportedImplicitReferenceFieldPlace(parent, function, program),
+            _ => false,
+        };
+    }
+
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
             or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer or PrimitiveType.TokenSpan
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode or PrimitiveType.NativeUtf16ZPointer
+            or PrimitiveType.NativeUtf8ZPointer or PrimitiveType.NativeNullPointer
             or PrimitiveType.NativeWindowHandle
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
