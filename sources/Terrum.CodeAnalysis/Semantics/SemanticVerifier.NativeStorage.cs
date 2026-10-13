@@ -6,6 +6,44 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 public static partial class SemanticVerifier
 {
+    private static void VerifyNativeFixedArrayInitialization(BoundNativeFixedArrayInitialization initialization,
+        int variable, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
+    {
+        Count(ref remaining, depth);
+        var layout = initialization.Layout;
+        if (!NativeFixedArrayContract.MatchesProgram(program)
+            || (uint)variable >= (uint)function.Variables.Length
+            || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+            || function.Variables[variable].Type != layout.CarrierType
+            || function.Variables[variable].NativeFixedArrayLayout != layout
+            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures, program.NativeImportCatalog)
+            || (function.Variables[variable].IsMutable
+                && !NativeFixedArrayContract.AllowsMutableLocal(layout, program.Structures,
+                    program.NativeImportCatalog))
+            || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
+                && !NativeFixedArrayContract.AllowsCheckedRuntimeAccess(
+                    layout, program.Structures, program.NativeImportCatalog))
+            || initialization.Elements.IsDefault
+            || (initialization.Elements.IsEmpty
+                ? !NativeFixedArrayContract.AllowsEmptyInitialization(layout, program.Structures,
+                    program.NativeImportCatalog)
+                : initialization.Elements.Length != layout.ElementCount))
+        {
+            throw InvalidEffect(initialization.Span, "NativeImport");
+        }
+
+        foreach (var element in initialization.Elements)
+        {
+            if (element is null || element.Type != layout.ElementType)
+            {
+                throw InvalidEffect(element?.Span ?? initialization.Span, "NativeImport");
+            }
+            Expression(element, initialized, fieldMasks, declarations, function, program,
+                ref remaining, depth + 1, failures);
+        }
+    }
+
     private static void VerifyNativeStorageParameterAddress(BoundNativeStorageAddress address,
         NativeStorageParameterDefinition parameter,
         InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,

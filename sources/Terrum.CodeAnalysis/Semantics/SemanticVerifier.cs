@@ -203,6 +203,12 @@ public static partial class SemanticVerifier
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
                 || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
                     or NativeWindowHandleContract.TypeName
+                || @class.Name == NativeImportCatalog.NativeNullPointerTypeName
+                || @class.Name == NativeStorageParameterContract.AddressTypeName
+                || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
+                    layout.TypeName == @class.Name) == true
+                || program.NativeImportCatalog?.IsCallbackTypeName(@class.Name) == true
+                || NativeComCallContract.IsCataloguedOwnerName(@class.Name, program.NativeImportCatalog)
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
@@ -263,9 +269,26 @@ public static partial class SemanticVerifier
             }
             layoutStates[index] = 1;
             var structure = program.Structures[index];
+            if (structure is not null && !string.IsNullOrWhiteSpace(structure.Name)
+                && VerifiedNativeComOwner((PrimitiveType)(100 + index), program) is NativeComOwnerDefinition owner)
+            {
+                if (!structNames.Add(structure.Name))
+                {
+                    throw InvalidEffect(default, "NativeImport");
+                }
+                alignments[index] = owner.CellAlignment;
+                layoutHeights[index] = 1;
+                layoutStates[index] = 2;
+                return;
+            }
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
                 || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
                     or NativeManagedNodeIntrinsics.HeapName or NativeWindowHandleContract.TypeName
+                || structure.Name == NativeImportCatalog.NativeNullPointerTypeName
+                || structure.Name == NativeStorageParameterContract.AddressTypeName
+                || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
+                    layout.TypeName == structure.Name) == true
+                || program.NativeImportCatalog?.IsCallbackTypeName(structure.Name) == true
                 || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
@@ -280,7 +303,8 @@ public static partial class SemanticVerifier
             foreach (var field in structure.Fields)
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
-                    || field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle)
+                    || field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                        or PrimitiveType.NativeWindowHandle)
                 {
                     throw Invalid();
                 }
@@ -371,7 +395,8 @@ public static partial class SemanticVerifier
             if (function is null || string.IsNullOrEmpty(function.Name) || !names.Add(function.Name)
                 || (function.IsPrivate && function.IsInternal)
                 || (function.DoesNotReturn && function.ReturnType != PrimitiveType.Void)
-                || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle
+                || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                    or PrimitiveType.NativeWindowHandle
                 || !ValidType(function.ReturnType, allowVoid: true, program) || function.Variables.IsDefault
                 || function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
                 || function.Body is null)
@@ -388,7 +413,7 @@ public static partial class SemanticVerifier
                 {
                     var variable = function.Variables[variableIndex];
                     if (variable is null || string.IsNullOrEmpty(variable.Name)
-                        || (variable.Type == PrimitiveType.NativeUtf16ZPointer
+                        || (variable.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                             && (!function.IsExternal || variableIndex >= function.ParameterCount))
                         || (variable.Type == PrimitiveType.NativeWindowHandle
                             && (!function.IsExternal || variableIndex != 0
@@ -908,6 +933,22 @@ public static partial class SemanticVerifier
                     break;
                 case BoundSnapshotSpan:
                     break;
+                case BoundNativeStorageAddress address:
+                    Expression(address.Index, scope, depth + 1);
+                    break;
+                case BoundNativeFixedArrayInitialization fixedArray:
+                    foreach (var element in fixedArray.Elements)
+                    {
+                        Expression(element, scope, depth + 1);
+                    }
+                    break;
+                case BoundNativeStorageRecordInitialization storageRecord:
+                    Expression(storageRecord.DataSource, scope, depth + 1);
+                    foreach (var field in storageRecord.Fields)
+                    {
+                        Expression(field, scope, depth + 1);
+                    }
+                    break;
                 case BoundNativeFixedArrayWrite write:
                     Expression(write.Index, scope, depth + 1);
                     Expression(write.Value, scope, depth + 1);
@@ -1349,6 +1390,22 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(snapshot.Span, "Ownership");
                     }
                     break;
+                case BoundNativeStorageAddress address:
+                    Expression(address.Index, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeFixedArrayInitialization fixedArray:
+                    foreach (var element in fixedArray.Elements)
+                    {
+                        Expression(element, depth + 1, acquiringRoot);
+                    }
+                    break;
+                case BoundNativeStorageRecordInitialization storageRecord:
+                    Expression(storageRecord.DataSource, depth + 1, acquiringRoot);
+                    foreach (var field in storageRecord.Fields)
+                    {
+                        Expression(field, depth + 1, acquiringRoot);
+                    }
+                    break;
                 case BoundRead localRead when localRead.Type is PrimitiveType.ReadonlyInt32BufferView
                     or PrimitiveType.MutableInt32BufferView:
                     throw InvalidEffect(localRead.Span, "Ownership");
@@ -1752,7 +1809,8 @@ public static partial class SemanticVerifier
                 || program.Functions.Any(static function => function.NativeImportKey is not null)
                 || program.Functions.Any(static function => function.ReturnType == PrimitiveType.NativeWindowHandle
                     || function.Variables.Any(static variable => variable.Type == PrimitiveType.NativeWindowHandle))
-                || !program.NativeUtf16ZLiterals.IsEmpty)
+                || !program.NativeUtf16ZLiterals.IsEmpty
+                || !program.NativeUtf8ZLiterals.IsEmpty)
             {
                 throw InvalidEffect(default, "NativeImport");
             }
@@ -1809,7 +1867,8 @@ public static partial class SemanticVerifier
             || (!program.Classes.IsDefaultOrEmpty && program.Classes.Any(
                 static @class => @class.Fields.Any(
                     static field => field.Type == PrimitiveType.NativeWindowHandle)))
-            || !program.NativeUtf16ZLiterals.IsEmpty)
+            || !program.NativeUtf16ZLiterals.IsEmpty
+            || !program.NativeUtf8ZLiterals.IsEmpty)
         {
             throw new NotSupportedException($"Source native imports are not supported by {target}.");
         }
@@ -1883,7 +1942,23 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                Expression(local.Initializer, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                if (local.Initializer is BoundNativeStorageRecordInitialization)
+                {
+                    VerifyNativeStorageRecordInitialization(local.Initializer, local.Variable,
+                        initialized, fieldMasks, declarations, function, program, ref remaining,
+                        depth + 1, failures);
+                }
+                else if (local.Initializer is BoundNativeFixedArrayInitialization fixedArray)
+                {
+                    VerifyNativeFixedArrayInitialization(fixedArray, local.Variable,
+                        initialized, fieldMasks, declarations, function, program, ref remaining,
+                        depth + 1, failures);
+                }
+                else
+                {
+                    Expression(local.Initializer, initialized, fieldMasks, declarations,
+                        function, program, ref remaining, depth + 1, failures);
+                }
                 if (local.Initializer.Type != function.Variables[local.Variable].Type)
                 {
                     throw Invalid();
@@ -4246,11 +4321,10 @@ public static partial class SemanticVerifier
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
                             }
-                            else if (argument is BoundNativeNoOwner or BoundNativeCallbackAddress
+                            else if (argument is BoundNativeCallbackAddress
                                 || argument is BoundNativeStorageAddress && !isAllowedStorageAddress
                                 || IsRestrictedNativeDescriptor(argument.Type) && !isAllowedStorageAddress
-                                || argument.Type is PrimitiveType.NativeWindowHandle
-                                    or PrimitiveType.NativeCallbackAddress)
+                                || argument.Type == PrimitiveType.NativeCallbackAddress)
                             {
                                 throw InvalidEffect(argument.Span, "NativeImport");
                             }
@@ -4262,7 +4336,8 @@ public static partial class SemanticVerifier
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                                if (IsNativeUtfZPointer(argument.Type))
+                                if (IsNativeUtfZPointer(argument.Type)
+                                    && !IsNativeUtfZPointer(target.Variables[parameterSlot].Type))
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }

@@ -286,6 +286,14 @@ internal sealed partial class Binder
                     }
                     if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                         || qualified == NativeWindowHandleContract.TypeName
+                        || qualified == NativeImportCatalog.NativeNullPointerTypeName
+                        || qualified == NativeStorageParameterContract.AddressTypeName
+                        || _nativeImportCatalog?.StorageRecordLayouts.Any(layout =>
+                            layout.TypeName == qualified || layout.TypeName == name) == true
+                        || _nativeImportCatalog?.IsCallbackTypeName(qualified) == true
+                        || NativeComCallContract.IsCataloguedOwnerName(qualified, _nativeImportCatalog)
+                        || (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
+                            && qualified is ("nint" or "nuint"))
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -329,6 +337,19 @@ internal sealed partial class Binder
         {
             _ = _structNames.TryAdd(NativeWindowHandleContract.TypeName, PrimitiveType.NativeWindowHandle);
         }
+        if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeNullPointer) == true)
+        {
+            _ = _structNames.TryAdd(NativeImportCatalog.NativeNullPointerTypeName, PrimitiveType.NativeNullPointer);
+        }
+        if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true)
+        {
+            foreach (var typeName in _nativeImportCatalog.CallbackTypeNames)
+            {
+                _ = _structNames.TryAdd(typeName, PrimitiveType.NativeCallbackAddress);
+            }
+            _ = _structNames.TryAdd("nint", PrimitiveType.Int64);
+            _ = _structNames.TryAdd("nuint", PrimitiveType.UInt64);
+        }
         DeclareAliases();
         foreach (var index in _structDeclarations.Keys)
         {
@@ -337,6 +358,10 @@ internal sealed partial class Binder
         foreach (var index in _classDeclarations.Keys)
         {
             DeclareClass(index);
+        }
+        if (_nativeImportCatalog is NativeImportCatalog nativeComCatalog)
+        {
+            DeclareNativeComOwners(nativeComCatalog);
         }
         DeclareConformances();
 
@@ -439,6 +464,10 @@ internal sealed partial class Binder
             }
         }
         DeclareClassFactories();
+        if (_nativeImportCatalog is NativeImportCatalog nativeImportCatalog)
+        {
+            DeclareNativeComDirectMethods(nativeImportCatalog);
+        }
         foreach (var template in _templates.Values)
         {
             if (_functions.ContainsKey(template.Name))
@@ -746,8 +775,9 @@ internal sealed partial class Binder
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     private static bool IsNativeImportParameterType(PrimitiveType type) =>
-        IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer
-            or PrimitiveType.NativeWindowHandle;
+        IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+            or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeNullPointer
+            or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress;
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -1833,8 +1863,11 @@ internal sealed partial class Binder
 
             if (isExternal && importDefinition is not null && externalFunction is not null
                 && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType))
-                && boundParameters.All(static parameter => !parameter.IsOut && !parameter.IsInit
-                        && IsNativeImportParameterType(parameter.Type))
+                && Enumerable.Range(0, boundParameters.Length).All(index =>
+                    !boundParameters[index].IsInit
+                    && (boundParameters[index].IsOut
+                        ? IsNativeComImportOutputParameter(boundParameters[index].Type, importDefinition, index)
+                        : IsNativeImportParameterType(boundParameters[index].Type)))
                 && _nativeImportCatalog is not null
                 && _nativeImportCatalog.MatchesFunction(externalFunction, importDefinition, [.. _structs]))
             {
@@ -1995,6 +2028,30 @@ internal sealed partial class Binder
         var writable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
         var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
+        if (name == NativeStorageParameterContract.AddressTypeName)
+        {
+            if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeStorageAddress) == true
+                && typeArgumentNodes.Length == 0 && !writable && !optional
+                && node.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
+            {
+                return PrimitiveType.NativeStorageAddress;
+            }
+
+            Report("TRM3030", "NativeStorageAddress is available only for selected catalogued native imports.",
+                node.Span);
+            return PrimitiveType.Int32;
+        }
+        if (NativeStorageRecordContract.TryGetLayout(name, _nativeImportCatalog, out _))
+        {
+            if (typeArgumentNodes.Length == 0 && !writable && !optional
+                && node.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
+            {
+                return PrimitiveType.NativeStorageRecord;
+            }
+
+            Report("TRM3030", "A catalogued native storage record is an immutable local-only type.", node.Span);
+            return PrimitiveType.Int32;
+        }
         if (name == "ptr")
         {
             if (typeArgumentNodes.Length != 1 || writable || optional
@@ -2738,6 +2795,14 @@ internal sealed partial class Binder
 
                 // Locals enter scope only after their initializer, including in nested blocks.
                 var slot = AddVariable(name.Name, declaredType ?? initializer.Type, isMutable, name.Span);
+                if (initializer is BoundNativeStorageRecordInitialization storageRecordInitializer)
+                {
+                    _variables[slot] = _variables[slot] with {
+                        NativeStorageRecordLayout = storageRecordInitializer.Layout,
+                        NativeStorageRecordFacts = NativeStorageRecordContract.Facts(
+                            storageRecordInitializer, _nativeImportCatalog),
+                    };
+                }
                 return new BoundLocal(slot, initializer, node.Span);
             }
 
@@ -3871,6 +3936,51 @@ internal sealed partial class Binder
             {
                 var op = ((SyntaxTokenElement)node.Children[0]).Token;
                 var operandNode = (SyntaxNode)node.Children[1];
+                if (op.Kind == TokenKind.Ampersand)
+                {
+                    if (expected == PrimitiveType.NativeUtf16ZPointer
+                        && operandNode.Kind == SyntaxKind.IndexExpression
+                        && KnownType((SyntaxNode)operandNode.Children[0]) is PrimitiveType arrayCarrier
+                        && NativeFixedArrayContract.IsCarrier(arrayCarrier))
+                    {
+                        expression = BindNativeFixedArrayUtf16ZAddress(operandNode, node.Span);
+                        break;
+                    }
+                    if (expected == PrimitiveType.NativeStorageAddress)
+                    {
+                        expression = BindNativeAggregateStorageAddress(operandNode, node.Span);
+                        break;
+                    }
+                    var functionName = NameText(operandNode);
+                    if (expected == PrimitiveType.NativeCallbackAddress
+                        && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
+                        && operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
+                        && !TryFindVariable(functionName, out _)
+                        && TryFindFunction(functionName, out var callback))
+                    {
+                        var signature = _signatures[callback];
+                        var ownerSeparator = signature.Name.LastIndexOf('.');
+                        var declaringType = signature.StructName is null || ownerSeparator < 0
+                            ? null : signature.Name[..ownerSeparator];
+                        var currentType = _currentStruct is null ? null : Qualify(_currentStruct);
+                        if (signature.IsPrivate && declaringType != currentType)
+                        {
+                            Report("TRM3011", "Private callback is inaccessible.", node.Span);
+                            expression = ErrorExpression(node.Span);
+                        }
+                        else
+                        {
+                            expression = new BoundNativeCallbackAddress(callback, node.Span);
+                        }
+                    }
+                    else
+                    {
+                        Report("TRM3030", "A function address is permitted only for a catalogued native callback parameter.",
+                            node.Span);
+                        expression = ErrorExpression(node.Span);
+                    }
+                    break;
+                }
                 if (op.Kind == TokenKind.MoveKeyword)
                 {
                     while (operandNode.Kind == SyntaxKind.ParenthesizedExpression)
@@ -4335,9 +4445,17 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Name, out function))
             {
+                if (expected == PrimitiveType.NativeStorageRecord)
+                {
+                    return BindNativeStorageRecordInitializer(node, expected);
+                }
                 if (name.Name == "utf16z")
                 {
                     return BindNativeUtf16ZLiteral(node, expected);
+                }
+                if (name.Name == "utf8z")
+                {
+                    return BindNativeUtf8ZLiteral(node, expected);
                 }
                 if (FindGenericTemplate(name.Name) is not null)
                 {
@@ -5448,8 +5566,19 @@ internal sealed partial class Binder
                             ? PrimitiveType.ReadonlyInt32BufferView : null;
             case SyntaxKind.UnaryExpression:
             {
-                var operand = KnownType((SyntaxNode)node.Children[1]);
+                var operandNode = (SyntaxNode)node.Children[1];
+                var operand = KnownType(operandNode);
                 var operation = ((SyntaxTokenElement)node.Children[0]).Token.Kind;
+                if (operation == TokenKind.Ampersand)
+                {
+                    if (operandNode is { Kind: SyntaxKind.IndexExpression } element
+                        && KnownType((SyntaxNode)element.Children[0]) is PrimitiveType arrayCarrier
+                        && NativeFixedArrayContract.IsCarrier(arrayCarrier))
+                    {
+                        return PrimitiveType.NativeStorageAddress;
+                    }
+                    return PrimitiveType.NativeCallbackAddress;
+                }
                 if (operand is PrimitiveType concrete && IsStruct(concrete)
                     && IsStaticUnaryOperator(operation)
                     && TryFindFunction(_structs[(int)concrete - 100].Name + "."
@@ -5876,6 +6005,10 @@ internal sealed partial class Binder
         PrimitiveType.NativeUtf16ZPointer => "ptr<char16>",
         PrimitiveType.NativeUtf8ZPointer => "ptr<char8>",
         PrimitiveType.NativeWindowHandle => NativeWindowHandleContract.TypeName,
+        PrimitiveType.NativeNullPointer => NativeImportCatalog.NativeNullPointerTypeName,
+        PrimitiveType.NativeCallbackAddress => NativeCallbackContract.TypeName,
+        PrimitiveType.NativeStorageAddress => NativeStorageParameterContract.AddressTypeName,
+        PrimitiveType.NativeStorageRecord => "catalogued native storage record",
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",

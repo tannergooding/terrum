@@ -61,6 +61,17 @@ public sealed partial class NativeSourceImportTests
         Assert.Null(storedCompilation.Program);
         Assert.NotEmpty(storedCompilation.Diagnostics);
 
+        foreach (var escapingFunction in new[] {
+            declaration + "\nptr<char8> Escape(ptr<char8> value) { return value; }\nvoid Main() {}",
+            declaration + "\nvoid Escape(ptr<char8> value) {}\nvoid Main() {}",
+        })
+        {
+            var escapingCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(escapingFunction)],
+                catalog, BoundRuntimePolicy.FailFast);
+            Assert.Null(escapingCompilation.Program);
+            Assert.NotEmpty(escapingCompilation.Diagnostics);
+        }
+
         var missingContract = new NativeImportDefinition(Utf8ZFixtureKey, "native-import-abi-probe.dll",
             "NativeFfiUtf8Z", [PrimitiveType.NativeUtf8ZPointer], PrimitiveType.Int32,
             true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);

@@ -57,6 +57,11 @@ internal static class ValueLayout
                 ? 8 : Size(type, structures);
         }
         var structure = structures[(int)type - 100];
+        if (catalog is not null && catalog.TryGetComOwner(structure.Name, out var owner))
+        {
+            return owner?.CellAlignment
+                ?? throw new InvalidOperationException("The native catalog contains a null COM owner record.");
+        }
         var alignment = 1;
         foreach (var field in structures[(int)type - 100].Fields)
         {

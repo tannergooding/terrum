@@ -11,11 +11,13 @@ namespace Terrum.CodeAnalysis.Semantics;
 /// <summary>A compiler-owned catalog of reviewed Windows x64 native imports.</summary>
 public sealed class NativeImportCatalog
 {
+    internal const string NativeNullPointerTypeName = "Terrum.Interop.Windows.NativeNullPointer";
+
     private static readonly NativeImportAttributeDefinition s_attributeDefinition =
         new("Terrum.Interop.NativeImport", ArgumentCount: 1, RequiresStringLiteral: true, IsRepeatable: false);
 
     private static readonly NativeImportCatalog s_windowsX64 = new(
-        "windows-x64-native-imports-v3",
+        NativeWindowsModulePathContract.CatalogIdentity,
         [
             new NativeImportDefinition(
                 "windows-x64.system32.kernel32.ExitProcess",
@@ -65,7 +67,8 @@ public sealed class NativeImportCatalog
                     NativeImportParameterContract.Value,
                 ],
             },
-        ]);
+            .. NativeWindowsModulePathContract.Imports,
+        ], fixedArrayStorageLayouts: [NativeWindowsModulePathContract.StorageLayout]);
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;
     private readonly ImmutableHashSet<string> _callbackTypeNames;
@@ -81,6 +84,15 @@ public sealed class NativeImportCatalog
     {
         if (!NativeStorageParameterContract.IsValid(import)
             || !NativeCallbackParameterContract.IsValid(import))
+        {
+            return false;
+        }
+
+        if (NativeWindowsModulePathContract.IsReservedImport(import))
+        {
+            return !isForTesting && NativeWindowsModulePathContract.MatchesImport(import);
+        }
+        if (!isForTesting && import.ParameterTypes.Contains(PrimitiveType.NativeUtf8ZPointer))
         {
             return false;
         }
@@ -476,6 +488,10 @@ public sealed class NativeImportCatalog
     internal bool MatchesFunction(BoundFunction function, NativeImportDefinition definition,
         ImmutableArray<BoundStruct> structures = default)
     {
+        if (NativeWindowsModulePathContract.IsReservedImport(definition))
+        {
+            return NativeWindowsModulePathContract.MatchesImportFunction(function, definition);
+        }
         if (!function.IsExternal || function.NativeImportKey != definition.Key
             || function.IsConstructor || function.IsClassConstructor
             || function.IsOperator || function.IsCleanup || function.PropertyName is not null
