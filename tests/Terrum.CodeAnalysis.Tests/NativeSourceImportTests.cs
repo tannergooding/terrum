@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class NativeSourceImportTests
+public sealed partial class NativeSourceImportTests
 {
     private const string ImportKey = "windows-x64.system32.kernel32.GetCurrentThreadId";
     private const string SleepImportKey = "windows-x64.system32.kernel32.Sleep";
