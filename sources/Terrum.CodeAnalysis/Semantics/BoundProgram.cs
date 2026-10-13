@@ -580,6 +580,109 @@ public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span
 public sealed record BoundNativeNoOwner(TextSpan Span)
     : BoundExpression(PrimitiveType.NativeWindowHandle, Span);
 
+/// <summary>The verified storage geometry for a bounded native fixed-array carrier.</summary>
+public readonly record struct BoundNativeFixedArrayLayout(PrimitiveType CarrierType, PrimitiveType ElementType,
+    int ElementCount, int ElementStride, int ByteExtent, int Alignment);
+
+/// <summary>A source-ordered initializer for a bounded native fixed-array carrier.</summary>
+public sealed record BoundNativeFixedArrayInitialization(BoundNativeFixedArrayLayout Layout,
+    ImmutableArray<BoundExpression> Elements, TextSpan Span)
+    : BoundExpression(Layout.CarrierType, Span)
+{
+    internal override bool HasValidNestedExpressions => !Elements.IsDefault;
+    internal override ImmutableArray<BoundExpression> NestedExpressions => Elements.IsDefault ? [] : Elements;
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Elements.IsDefault ? this
+        : this with { Elements = [.. Elements.Select(rewrite)] };
+}
+
+/// <summary>A checked read of one initialized element from a bounded native fixed-array local.</summary>
+public sealed record BoundNativeFixedArrayElement(int Variable, BoundNativeFixedArrayLayout Layout,
+    BoundExpression Index, TextSpan Span) : BoundExpression(Layout.ElementType, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
+}
+
+/// <summary>A checked write to one element of a mutable bounded native fixed-array local.</summary>
+public sealed record BoundNativeFixedArrayWrite(int Variable, BoundNativeFixedArrayLayout Layout,
+    BoundExpression Index, BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Void, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index, Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Index = rewrite(Index),
+            Value = rewrite(Value),
+        };
+}
+
+/// <summary>A bounded address into initialized contiguous local storage.</summary>
+public sealed record BoundNativeStorageAddress(
+    int Variable,
+    BoundExpression Index,
+    PrimitiveType CarrierType,
+    PrimitiveType ElementType,
+    PrimitiveType AddressType,
+    int ElementCount,
+    int ElementStride,
+    int ByteExtent,
+    bool IsReadonly,
+    TextSpan Span) : BoundExpression(AddressType, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
+}
+
+/// <summary>A bounds-checked read from a catalogued native mapped region.</summary>
+public sealed record BoundNativeMappedByteRead(
+    int Variable,
+    BoundExpression Index,
+    string SourceType,
+    int PointerOffset,
+    int LengthOffset,
+    string MapMethodIdentity,
+    string UnmapMethodIdentity,
+    TextSpan Span) : BoundExpression(PrimitiveType.UInt32, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Index = rewrite(Index),
+        };
+}
+
+internal sealed record NativeStorageLoan(int BackingVariable, PrimitiveType CarrierType,
+    PrimitiveType ElementType, bool IsReadonly, int ByteExtent);
+
+/// <summary>A catalogued local record with a readonly dependency on bounded native storage.</summary>
+internal sealed record BoundNativeStorageRecordInitialization(
+    NativeStorageRecordLayoutDefinition Layout,
+    BoundExpression DataSource,
+    ImmutableArray<BoundExpression> Fields,
+    TextSpan Span) : BoundExpression(PrimitiveType.NativeStorageRecord, Span)
+{
+    internal NativeStorageLoan? Loan { get; init; }
+
+    internal override bool HasValidNestedExpressions => !Fields.IsDefault;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Fields.IsDefault ? [DataSource] : [DataSource, .. Fields];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Fields.IsDefault ? this
+        : this with {
+            DataSource = rewrite(DataSource),
+            Fields = [.. Fields.Select(rewrite)],
+        };
+}
+
+internal sealed record NativeAggregateStorageParameterDefinition(
+    int ParameterIndex,
+    PrimitiveType AddressType,
+    int ByteExtent,
+    int RequiredAlignment,
+    bool IsReadonly);
+
 /// <summary>An explicitly absent optional managed handle.</summary>
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 

@@ -65,7 +65,6 @@ internal sealed partial class Binder
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private readonly NativeImportCatalog? _nativeImportCatalog;
-    private NativeSourceProfile _sourceProfile;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
     private bool _usesNativeImportCatalog;
@@ -159,7 +158,6 @@ internal sealed partial class Binder
             || _reference?.Structures.Any(static structure =>
                 structure.Fields.Any(static field => field.Type == PrimitiveType.OwnedInt32Buffer)) == true;
         // Parser depth limits do not bound left-associated flat expression trees.
-        var sourceProfileBuilder = new NativeSourceProfileBuilder();
         var pending = new Stack<(SyntaxTree Tree, SyntaxNode Node, int Depth)>();
         if (_reference is not null)
         {
@@ -199,7 +197,6 @@ internal sealed partial class Binder
         {
             _cancellationToken.ThrowIfCancellationRequested();
             _tree = item.Tree;
-            sourceProfileBuilder.Observe(item.Node);
             if (item.Depth >= MaximumSemanticDepth)
             {
                 Report("TRM3015", $"Semantic nesting exceeds {MaximumSemanticDepth} nodes.", item.Node.Span);
