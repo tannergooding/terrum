@@ -608,6 +608,19 @@ public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span
 public sealed record BoundNativeNoOwner(TextSpan Span)
     : BoundExpression(PrimitiveType.NativeWindowHandle, Span);
 
+/// <summary>A verified address of a static Windows x64 callback.</summary>
+public sealed record BoundNativeCallbackAddress(int Function, TextSpan Span)
+    : BoundExpression(PrimitiveType.NativeCallbackAddress, Span);
+
+/// <summary>Tests a callback HWND against the closed no-owner sentinel.</summary>
+public sealed record BoundNativeWindowHandleIsNoOwner(BoundExpression Handle, bool IsNegated, TextSpan Span)
+    : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Handle];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Handle = rewrite(Handle) };
+}
+
 /// <summary>The verified storage geometry for a bounded native fixed-array carrier.</summary>
 public readonly record struct BoundNativeFixedArrayLayout(PrimitiveType CarrierType, PrimitiveType ElementType,
     int ElementCount, int ElementStride, int ByteExtent, int Alignment);

@@ -79,8 +79,20 @@ public sealed class NativeImportCatalog
         Justification = "Unsupported native parameter types cannot acquire an import contract.")]
     private static bool ValidParameterContracts(NativeImportDefinition import, bool isForTesting)
     {
+        if (!NativeStorageParameterContract.IsValid(import)
+            || !NativeCallbackParameterContract.IsValid(import))
+        {
+            return false;
+        }
         var hasRestrictedContract = import.ParameterTypes.Contains(PrimitiveType.NativeUtf16ZPointer)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeWindowHandle);
+            || import.ParameterTypes.Contains(PrimitiveType.NativeUtf8ZPointer)
+            || import.ParameterTypes.Contains(PrimitiveType.NativeWindowHandle)
+            || import.ParameterTypes.Contains(PrimitiveType.NativeNullPointer)
+            || import.ParameterTypes.Contains(PrimitiveType.NativeCallbackAddress)
+            || import.ParameterTypes.Contains(PrimitiveType.NativeStorageAddress)
+            || import.ParameterTypes.Contains(PrimitiveType.NativeComInterfaceOutputAddress)
+            || (!import.ParameterContracts.IsDefault && import.ParameterContracts.Contains(
+                NativeImportParameterContract.OwnedNativeComInterfaceOutput));
         if (!hasRestrictedContract)
         {
             return import.ParameterContracts.IsDefaultOrEmpty;
@@ -112,7 +124,11 @@ public sealed class NativeImportCatalog
             }
             var expected = type switch {
                 PrimitiveType.NativeUtf16ZPointer => NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+                PrimitiveType.NativeUtf8ZPointer => NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
                 PrimitiveType.NativeWindowHandle => NativeImportParameterContract.NoOwnerWindowHandle,
+                PrimitiveType.NativeNullPointer => NativeImportParameterContract.NullPointerOnly,
+                PrimitiveType.NativeStorageAddress =>
+                    NativeStorageParameterContract.ExpectedParameterContract(import, index),
                 _ => NativeImportParameterContract.Value,
             };
             if (import.ParameterContracts[index] != expected)
@@ -240,8 +256,11 @@ public sealed class NativeImportCatalog
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
                 || import.ParameterTypes.Any(static type => type is not (PrimitiveType.Int32
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle))
-                || !ValidParameterContracts(import)
+                    or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                    or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeNullPointer
+                    or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress
+                    or PrimitiveType.NativeComInterfaceOutputAddress))
+                || !ValidParameterContracts(import, isForTesting)
                 || import.DeploymentPolicy is not (NativeImportDeploymentPolicy.System32
                     or NativeImportDeploymentPolicy.ApplicationDirectory)
                 || builder.ContainsKey(import.Key))
