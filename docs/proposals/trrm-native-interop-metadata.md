@@ -58,6 +58,11 @@ blittable Terrum value. The raw declaration spells the actual ABI shape:
 native-width scalar types, pointers, and explicitly laid-out values.
 `NativeParameter` describes pointer access and retention, but it does not
 grant safety or prove that the foreign implementation honors those claims.
+`ref<T>` is not a pin: ordinary reference formation acquires no address
+stability. A C pointer parameter is represented as `ptr<T>` in the raw FFI
+signature. The caller may form that pointer from stable stack/native storage,
+or from movable managed storage only under an explicit live `pin ref<T>`
+dependency. `ptr<T>` itself does not root or pin its referent.
 Any temporary required by the target ABI for a by-value `Blittable` aggregate
 is ordinary ABI lowering, not a general-purpose marshalling or pinning step.
 
@@ -84,6 +89,49 @@ remain authoritative.
 The intended model is direct blittable FFI, closer to .NET interop with
 runtime marshalling disabled and a generated `LibraryImport` stub than to
 classic runtime-marshalled `DllImport`.
+
+### `ref<T>`, `pin ref<T>`, and `ptr<T>` at the boundary
+
+These forms overlap in how callers can reach storage, but they are not aliases:
+
+| Form | Contract | Native-boundary role |
+|---|---|---|
+| `ref<T>` | Checked reference descriptor; ordinary formation acquires no pin and does not promise a stable raw address. | Not the C pointer type. |
+| `pin ref<T>` | Checked reference plus an explicit live pin/root dependency that keeps eligible backing address-stable for that dependency's lifetime. | Can convert to the matching `ptr<T>` while the pin remains live. The conversion acquires no pin. |
+| `ptr<T>` | Explicit raw address; it carries no root, ownership, or pin by itself. Dereference requires unsafe authorization and valid lifetime/provenance. | The direct representation for a C `T*`; `ptr<ptr<T>>` represents `T**`. |
+| `init ref<T>` | Initialization-destination parameter mode for a Terrum `T` value, not a raw pointer or a type qualifier inside `T`. | Appropriate on a safe Terrum wrapper. Do not use it in place of the raw FFI pointer parameter. |
+
+Thus `ptr<T>` is not `pin ref<T>`: a pointer may refer to stack or native
+storage without a GC pin, while a pointer into movable managed storage
+requires an explicit live pin or other independently stable backing. The QPC
+wrapper uses `init ref<int64>` only for its Terrum-facing output; the raw
+import accepts `ptr<int64>` and receives the address of an initialized stack
+local. Similarly, the raw DXGI acquisition takes `ptr<Guid>` and
+`ptr<ptr<IDXGIDebug>>`; a wrapper forms those addresses from local storage
+inside an unsafe scope, then adopts the returned interface pointer.
+
+`init ref<T>` is currently a parameter mode with call-site spelling
+`init value`; it is not a first-class `init T` type qualifier. This proposal
+therefore keeps `init ref<T>` in safe wrapper signatures and uses
+`NativeParameter`, `NativeOutput`, and `NativeComAcquisition` metadata for raw
+pointer access, conditional validity, and ownership. Whether the language
+should add a form such as `ref<init T>` or `ptr<init T>` is a separate type
+model question, not an implied part of this TRRM extension.
+
+An `init var` call-site argument is only an initialization destination for
+the wrapper's parameter. A wrapper output of type `init ref<ptr<T>>` would
+initialize a pointer cell; it would not pin the pointee or confer ownership.
+The pointer's validity and ownership still need their own contract.
+
+The proposed `NativeParameter` access field can distinguish simple readonly,
+writable, and read/write pointer use; it does not settle a complete C/C++
+const-qualification mapping. In particular, `T* const`'s top-level const is
+callee-local and does not change the ABI signature, while `write ptr<T>` and
+`ptr<write T>` qualify different levels of a Terrum type. A complete
+per-indirection mapping and its relationship to `[In]`, `[Out]`, and
+`[In, Out]` remain open; do not infer those contracts from `ptr<T>` alone.
+These distinctions follow the current [reference and pointer rules](../specs/language/references.md)
+and [initialization-loan syntax](../specs/grammar-spec.md#32-types-parameters-and-arguments).
 
 ## Proposed metadata
 
@@ -182,8 +230,8 @@ recovered from that signature.
 ### `QueryPerformanceCounter`
 
 The Windows API is a `BOOL` function with one output pointer to a signed
-64-bit `LARGE_INTEGER`. The Terrum declaration keeps the native return width
-as `int32`; the `init ref<int64>` parameter designates vacant output storage.
+64-bit `LARGE_INTEGER`. Its raw FFI signature uses `ptr<int64>`: `init ref<T>`
+is a checked Terrum destination descriptor, not the native pointer type.
 
 **Interop library declaration**
 
@@ -191,7 +239,7 @@ as `int32`; the `init ref<int64>` parameter designates vacant output storage.
 namespace Terrum.Interop.Windows;
 
 [NoThrow]
-public extern unsafe int32 QueryPerformanceCounter(init ref<int64> performanceCount);
+public extern unsafe int32 QueryPerformanceCounter(ptr<int64> performanceCount);
 ```
 
 The bodyless `extern unsafe` declaration is Terrum source syntax. Its
@@ -221,28 +269,33 @@ result/output contract:
 
 ```terrum
 public bool TryGetPerformanceCounter(init ref<int64> ticks) {
+    mut int64 nativeTicks = 0;
     unsafe {
-        int32 succeeded = QueryPerformanceCounter(init *ticks);
+        int32 succeeded = QueryPerformanceCounter(&nativeTicks);
         if (succeeded == 0) {
             return false;
         }
-        return true;
     }
+    *ticks = nativeTicks;
+    return true;
 }
 ```
 
 That wrapper must state that `ticks` is initialized on `true` and unavailable
-on `false`. It does not marshal or pin the scalar; it only narrows the API's
-result contract.
+on `false`. It passes the address of an initialized stack local for the
+synchronous call, then copies the successful scalar into the safe output
+destination. A stack local is stable for this call; a pointer into movable
+managed storage would instead require an explicit pin or separately stable
+native storage. The compiler inserts neither.
 
 The exported declaration produces or reuses these TRRM records:
 
 | Record | Example value |
 |---|---|
-| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(init ref<int64>)`; parameter 0 is an output destination. |
+| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(ptr<int64>)`; parameter 0 is a raw pointer to one `int64`. |
 | `NativeImport` | Method `QueryPerformanceCounter` → `Kernel32.dll!QueryPerformanceCounter`, resolved by the selected Windows system-library policy. |
 | `Effects` | `RequiresUnsafeCaller` and `NoThrow`. |
-| `NativeParameter` | Parameter 0 is writable and non-retained; its pointee is one `int64`. |
+| `NativeParameter` | Parameter 0 is writable and non-retained; its pointee is one `Blittable` `int64`. |
 | `NativeOutput` | Parameter 0 is valid when the `int32` result is nonzero. On zero, its state is unspecified and the caller must not read it. |
 | `OutputState` | On the safe `TryGetPerformanceCounter` wrapper, `ticks` is initialized on `true` and vacant on `false`. |
 
@@ -273,7 +326,7 @@ namespace Terrum.Interop.Dxgi;
 public extern unsafe int32 DXGIGetDebugInterface1(
     uint32 flags,
     ptr<Guid> riid,
-    init ref<ptr<IDXGIDebug>> ppDebug);
+    ptr<ptr<IDXGIDebug>> ppDebug);
 
 public interface IDXGIDebug : IUnknown {
     [NoThrow]
@@ -318,15 +371,18 @@ declares `Guid` with the Windows layout (16 bytes, 4-byte alignment).
 they are passed as ordinary Blittable values. A library can expose them as
 type-owned values rather than relying on namespace-level constants.
 An ordinary Terrum factory calls `DXGIGetDebugInterface1` in an explicit
-unsafe scope, checks the HRESULT, releases a possibly written failure output,
-and transfers a successful pointer into `DxgiDebugOwner`; the compiler does
-not synthesize that wrapper. The owner type itself stays on the Terrum side
-of the boundary; only its opaque interface pointer is passed to COM.
+unsafe scope with the address of a local `Guid` and the address of a mutable,
+initialized local pointer cell. It checks the HRESULT, releases a possibly
+written failure output, and transfers a successful pointer into
+`DxgiDebugOwner`; the compiler does not synthesize that wrapper. These locals
+have stable stack storage for the synchronous call, so no GC pinning is
+needed. The owner type itself stays on the Terrum side of the boundary; only
+its opaque interface pointer is passed to COM.
 
 | Record | Example value |
 |---|---|
 | `NativeImport` | `DXGIGetDebugInterface1` → `Dxgi.dll!DXGIGetDebugInterface1`, Windows system-library policy. |
-| `MethodSig` / `Param` | `int32(uint32, ptr<Guid>, init ref<ptr<IDXGIDebug>>)`; parameter 1 is `REFIID`, parameter 2 is `void**`. |
+| `MethodSig` / `Param` | `int32(uint32, ptr<Guid>, ptr<ptr<IDXGIDebug>>)`; parameter 1 is `REFIID`, parameter 2 is `void**`. |
 | `Effects` | `RequiresUnsafeCaller` and `NoThrow` on the raw import and COM method. |
 | `NativeParameter` | Parameter 1 is read-only and non-retained; parameter 2 is writable and non-retained. |
 | `NativeOutput` | Parameter 2 is valid when the HRESULT is nonnegative. Conservatively, treat it as possibly written on failure. |
