@@ -1,7 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
-using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
@@ -10,7 +9,6 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal static class NativeWindowsModulePathContract
 {
-    internal const string CatalogIdentity = "windows-x64-native-imports-v9";
     internal const int Capacity = 260;
     internal const int StorageBytes = Capacity * sizeof(char);
     internal const string GetModuleFileNameKey = "windows-x64.system32.kernel32.GetModuleFileNameW";
@@ -97,39 +95,11 @@ internal static class NativeWindowsModulePathContract
     }
 
     internal static bool MatchesCatalog(NativeImportCatalog? catalog) =>
-        catalog is { IsForTesting: false, Identity: CatalogIdentity }
+        catalog is { IsForTesting: false, Identity: NativeWindowClassContract.CatalogIdentity }
         && catalog.TryGetImport(GetModuleFileNameKey, out var getModuleFileName)
         && getModuleFileName == GetModuleFileNameImport
         && catalog.TryGetImport(GetLastErrorKey, out var getLastError)
         && getLastError == GetLastErrorImport;
-
-    internal static bool SupportsPathBufferStorage(NativeImportCatalog? catalog) =>
-        MatchesCatalog(catalog)
-        && catalog is not null && catalog.FixedArrayStorageLayouts.Contains(StorageLayout);
-
-    internal static bool MatchesPathStorageProgram(BoundProgram program)
-    {
-        if (program.RuntimePolicy != BoundRuntimePolicy.CheckedExceptions
-            || !SupportsPathBufferStorage(program.NativeImportCatalog)
-            || program.Functions.IsDefaultOrEmpty
-            || program.Functions.Any(static function => function is null || function.Variables.IsDefault
-                || function.Variables.Any(static variable => variable is null))
-            || program.Structures.IsDefault
-            || program.Structures.Any(static structure => structure is null)
-            || !program.Functions.Any(static function =>
-                function is { IsExternal: true, NativeImportKey: GetModuleFileNameKey }))
-        {
-            return false;
-        }
-
-        var pathLayouts = program.Functions.SelectMany(static function => function.Variables)
-            .Select(static variable => variable.NativeFixedArrayLayout)
-            .OfType<BoundNativeFixedArrayLayout>()
-            .ToArray();
-        return pathLayouts.Length > 0
-            && pathLayouts.All(layout => IsPathBufferLayout(layout, program.Structures,
-                program.NativeImportCatalog));
-    }
 
     internal static bool IsNullPointerParameter(NativeImportDefinition import, int parameter) =>
         import.Key == GetModuleFileNameKey && parameter == 0;
@@ -140,20 +110,4 @@ internal static class NativeWindowsModulePathContract
         && target.IsExternal && target.NativeImportKey == GetModuleFileNameKey
         && IsNullPointerParameter(GetModuleFileNameImport, parameter)
         && MatchesCatalog(program.NativeImportCatalog);
-
-    internal static bool IsPathBufferLayout(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
-        layout.CarrierType == PrimitiveType.NativeFixedArray
-        && layout.ElementType == PrimitiveType.Char16
-        && layout.ElementCount == Capacity
-        && layout.ElementStride == sizeof(char)
-        && layout.Alignment == sizeof(char)
-        && layout.ByteExtent == StorageBytes
-        && NativeFixedArrayContract.MatchesLayout(layout, structures, catalog)
-        && NativeFixedArrayContract.AllowsEmptyInitialization(layout, structures, catalog)
-        && NativeFixedArrayContract.AllowsMutableLocal(layout, structures, catalog)
-        && NativeFixedArrayContract.AllowsElementWrites(layout, structures, catalog)
-        && NativeFixedArrayContract.AllowsUInt32Indices(layout, structures, catalog)
-        && NativeFixedArrayContract.AllowsCheckedRuntimeAccess(layout, structures, catalog)
-        && NativeFixedArrayContract.AllowsReadonlyUtf16ZLoan(layout, structures, catalog);
 }

@@ -208,6 +208,8 @@ public static partial class SemanticVerifier
                 || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                     layout.TypeName == @class.Name) == true
                 || program.NativeImportCatalog?.IsCallbackTypeName(@class.Name) == true
+                || NativeWindowMessageContract.IsTypeName(@class.Name)
+                || NativeWindowOwnerContract.IsReservedTypeName(@class.Name)
                 || NativeComCallContract.IsCataloguedOwnerName(@class.Name, program.NativeImportCatalog)
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
@@ -221,8 +223,11 @@ public static partial class SemanticVerifier
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
-                        or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer
-                        or PrimitiveType.NativeWindowHandle or PrimitiveType.MutableInt32BufferView
+                        or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                        or PrimitiveType.NativeNullPointer or PrimitiveType.NativeWindowHandle
+                        or PrimitiveType.NativeCallbackAddress
+                        or PrimitiveType.MutableInt32BufferView
+                    || NativeFixedArrayContract.IsCarrier(field.Type)
                     || IsUnique(program, field.Type))
                 {
                     throw Invalid();
@@ -281,6 +286,17 @@ public static partial class SemanticVerifier
                 layoutStates[index] = 2;
                 return;
             }
+            if (structure is not null && structure.Name == NativeWindowOwnerContract.TypeName)
+            {
+                if (!NativeWindowOwnerContract.MatchesProgram(program) || !structNames.Add(structure.Name))
+                {
+                    throw InvalidEffect(default, "NativeImport");
+                }
+                alignments[index] = 8;
+                layoutHeights[index] = 1;
+                layoutStates[index] = 2;
+                return;
+            }
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
                 || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
                     or NativeManagedNodeIntrinsics.HeapName or NativeWindowHandleContract.TypeName
@@ -289,6 +305,8 @@ public static partial class SemanticVerifier
                 || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                     layout.TypeName == structure.Name) == true
                 || program.NativeImportCatalog?.IsCallbackTypeName(structure.Name) == true
+                || NativeWindowMessageContract.IsTypeName(structure.Name)
+                || NativeWindowOwnerContract.IsReservedTypeName(structure.Name)
                 || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
@@ -304,7 +322,17 @@ public static partial class SemanticVerifier
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        or PrimitiveType.NativeWindowHandle)
+                        or PrimitiveType.NativeNullPointer
+                        or PrimitiveType.NativeCallbackAddress
+                    || (field.Type == PrimitiveType.NativeWindowHandle
+                        && !NativeStorageParameterContract.SupportsAggregateType(
+                            program.NativeImportCatalog, (PrimitiveType)(100 + index),
+                            program.Structures, isReadonly: false)
+                        && !NativeStorageParameterContract.SupportsAggregateType(
+                            program.NativeImportCatalog, (PrimitiveType)(100 + index),
+                            program.Structures, isReadonly: true))
+                    || NativeFixedArrayContract.IsCarrier(field.Type)
+                    || IsRestrictedNativeDescriptor(field.Type))
                 {
                     throw Invalid();
                 }
@@ -363,8 +391,10 @@ public static partial class SemanticVerifier
                 program.NativeImportCatalog, (PrimitiveType)(100 + index), program.Structures, isReadonly: false)
                 || NativeStorageParameterContract.SupportsAggregateType(
                     program.NativeImportCatalog, (PrimitiveType)(100 + index), program.Structures, isReadonly: true);
+            var cataloguedAggregateLayout = program.NativeImportCatalog?.SupportsAggregateStorageLayout(
+                (PrimitiveType)(100 + index), program.Structures) == true;
             if (structure.Size > ValueLayout.MaximumSize
-                && !isCataloguedFixedArrayElement && !cataloguedAggregateStorage)
+                && !isCataloguedFixedArrayElement && !cataloguedAggregateStorage && !cataloguedAggregateLayout)
             {
                 throw Invalid();
             }
@@ -405,8 +435,19 @@ public static partial class SemanticVerifier
                 || (function.IsPrivate && function.IsInternal)
                 || (function.DoesNotReturn && function.ReturnType != PrimitiveType.Void)
                 || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeWindowHandle
-                || !ValidType(function.ReturnType, allowVoid: true, program) || function.Variables.IsDefault
+                    or PrimitiveType.NativeNullPointer
+                    or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress
+                || (function.ReturnType == PrimitiveType.NativeWindowHandle
+                    && !NativeWindowCreationContract.IsCreateWindowFunction(function, program.NativeImportCatalog))
+                || (function.ReturnType == PrimitiveType.NativeModuleHandle
+                    && !NativeWindowClassContract.IsGetModuleHandleFunction(function, program.NativeImportCatalog))
+                || NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                || (IsRestrictedNativeDescriptor(function.ReturnType)
+                    && !(function.ReturnType == PrimitiveType.NativeModuleHandle
+                        && NativeWindowClassContract.IsGetModuleHandleFunction(function,
+                            program.NativeImportCatalog)))
+                || !ValidType(function.ReturnType, allowVoid: true, program)
+                || function.Variables.IsDefault
                 || function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
                 || function.Body is null)
             {
@@ -422,14 +463,99 @@ public static partial class SemanticVerifier
                 {
                     var variable = function.Variables[variableIndex];
                     if (variable is null || string.IsNullOrEmpty(variable.Name)
-                        || (variable.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                            && (!function.IsExternal || variableIndex >= function.ParameterCount))
+                        || (variable.Type == PrimitiveType.NativeStorageRecord
+                            ? function.IsExternal || function.IndexedBody is not null
+                                || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                                || variable.IsMutable || variable.IsOut || variable.IsInit
+                                || variable.IsInitializationLocal
+                                || variable.NativeStorageRecordLayout is not NativeStorageRecordLayoutDefinition recordLayout
+                                || variable.NativeStorageRecordFacts is null
+                                || !NativeStorageParameterContract.SupportsStorageRecordType(
+                                    recordLayout, program.NativeImportCatalog, isReadonly: true)
+                            : variable.NativeStorageRecordLayout is not null
+                                || variable.NativeStorageRecordFacts is not null)
+                        || (variable.Type == PrimitiveType.NativeWindowClassEx
+                            ? function.IsExternal || function.IndexedBody is not null
+                                || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                                || variable.IsMutable || variable.IsOut || variable.IsInit
+                                || variable.IsInitializationLocal
+                                || variable.NativeWindowClassExFacts is not NativeWindowClassExFacts classFacts
+                                || classFacts.CallbackFunction < 0
+                                || classFacts.CallbackFunction >= program.Functions.Length
+                                || classFacts.ClassNameLiteralIndex < 0
+                                || classFacts.ClassNameLiteralIndex >= program.NativeUtf16ZLiterals.Length
+                                || program.NativeImportCatalog?.SupportsWindowClassInitialization != true
+                                || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
+                                    && !NativeWindowOwnerContract.MatchesProgram(program))
+                            : variable.NativeWindowClassExFacts is not null)
+                        || (variable.Type == PrimitiveType.NativeWindowClassExAddress
+                            && (!function.IsExternal || variableIndex >= function.ParameterCount
+                                || function.NativeImportKey != NativeWindowClassContract.RegisterClassExKey
+                                || program.NativeImportCatalog?.SupportsWindowClassInitialization != true
+                                || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
+                                    && !NativeWindowOwnerContract.MatchesProgram(program))))
+                        || (variable.Type == PrimitiveType.NativeWindowMessage
+                            ? function.IsExternal || function.IndexedBody is not null
+                                || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                                || variable.NativeWindowClassExFacts is not null
+                                || program.NativeImportCatalog?.SupportsWindowMessageLoop != true
+                            : false)
+                        || (variable.Type == PrimitiveType.NativeWindowMessageAddress
+                            && (variableIndex >= function.ParameterCount
+                                || !NativeWindowMessageContract.IsMessageAddressParameter(
+                                    function, variableIndex, program)))
+                        || (variable.Type == PrimitiveType.NativeStorageAddress
+                            && !NativeStorageParameterContract.IsStorageAddressParameter(function,
+                                variableIndex, program.NativeImportCatalog))
+                        || (NativeFixedArrayContract.IsCarrier(variable.Type)
+                            && (function.IsExternal || function.IndexedBody is not null
+                                || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                                || variable.IsOut || variable.IsInit
+                                || variable.IsInitializationLocal
+                                || variable.NativeFixedArrayLayout is not BoundNativeFixedArrayLayout sampleLayout
+                                || sampleLayout.CarrierType != variable.Type
+                                || (variable.IsMutable
+                                    && !NativeFixedArrayContract.AllowsMutableLocal(sampleLayout,
+                                        program.Structures, program.NativeImportCatalog))
+                                || !NativeFixedArrayContract.MatchesLayout(sampleLayout, program.Structures,
+                                    program.NativeImportCatalog)
+                                || !NativeFixedArrayContract.MatchesProgram(program)))
+                                || (!NativeFixedArrayContract.IsCarrier(variable.Type)
+                                    && variable.NativeFixedArrayLayout is not null)
+                                || (variable.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                            && (!function.IsExternal || variableIndex >= function.ParameterCount)
+                            && !NativeStorageParameterContract.IsReadonlyStringParameter(
+                                function, variableIndex, variable.Type, program))
                         || (variable.Type == PrimitiveType.NativeWindowHandle
-                            && !(function.IsExternal && variableIndex == 0
-                                && variableIndex < function.ParameterCount)
-                            && !(variableIndex < function.ParameterCount
-                                && program.NativeImportCatalog?.MatchesCallbackFunction(
-                                    PrimitiveType.NativeCallbackAddress, function) == true))
+                            && !((function.IsExternal && variableIndex < function.ParameterCount
+                                && program.NativeImportCatalog is NativeImportCatalog windowCatalog
+                                && function.NativeImportKey is string windowKey
+                                && windowCatalog.TryGetImport(windowKey, out var windowImport)
+                                && windowImport is not null
+                                && windowImport.ParameterTypes[variableIndex] == PrimitiveType.NativeWindowHandle
+                                && windowImport.ParameterContracts[variableIndex]
+                                    == (NativeWindowMessageContract.ExpectedHandleParameterContract(
+                                        windowImport, variableIndex)
+                                        ?? NativeWindowCreationContract.ExpectedHandleParameterContract(
+                                            windowImport, variableIndex)
+                                        ?? NativeWindowClientRectContract.ExpectedHandleParameterContract(
+                                            windowImport, variableIndex)
+                                        ?? NativeImportParameterContract.NoOwnerWindowHandle))
+                                || (program.NativeImportCatalog is NativeImportCatalog callbackCatalog
+                                    && callbackCatalog.MatchesCallbackFunction(
+                                        PrimitiveType.NativeCallbackAddress, function)
+                                    && variableIndex == 0)
+                                || (function.IsConstructor
+                                    && NativeAggregateContract.IsPlainValueAggregate(
+                                        function.ReturnType, program.Structures))
+                                || NativeWindowCreationContract.IsCreatedWindowLocal(
+                                    function, variableIndex, program)))
+                        || (variable.Type == PrimitiveType.NativeNullPointer
+                            && !IsNullPointerParameter(function, variableIndex, program))
+                        || (variable.Type == PrimitiveType.NativeModuleHandle
+                            && !IsCurrentModuleHandleParameter(function, variableIndex, program))
+                        || (variable.Type == PrimitiveType.NativeCallbackAddress
+                            && (!function.IsExternal || variableIndex >= function.ParameterCount))
                         || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
@@ -504,6 +630,14 @@ public static partial class SemanticVerifier
             if (function.Intrinsic == BoundIntrinsic.NativeComOwnerTryClone)
             {
                 if (!NativeComCallContract.IsValidOwnerCloneFunction(function, program))
+                {
+                    throw InvalidEffect(function.Span, "NativeImport");
+                }
+                continue;
+            }
+            if (NativeWindowMessageContract.IsAccessorFunction(function))
+            {
+                if (program.NativeImportCatalog?.SupportsWindowMessageLoop != true)
                 {
                     throw InvalidEffect(function.Span, "NativeImport");
                 }
@@ -911,6 +1045,45 @@ public static partial class SemanticVerifier
                 case BoundNativeWindowHandleIsNoOwner test:
                     Expression(test.Handle, scope, depth + 1);
                     break;
+                case BoundNativeFixedArrayInitialization fixedArray:
+                    if (fixedArray.Elements.IsDefault)
+                    {
+                        throw Invalid();
+                    }
+                    foreach (var element in fixedArray.Elements)
+                    {
+                        Expression(element, scope, depth + 1);
+                    }
+                    break;
+                case BoundNativeFixedArrayElement fixedArrayElement:
+                    Expression(fixedArrayElement.Index, scope, depth + 1);
+                    break;
+                case BoundNativeStorageAddress address:
+                    Expression(address.Index, scope, depth + 1);
+                    break;
+                case BoundNativeStorageRecordInitialization record:
+                    Expression(record.DataSource, scope, depth + 1);
+                    if (record.Fields.IsDefault)
+                    {
+                        throw Invalid();
+                    }
+                    foreach (var field in record.Fields)
+                    {
+                        Expression(field, scope, depth + 1);
+                    }
+                    break;
+                case BoundNativeMappedByteRead mappedByte:
+                    Expression(mappedByte.Index, scope, depth + 1);
+                    break;
+                case BoundNativeWindowClassExInitialization windowClass:
+                    Expression(windowClass.Instance, scope, depth + 1);
+                    Expression(windowClass.ClassName, scope, depth + 1);
+                    break;
+                case BoundNativeWindowClassExAddress:
+                    break;
+                case BoundNativeWindowMessageInitialization:
+                case BoundNativeWindowMessageAddress:
+                    break;
                 case BoundIsInitialized:
                     break;
                 case BoundIsSome pattern:
@@ -972,22 +1145,6 @@ public static partial class SemanticVerifier
                     Expression(advance.View, scope, depth + 1);
                     break;
                 case BoundSnapshotSpan:
-                    break;
-                case BoundNativeStorageAddress address:
-                    Expression(address.Index, scope, depth + 1);
-                    break;
-                case BoundNativeFixedArrayInitialization fixedArray:
-                    foreach (var element in fixedArray.Elements)
-                    {
-                        Expression(element, scope, depth + 1);
-                    }
-                    break;
-                case BoundNativeStorageRecordInitialization storageRecord:
-                    Expression(storageRecord.DataSource, scope, depth + 1);
-                    foreach (var field in storageRecord.Fields)
-                    {
-                        Expression(field, scope, depth + 1);
-                    }
                     break;
                 case BoundNativeFixedArrayWrite write:
                     Expression(write.Index, scope, depth + 1);
@@ -1431,15 +1588,36 @@ public static partial class SemanticVerifier
                     }
                     break;
                 case BoundNativeStorageAddress address:
+                    if (address.Variable >= 0 && address.Variable < function.Variables.Length
+                        && function.Variables[address.Variable].NativeStorageRecordFacts
+                            is NativeStorageRecordFacts facts
+                        && (nativeLocals?.Contains(address.Variable) != true
+                            || !nativeLocals.Contains(facts.Loan.BackingVariable)))
+                    {
+                        throw InvalidEffect(address.Span, "NativeImport");
+                    }
                     Expression(address.Index, depth + 1, acquiringRoot);
                     break;
                 case BoundNativeFixedArrayInitialization fixedArray:
+                    if (fixedArray.Elements.IsDefault)
+                    {
+                        throw Invalid();
+                    }
                     foreach (var element in fixedArray.Elements)
                     {
                         Expression(element, depth + 1, acquiringRoot);
                     }
                     break;
                 case BoundNativeStorageRecordInitialization storageRecord:
+                    var recordBackingVariable = storageRecord.DataSource switch {
+                        BoundNativeStorageAddress source => source.Variable,
+                        _ => -1,
+                    };
+                    if (recordBackingVariable < 0 || nativeLocals?.Contains(recordBackingVariable) != true
+                        || storageRecord.Fields.IsDefault)
+                    {
+                        throw InvalidEffect(storageRecord.Span, "NativeImport");
+                    }
                     Expression(storageRecord.DataSource, depth + 1, acquiringRoot);
                     foreach (var field in storageRecord.Fields)
                     {
@@ -1496,6 +1674,37 @@ public static partial class SemanticVerifier
                     break;
                 case BoundNativeWindowHandleIsNoOwner test:
                     Expression(test.Handle, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeFixedArrayElement fixedArrayElement:
+                    Expression(fixedArrayElement.Index, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeMappedByteRead mappedByte:
+                    Expression(mappedByte.Index, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeFixedArrayWrite fixedArrayWrite:
+                    Expression(fixedArrayWrite.Index, depth + 1, acquiringRoot);
+                    Expression(fixedArrayWrite.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeWindowClassExInitialization windowClass:
+                    Expression(windowClass.Instance, depth + 1, acquiringRoot);
+                    Expression(windowClass.ClassName, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeWindowClassExAddress address:
+                    if (address.Variable < 0 || address.Variable >= roots.Length
+                        || function.Variables[address.Variable].Type != PrimitiveType.NativeWindowClassEx
+                        || function.Variables[address.Variable].NativeWindowClassExFacts is null)
+                    {
+                        throw InvalidEffect(address.Span, "NativeImport");
+                    }
+                    break;
+                case BoundNativeWindowMessageInitialization:
+                    break;
+                case BoundNativeWindowMessageAddress address:
+                    if (address.Variable < 0 || address.Variable >= roots.Length
+                        || function.Variables[address.Variable].Type != PrimitiveType.NativeWindowMessage)
+                    {
+                        throw InvalidEffect(address.Span, "NativeImport");
+                    }
                     break;
                 case BoundIsInitialized:
                     break;
@@ -1847,10 +2056,21 @@ public static partial class SemanticVerifier
         {
             if (program.NativeImportCatalogId is not null
                 || program.Functions.Any(static function => function.NativeImportKey is not null)
-                || program.Functions.Any(static function => function.ReturnType == PrimitiveType.NativeWindowHandle
-                    || function.Variables.Any(static variable => variable.Type == PrimitiveType.NativeWindowHandle))
-                || !program.NativeUtf16ZLiterals.IsEmpty
-                || !program.NativeUtf8ZLiterals.IsEmpty)
+                || program.Functions.Any(static function => function.ReturnType is
+                    PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                    or PrimitiveType.NativeWindowHandle
+                    || function.ReturnType == PrimitiveType.NativeCallbackAddress
+                    || NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                    || IsRestrictedNativeDescriptor(function.ReturnType)
+                    || function.Variables.Any(static variable => variable.Type is
+                        PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                        or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeCallbackAddress
+                        || IsRestrictedNativeDescriptor(variable.Type)
+                        || variable.NativeStorageRecordLayout is not null
+                        || variable.NativeStorageRecordFacts is not null
+                        || NativeFixedArrayContract.IsCarrier(variable.Type)
+                        || variable.NativeFixedArrayLayout is not null))
+                || !program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
             {
                 throw InvalidEffect(default, "NativeImport");
             }
@@ -1887,9 +2107,23 @@ public static partial class SemanticVerifier
             }
         }
 
-        if (externalCount == 0)
+        if (externalCount == 0 && !catalog.SupportsCataloguedFixedArrayStorage)
         {
             throw InvalidEffect(default, "NativeImport");
+        }
+        if (NativeWindowClassContract.MatchesCatalog(catalog))
+        {
+            if (NativeWindowOwnerContract.HasOwnerType(program.Structures))
+            {
+                if (!NativeWindowOwnerContract.MatchesProgram(program))
+                {
+                    throw InvalidEffect(default, "NativeImport");
+                }
+            }
+            else
+            {
+                VerifyNativeWindowClassLifecycles(program);
+            }
         }
     }
 
@@ -1899,16 +2133,35 @@ public static partial class SemanticVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
         if (program.NativeImportCatalog is not null || program.NativeImportCatalogId is not null
             || program.Functions.Any(static function => function.NativeImportKey is not null)
-            || program.Functions.Any(static function => function.ReturnType == PrimitiveType.NativeWindowHandle
-                || function.Variables.Any(static variable => variable.Type == PrimitiveType.NativeWindowHandle))
+            || program.Functions.Any(static function => function.ReturnType is
+                PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                or PrimitiveType.NativeWindowHandle
+                || function.ReturnType == PrimitiveType.NativeCallbackAddress
+                || NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                || IsRestrictedNativeDescriptor(function.ReturnType)
+                || function.Variables.Any(static variable => variable.Type is
+                    PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                    or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeCallbackAddress
+                    || IsRestrictedNativeDescriptor(variable.Type)
+                    || variable.NativeStorageRecordLayout is not null
+                    || variable.NativeStorageRecordFacts is not null
+                    || NativeFixedArrayContract.IsCarrier(variable.Type)
+                    || variable.NativeFixedArrayLayout is not null))
             || (!program.Structures.IsDefaultOrEmpty && program.Structures.Any(
                 static structure => structure.Fields.Any(
-                    static field => field.Type == PrimitiveType.NativeWindowHandle)))
+                    static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                        or PrimitiveType.NativeWindowHandle
+                        or PrimitiveType.NativeCallbackAddress
+                        || NativeFixedArrayContract.IsCarrier(field.Type)
+                        || IsRestrictedNativeDescriptor(field.Type))))
             || (!program.Classes.IsDefaultOrEmpty && program.Classes.Any(
-                static @class => @class.Fields.Any(
-                    static field => field.Type == PrimitiveType.NativeWindowHandle)))
-            || !program.NativeUtf16ZLiterals.IsEmpty
-            || !program.NativeUtf8ZLiterals.IsEmpty)
+            static @class => @class.Fields.Any(
+                static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                    or PrimitiveType.NativeWindowHandle
+                        or PrimitiveType.NativeCallbackAddress
+                        || NativeFixedArrayContract.IsCarrier(field.Type)
+                            || IsRestrictedNativeDescriptor(field.Type))))
+            || !program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
         {
             throw new NotSupportedException($"Source native imports are not supported by {target}.");
         }
@@ -1982,22 +2235,47 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (local.Initializer is BoundNativeStorageRecordInitialization)
+                if (NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type))
                 {
-                    VerifyNativeStorageRecordInitialization(local.Initializer, local.Variable,
-                        initialized, fieldMasks, declarations, function, program, ref remaining,
-                        depth + 1, failures);
+                    VerifyNativeFixedArrayInitialization(local.Initializer, local.Variable, initialized,
+                        fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 }
-                else if (local.Initializer is BoundNativeFixedArrayInitialization fixedArray)
+                else if (function.Variables[local.Variable].Type == PrimitiveType.NativeStorageRecord)
                 {
-                    VerifyNativeFixedArrayInitialization(fixedArray, local.Variable,
-                        initialized, fieldMasks, declarations, function, program, ref remaining,
-                        depth + 1, failures);
+                    VerifyNativeStorageRecordInitialization(local.Initializer, local.Variable, initialized,
+                        fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                }
+                else if (function.Variables[local.Variable].Type == PrimitiveType.NativeWindowClassEx)
+                {
+                    if (local.Initializer is not BoundNativeWindowClassExInitialization windowClass)
+                    {
+                        throw InvalidEffect(local.Span, "NativeImport");
+                    }
+                    VerifyNativeWindowClassExInitialization(windowClass, local.Variable, initialized,
+                        fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                }
+                else if (function.Variables[local.Variable].Type == PrimitiveType.NativeWindowMessage)
+                {
+                    if (local.Initializer is not BoundNativeWindowMessageInitialization
+                        || program.NativeImportCatalog?.SupportsWindowMessageLoop != true)
+                    {
+                        throw InvalidEffect(local.Span, "NativeImport");
+                    }
+                }
+                else if (function.Variables[local.Variable].Type == PrimitiveType.NativeWindowHandle)
+                {
+                    if (!NativeWindowCreationContract.IsCreatedWindowInitializer(
+                        local.Initializer, local.Variable, function, program))
+                    {
+                        throw InvalidEffect(local.Span, "NativeImport");
+                    }
+                    Expression(local.Initializer, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures, allowCreatedWindowResult: true);
                 }
                 else
                 {
-                    Expression(local.Initializer, initialized, fieldMasks, declarations,
-                        function, program, ref remaining, depth + 1, failures);
+                    Expression(local.Initializer, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
                 }
                 if (local.Initializer.Type != function.Variables[local.Variable].Type)
                 {
@@ -3234,12 +3512,40 @@ public static partial class SemanticVerifier
         return expression;
     }
 
+    private static bool IsPlainAggregateWindowHandleParameter(BoundExpression expression, BoundFunction function,
+        BoundProgram program) =>
+        function.IsConstructor
+        && NativeAggregateContract.IsPlainValueAggregate(function.ReturnType, program.Structures)
+        && expression is BoundRead {
+            Type: PrimitiveType.NativeWindowHandle,
+        } read
+        && read.Variable > 0 && read.Variable <= function.ParameterCount;
+
+    private static bool IsPlainAggregateWindowHandleArgument(BoundExpression argument, BoundFunction target,
+        int parameterSlot, BoundFunction caller, BoundProgram program) =>
+        target.IsConstructor
+        && NativeAggregateContract.IsPlainValueAggregate(target.ReturnType, program.Structures)
+        && target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowHandle
+        && (argument is BoundNativeNoOwner
+            || argument is BoundCall {
+                Type: PrimitiveType.NativeWindowHandle,
+            } createCall
+                && createCall.Function >= 0 && createCall.Function < program.Functions.Length
+                && NativeWindowCreationContract.IsCreateWindowFunction(
+                    program.Functions[createCall.Function], program.NativeImportCatalog)
+            || argument is BoundRead {
+                Type: PrimitiveType.NativeWindowHandle,
+            } window
+                && NativeWindowCreationContract.IsCreatedWindowLocal(caller, window.Variable, program)
+            || NativeWindowOwnerContract.IsOwnedHandleExpression(argument, caller, program));
+
     private static void Expression(BoundExpression expression, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
         BoundProgram program, ref int remaining, int depth, FailureEdges? failures = null,
         bool statementCompound = false, bool allowCreatedWindowResult = false,
         bool allowNullPointerArgument = false, bool allowCallbackWindowHandle = false,
-        bool allowCurrentModuleHandleValue = false, BoundBinary? cleanupCounterStep = null)
+        bool allowCurrentModuleHandleValue = false, BoundBinary? cleanupCounterStep = null,
+        bool allowPlainAggregateWindowHandle = false)
     {
         Count(ref remaining, depth);
         if (expression is null || !ValidType(expression.Type,
@@ -3249,8 +3555,12 @@ public static partial class SemanticVerifier
             throw Invalid();
         }
         if (expression.Type == PrimitiveType.NativeWindowHandle
+            && !allowPlainAggregateWindowHandle
+            && !(allowCreatedWindowResult && expression is (BoundCall or BoundRead))
+            && !IsPlainAggregateWindowHandleParameter(expression, function, program)
+            && !NativeWindowOwnerContract.IsOwnerHandleFieldRead(expression, function, program)
+            && !NativeWindowOwnerContract.IsOwnedHandleExpression(expression, function, program)
             && !(allowCallbackWindowHandle
-                && program.RuntimePolicy == BoundRuntimePolicy.FailFast
                 && program.NativeImportCatalog?.MatchesCallbackFunction(
                     PrimitiveType.NativeCallbackAddress, function) == true
                 && expression is BoundRead { Variable: 0, Type: PrimitiveType.NativeWindowHandle }))
@@ -3261,17 +3571,23 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(expression.Span, "NativeImport");
         }
+        if (expression.Type == PrimitiveType.NativeModuleHandle && !allowCurrentModuleHandleValue)
+        {
+            throw InvalidEffect(expression.Span, "NativeImport");
+        }
         switch (expression)
         {
             case BoundConstant constant:
-                if (IsNativeUtfZPointer(constant.Type))
+                if (constant.Type == PrimitiveType.NativeUtf16ZPointer)
                 {
-                    var literalCount = constant.Type == PrimitiveType.NativeUtf16ZPointer
-                        ? program.NativeUtf16ZLiterals.Length : program.NativeUtf8ZLiterals.Length;
-                    var isValidPool = constant.Type == PrimitiveType.NativeUtf16ZPointer
-                        ? NativeUtf16ZContract.IsValidPool(program.NativeUtf16ZLiterals)
-                        : NativeUtf8ZContract.IsValidPool(program.NativeUtf8ZLiterals);
-                    if (constant.Value < 0 || constant.Value >= literalCount || !isValidPool)
+                    if (constant.Value < 0 || constant.Value >= program.NativeUtf16ZLiterals.Length)
+                    {
+                        throw InvalidEffect(constant.Span, "NativeImport");
+                    }
+                }
+                else if (constant.Type == PrimitiveType.NativeUtf8ZPointer)
+                {
+                    if (constant.Value < 0 || constant.Value >= program.NativeUtf8ZLiterals.Length)
                     {
                         throw InvalidEffect(constant.Span, "NativeImport");
                     }
@@ -3295,10 +3611,40 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 break;
-            case BoundNativeNoOwner:
-                throw InvalidEffect(expression.Span, "NativeImport");
+            case BoundNativeNoOwner noOwner:
+                if (!allowPlainAggregateWindowHandle
+                    && !NativeWindowOwnerContract.IsOwnedHandleExpression(noOwner, function, program))
+                {
+                    throw InvalidEffect(expression.Span, "NativeImport");
+                }
+                break;
             case BoundNativeCallbackAddress:
                 throw InvalidEffect(expression.Span, "NativeImport");
+            case BoundNativeWindowClassExInitialization:
+            case BoundNativeWindowClassExAddress:
+            case BoundNativeWindowMessageInitialization:
+            case BoundNativeWindowMessageAddress:
+                throw InvalidEffect(expression.Span, "NativeImport");
+            case BoundNativeFixedArrayInitialization:
+                throw InvalidEffect(expression.Span, "NativeImport");
+            case BoundNativeStorageAddress:
+            case BoundNativeStorageRecordInitialization:
+            case BoundRead read when NativeFixedArrayContract.IsCarrier(read.Type):
+                throw InvalidEffect(expression.Span, "NativeImport");
+            case BoundRead read when IsRestrictedNativeDescriptor(read.Type):
+                throw InvalidEffect(expression.Span, "NativeImport");
+            case BoundNativeFixedArrayElement fixedArrayElement:
+                VerifyNativeFixedArrayElement(fixedArrayElement, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures);
+                break;
+            case BoundNativeFixedArrayWrite fixedArrayWrite:
+                VerifyNativeFixedArrayWrite(fixedArrayWrite, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures);
+                break;
+            case BoundNativeMappedByteRead mappedByte:
+                VerifyNativeMappedByteRead(mappedByte, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth, failures);
+                break;
             case BoundNativeWindowHandleIsNoOwner handleTest:
                 var isCallbackHandleTest = handleTest.Handle is BoundRead {
                         Variable: 0, Type: PrimitiveType.NativeWindowHandle,
@@ -3306,12 +3652,21 @@ public static partial class SemanticVerifier
                     && program.NativeImportCatalog?.MatchesCallbackFunction(
                         PrimitiveType.NativeCallbackAddress, function) == true
                     && program.RuntimePolicy == BoundRuntimePolicy.FailFast;
-                if (handleTest.Type != PrimitiveType.Bool || !isCallbackHandleTest)
+                var isCreatedWindowNullTest = handleTest.Type == PrimitiveType.Bool && !handleTest.IsNegated
+                    && handleTest.Handle is BoundRead {
+                        Type: PrimitiveType.NativeWindowHandle,
+                    } createdWindow
+                    && NativeWindowCreationContract.IsCreatedWindowLocal(
+                        function, createdWindow.Variable, program);
+                if (handleTest.Type != PrimitiveType.Bool
+                    || (!isCallbackHandleTest && !isCreatedWindowNullTest
+                        && !NativeWindowOwnerContract.IsOwnerHandleComparison(handleTest, function, program)))
                 {
                     throw InvalidEffect(handleTest.Span, "NativeImport");
                 }
                 Expression(handleTest.Handle, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures, allowCallbackWindowHandle: true);
+                    ref remaining, depth + 1, failures, allowCreatedWindowResult: isCreatedWindowNullTest,
+                    allowCallbackWindowHandle: isCallbackHandleTest);
                 break;
             case BoundNull:
                 if (!ManagedClassTypes.IsOptional(expression.Type))
@@ -4135,7 +4490,7 @@ public static partial class SemanticVerifier
                                     ? null : method.ParameterAdaptations.SingleOrDefault(adaptation =>
                                         adaptation.ParameterIndex == nativeParameter
                                         && adaptation.Kind
-                                            == NativeComParameterAdaptationKind.ValueOutputAddress);
+                                        == NativeComParameterAdaptationKind.ValueOutputAddress);
                             }
                             isAllowedStorageAddress |= argument is BoundNativeStorageAddress aggregateAddress
                                 && aggregateStorageParameter is not null
@@ -4149,39 +4504,214 @@ public static partial class SemanticVerifier
                                 && comValueOutputAddressAdaptation is not null
                                 && NativeStorageParameterContract.MatchesValueOutputAddress(
                                     comValueOutputAddress, comValueOutputAddressAdaptation, program);
-                            if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowHandle)
+                            if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowClassExAddress)
                             {
-                                if (argument is not BoundNativeNoOwner
-                                    || parameterIndex != 0 || !target.IsExternal
-                                    || target.NativeImportKey is not string handleKey
-                                    || program.NativeImportCatalog is not NativeImportCatalog handleCatalog
-                                    || !handleCatalog.TryGetImport(handleKey, out var handleDefinition)
-                                    || handleDefinition is null
+                                VerifyNativeWindowClassExAddress(argument, target, parameterIndex,
+                                    initialized, declarations, function, program, ref remaining, depth + 1);
+                            }
+                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowMessageAddress)
+                            {
+                                VerifyNativeWindowMessageAddress(argument, target, parameterIndex,
+                                    initialized, declarations, function, program, ref remaining, depth + 1);
+                            }
+                            else if (storageParameter is not null
+                                && argument is BoundNativeStorageAddress nativeStorageAddress)
+                            {
+                                if (!NativeStorageParameterContract.MatchesAddress(
+                                    nativeStorageAddress, storageParameter))
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                VerifyNativeStorageParameterAddress(nativeStorageAddress, storageParameter,
+                                    initialized, fieldMasks, declarations, function, program,
+                                    ref remaining, depth + 1, failures);
+                            }
+                            else if (storageRecordParameter is not null)
+                            {
+                                if (argument is not BoundNativeStorageAddress address
+                                    || !NativeStorageRecordContract.MatchesAddress(address,
+                                        storageRecordParameter, program.NativeImportCatalog))
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                var facts = VerifyNativeStorageRecordAddress(address, storageRecordParameter,
+                                    initialized, fieldMasks, declarations, function, program,
+                                    ref remaining, depth + 1, failures);
+                                if (storageRecordParameter.LoanGroup is string loanGroup
+                                    && storageRecordLoans.TryGetValue(loanGroup, out var previousLoan)
+                                    && previousLoan != facts.Loan)
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                if (storageRecordParameter.LoanGroup is string group)
+                                {
+                                    storageRecordLoans[group] = facts.Loan;
+                                }
+                            }
+                            else if (aggregateStorageParameter is not null)
+                            {
+                                if (argument is not BoundNativeStorageAddress address
+                                    || !NativeStorageParameterContract.MatchesAggregateAddress(address,
+                                        aggregateStorageParameter, program))
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                VerifyNativeAggregateStorageAddress(address, aggregateStorageParameter,
+                                    initialized, fieldMasks, declarations, function, program,
+                                    ref remaining, depth + 1);
+                            }
+                            else if (comAggregateStorageAdaptation is not null)
+                            {
+                                if (argument is not BoundNativeStorageAddress address
+                                    || !NativeStorageParameterContract.MatchesAggregateAddress(address,
+                                        comAggregateStorageAdaptation, program))
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                var parameter = new NativeAggregateStorageParameterDefinition(parameterIndex,
+                                    PrimitiveType.NativeStorageAddress,
+                                    comAggregateStorageAdaptation.SourceSize,
+                                    comAggregateStorageAdaptation.SourceAlignment,
+                                    comAggregateStorageAdaptation.TargetType.StartsWith(
+                                        "const ", StringComparison.Ordinal));
+                                VerifyNativeAggregateStorageAddress(address, parameter, initialized,
+                                    fieldMasks, declarations, function, program, ref remaining, depth + 1);
+                            }
+                            else if (comValueOutputAddressAdaptation is not null)
+                            {
+                                if (argument is not BoundNativeStorageAddress address
+                                    || !NativeStorageParameterContract.MatchesValueOutputAddress(address,
+                                        comValueOutputAddressAdaptation, program))
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                VerifyNativeValueOutputAddress(address, comValueOutputAddressAdaptation,
+                                    initialized, declarations, function, program, ref remaining, depth + 1);
+                            }
+                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeCallbackAddress)
+                            {
+                                if (argument is not BoundNativeCallbackAddress callback
                                     || parameterIndex < 0
-                                    || parameterIndex >= handleDefinition.ParameterTypes.Length
-                                    || handleDefinition.ParameterTypes[parameterIndex]
-                                        != PrimitiveType.NativeWindowHandle
-                                    || parameterIndex >= handleDefinition.ParameterContracts.Length
-                                    || handleDefinition.ParameterContracts[parameterIndex]
-                                        != NativeImportParameterContract.NoOwnerWindowHandle)
+                                    || !target.IsExternal
+                                    || target.NativeImportKey is not string callbackKey
+                                    || program.NativeImportCatalog is not NativeImportCatalog callbackCatalog
+                                    || !callbackCatalog.TryGetImport(callbackKey, out var callbackDefinition)
+                                    || callbackDefinition is null
+                                    || !NativeCallbackParameterContract.TryGetParameter(
+                                        callbackDefinition, parameterIndex, out var callbackParameter)
+                                    || callbackParameter is null
+                                    || callback.Function < 0 || callback.Function >= program.Functions.Length
+                                    || (program.Functions[callback.Function].IsPrivate
+                                        && program.Functions[callback.Function].DeclaringStruct
+                                            != function.DeclaringStruct)
+                                    || !NativeCallbackContract.MatchesFunction(
+                                        program.Functions[callback.Function], callbackParameter.Signature)
+                                    || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
+                                        && !NativeWindowOwnerContract.MatchesProgram(program)))
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
                             }
-                            else if (argument is BoundNativeNoOwner
-                                || argument.Type == PrimitiveType.NativeWindowHandle)
+                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowHandle)
                             {
-                                throw InvalidEffect(argument.Span, "NativeImport");
+                                if (!target.IsExternal
+                                    && NativeAggregateContract.IsOwnedWindowHandleFieldArgument(
+                                        argument, target, parameterSlot, function, program))
+                                {
+                                    Expression(argument, initialized, fieldMasks, declarations, function, program,
+                                        ref remaining, depth + 1, failures,
+                                        allowPlainAggregateWindowHandle: true);
+                                    continue;
+                                }
+                                if (IsPlainAggregateWindowHandleArgument(
+                                    argument, target, parameterSlot, function, program))
+                                {
+                                    Expression(argument, initialized, fieldMasks, declarations, function, program,
+                                        ref remaining, depth + 1, failures, allowPlainAggregateWindowHandle: true);
+                                    continue;
+                                }
+                                if (NativeWindowMessageContract.IsAccessorWindowArgument(
+                                    argument, target, parameterIndex, function, program))
+                                {
+                                    Expression(argument, initialized, fieldMasks, declarations, function, program,
+                                        ref remaining, depth + 1, failures, allowCreatedWindowResult: true);
+                                    continue;
+                                }
+                                var handleContract = target.IsExternal
+                                    && target.NativeImportKey is string contractKey
+                                    && program.NativeImportCatalog is NativeImportCatalog contractCatalog
+                                    && contractCatalog.TryGetImport(contractKey, out var contractDefinition)
+                                    && contractDefinition is not null
+                                    && parameterIndex < contractDefinition.ParameterContracts.Length
+                                        ? contractDefinition.ParameterContracts[parameterIndex]
+                                        : NativeImportParameterContract.Value;
+                                var validHandleArgument = handleContract switch {
+                                    NativeImportParameterContract.CreatedWindowHandleNoEscape =>
+                                        NativeWindowCreationContract.IsCreatedWindowArgument(
+                                            argument, target, parameterIndex, function, program),
+                                    NativeImportParameterContract.WindowProcedureBorrowedHandle =>
+                                        NativeWindowMessageContract.IsWindowProcedureHandleArgument(
+                                            argument, target, parameterIndex, function, program),
+                                    NativeImportParameterContract.NoOwnerWindowHandle =>
+                                        argument is BoundNativeNoOwner,
+                                    NativeImportParameterContract.NoOwnerOrCreatedWindowHandleNoEscape =>
+                                        argument is BoundNativeNoOwner
+                                        || NativeWindowCreationContract.IsCreatedWindowArgument(
+                                            argument, target, parameterIndex, function, program),
+                                    _ => false,
+                                };
+                                if (!target.IsExternal
+                                    || target.NativeImportKey is not string handleKey
+                                    || program.NativeImportCatalog is not NativeImportCatalog handleCatalog
+                                    || !handleCatalog.TryGetImport(handleKey, out var handleDefinition)
+                                    || handleDefinition is null
+                                    || handleDefinition.ParameterTypes[parameterIndex]
+                                        != PrimitiveType.NativeWindowHandle
+                                    || !validHandleArgument)
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
                             }
-                            else if (argument.Type == PrimitiveType.NativeNullPointer
+                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeNullPointer
                                 && !NativeImportCatalog.IsNullPointerArgument(
                                     argument, target, parameterIndex, program))
                             {
                                 throw InvalidEffect(argument.Span, "NativeImport");
                             }
+                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeModuleHandle
+                                && !NativeWindowClassContract.IsCurrentModuleHandleArgument(
+                                    argument, target, parameterIndex, program))
+                            {
+                                throw InvalidEffect(argument.Span, "NativeImport");
+                            }
+                            else if (argument is BoundNativeNoOwner or BoundNativeCallbackAddress
+                                    or BoundNativeWindowClassExInitialization
+                                    or BoundNativeWindowMessageInitialization
+                                || argument is BoundNativeStorageAddress && !isAllowedStorageAddress
+                                || IsRestrictedNativeDescriptor(argument.Type)
+                                    && !isAllowedStorageAddress
+                                    && !(argument is BoundNativeWindowClassExAddress
+                                        && NativeWindowClassContract.IsWindowClassAddressArgument(
+                                            argument, target, parameterIndex, program))
+                                    && !(argument.Type == PrimitiveType.NativeModuleHandle
+                                        && NativeWindowClassContract.IsCurrentModuleHandleArgument(
+                                            argument, target, parameterIndex, program))
+                                    && !(argument is BoundNativeWindowMessageAddress
+                                        && NativeWindowMessageContract.IsMessageAddressArgument(
+                                            argument, target, parameterIndex, function, program))
+                                || argument.Type is PrimitiveType.NativeWindowHandle
+                                    or PrimitiveType.NativeCallbackAddress)
+                            {
+                                throw InvalidEffect(argument.Span, "NativeImport");
+                            }
                             else if (IsNativeUtfZPointer(target.Variables[parameterSlot].Type)
                                 && !HasValidNativeStringArgument(argument, target.Variables[parameterSlot].Type,
-                                    parameterIndex, target, program))
+                                    parameterIndex, target, program)
+                                || (IsNativeUtfZPointer(target.Variables[parameterSlot].Type)
+                                    && (target.NativeImportKey is NativeWindowCreationContract.CreateWindowExKey
+                                        or NativeWindowClassContract.UnregisterClassKey)
+                                    && !IsRegisteredWindowClassNameArgument(
+                                        argument, target, parameterIndex, function, program)))
                             {
                                 throw InvalidEffect(argument.Span, "NativeImport");
                             }
@@ -4265,123 +4795,31 @@ public static partial class SemanticVerifier
                                     function, program, ref remaining, depth + 1);
                                 loanOfInitializedField = true;
                             }
-                            else if (storageParameter is not null
-                                && argument is BoundNativeStorageAddress nativeStorageAddress)
-                            {
-                                if (!NativeStorageParameterContract.MatchesAddress(
-                                    nativeStorageAddress, storageParameter))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                VerifyNativeStorageParameterAddress(nativeStorageAddress, storageParameter,
-                                    initialized, fieldMasks, declarations, function, program,
-                                    ref remaining, depth + 1, failures);
-                            }
-                            else if (storageRecordParameter is not null)
-                            {
-                                if (argument is not BoundNativeStorageAddress address
-                                    || !NativeStorageRecordContract.MatchesAddress(address,
-                                        storageRecordParameter, program.NativeImportCatalog))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                var facts = VerifyNativeStorageRecordAddress(address, storageRecordParameter,
-                                    initialized, fieldMasks, declarations, function, program,
-                                    ref remaining, depth + 1, failures);
-                                if (storageRecordParameter.LoanGroup is string loanGroup
-                                    && storageRecordLoans.TryGetValue(loanGroup, out var previousLoan)
-                                    && previousLoan != facts.Loan)
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                if (storageRecordParameter.LoanGroup is string group)
-                                {
-                                    storageRecordLoans[group] = facts.Loan;
-                                }
-                            }
-                            else if (aggregateStorageParameter is not null)
-                            {
-                                if (argument is not BoundNativeStorageAddress address
-                                    || !NativeStorageParameterContract.MatchesAggregateAddress(address,
-                                        aggregateStorageParameter, program))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                VerifyNativeAggregateStorageAddress(address, aggregateStorageParameter,
-                                    initialized, fieldMasks, declarations, function, program,
-                                    ref remaining, depth + 1);
-                            }
-                            else if (comAggregateStorageAdaptation is not null)
-                            {
-                                if (argument is not BoundNativeStorageAddress address
-                                    || !NativeStorageParameterContract.MatchesAggregateAddress(address,
-                                        comAggregateStorageAdaptation, program))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                var parameter = new NativeAggregateStorageParameterDefinition(parameterIndex,
-                                    PrimitiveType.NativeStorageAddress,
-                                    comAggregateStorageAdaptation.SourceSize,
-                                    comAggregateStorageAdaptation.SourceAlignment,
-                                    comAggregateStorageAdaptation.TargetType.StartsWith(
-                                        "const ", StringComparison.Ordinal));
-                                VerifyNativeAggregateStorageAddress(address, parameter, initialized,
-                                    fieldMasks, declarations, function, program, ref remaining, depth + 1);
-                            }
-                            else if (comValueOutputAddressAdaptation is not null)
-                            {
-                                if (argument is not BoundNativeStorageAddress address
-                                    || !NativeStorageParameterContract.MatchesValueOutputAddress(address,
-                                        comValueOutputAddressAdaptation, program))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                VerifyNativeValueOutputAddress(address, comValueOutputAddressAdaptation,
-                                    initialized, declarations, function, program, ref remaining, depth + 1);
-                            }
-                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeCallbackAddress)
-                            {
-                                if (argument is not BoundNativeCallbackAddress callback
-                                    || !target.IsExternal
-                                    || target.NativeImportKey is not string callbackKey
-                                    || program.NativeImportCatalog is not NativeImportCatalog callbackCatalog
-                                    || !callbackCatalog.TryGetImport(callbackKey, out var callbackDefinition)
-                                    || callbackDefinition is null
-                                    || !NativeCallbackParameterContract.TryGetParameter(
-                                        callbackDefinition, parameterIndex, out var callbackParameter)
-                                    || callbackParameter is null
-                                    || callback.Function < 0 || callback.Function >= program.Functions.Length
-                                    || (program.Functions[callback.Function].IsPrivate
-                                        && program.Functions[callback.Function].DeclaringStruct
-                                            != function.DeclaringStruct)
-                                    || !NativeCallbackContract.MatchesFunction(
-                                        program.Functions[callback.Function], callbackParameter.Signature)
-                                    || program.RuntimePolicy != BoundRuntimePolicy.FailFast)
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                            }
-                            else if (argument is BoundNativeCallbackAddress
-                                || argument is BoundNativeStorageAddress && !isAllowedStorageAddress
-                                || IsRestrictedNativeDescriptor(argument.Type) && !isAllowedStorageAddress
-                                || argument.Type == PrimitiveType.NativeCallbackAddress)
-                            {
-                                throw InvalidEffect(argument.Span, "NativeImport");
-                            }
                             else
                             {
-                                if (IsNativeUtfZPointer(target.Variables[parameterSlot].Type)
-                                    && !HasValidNativeStringArgument(argument, target.Variables[parameterSlot].Type,
-                                        parameterIndex, target, program))
+                                if (IsNativeUtfZPointer(target.Variables[parameterSlot].Type))
+                                {
+                                    if (!HasValidNativeStringArgument(argument,
+                                        target.Variables[parameterSlot].Type, parameterIndex, target, program))
+                                    {
+                                        throw InvalidEffect(argument.Span, "NativeImport");
+                                    }
+                                    if ((target.NativeImportKey is NativeWindowCreationContract.CreateWindowExKey
+                                        or NativeWindowClassContract.UnregisterClassKey)
+                                        && !IsRegisteredWindowClassNameArgument(
+                                            argument, target, parameterIndex, function, program))
+                                    {
+                                        throw InvalidEffect(argument.Span, "NativeImport");
+                                    }
+                                }
+                                else if (IsNativeUtfZPointer(argument.Type))
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                                if (IsNativeUtfZPointer(argument.Type)
-                                    && !IsNativeUtfZPointer(target.Variables[parameterSlot].Type))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                if (argument is not BoundNativeNoOwner)
+                                if (argument is not (BoundNativeNoOwner or BoundNativeCallbackAddress
+                                    or BoundNativeStorageAddress
+                                    or BoundNativeWindowClassExAddress
+                                    or BoundNativeWindowClassExInitialization or BoundNativeWindowMessageAddress))
                                 {
                                     if (IsUnique(program, argument.Type)
                                         && argument is not (BoundMove or BoundCall))
@@ -4390,8 +4828,16 @@ public static partial class SemanticVerifier
                                     }
                                     Expression(argument, initialized, fieldMasks, declarations, function, program,
                                         ref remaining, depth + 1, failures,
+                                        allowCreatedWindowResult: NativeWindowCreationContract.IsCreatedWindowArgument(
+                                            argument, target, parameterIndex, function, program),
                                         allowNullPointerArgument: NativeImportCatalog.IsNullPointerArgument(
-                                            argument, target, parameterIndex, program));
+                                            argument, target, parameterIndex, program),
+                                        allowCallbackWindowHandle:
+                                            NativeWindowMessageContract.IsWindowProcedureHandleArgument(
+                                                argument, target, parameterIndex, function, program),
+                                        allowCurrentModuleHandleValue:
+                                            NativeWindowClassContract.IsCurrentModuleHandleArgument(
+                                                argument, target, parameterIndex, program));
                                 }
                             }
                         }
@@ -4520,7 +4966,10 @@ public static partial class SemanticVerifier
         type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer;
 
     private static bool IsRestrictedNativeDescriptor(PrimitiveType type) =>
-        type == PrimitiveType.NativeStorageRecord;
+        type == PrimitiveType.NativeStorageRecord
+        || type is PrimitiveType.NativeModuleHandle or PrimitiveType.NativeWindowClassEx
+            or PrimitiveType.NativeWindowClassExAddress or PrimitiveType.NativeWindowMessage
+            or PrimitiveType.NativeWindowMessageAddress;
 
     private static bool HasValidNativeStringArgument(BoundExpression argument, PrimitiveType parameterType,
         int parameterIndex, BoundFunction target, BoundProgram program)
@@ -4601,8 +5050,11 @@ public static partial class SemanticVerifier
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer or PrimitiveType.TokenSpan
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode or PrimitiveType.NativeUtf16ZPointer
             or PrimitiveType.NativeUtf8ZPointer or PrimitiveType.NativeNullPointer
-            or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeCallbackAddress
+            or PrimitiveType.NativeWindowHandle
+            or PrimitiveType.NativeCallbackAddress
             or PrimitiveType.NativeStorageAddress
+            or PrimitiveType.NativeModuleHandle or PrimitiveType.NativeWindowClassEx
+            or PrimitiveType.NativeWindowClassExAddress
             || NativeFixedArrayContract.IsCarrier(type)
             || IsRestrictedNativeDescriptor(type)
             || (allowVoid && type == PrimitiveType.Void)
@@ -4714,8 +5166,6 @@ public static partial class SemanticVerifier
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
             BoundReadonlyProjection projection => InvalidatesReservedOwner(projection.Value, variable, ref remaining, depth + 1),
             BoundIsNull test => InvalidatesReservedOwner(test.Value, variable, ref remaining, depth + 1),
-            BoundNativeWindowHandleIsNoOwner test =>
-                InvalidatesReservedOwner(test.Handle, variable, ref remaining, depth + 1),
             BoundCoalesce coalesce => InvalidatesReservedOwner(coalesce.Optional, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(coalesce.Fallback, variable, ref remaining, depth + 1),
             BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
@@ -5073,6 +5523,32 @@ public static partial class SemanticVerifier
             case BoundNativeWindowHandleIsNoOwner test:
                 VacateNestedOutputs(test.Handle, state, ref remaining);
                 break;
+            case BoundNativeFixedArrayInitialization fixedArray:
+                foreach (var element in fixedArray.Elements)
+                {
+                    VacateNestedOutputs(element, state, ref remaining);
+                }
+                break;
+            case BoundNativeFixedArrayElement fixedArrayElement:
+                VacateNestedOutputs(fixedArrayElement.Index, state, ref remaining);
+                break;
+            case BoundNativeStorageAddress address:
+                VacateNestedOutputs(address.Index, state, ref remaining);
+                break;
+            case BoundNativeMappedByteRead mappedByte:
+                VacateNestedOutputs(mappedByte.Index, state, ref remaining);
+                break;
+            case BoundNativeFixedArrayWrite write:
+                VacateNestedOutputs(write.Index, state, ref remaining);
+                VacateNestedOutputs(write.Value, state, ref remaining);
+                break;
+            case BoundNativeStorageRecordInitialization record:
+                VacateNestedOutputs(record.DataSource, state, ref remaining);
+                foreach (var field in record.Fields)
+                {
+                    VacateNestedOutputs(field, state, ref remaining);
+                }
+                break;
             case BoundIsInitialized:
                 break;
             case BoundIsSome pattern:
@@ -5107,6 +5583,8 @@ public static partial class SemanticVerifier
                 break;
             case BoundSnapshotSpan:
                 break;
+            case BoundNativeWindowMessageAddress:
+            case BoundNativeWindowMessageInitialization:
             case BoundViewLength:
             case BoundBufferLength:
             case BoundConstant:
@@ -5175,6 +5653,18 @@ public static partial class SemanticVerifier
             BoundReadonlyProjection projection => FlowFacts(projection.Value, flowFacts, ref remaining),
             BoundIsNull test => FlowFacts(test.Value, flowFacts, ref remaining),
             BoundNativeWindowHandleIsNoOwner test => FlowFacts(test.Handle, flowFacts, ref remaining),
+            BoundNativeFixedArrayInitialization fixedArray =>
+                FlowFacts(fixedArray.Elements, flowFacts, ref remaining),
+            BoundNativeFixedArrayElement fixedArrayElement =>
+                FlowFacts(fixedArrayElement.Index, flowFacts, ref remaining),
+            BoundNativeFixedArrayWrite fixedArrayWrite => AddFlowFact(
+                FlowFacts(fixedArrayWrite.Index, flowFacts, ref remaining),
+                fixedArrayWrite.Value, flowFacts, ref remaining),
+            BoundNativeStorageAddress address => FlowFacts(address.Index, flowFacts, ref remaining),
+            BoundNativeStorageRecordInitialization record => AddFlowFact(
+                FlowFacts(record.Fields, flowFacts, ref remaining), record.DataSource, flowFacts, ref remaining),
+            BoundNativeMappedByteRead mappedByte =>
+                FlowFacts(mappedByte.Index, flowFacts, ref remaining),
             BoundIsSome test => (byte)(OutcomeEffectFact | FlowFacts(test.Value, flowFacts, ref remaining)),
             BoundIsVariablePattern or BoundIsInitialized => AllFlowFacts,
             BoundOutArgument or BoundMove => OutcomeEffectFact,
@@ -5185,8 +5675,9 @@ public static partial class SemanticVerifier
             BoundSpanRead read => AddFlowFact(AddFlowFact(0, read.View, flowFacts, ref remaining),
                 read.Index, flowFacts, ref remaining),
             BoundSpanAdvance advance => FlowFacts(advance.View, flowFacts, ref remaining),
-            BoundSnapshotSpan => 0,
-            BoundViewLength or BoundBufferLength or BoundConstant or BoundNull or BoundNativeNoOwner or BoundRead or BoundReceiverLoan
+            BoundSnapshotSpan or BoundNativeWindowMessageAddress or BoundNativeWindowMessageInitialization => 0,
+            BoundViewLength or BoundBufferLength or BoundConstant or BoundNull or BoundNativeNoOwner
+                or BoundNativeCallbackAddress or BoundRead or BoundReceiverLoan
                 or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => 0,
             _ => AllFlowFacts,
         };

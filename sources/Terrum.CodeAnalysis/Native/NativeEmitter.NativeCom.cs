@@ -58,10 +58,30 @@ internal sealed partial class PeCompiler
         Array.Fill(boundParameterByNative, -1);
         for (var boundIndex = 0; boundIndex < function.ParameterCount; boundIndex++)
         {
-            var nativeIndex = NativeComCallContract.NativeParameterIndex(function, boundIndex, method);
-            if (boundParameterByNative[nativeIndex] < 0)
+            NativeComBoundParameterMapping[] explicitMappings = function.NativeComParameterMappings.IsDefaultOrEmpty
+                ? [] : function.NativeComParameterMappings.Where(mapping =>
+                    mapping.BoundParameterIndex == boundIndex).ToArray();
+            if (explicitMappings.Length == 0)
             {
-                boundParameterByNative[nativeIndex] = boundIndex;
+                if (boundIndex < nativeParameters.Length
+                    && boundParameterByNative[boundIndex] < 0)
+                {
+                    boundParameterByNative[boundIndex] = boundIndex;
+                }
+                continue;
+            }
+            foreach (var mapping in explicitMappings)
+            {
+                if (boundParameterByNative[mapping.NativeParameterIndex] < 0)
+                {
+                    boundParameterByNative[mapping.NativeParameterIndex] = boundIndex;
+                }
+                else if (NativeComCallContract.BoundParameterIndices(
+                        function, mapping.NativeParameterIndex).Length <= 1)
+                {
+                    throw new InvalidOperationException(
+                        "A COM method maps multiple bound parameters to one native parameter.");
+                }
             }
         }
 
@@ -71,6 +91,36 @@ internal sealed partial class PeCompiler
         {
             _code.Bytes(0x31, 0xC0);
             _code.Store64(output);
+        }
+        var bufferContentsSpills = new Dictionary<int, (int Pointer, int Size)>();
+        if (!method.ParameterAdaptations.IsDefaultOrEmpty)
+        {
+            foreach (var adaptation in method.ParameterAdaptations.Where(static adaptation =>
+                adaptation.Kind == NativeComParameterAdaptationKind.ComObjectBufferContents))
+            {
+                var ownerParameters = NativeComCallContract.BoundParameterIndices(
+                    function, adaptation.ParameterIndex);
+                if (ownerParameters.Length != 1
+                    || adaptation.BufferPointerMethodIdentity is not string pointerMethodIdentity
+                    || adaptation.BufferSizeMethodIdentity is not string sizeMethodIdentity)
+                {
+                    throw new InvalidOperationException(
+                        "A COM buffer-content adaptation has no unique owner or accessor methods.");
+                }
+                var pointer = Spill(nextSpill++);
+                var size = Spill(nextSpill++);
+                _code.Load64(Slot(ownerParameters[0]));
+                _code.LoadPointerField(0, NativeTargetProfile.PointerSize);
+                _code.MoveArgument(0, wide: true);
+                EmitNativeComVTableCall(CataloguedComMethod(pointerMethodIdentity));
+                _code.Store64(pointer);
+                _code.Load64(Slot(ownerParameters[0]));
+                _code.LoadPointerField(0, NativeTargetProfile.PointerSize);
+                _code.MoveArgument(0, wide: true);
+                EmitNativeComVTableCall(CataloguedComMethod(sizeMethodIdentity));
+                _code.Store64(size);
+                bufferContentsSpills.Add(adaptation.ParameterIndex, (pointer, size));
+            }
         }
         var interfaceIdSpills = new Dictionary<int, int>();
         if (!function.NativeComHiddenParameters.IsDefaultOrEmpty)
@@ -92,6 +142,7 @@ internal sealed partial class PeCompiler
             var adaptation = boundIndex >= 0 && !method.ParameterAdaptations.IsDefaultOrEmpty
                 ? method.ParameterAdaptations.SingleOrDefault(item => item.ParameterIndex == nativeIndex)
                 : null;
+            var bufferContents = NativeComCallContract.ComObjectBufferContentsAdaptation(method, nativeIndex);
             var isFloating = adaptation?.Kind is not (NativeComParameterAdaptationKind.ValueAddress
                     or NativeComParameterAdaptationKind.ValueOutputAddress
                     or NativeComParameterAdaptationKind.ValueArrayAddress)
@@ -150,6 +201,13 @@ internal sealed partial class PeCompiler
                 else if (adaptation?.Kind == NativeComParameterAdaptationKind.ValueOutputAddress)
                 {
                     _code.Load64(Slot(boundIndex));
+                    wide = true;
+                }
+                else if (bufferContents is not null)
+                {
+                    var spills = bufferContentsSpills[bufferContents.ParameterIndex];
+                    _code.Load64(NativeComCallContract.IsComObjectBufferSizeParameter(
+                        bufferContents, nativeIndex) ? spills.Size : spills.Pointer);
                     wide = true;
                 }
                 else if (owner is not null)

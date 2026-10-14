@@ -54,19 +54,29 @@ public enum PrimitiveType
     NativeUtf16ZPointer,
     /// <summary>A closed Windows x64 HWND carrier, restricted to a catalogued no-owner argument.</summary>
     NativeWindowHandle,
-    /// <summary>A source function's native callback address.</summary>
+    /// <summary>A closed Windows x64 WNDPROC address, restricted to a catalogued synchronous no-escape argument.</summary>
     NativeCallbackAddress,
-    /// <summary>A catalog-described fixed native array carrier.</summary>
+    /// <summary>Inline storage whose closed geometry is carried by selected native fixed-array metadata.</summary>
     NativeFixedArray,
-    /// <summary>A compiler-owned UTF-8-NUL image address, restricted to reviewed no-escape imports.</summary>
+    /// <summary>A compiler-owned ASCII UTF-8-NUL image address for reviewed no-escape imports.</summary>
     NativeUtf8ZPointer,
-    /// <summary>A restricted null pointer value for reviewed native imports.</summary>
+    /// <summary>A catalogued null-only native pointer value.</summary>
     NativeNullPointer,
-    /// <summary>A writable address that receives an owned native COM interface.</summary>
+    /// <summary>A borrowed current-process module handle from the closed GetModuleHandleW import.</summary>
+    NativeModuleHandle,
+    /// <summary>A closed SDK-layout WNDCLASSEXW local initialized only for direct RegisterClassExW.</summary>
+    NativeWindowClassEx,
+    /// <summary>A readonly address of an initialized WNDCLASSEXW local for RegisterClassExW.</summary>
+    NativeWindowClassExAddress,
+    /// <summary>An opaque SDK-layout MSG local used only by the sealed Windows message loop.</summary>
+    NativeWindowMessage,
+    /// <summary>A no-escape address of the sealed message-loop MSG local.</summary>
+    NativeWindowMessageAddress,
+    /// <summary>A compiler-private writable output-cell address for an owned COM interface.</summary>
     NativeComInterfaceOutputAddress,
-    /// <summary>A checked address into catalogued native storage.</summary>
+    /// <summary>A catalogued, no-escape address of a checked plain aggregate value.</summary>
     NativeStorageAddress,
-    /// <summary>A catalog-described native storage record.</summary>
+    /// <summary>A catalogued immutable native storage record whose layout is local to its selected profile.</summary>
     NativeStorageRecord,
 }
 
@@ -223,12 +233,18 @@ public enum BoundIntrinsic
     NodeCollect,
     /// <summary>Allocates and constructs a source class, publishing its handle only on success.</summary>
     ClassTryCreate,
-    /// <summary>Invokes a catalogued COM method through its interface vtable.</summary>
+    /// <summary>Dispatches a catalogued COM method using its checked vtable slot and signature.</summary>
     NativeComVTableCall,
-    /// <summary>Releases a uniquely owned COM interface.</summary>
+    /// <summary>Releases one catalogued unique COM owner through its verified interface method.</summary>
     NativeComOwnerClose,
-    /// <summary>Clones a COM owner only when its catalogued interface supports AddRef.</summary>
+    /// <summary>Adds a catalogued reference to a live unique COM owner and publishes a distinct owner.</summary>
     NativeComOwnerTryClone,
+    /// <summary>Reads the message identifier field from a bounded Windows MSG address.</summary>
+    NativeWindowMessageId,
+    /// <summary>Reads the WPARAM field from a bounded Windows MSG address.</summary>
+    NativeWindowMessageWParam,
+    /// <summary>Compares the HWND field of a bounded Windows MSG with a borrowed window handle.</summary>
+    NativeWindowMessageWindowIs,
 }
 
 /// <summary>The verified behavior of compiler-generated checked failures.</summary>
@@ -339,12 +355,13 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
-    internal TrRmScalarGraph? IndexedBody { get; init; }
     internal NativeComMethodDefinition? NativeComMethod { get; init; }
     internal string? NativeComAcquisitionMethodIdentity { get; init; }
     internal ImmutableArray<NativeComBoundParameterMapping> NativeComParameterMappings { get; init; }
     internal ImmutableArray<NativeImportBoundParameterMapping> NativeImportParameterMappings { get; init; }
     internal ImmutableArray<NativeComHiddenParameter> NativeComHiddenParameters { get; init; }
+
+    internal TrRmScalarGraph? IndexedBody { get; init; }
     /// <summary>The declared property member name, distinct from the callable implementation's name.</summary>
     public string? PropertyName { get; init; }
 
@@ -413,11 +430,17 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 /// <param name="Span">The declaration range.</param>
 public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutable, TextSpan Span)
 {
+    internal BoundNativeFixedArrayLayout? NativeFixedArrayLayout { get; init; }
+
+    internal NativeStorageRecordLayoutDefinition? NativeStorageRecordLayout { get; init; }
+
+    internal NativeStorageRecordFacts? NativeStorageRecordFacts { get; init; }
+
+
+    internal NativeWindowClassExFacts? NativeWindowClassExFacts { get; init; }
+
     /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
     public bool IsOut { get; init; }
-    internal BoundNativeFixedArrayLayout? NativeFixedArrayLayout { get; init; }
-    internal NativeStorageRecordLayoutDefinition? NativeStorageRecordLayout { get; init; }
-    internal NativeStorageRecordFacts? NativeStorageRecordFacts { get; init; }
 
     /// <summary>Whether this source parameter uses the vacant initialization loan mode.</summary>
     public bool IsInit { get; init; }
@@ -431,6 +454,8 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
     /// <summary>Whether a vacant local may initialize its storage without replacing a live value.</summary>
     public bool IsInitializationLocal { get; init; }
 }
+
+internal sealed record NativeWindowClassExFacts(int CallbackFunction, int ClassNameLiteralIndex);
 
 /// <summary>A structured statement, retaining its source range.</summary>
 /// <param name="Span">The source range.</param>
@@ -608,11 +633,11 @@ public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span
 public sealed record BoundNativeNoOwner(TextSpan Span)
     : BoundExpression(PrimitiveType.NativeWindowHandle, Span);
 
-/// <summary>A verified address of a static Windows x64 callback.</summary>
+/// <summary>A verified address of a static Windows x64 WNDPROC callback.</summary>
 public sealed record BoundNativeCallbackAddress(int Function, TextSpan Span)
     : BoundExpression(PrimitiveType.NativeCallbackAddress, Span);
 
-/// <summary>Tests a callback HWND against the closed no-owner sentinel.</summary>
+/// <summary>Tests a WNDPROC's HWND parameter against the closed no-owner sentinel.</summary>
 public sealed record BoundNativeWindowHandleIsNoOwner(BoundExpression Handle, bool IsNegated, TextSpan Span)
     : BoundExpression(PrimitiveType.Bool, Span)
 {
@@ -722,7 +747,42 @@ internal sealed record NativeAggregateStorageParameterDefinition(
     PrimitiveType AddressType,
     int ByteExtent,
     int RequiredAlignment,
-    bool IsReadonly);
+    bool IsReadonly,
+    string? SourceType = null);
+
+internal sealed record NativeAggregateStorageLayoutDefinition(string TypeName, int ByteExtent, int Alignment)
+{
+    internal ImmutableArray<NativeAggregateStorageFieldLayoutDefinition> Fields { get; init; } = [];
+}
+
+internal sealed record NativeAggregateStorageFieldLayoutDefinition(
+    string Name, string TypeName, int Offset, int Size);
+
+/// <summary>A closed WNDCLASSEXW initializer with a static callback, current module and UTF-16 class name.</summary>
+public sealed record BoundNativeWindowClassExInitialization(BoundNativeCallbackAddress Callback,
+    BoundExpression Instance, BoundExpression ClassName, TextSpan Span)
+    : BoundExpression(PrimitiveType.NativeWindowClassEx, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Callback, Instance, ClassName];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Callback = (BoundNativeCallbackAddress)rewrite(Callback),
+            Instance = rewrite(Instance),
+            ClassName = rewrite(ClassName),
+        };
+}
+
+/// <summary>A no-escape address loan of one initialized WNDCLASSEXW local.</summary>
+public sealed record BoundNativeWindowClassExAddress(int Variable, TextSpan Span)
+    : BoundExpression(PrimitiveType.NativeWindowClassExAddress, Span);
+
+/// <summary>Initializes the full opaque MSG storage used by the sealed Windows message loop.</summary>
+public sealed record BoundNativeWindowMessageInitialization(TextSpan Span)
+    : BoundExpression(PrimitiveType.NativeWindowMessage, Span);
+
+/// <summary>A no-escape address loan of the message-loop MSG local.</summary>
+public sealed record BoundNativeWindowMessageAddress(int Variable, TextSpan Span)
+    : BoundExpression(PrimitiveType.NativeWindowMessageAddress, Span);
 
 /// <summary>An explicitly absent optional managed handle.</summary>
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

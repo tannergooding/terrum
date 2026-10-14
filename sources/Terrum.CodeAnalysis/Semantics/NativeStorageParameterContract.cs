@@ -93,6 +93,7 @@ internal static class NativeStorageParameterContract
                         : NativeImportParameterContract.WritableNativeStorageNoEscape)
                 || import.ParameterTypes[parameter.ParameterIndex] != parameter.AddressType
                 || parameter.AddressType != PrimitiveType.NativeStorageAddress
+                || parameter.SourceType is string sourceType && string.IsNullOrWhiteSpace(sourceType)
                 || parameter.ByteExtent <= 0 || parameter.RequiredAlignment <= 0
                 || (parameter.RequiredAlignment & (parameter.RequiredAlignment - 1)) != 0
                 || parameter.ByteExtent % parameter.RequiredAlignment != 0
@@ -302,7 +303,13 @@ internal static class NativeStorageParameterContract
             && ValueLayout.Size(address.CarrierType, program.Structures) == parameter.ByteExtent
             && ValueLayout.Alignment(address.CarrierType, program.Structures, program.NativeImportCatalog)
                 == parameter.RequiredAlignment
-            && NativeAggregateContract.IsPlainValueAggregate(address.CarrierType, program.Structures);
+            && NativeAggregateContract.IsPlainValueAggregate(address.CarrierType, program.Structures)
+            && (parameter.SourceType is null
+                || (NativeAggregateContract.TryResolveSourceType(parameter.SourceType,
+                        program.Structures, out var sourceType)
+                    && sourceType == address.CarrierType
+                    && program.NativeImportCatalog?.SupportsAggregateStorageLayout(
+                        address.CarrierType, program.Structures) == true));
     }
 
     internal static bool MatchesAggregateAddress(BoundNativeStorageAddress address,
@@ -377,6 +384,11 @@ internal static class NativeStorageParameterContract
                 && parameter.AddressType == PrimitiveType.NativeStorageAddress
                 && parameter.ByteExtent == byteExtent
                 && parameter.RequiredAlignment == alignment
+                && (parameter.SourceType is null
+                    || (NativeAggregateContract.TryResolveSourceType(parameter.SourceType, structures,
+                            out var sourceType)
+                        && sourceType == type
+                        && catalog.SupportsAggregateStorageLayout(type, structures)))
                 && (parameter.IsReadonly || !isReadonly)))
             || catalog.ComMethods.Any(method => !method.ParameterAdaptations.IsDefaultOrEmpty
                 && method.ParameterAdaptations.Any(adaptation => adaptation is not null

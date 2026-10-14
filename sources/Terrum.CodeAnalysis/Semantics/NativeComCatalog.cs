@@ -69,6 +69,7 @@ internal sealed record NativeComOwnerDefinition(
     int CellSize,
     int CellAlignment)
 {
+    internal ImmutableArray<int> AdditionalOutputParameterIndexes { get; init; } = [];
     internal ImmutableArray<string> AdditionalAcquisitionMethodIdentities { get; init; } = [];
     internal string ReleaseMethodIdentity { get; init; } = "";
 }
@@ -80,7 +81,9 @@ internal sealed record NativeComParameterAdaptation(
     NativeComParameterAdaptationKind Kind,
     int SourceSize = 0,
     int SourceAlignment = 0,
-    bool NoEscape = false);
+    bool NoEscape = false,
+    string? BufferPointerMethodIdentity = null,
+    string? BufferSizeMethodIdentity = null);
 
 internal sealed record NativeComMappedBufferDefinition(
     int OutputParameterIndex,
@@ -310,6 +313,12 @@ internal static class NativeComCatalog
                 || owner.OutputParameterIndex < 0
                 || (owner.AcquisitionKind == NativeComOwnerAcquisitionKind.ComMethodOutput
                     && owner.OutputParameterIndex < 1)
+                || owner.AdditionalOutputParameterIndexes.IsDefault
+                || owner.AdditionalOutputParameterIndexes.Contains(owner.OutputParameterIndex)
+                || owner.AdditionalOutputParameterIndexes.Distinct().Count()
+                    != owner.AdditionalOutputParameterIndexes.Length
+                || (owner.AcquisitionKind != NativeComOwnerAcquisitionKind.NativeImportOutput
+                    && !owner.AdditionalOutputParameterIndexes.IsEmpty)
                 || !owner.IsUnique
                 || owner.CellSize != NativeTargetProfile.PointerSize
                 || owner.CellAlignment != NativeTargetProfile.PointerSize)
@@ -498,6 +507,9 @@ internal static class NativeComCatalog
                         || (adaptation.Kind is not (NativeComParameterAdaptationKind.AggregateAddress
                             or NativeComParameterAdaptationKind.AggregateStorageAddress)
                             && (adaptation.SourceSize != 0 || adaptation.SourceAlignment != 0))
+                        || (adaptation.Kind != NativeComParameterAdaptationKind.ComObjectBufferContents
+                            && (adaptation.BufferPointerMethodIdentity is not null
+                                || adaptation.BufferSizeMethodIdentity is not null))
                         || adaptation.NoEscape
                             != (adaptation.Kind is NativeComParameterAdaptationKind.AggregateStorageAddress
                                 or NativeComParameterAdaptationKind.ValueOutputAddress)
@@ -583,7 +595,18 @@ internal static class NativeComCatalog
                         NativeComParameterAdaptationKind.SingleElementOwnerPointerArray =>
                             adaptation.TargetType == sourceSignatureIdentity + "*const*",
                         NativeComParameterAdaptationKind.ComObjectBufferContents =>
-                            adaptation.TargetType == "const void*",
+                            adaptation.TargetType == "const void*"
+                            && !string.IsNullOrWhiteSpace(adaptation.BufferPointerMethodIdentity)
+                            && !string.IsNullOrWhiteSpace(adaptation.BufferSizeMethodIdentity)
+                            && adaptation.ParameterIndex + 1 < parameters.Length
+                            && parameters[adaptation.ParameterIndex + 1] == "SIZE_T"
+                            && method.OutputParameterIndex != adaptation.ParameterIndex + 1
+                            && !method.ParameterAdaptations.Any(other =>
+                                other.ParameterIndex == adaptation.ParameterIndex + 1)
+                            && (method.HiddenParameters.IsDefaultOrEmpty
+                                || !method.HiddenParameters.Any(hidden =>
+                                    hidden.NativeParameterIndex == adaptation.ParameterIndex + 1))
+                            && !method.BorrowedOwnerParameters.Contains(adaptation.ParameterIndex + 1),
                         _ => false,
                     };
                     if (!validAdaptation)
@@ -606,6 +629,30 @@ internal static class NativeComCatalog
             {
                 return Invalid(out failureReason,
                     $"COM method '{first.VTableMethodIdentity}' has conflicting signatures.");
+            }
+        }
+
+        foreach (var method in methodsByIdentity.Values)
+        {
+            if (method.ParameterAdaptations.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+            foreach (var adaptation in method.ParameterAdaptations.Where(static adaptation =>
+                adaptation.Kind == NativeComParameterAdaptationKind.ComObjectBufferContents))
+            {
+                if (!interfaceBySignatureIdentity.TryGetValue(
+                        adaptation.SourceType[..^1].Trim(), out var sourceInterface)
+                    || adaptation.BufferPointerMethodIdentity is not string pointerIdentity
+                    || adaptation.BufferSizeMethodIdentity is not string sizeIdentity
+                    || !IsValidBufferContentsAccessor(pointerIdentity, "LPVOID", sourceInterface,
+                        methodsByIdentity, interfaceBySignatureIdentity, signatureTypesByIdentity)
+                    || !IsValidBufferContentsAccessor(sizeIdentity, "SIZE_T", sourceInterface,
+                        methodsByIdentity, interfaceBySignatureIdentity, signatureTypesByIdentity))
+                {
+                    return Invalid(out failureReason,
+                        $"COM method '{method.Identity}' has invalid buffer-content accessor metadata.");
+                }
             }
         }
 
@@ -678,7 +725,12 @@ internal static class NativeComCatalog
                     || owner.OutputParameterIndex >= import.ParameterTypes.Length
                     || !import.ComOutputs.Any(output => output.ParameterIndex == owner.OutputParameterIndex
                         && output.InterfaceIdentity == owner.InterfaceIdentity
-                        && output.Effects.HasFlag(NativeComEffects.AcquiresReference)))
+                        && output.Effects.HasFlag(NativeComEffects.AcquiresReference))
+                    || owner.AdditionalOutputParameterIndexes.Any(index =>
+                        index < 0 || index >= import.ParameterTypes.Length
+                        || !import.ComOutputs.Any(output => output.ParameterIndex == index
+                            && output.InterfaceIdentity == owner.InterfaceIdentity
+                            && output.Effects.HasFlag(NativeComEffects.AcquiresReference))))
                 {
                     return Invalid(out failureReason, $"COM owner '{owner.BoundOwnerName}' does not match a native import output.");
                 }
@@ -850,6 +902,34 @@ internal static class NativeComCatalog
             return false;
         }
         return elementCount > 0 && targetKind == sourceValueKind;
+    }
+
+    private static bool IsValidBufferContentsAccessor(string identity, string expectedReturnType,
+        string sourceInterface,
+        IReadOnlyDictionary<string, NativeComMethodDefinition> methods,
+        IReadOnlyDictionary<string, string> interfaceBySignatureIdentity,
+        IReadOnlyDictionary<string, NativeComSignatureTypeDefinition> signatureTypes)
+    {
+        if (!methods.TryGetValue(identity, out var accessor)
+            || !accessor.IsCallable || accessor.OwnerInterfaceIdentity != sourceInterface
+            || accessor.Effects != NativeComEffects.None || accessor.OutputParameterIndex != -1
+            || !accessor.ParameterAdaptations.IsDefaultOrEmpty
+            || !accessor.HiddenParameters.IsDefaultOrEmpty
+            || !TryParseSignature(accessor.Signature, out var returnType, out var parameters)
+            || returnType != expectedReturnType || parameters.Length != 1
+            || !parameters[0].EndsWith("*", StringComparison.Ordinal)
+            || parameters[0].EndsWith("**", StringComparison.Ordinal)
+            || !interfaceBySignatureIdentity.TryGetValue(parameters[0][..^1].Trim(),
+                out var receiverInterface)
+            || receiverInterface != sourceInterface)
+        {
+            return false;
+        }
+
+        var expectedKind = expectedReturnType == "LPVOID"
+            ? NativeComAbiValueKind.Pointer : NativeComAbiValueKind.Unsigned64;
+        return TryGetAbiValueKind(returnType, signatureTypes, allowVoid: false,
+            isParameter: false, out var returnKind) && returnKind == expectedKind;
     }
 
     private static bool IsValidAggregateAddressAdaptation(NativeComParameterAdaptation adaptation)

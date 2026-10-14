@@ -56,4 +56,29 @@ public sealed partial class CliTests
             }
         }
     }
+
+    [TestCase("main.terrum")]
+    [TestCase("main-hardware.terrum")]
+    public async Task BuildNativeImportCompilesGenericDx11EntryPointAsync(string sourceName)
+    {
+        var sample = Path.Combine(RepositoryRoot(), "samples", "design", "win32-dx11-triangle", sourceName);
+        var output = Path.Combine(Path.GetTempPath(), $"terrum-dx11-{Guid.NewGuid():N}.exe");
+        try
+        {
+            var (exitCode, result, error) = await RunAsync([], "build-native-import", sample,
+                "-o", output, "--runtime", "checked-exceptions", "--json");
+            Assert.That(exitCode, Is.EqualTo(0), result + error);
+            Assert.That(error, Is.Empty);
+            using var json = JsonDocument.Parse(result);
+            Assert.That(json.RootElement.GetProperty("success").GetBoolean(), Is.True);
+
+            var image = await File.ReadAllBytesAsync(output);
+            Assert.That(image.AsSpan().IndexOf("D3D11CreateDeviceAndSwapChain\0"u8) >= 0, Is.True);
+            Assert.That(image.AsSpan().IndexOf("D3DCompileFromFile\0"u8) >= 0, Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(output).ConfigureAwait(true);
+        }
+    }
 }

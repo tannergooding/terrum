@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -66,6 +65,7 @@ internal sealed partial class Binder
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private readonly NativeImportCatalog? _nativeImportCatalog;
+    private NativeSourceProfile _sourceProfile;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
     private bool _usesNativeImportCatalog;
@@ -125,7 +125,7 @@ internal sealed partial class Binder
         _reference = reference;
         _runtimePolicy = runtimePolicy;
         _nativeImportCatalog = nativeImportCatalog;
-        _usesNativeImportCatalog = nativeImportCatalog?.SupportsNativeFixedArrayStorage == true;
+        _usesNativeImportCatalog = nativeImportCatalog?.SupportsCataloguedFixedArrayStorage == true;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null
@@ -159,6 +159,7 @@ internal sealed partial class Binder
             || _reference?.Structures.Any(static structure =>
                 structure.Fields.Any(static field => field.Type == PrimitiveType.OwnedInt32Buffer)) == true;
         // Parser depth limits do not bound left-associated flat expression trees.
+        var sourceProfileBuilder = new NativeSourceProfileBuilder();
         var pending = new Stack<(SyntaxTree Tree, SyntaxNode Node, int Depth)>();
         if (_reference is not null)
         {
@@ -234,6 +235,9 @@ internal sealed partial class Binder
             }
         }
 
+        var sourceProfile = sourceProfileBuilder.Select(_trees, _nativeImportCatalog, _runtimePolicy);
+        _sourceProfile = sourceProfile;
+
         foreach (var tree in _trees)
         {
             _tree = tree;
@@ -291,6 +295,9 @@ internal sealed partial class Binder
                         || _nativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                             layout.TypeName == qualified || layout.TypeName == name) == true
                         || _nativeImportCatalog?.IsCallbackTypeName(qualified) == true
+                        || NativeWindowClassContract.IsTypeName(qualified)
+                        || NativeWindowMessageContract.IsTypeName(qualified)
+                        || NativeWindowCreationContract.IsNullOnlyParameterTypeName(qualified)
                         || NativeComCallContract.IsCataloguedOwnerName(qualified, _nativeImportCatalog)
                         || (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
                             && qualified is ("nint" or "nuint"))
@@ -339,7 +346,10 @@ internal sealed partial class Binder
         }
         if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeNullPointer) == true)
         {
-            _ = _structNames.TryAdd(NativeImportCatalog.NativeNullPointerTypeName, PrimitiveType.NativeNullPointer);
+            foreach (var typeName in NativeWindowCreationContract.NullOnlyParameterTypeNames)
+            {
+                _ = _structNames.TryAdd(typeName, PrimitiveType.NativeNullPointer);
+            }
         }
         if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true)
         {
@@ -350,10 +360,30 @@ internal sealed partial class Binder
             _ = _structNames.TryAdd("nint", PrimitiveType.Int64);
             _ = _structNames.TryAdd("nuint", PrimitiveType.UInt64);
         }
+        if (_nativeImportCatalog?.SupportsWindowClassInitialization == true)
+        {
+            _ = _structNames.TryAdd(NativeWindowClassContract.ModuleHandleTypeName,
+                PrimitiveType.NativeModuleHandle);
+            _ = _structNames.TryAdd(NativeWindowClassContract.WindowClassTypeName,
+                PrimitiveType.NativeWindowClassEx);
+            _ = _structNames.TryAdd(NativeWindowClassContract.WindowClassAddressTypeName,
+                PrimitiveType.NativeWindowClassExAddress);
+        }
+        if (_nativeImportCatalog?.SupportsWindowMessageLoop == true)
+        {
+            _ = _structNames.TryAdd(NativeWindowMessageContract.TypeName,
+                PrimitiveType.NativeWindowMessage);
+            _ = _structNames.TryAdd(NativeWindowMessageContract.AddressTypeName,
+                PrimitiveType.NativeWindowMessageAddress);
+        }
         DeclareAliases();
         foreach (var index in _structDeclarations.Keys)
         {
             DeclareStruct(index);
+        }
+        if (_nativeImportCatalog is NativeImportCatalog nativeComCatalogBeforeDirectSession)
+        {
+            DeclareNativeComOwners(nativeComCatalogBeforeDirectSession);
         }
         foreach (var index in _classDeclarations.Keys)
         {
@@ -364,7 +394,6 @@ internal sealed partial class Binder
             DeclareNativeComOwners(nativeComCatalog);
         }
         DeclareConformances();
-
         foreach (var tree in _trees)
         {
             SetContext(tree);
@@ -466,6 +495,7 @@ internal sealed partial class Binder
         DeclareClassFactories();
         if (_nativeImportCatalog is NativeImportCatalog nativeImportCatalog)
         {
+            DeclareNativeWindowMessageAccessors(nativeImportCatalog);
             DeclareNativeComDirectMethods(nativeImportCatalog);
         }
         foreach (var template in _templates.Values)
@@ -777,7 +807,47 @@ internal sealed partial class Binder
     private static bool IsNativeImportParameterType(PrimitiveType type) =>
         IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
             or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeNullPointer
-            or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress;
+            or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeModuleHandle
+            or PrimitiveType.NativeWindowClassEx or PrimitiveType.NativeWindowClassExAddress
+            or PrimitiveType.NativeWindowMessageAddress
+            or PrimitiveType.NativeStorageAddress;
+
+    private bool IsNativeComImportOutputParameter(PrimitiveType type,
+        NativeImportDefinition? importDefinition, int parameterIndex)
+    {
+        var structureIndex = (int)type - 100;
+        if (_nativeImportCatalog is not NativeImportCatalog catalog || importDefinition is null
+            || structureIndex < 0 || structureIndex >= _structs.Count
+            || parameterIndex < 0 || parameterIndex >= importDefinition.ParameterTypes.Length
+            || parameterIndex >= importDefinition.ParameterContracts.Length
+            || importDefinition.ParameterTypes[parameterIndex] != PrimitiveType.NativeComInterfaceOutputAddress
+            || importDefinition.ParameterContracts[parameterIndex]
+                != NativeImportParameterContract.OwnedNativeComInterfaceOutput
+            || !catalog.TryGetComOwner(_structs[structureIndex].Name, out var owner)
+            || owner is null || !owner.IsUnique
+            || owner.AcquisitionKind != NativeComOwnerAcquisitionKind.NativeImportOutput
+            || owner.AcquisitionIdentity != importDefinition.Key
+            || (owner.OutputParameterIndex != parameterIndex
+                && !owner.AdditionalOutputParameterIndexes.Contains(parameterIndex))
+            || !_structs[structureIndex].IsUnique
+            || _structs[structureIndex].Fields.Length != 0
+            || _structs[structureIndex].Size != owner.CellSize
+            || _structs[structureIndex].CleanupMethod != owner.BoundOwnerName + ".Close")
+        {
+            return false;
+        }
+        return importDefinition.ComOutputs.Any(output => output.ParameterIndex == parameterIndex
+            && output.InterfaceIdentity == owner.InterfaceIdentity
+            && output.Effects.HasFlag(NativeComEffects.AcquiresReference));
+    }
+
+    private bool IsCataloguedNativeComOwner(PrimitiveType type)
+    {
+        var structureIndex = (int)type - 100;
+        return structureIndex >= 0 && structureIndex < _structs.Count
+            && NativeComCallContract.IsCataloguedOwnerName(
+                _structs[structureIndex].Name, _nativeImportCatalog);
+    }
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -1025,13 +1095,16 @@ internal sealed partial class Binder
             _nativeImportCatalog, structureType, _structs, isReadonly: false)
             || NativeStorageParameterContract.SupportsAggregateType(
                 _nativeImportCatalog, structureType, _structs, isReadonly: true);
+        var cataloguedAggregateLayout = _nativeImportCatalog?.SupportsAggregateStorageLayout(
+            structureType, _structs) == true;
         if (isSequential && (isPublic || isUnique || fields.Any(static field => !field.IsPrivate))
             && !cataloguedFixedArrayElement)
         {
             Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
         }
         if (size is < 1 or > ValueLayout.MaximumStructureSize
-            || (size > ValueLayout.MaximumSize && !cataloguedFixedArrayElement && !cataloguedAggregateStorage))
+            || (size > ValueLayout.MaximumSize && !cataloguedFixedArrayElement
+                && !cataloguedAggregateStorage && !cataloguedAggregateLayout))
         {
             Report("TRM3005",
                 $"A struct must have a naturally aligned size from 1 through {ValueLayout.MaximumSize} bytes unless a native storage catalog admits its layout.",
@@ -1170,6 +1243,10 @@ internal sealed partial class Binder
                 var qualifiedName = Qualify(name.Name);
                 if (TryPrimitiveType(name.Name, out _)
                     || qualifiedName == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                    || _nativeImportCatalog?.IsCallbackTypeName(qualifiedName) == true
+                    || NativeWindowClassContract.IsTypeName(qualifiedName)
+                    || NativeWindowMessageContract.IsTypeName(qualifiedName)
+                    || NativeComCallContract.IsCataloguedOwnerName(qualifiedName, _nativeImportCatalog)
                     || qualifiedName is NativeBufferIntrinsics.TypeName
                         or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
                     || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
@@ -1791,7 +1868,8 @@ internal sealed partial class Binder
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                     or PrimitiveType.Float32 or PrimitiveType.Float64)
                 && (!IsStruct(type) || IsUnique(type))
-                && !IsNativeComImportOutputParameter(type, importDefinition, declared.Count))
+                && !IsNativeComImportOutputParameter(type, importDefinition, declared.Count)
+                && (isExternal || !IsCataloguedNativeComOwner(type)))
             {
                 Report("TRM3011",
                     "A non-boolean output parameter requires a scalar or Copy struct type.", parameter.Span);
@@ -1868,7 +1946,14 @@ internal sealed partial class Binder
             };
 
             if (isExternal && importDefinition is not null && externalFunction is not null
-                && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType))
+                && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType)
+                    || returnType == PrimitiveType.NativeWindowHandle
+                        && NativeWindowCreationContract.MatchesImport(importDefinition)
+                    || returnType == PrimitiveType.NativeModuleHandle
+                        && NativeWindowClassContract.MatchesImport(importDefinition)
+                    || returnType == PrimitiveType.Char16
+                        && NativeWindowClassContract.MatchesImport(importDefinition)
+                    )
                 && Enumerable.Range(0, boundParameters.Length).All(index =>
                     !boundParameters[index].IsInit
                     && (boundParameters[index].IsOut
@@ -2055,8 +2140,35 @@ internal sealed partial class Binder
                 return PrimitiveType.NativeStorageRecord;
             }
 
-            Report("TRM3030", "A catalogued native storage record is an immutable local-only type.", node.Span);
+            Report("TRM3030", "A catalogued native storage record is an immutable local-only type.",
+                node.Span);
             return PrimitiveType.Int32;
+        }
+        if (NativeWindowClassContract.IsTypeName(name))
+        {
+            if (_nativeImportCatalog?.SupportsWindowClassInitialization != true || typeArgumentNodes.Length != 0
+                || writable || optional
+                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
+            {
+                Report("TRM3030", "The Windows class descriptor and module handle are available only in the reviewed direct window-class profile.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+
+            return NativeWindowClassContract.Type(name);
+        }
+        if (NativeWindowMessageContract.IsTypeName(name))
+        {
+            if (_nativeImportCatalog?.SupportsWindowMessageLoop != true || typeArgumentNodes.Length != 0
+                || writable || optional
+                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
+            {
+                Report("TRM3030", "The opaque Windows MSG carrier is available only in the reviewed direct message-loop profile.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+
+            return NativeWindowMessageContract.Type(name);
         }
         if (name == "ptr")
         {
@@ -2807,6 +2919,13 @@ internal sealed partial class Binder
                         NativeStorageRecordLayout = storageRecordInitializer.Layout,
                         NativeStorageRecordFacts = NativeStorageRecordContract.Facts(
                             storageRecordInitializer, _nativeImportCatalog),
+                    };
+                }
+                if (initializer is BoundNativeWindowClassExInitialization windowClass)
+                {
+                    _variables[slot] = _variables[slot] with {
+                        NativeWindowClassExFacts = NativeWindowClassContract.Facts(
+                            windowClass, _nativeUtf16ZLiterals),
                     };
                 }
                 return new BoundLocal(slot, initializer, node.Span);
@@ -3834,11 +3953,7 @@ internal sealed partial class Binder
                 }
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
-                if (member == NativeWindowHandleContract.NoOwnerMemberName
-                    && !HasVariableReceiverName(receiverNode)
-                    && ResolveTypeName(NameText(receiverNode), out var nativeHandleType)
-                        == DeclaredTypeResolution.Unique
-                    && nativeHandleType == PrimitiveType.NativeWindowHandle)
+                if (IsNativeWindowNoOwnerExpression(node))
                 {
                     expression = new BoundNativeNoOwner(node.Span);
                     break;
@@ -3973,6 +4088,16 @@ internal sealed partial class Binder
                     if (expected == PrimitiveType.NativeStorageAddress)
                     {
                         expression = BindNativeAggregateStorageAddress(operandNode, node.Span);
+                        break;
+                    }
+                    if (expected == PrimitiveType.NativeWindowClassExAddress)
+                    {
+                        expression = BindNativeWindowClassExAddress(operandNode, node.Span);
+                        break;
+                    }
+                    if (expected == PrimitiveType.NativeWindowMessageAddress)
+                    {
+                        expression = BindNativeWindowMessageAddress(operandNode, node.Span);
                         break;
                     }
                     var functionName = NameText(operandNode);
@@ -4469,17 +4594,42 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Name, out function))
             {
+                if (name.Name == NativeMappedBufferContract.ReadByteIntrinsicName
+                    && FindGenericTemplate(name.Name) is null)
+                {
+                    return BindNativeMappedByteRead(node);
+                }
                 if (expected == PrimitiveType.NativeStorageRecord)
                 {
                     return BindNativeStorageRecordInitializer(node, expected);
                 }
-                if (name.Name == "utf16z")
+                if (expected == PrimitiveType.NativeUtf16ZPointer
+                    && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf16ZPointer) == true
+                    && name.Name == "utf16z")
                 {
                     return BindNativeUtf16ZLiteral(node, expected);
                 }
-                if (name.Name == "utf8z")
+                if (expected == PrimitiveType.NativeUtf8ZPointer
+                    && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf8ZPointer) == true
+                    && name.Name == "utf8z")
                 {
                     return BindNativeUtf8ZLiteral(node, expected);
+                }
+                if (expected == PrimitiveType.NativeWindowClassEx
+                    && _nativeImportCatalog?.SupportsWindowClassInitialization == true
+                    && name.Name == NativeWindowClassContract.InitializerName)
+                {
+                    return BindNativeWindowClassExInitializer(node);
+                }
+                if (expected == PrimitiveType.NativeWindowMessage
+                    && _nativeImportCatalog?.SupportsWindowMessageLoop == true
+                    && name.Name == NativeWindowMessageContract.InitializerName)
+                {
+                    return BindNativeWindowMessageInitializer(node);
+                }
+                if (expected == PrimitiveType.NativeStorageRecord)
+                {
+                    return BindNativeStorageRecordInitializer(node, expected);
                 }
                 if (FindGenericTemplate(name.Name) is not null)
                 {
@@ -5595,6 +5745,10 @@ internal sealed partial class Binder
                 var operation = ((SyntaxTokenElement)node.Children[0]).Token.Kind;
                 if (operation == TokenKind.Ampersand)
                 {
+                    if (operand == PrimitiveType.NativeWindowClassEx)
+                    {
+                        return PrimitiveType.NativeWindowClassExAddress;
+                    }
                     if (operandNode is { Kind: SyntaxKind.IndexExpression } element
                         && KnownType((SyntaxNode)element.Children[0]) is PrimitiveType arrayCarrier
                         && NativeFixedArrayContract.IsCarrier(arrayCarrier))
@@ -5654,171 +5808,6 @@ internal sealed partial class Binder
             default:
                 return null;
         }
-    }
-
-    private bool TryBindNativeFixedArrayType(SyntaxNode node, out PrimitiveType arrayType,
-        out PrimitiveType elementType, out int elementCount)
-    {
-        arrayType = PrimitiveType.Int32;
-        elementType = PrimitiveType.Int32;
-        elementCount = 0;
-        if (_nativeImportCatalog is not { SupportsNativeFixedArrayStorage: true }
-            || node.Kind != SyntaxKind.InlineArrayTypeName
-            || node.Children is not [
-                SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "InlineArray" },
-                SyntaxTokenElement { Token.Kind: TokenKind.Less },
-                SyntaxNode elementNode,
-                SyntaxTokenElement { Token.Kind: TokenKind.Comma },
-                SyntaxTokenElement { Token.Kind: TokenKind.NumericLiteral } extentToken,
-                SyntaxTokenElement { Token.Kind: TokenKind.Greater },
-            ])
-        {
-            Report("TRM3030", "InlineArray requires a native fixed-array layout admitted by the active catalog.",
-                node.Span);
-            return false;
-        }
-
-        var resolvedElement = BindType(elementNode, allowVoid: false);
-        if (int.TryParse(extentToken.Token.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var resolvedCount)
-            && NativeFixedArrayContract.TryGetLayout(PrimitiveType.NativeFixedArray, resolvedElement,
-                resolvedCount, _structs, _nativeImportCatalog, out _))
-        {
-            arrayType = PrimitiveType.NativeFixedArray;
-            elementType = resolvedElement;
-            elementCount = resolvedCount;
-            return true;
-        }
-
-        Report("TRM3030", "InlineArray must match an exact selected native fixed-array layout.", node.Span);
-        return false;
-    }
-
-    private BoundExpression BindNativeFixedArrayInitializer(SyntaxNode node, PrimitiveType arrayType,
-        PrimitiveType elementType, int elementCount)
-    {
-        if (!NativeFixedArrayContract.TryGetLayout(arrayType, elementType, elementCount, _structs,
-            _nativeImportCatalog, out var layout))
-        {
-            Report("TRM3030", "The selected native fixed-array carrier has no admitted layout.", node.Span);
-            return ErrorExpression(node.Span);
-        }
-        var count = layout.ElementCount;
-        var elements = node.Children.OfType<SyntaxNode>().ToArray();
-        if (node.Kind != SyntaxKind.ArrayInitializerExpression
-            || node.Children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
-            || node.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
-        {
-            Report("TRM3030", "A fixed array requires an array initializer.", node.Span);
-            return ErrorExpression(node.Span);
-        }
-        if (elements.Length == 0)
-        {
-            if (node.Children.Length == 2
-                && NativeFixedArrayContract.AllowsEmptyInitialization(layout, _structs, _nativeImportCatalog))
-            {
-                return new BoundNativeFixedArrayInitialization(layout, [], node.Span);
-            }
-            Report("TRM3030", "The selected fixed-array layout does not permit empty zero-initialization.",
-                node.Span);
-            return ErrorExpression(node.Span);
-        }
-        if (count == 0 || elements.Length != count || node.Children.Length != (2 * count) + 1)
-        {
-            Report("TRM3030", "A fixed array requires exactly one complete initializer per element.",
-                node.Span);
-            return ErrorExpression(node.Span);
-        }
-        for (var child = 1; child < node.Children.Length - 1; child++)
-        {
-            if ((child & 1) == 0
-                    ? node.Children[child] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
-                    : node.Children[child] is not SyntaxNode)
-            {
-                Report("TRM3030", "Fixed-array elements must be complete and source ordered.", node.Span);
-                return ErrorExpression(node.Span);
-            }
-        }
-
-        var bound = ImmutableArray.CreateBuilder<BoundExpression>(count);
-        foreach (var element in elements)
-        {
-            if (element.Kind == SyntaxKind.MissingExpression)
-            {
-                Report("TRM3030", "Fixed-array elements must be completely initialized.", element.Span);
-                return ErrorExpression(node.Span);
-            }
-            bound.Add(BindExpression(element, elementType));
-        }
-        if (bound.Any(element => element.Type != elementType))
-        {
-            Report("TRM3030", "Every fixed-array element must have its exact element type.", node.Span);
-            return ErrorExpression(node.Span);
-        }
-        return new BoundNativeFixedArrayInitialization(layout, bound.MoveToImmutable(), node.Span);
-    }
-
-    private BoundExpression BindNativeFixedArrayUtf16ZAddress(SyntaxNode node, TextSpan span)
-    {
-        if (node.Kind != SyntaxKind.IndexExpression
-            || !TryFindNativeFixedArrayLocal((SyntaxNode)node.Children[0], out var variable)
-            || _variables[variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
-            || !NativeFixedArrayContract.AllowsReadonlyUtf16ZLoan(
-                layout, _structs, _nativeImportCatalog))
-        {
-            Report("TRM3030", "A UTF-16Z address requires a selected fixed-array layout that permits the loan.",
-                span);
-            return ErrorExpression(span);
-        }
-        var index = BindNativeFixedArrayIndex((SyntaxNode)node.Children[2], layout);
-        if (index.Type != PrimitiveType.Int32
-            && !(index.Type == PrimitiveType.UInt32
-                && NativeFixedArrayContract.AllowsUInt32Indices(layout, _structs, _nativeImportCatalog)))
-        {
-            Report("TRM3030", "The selected fixed-array layout does not permit this index type.", index.Span);
-        }
-        if (index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 })
-        {
-            Report("TRM3030", "A UTF-16Z fixed-array loan must begin at code unit zero.", index.Span);
-        }
-        return new BoundNativeStorageAddress(variable, index, layout.CarrierType, layout.ElementType,
-            PrimitiveType.NativeUtf16ZPointer, layout.ElementCount, layout.ElementStride,
-            layout.ByteExtent, IsReadonly: true, Span: span);
-    }
-
-    private BoundExpression BindNativeFixedArrayIndex(SyntaxNode node, BoundNativeFixedArrayLayout layout)
-    {
-        var expectedType = NativeFixedArrayContract.AllowsUInt32Indices(layout, _structs, _nativeImportCatalog)
-            && KnownType(node) == PrimitiveType.UInt32
-            ? PrimitiveType.UInt32 : PrimitiveType.Int32;
-        return BindExpression(node, expectedType);
-    }
-
-    private bool IsNativeComImportOutputParameter(PrimitiveType type,
-        NativeImportDefinition? importDefinition, int parameterIndex)
-    {
-        var structureIndex = (int)type - 100;
-        if (_nativeImportCatalog is not NativeImportCatalog catalog || importDefinition is null
-            || structureIndex < 0 || structureIndex >= _structs.Count
-            || parameterIndex < 0 || parameterIndex >= importDefinition.ParameterTypes.Length
-            || parameterIndex >= importDefinition.ParameterContracts.Length
-            || importDefinition.ParameterTypes[parameterIndex] != PrimitiveType.NativeComInterfaceOutputAddress
-            || importDefinition.ParameterContracts[parameterIndex]
-                != NativeImportParameterContract.OwnedNativeComInterfaceOutput
-            || !catalog.TryGetComOwner(_structs[structureIndex].Name, out var owner)
-            || owner is null || !owner.IsUnique
-            || owner.AcquisitionKind != NativeComOwnerAcquisitionKind.NativeImportOutput
-            || owner.AcquisitionIdentity != importDefinition.Key
-            || owner.OutputParameterIndex != parameterIndex
-            || !_structs[structureIndex].IsUnique
-            || _structs[structureIndex].Fields.Length != 0
-            || _structs[structureIndex].Size != owner.CellSize
-            || _structs[structureIndex].CleanupMethod != owner.BoundOwnerName + ".Close")
-        {
-            return false;
-        }
-        return importDefinition.ComOutputs.Any(output => output.ParameterIndex == parameterIndex
-            && output.InterfaceIdentity == owner.InterfaceIdentity
-            && output.Effects.HasFlag(NativeComEffects.AcquiresReference));
     }
 
     private bool TryFindNativeFixedArrayLocal(SyntaxNode node, out int variable)
@@ -6033,6 +6022,11 @@ internal sealed partial class Binder
         PrimitiveType.NativeCallbackAddress => NativeCallbackContract.TypeName,
         PrimitiveType.NativeStorageAddress => NativeStorageParameterContract.AddressTypeName,
         PrimitiveType.NativeStorageRecord => "catalogued native storage record",
+        PrimitiveType.NativeModuleHandle => NativeWindowClassContract.ModuleHandleTypeName,
+        PrimitiveType.NativeWindowClassEx => NativeWindowClassContract.WindowClassTypeName,
+        PrimitiveType.NativeWindowClassExAddress => NativeWindowClassContract.WindowClassAddressTypeName,
+        PrimitiveType.NativeWindowMessage => NativeWindowMessageContract.TypeName,
+        PrimitiveType.NativeWindowMessageAddress => NativeWindowMessageContract.AddressTypeName,
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",

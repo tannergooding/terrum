@@ -31,6 +31,7 @@ internal sealed partial class Binder
     private void DeclareNativeComOwners(NativeImportCatalog catalog)
     {
         var referencedOwners = new HashSet<string>(StringComparer.Ordinal);
+        var usedMethodNames = InvokedMemberNames();
         foreach (var tree in _trees)
         {
             SetContext(tree);
@@ -45,6 +46,32 @@ internal sealed partial class Binder
                     {
                         _ = referencedOwners.Add(owner.BoundOwnerName);
                     }
+                }
+            }
+        }
+        foreach (var method in catalog.ComMethods)
+        {
+            if (!method.IsCallable || method.OutputParameterIndex < 0
+                || !method.Effects.HasFlag(NativeComEffects.AcquiresReference)
+                || method.OutputInterfaceIdentity is not string outputInterface)
+            {
+                continue;
+            }
+            var separator = method.VTableMethodIdentity.LastIndexOf("::", StringComparison.Ordinal);
+            var methodName = method.BoundMethodName
+                ?? (separator < 0 ? "" : method.VTableMethodIdentity[(separator + 2)..]);
+            if (!usedMethodNames.Contains(methodName))
+            {
+                continue;
+            }
+            foreach (var owner in catalog.ComOwners)
+            {
+                if (owner.InterfaceIdentity == outputInterface
+                    && (owner.AcquisitionKind == NativeComOwnerAcquisitionKind.ComMethodOutput
+                        && owner.AcquisitionIdentity == method.Identity
+                        || owner.AdditionalAcquisitionMethodIdentities.Contains(method.Identity)))
+                {
+                    _ = referencedOwners.Add(owner.BoundOwnerName);
                 }
             }
         }

@@ -22,9 +22,14 @@ internal static class ValueLayout
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
         PrimitiveType.TokenSpan => TokenSpanContract.DescriptorSize,
         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer or PrimitiveType.NativeWindowHandle
-            or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeNullPointer
-            or PrimitiveType.NativeComInterfaceOutputAddress or PrimitiveType.NativeStorageAddress
+            or PrimitiveType.NativeCallbackAddress
+            or PrimitiveType.NativeNullPointer or PrimitiveType.NativeModuleHandle
+            or PrimitiveType.NativeComInterfaceOutputAddress
+            or PrimitiveType.NativeWindowClassExAddress or PrimitiveType.NativeWindowMessageAddress
+            or PrimitiveType.NativeStorageAddress
                 => NativeTargetProfile.PointerSize,
+        PrimitiveType.NativeWindowClassEx => NativeWindowClassContract.WindowClassExSize,
+        PrimitiveType.NativeWindowMessage => NativeWindowMessageContract.MessageSize,
         PrimitiveType.NativeStorageRecord => MaximumStructureSize,
         PrimitiveType.Void => 0,
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
@@ -45,11 +50,24 @@ internal static class ValueLayout
         }
         if ((int)type < 100)
         {
-            if (type is PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer
-                or PrimitiveType.NativeUtf8ZPointer or PrimitiveType.NativeWindowHandle
-                or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeNullPointer
-                or PrimitiveType.NativeComInterfaceOutputAddress or PrimitiveType.NativeStorageAddress
-                or PrimitiveType.NativeStorageRecord)
+            if (type is PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeCallbackAddress
+                or PrimitiveType.NativeNullPointer or PrimitiveType.NativeModuleHandle
+                or PrimitiveType.NativeComInterfaceOutputAddress
+                or PrimitiveType.NativeWindowClassExAddress or PrimitiveType.NativeWindowMessageAddress
+                or PrimitiveType.NativeStorageAddress)
+            {
+                return NativeTargetProfile.PointerSize;
+            }
+            if (type == PrimitiveType.NativeWindowClassEx)
+            {
+                return NativeTargetProfile.PointerSize;
+            }
+            if (type == PrimitiveType.NativeWindowMessage)
+            {
+                return NativeWindowMessageContract.MessageAlignment;
+            }
+            if (type == PrimitiveType.NativeStorageRecord)
             {
                 return NativeTargetProfile.PointerSize;
             }
@@ -63,7 +81,7 @@ internal static class ValueLayout
                 ?? throw new InvalidOperationException("The native catalog contains a null COM owner record.");
         }
         var alignment = 1;
-        foreach (var field in structures[(int)type - 100].Fields)
+        foreach (var field in structure.Fields)
         {
             alignment = Math.Max(alignment, Alignment(field.Type, structures, catalog));
         }

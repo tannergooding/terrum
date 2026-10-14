@@ -36,6 +36,142 @@ public sealed class NativeComCatalogTests
     }
 
     [Test]
+    public void CheckedFixedArrayStorageUsesCatalogLayoutRatherThanApiSourceShape()
+    {
+        var layout = new NativeFixedArrayStorageLayoutDefinition(
+            nameof(PrimitiveType.UInt32), 2, sizeof(uint), sizeof(uint), 2 * sizeof(uint)) {
+            AllowsMutableLocal = true,
+            AllowsElementWrites = true,
+            AllowsCheckedRuntimeAccess = true,
+        };
+        var catalog = NativeImportCatalog.CreateForTesting(
+            "test.generic-checked-fixed-array.v1", [], fixedArrayStorageLayouts: [layout]);
+        var profile = new NativeSourceProfileBuilder().Select([], catalog,
+            BoundRuntimePolicy.CheckedExceptions);
+        var program = new BoundProgram([], -1) {
+            NativeImportCatalog = catalog,
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+        };
+
+        Assert.That(profile.Has(NativeSourceFeature.NativeFixedArrayStorage), Is.True);
+        Assert.That(NativeFixedArrayContract.MatchesProgram(program), Is.True);
+    }
+
+    [Test]
+    public void CheckedFixedArrayArithmeticUsesCatalogCapabilitiesWithoutWindowsImports()
+    {
+        var layout = new NativeFixedArrayStorageLayoutDefinition(
+            nameof(PrimitiveType.UInt32), 3, sizeof(uint), sizeof(uint), 3 * sizeof(uint)) {
+            AllowsMutableLocal = true,
+            AllowsElementWrites = true,
+            AllowsUInt32Indices = true,
+            AllowsCheckedRuntimeAccess = true,
+        };
+        var catalog = NativeImportCatalog.CreateForTesting(
+            "test.generic-checked-array-arithmetic.v1", [], fixedArrayStorageLayouts: [layout]);
+        var source = """
+            int32 Main() {
+                mut InlineArray<uint32, 3> values = [4, 5, 6];
+                values[1] = values[0] + 1;
+                return int32(values[2]);
+            }
+            """;
+        var compilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+
+        _ = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.CheckedExceptions);
+    }
+
+    [Test]
+    public void CataloguedAggregateLayoutsAdmitNestedStructsBeyondTheValueProfile()
+    {
+        const string importKey = "test.fixture.read-descriptor";
+        var import = new NativeImportDefinition(importKey, "fixture.dll", "ReadDescriptor",
+            [PrimitiveType.NativeStorageAddress], PrimitiveType.Int32,
+            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            NativeImportDeploymentPolicy.ApplicationDirectory) {
+            ParameterContracts = [NativeImportParameterContract.ReadonlyNativeStorageNoEscape],
+            AggregateStorageParameters = [
+                new(0, PrimitiveType.NativeStorageAddress, 40, 8, IsReadonly: true,
+                    SourceType: "FixtureDescriptor"),
+            ],
+        };
+        var catalog = NativeImportCatalog.CreateForTesting("test.generic-aggregate-storage.v1", [import],
+            aggregateStorageLayouts: [
+                new("FixtureHeader", 3 * sizeof(ulong), sizeof(ulong)) {
+                    Fields = [
+                        new("First", nameof(PrimitiveType.UInt64), 0, sizeof(ulong)),
+                        new("Second", nameof(PrimitiveType.UInt64), sizeof(ulong), sizeof(ulong)),
+                        new("Third", nameof(PrimitiveType.UInt64), 2 * sizeof(ulong), sizeof(ulong)),
+                    ],
+                },
+                new("FixtureDescriptor", 40, 8) {
+                    Fields = [
+                        new("Header", "FixtureHeader", 0, 3 * sizeof(ulong)),
+                        new("OutputHandle", nameof(PrimitiveType.UInt64),
+                            3 * sizeof(ulong), sizeof(ulong)),
+                        new("Count", nameof(PrimitiveType.UInt32), 4 * sizeof(ulong), sizeof(uint)),
+                        new("Flags", nameof(PrimitiveType.UInt32), 4 * sizeof(ulong) + sizeof(uint),
+                            sizeof(uint)),
+                    ],
+                },
+            ]);
+        var source = $$"""
+            [Terrum.Interop.NativeImport("{{importKey}}")]
+            [NoThrow]
+            extern int32 ReadDescriptor(Terrum.Interop.NativeStorageAddress descriptor);
+
+            struct FixtureHeader {
+                uint64 First;
+                uint64 Second;
+                uint64 Third;
+
+                public FixtureHeader(uint64 first, uint64 second, uint64 third) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+
+            struct FixtureDescriptor {
+                FixtureHeader Header;
+                uint64 OutputHandle;
+                uint32 Count;
+                uint32 Flags;
+
+                public FixtureDescriptor(FixtureHeader header, uint64 outputHandle,
+                    uint32 count, uint32 flags) {
+                    Header = header;
+                    OutputHandle = outputHandle;
+                    Count = count;
+                    Flags = flags;
+                }
+            }
+
+            int32 Main() {
+                FixtureDescriptor descriptor = new FixtureDescriptor(
+                    new FixtureHeader(1, 2, 3), 4, 5, 6);
+                return ReadDescriptor(&descriptor);
+            }
+            """;
+
+        var compilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        var main = program.Functions[program.EntryPoint];
+        var returnStatement = main.Body.Statements.OfType<BoundReturn>().Single();
+        var call = returnStatement.Value as BoundCall
+            ?? throw new AssertionException("Expected the aggregate import call.");
+        var address = call.Arguments[0] as BoundNativeStorageAddress
+            ?? throw new AssertionException("Expected a catalogued aggregate storage address.");
+        Assert.That(address.ByteExtent, Is.EqualTo(40));
+        Assert.That(address.IsReadonly, Is.True);
+    }
+
+    [Test]
     public void NativeComCatalogAcceptsAnUnrelatedInterfaceAndMethod()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -418,8 +554,12 @@ public sealed class NativeComCatalogTests
             [NoThrow]
             extern int32 Acquire(Terrum.Interop.Windows.NativeNullPointer optional, out FixtureOwner owner);
 
+            bool ForwardAcquire(out FixtureOwner owner) {
+                return Acquire(null, out owner) >= 0;
+            }
+
             int32 Main() {
-                if (Acquire(null, out var owner) < 0) {
+                if (!ForwardAcquire(out var owner)) {
                     return 1;
                 }
                 return 0;
@@ -997,6 +1137,86 @@ public sealed class NativeComCatalogTests
                 NativeImportCatalogId = catalog.Identity,
                 NativeImportCatalog = catalog,
             }), Is.True);
+    }
+
+    [Test]
+    public void GenericComCatalogForwardsBufferContentsAndSizeFromOneBorrowedOwner()
+    {
+        var catalog = NativeImportCatalog.WindowsX64;
+        var structures = catalog.ComOwners.Select(static owner =>
+            new BoundStruct(owner.BoundOwnerName, [], owner.CellSize) {
+                IsUnique = true,
+                CleanupMethod = owner.BoundOwnerName + ".Close",
+            }).ToImmutableArray();
+        var program = new BoundProgram([], -1) {
+            Structures = structures,
+            NativeImportCatalogId = catalog.Identity,
+            NativeImportCatalog = catalog,
+        };
+        var functions = NativeComCallContract.DirectMethodFunctions(catalog, structures,
+            new HashSet<string>(StringComparer.Ordinal) { "CreateVertexShader" });
+        var function = functions.SingleOrDefault(static candidate =>
+            candidate.Name == NativeDx11ComCatalog.DeviceOwnerName + ".CreateVertexShader");
+
+        Assert.That(function, Is.Not.Null);
+        TestAssertions.NotNull(function);
+        Assert.That(function.NativeComParameterMappings, Is.EqualTo([
+            new NativeComBoundParameterMapping(1, 1),
+            new NativeComBoundParameterMapping(1, 2),
+            new NativeComBoundParameterMapping(2, 4),
+        ]));
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(function, program), Is.True);
+        var code = new PeCompiler(program with { Functions = functions }, default,
+            managedNodes: false, library: true).Compile();
+        var pointerGetterCall = new byte[] {
+            0x48, 0x8B, 0x80, 0, 0, 0, 0, 0x48, 0x89, 0xC1, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x18,
+        };
+        var sizeGetterCall = new byte[] {
+            0x48, 0x8B, 0x80, 0, 0, 0, 0, 0x48, 0x89, 0xC1, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x20,
+        };
+        Assert.That(code.Code.AsSpan().IndexOf(pointerGetterCall) >= 0, Is.True);
+        Assert.That(code.Code.AsSpan().IndexOf(sizeGetterCall) >= 0, Is.True);
+    }
+
+    [Test]
+    public void D3DCompileCatalogUsesNullForOptionalDiagnosticsOutput()
+    {
+        var catalog = NativeImportCatalog.WindowsX64;
+        Assert.That(catalog.TryGetImport(NativeDx11ComCatalog.CompileShaderFromFileKey,
+            out var definition), Is.True);
+        TestAssertions.NotNull(definition);
+        Assert.That(definition.ParameterTypes[8], Is.EqualTo(PrimitiveType.NativeNullPointer));
+        Assert.That(definition.ParameterContracts[8], Is.EqualTo(NativeImportParameterContract.NullPointerOnly));
+        Assert.That(definition.ComOutputs.Select(static output => output.ParameterIndex), Is.EqualTo([7]));
+        var codeOwner = catalog.ComOwners.Single(owner =>
+            owner.BoundOwnerName == NativeDx11ComCatalog.ShaderCodeOwnerName);
+        Assert.That(codeOwner.AdditionalOutputParameterIndexes, Is.Empty);
+    }
+
+    [Test]
+    public void D3DCreateBufferUsesGenericStorageRecordAndComOutputContracts()
+    {
+        var catalog = NativeImportCatalog.WindowsX64;
+        var structures = catalog.ComOwners.Select(static owner =>
+            new BoundStruct(owner.BoundOwnerName, [], owner.CellSize) {
+                IsUnique = true,
+                CleanupMethod = owner.BoundOwnerName + ".Close",
+            }).ToImmutableArray();
+        var program = new BoundProgram([], -1) {
+            Structures = structures,
+            NativeImportCatalogId = catalog.Identity,
+            NativeImportCatalog = catalog,
+        };
+        var functions = NativeComCallContract.DirectMethodFunctions(catalog, structures,
+            new HashSet<string>(StringComparer.Ordinal) { "CreateBuffer" });
+        var function = functions.SingleOrDefault(static candidate =>
+            candidate.Name == NativeDx11ComCatalog.DeviceOwnerName + ".CreateBuffer");
+
+        Assert.That(function, Is.Not.Null);
+        TestAssertions.NotNull(function);
+        Assert.That(function.Variables[1].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+        Assert.That(function.Variables[2].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(function, program), Is.True);
     }
 
     [Test]

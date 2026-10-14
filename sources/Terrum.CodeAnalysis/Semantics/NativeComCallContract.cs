@@ -89,9 +89,12 @@ internal static class NativeComCallContract
                         && method.ParameterAdaptations.Any(adaptation => adaptation is null
                             || adaptation.Kind is not (NativeComParameterAdaptationKind.AggregateAddress
                                 or NativeComParameterAdaptationKind.AggregateStorageAddress
+                                or NativeComParameterAdaptationKind.ValueAddress
                                 or NativeComParameterAdaptationKind.ValueOutputAddress
+                                or NativeComParameterAdaptationKind.ValueArrayAddress
                                 or NativeComParameterAdaptationKind.PointerPreservingBaseInterface
-                                or NativeComParameterAdaptationKind.SingleElementOwnerPointerArray))
+                                or NativeComParameterAdaptationKind.SingleElementOwnerPointerArray
+                                or NativeComParameterAdaptationKind.ComObjectBufferContents))
                     || !NativeComCatalog.TryParseSignature(method.Signature, out var returnIdentity,
                         out var parameterIdentities)
                     || parameterIdentities.Length == 0
@@ -104,11 +107,17 @@ internal static class NativeComCallContract
                 var variables = ImmutableArray.CreateBuilder<BoundVariable>(parameterIdentities.Length);
                 variables.Add(new("this", receiverType, false, default));
                 var mappings = ImmutableArray.CreateBuilder<NativeComBoundParameterMapping>();
+                var bufferContentOwnersBySizeParameter = new Dictionary<int, int>();
                 var supported = true;
                 for (var index = 1; index < parameterIdentities.Length; index++)
                 {
                     if (method.HiddenParameters.Any(parameter => parameter.NativeParameterIndex == index))
                     {
+                        continue;
+                    }
+                    if (bufferContentOwnersBySizeParameter.TryGetValue(index, out var bufferOwnerIndex))
+                    {
+                        mappings.Add(new(bufferOwnerIndex, index));
                         continue;
                     }
                     var adaptation = method.ParameterAdaptations.IsDefaultOrEmpty
@@ -154,6 +163,35 @@ internal static class NativeComCallContract
                             false, default));
                         continue;
                     }
+                    if (adaptation?.Kind == NativeComParameterAdaptationKind.ValueAddress)
+                    {
+                        if (!TryResolveBoundType(adaptation.SourceType, catalog, program,
+                                allowVoid: false, out var sourceType))
+                        {
+                            supported = false;
+                            break;
+                        }
+                        AddParameterMapping(mappings, variables.Count, index);
+                        variables.Add(new($"parameter{index}", sourceType, false, default));
+                        continue;
+                    }
+                    if (adaptation?.Kind == NativeComParameterAdaptationKind.ValueArrayAddress)
+                    {
+                        if (!TryResolveBoundType(adaptation.SourceType, catalog, program,
+                                allowVoid: false, out var elementType)
+                            || !NativeComCatalog.TryGetValueArrayElementCount(adaptation.TargetType,
+                                out var elementCount))
+                        {
+                            supported = false;
+                            break;
+                        }
+                        for (var elementIndex = 0; elementIndex < elementCount; elementIndex++)
+                        {
+                            mappings.Add(new(variables.Count, index));
+                            variables.Add(new($"parameter{index}_{elementIndex}", elementType, false, default));
+                        }
+                        continue;
+                    }
                     if (adaptation?.Kind == NativeComParameterAdaptationKind.ValueOutputAddress)
                     {
                         if (!IsValidValueOutputAddressType(adaptation, catalog, program.Structures,
@@ -165,6 +203,23 @@ internal static class NativeComCallContract
                         AddParameterMapping(mappings, variables.Count, index);
                         variables.Add(new($"parameter{index}", PrimitiveType.NativeStorageAddress,
                             false, default));
+                        continue;
+                    }
+                    if (adaptation?.Kind == NativeComParameterAdaptationKind.ComObjectBufferContents)
+                    {
+                        if (!method.BorrowedOwnerParameters.Contains(index)
+                            || adaptation.BufferPointerMethodIdentity is null
+                            || adaptation.BufferSizeMethodIdentity is null
+                            || !TryResolveOwnerPointerType(adaptation.SourceType, catalog, program,
+                                out var bufferOwnerType))
+                        {
+                            supported = false;
+                            break;
+                        }
+                        bufferOwnerIndex = variables.Count;
+                        mappings.Add(new(bufferOwnerIndex, index));
+                        bufferContentOwnersBySizeParameter.Add(index + 1, bufferOwnerIndex);
+                        variables.Add(new($"parameter{index}", bufferOwnerType, false, default));
                         continue;
                     }
                     if (index == method.OutputParameterIndex)
@@ -372,6 +427,9 @@ internal static class NativeComCallContract
                 {
                     continue;
                 }
+                var parameter = call.ParameterIndex(index);
+                var hasForwardedAcquisition = TryGetForwardedImportOutput(
+                    target, parameter, owner, program, out _, out _);
                 var methodIdentity = target.NativeComMethod?.Identity
                     ?? target.NativeComAcquisitionMethodIdentity;
                 var importKey = target.NativeComAcquisitionImportKey
@@ -384,11 +442,11 @@ internal static class NativeComCallContract
                 var isImportAcquisition = owner.AcquisitionKind
                     == NativeComOwnerAcquisitionKind.NativeImportOutput
                     && importKey == owner.AcquisitionIdentity;
-                if (!isMethodOutputAcquisition && !isAdditionalAcquisition && !isImportAcquisition)
+                if (!isMethodOutputAcquisition && !isAdditionalAcquisition && !isImportAcquisition
+                    && !hasForwardedAcquisition)
                 {
                     continue;
                 }
-                var parameter = call.ParameterIndex(index);
                 var nativeParameter = parameter;
                 if (target.NativeComMethod is NativeComMethodDefinition outputMethod
                     && outputMethod.OutputParameterIndex >= 0)
@@ -409,7 +467,12 @@ internal static class NativeComCallContract
                 }
                 if (output.Variable < 0 || output.Variable >= function.Variables.Length
                     || output.Type != function.Variables[output.Variable].Type
-                    || !output.DeclaresVariable || output.IsInit
+                    || output.IsInit
+                    || !(output.DeclaresVariable
+                        && output.Variable >= function.ParameterCount
+                        || !output.DeclaresVariable
+                            && output.Variable < function.ParameterCount
+                            && function.Variables[output.Variable].IsOut)
                     || parameter < 0 || parameter >= target.ParameterCount
                     || parameter >= target.Variables.Length
                     || !target.Variables[parameter].IsOut
@@ -542,8 +605,11 @@ internal static class NativeComCallContract
         }
         return method.BorrowedOwnerParameters.Contains(nativeParameter)
             && (method.ParameterAdaptations.IsDefaultOrEmpty
-                || method.ParameterAdaptations.All(adaptation => adaptation.ParameterIndex != nativeParameter
-                    || adaptation.Kind != NativeComParameterAdaptationKind.ComObjectBufferContents));
+                || method.ParameterAdaptations.All(adaptation =>
+                    adaptation.ParameterIndex != nativeParameter
+                    || adaptation.Kind == NativeComParameterAdaptationKind.ComObjectBufferContents
+                    || adaptation.Kind == NativeComParameterAdaptationKind.PointerPreservingBaseInterface
+                    || adaptation.Kind == NativeComParameterAdaptationKind.SingleElementOwnerPointerArray));
     }
 
     internal static bool IsValidVTableCallFunction(BoundFunction function, BoundProgram program)
@@ -573,6 +639,23 @@ internal static class NativeComCallContract
             || !TryMapParameters(function, parameters, out var boundParameterByNative, out var hiddenParameters))
         {
             return false;
+        }
+        if (!method.ParameterAdaptations.IsDefaultOrEmpty)
+        {
+            foreach (var adaptation in method.ParameterAdaptations)
+            {
+                if (adaptation?.Kind != NativeComParameterAdaptationKind.ComObjectBufferContents)
+                {
+                    continue;
+                }
+                var bufferOwnerParameters = BoundParameterIndices(function, adaptation.ParameterIndex);
+                var sizeOwnerParameters = BoundParameterIndices(function, adaptation.ParameterIndex + 1);
+                if (bufferOwnerParameters.Length != 1 || sizeOwnerParameters.Length != 1
+                    || bufferOwnerParameters[0] != sizeOwnerParameters[0])
+                {
+                    return false;
+                }
+            }
         }
         for (var nativeIndex = 0; nativeIndex < parameters.Length; nativeIndex++)
         {
@@ -671,7 +754,8 @@ internal static class NativeComCallContract
                 || !IsValidBoundParameterType(variable.Type, parameters[nativeIndex], nativeIndex,
                     method, catalog, program)
                 || nativeIndex > 0 && Owner(variable.Type, program) is not null
-                    && !method.BorrowedOwnerParameters.Contains(nativeIndex))
+                    && !method.BorrowedOwnerParameters.Contains(nativeIndex)
+                    && ComObjectBufferContentsAdaptation(method, nativeIndex) is null)
             {
                 return false;
             }
@@ -742,36 +826,63 @@ internal static class NativeComCallContract
                 if (mapping is null || mapping.BoundParameterIndex < 0
                     || mapping.BoundParameterIndex >= function.ParameterCount
                     || mapping.NativeParameterIndex < 0 || mapping.NativeParameterIndex >= nativeParameters.Length
-                    || !mappedParameters.Add(mapping.BoundParameterIndex)
                     || (!mappedNativeParameters.Add(mapping.NativeParameterIndex)
                         && !IsValueArrayAddressParameter(function, mapping.NativeParameterIndex)))
                 {
                     return false;
                 }
+                _ = mappedParameters.Add(mapping.BoundParameterIndex);
+            }
+            foreach (var group in mappings.GroupBy(static mapping => mapping.BoundParameterIndex))
+            {
+                if (group.Count() > 1 && !IsComObjectBufferContentsAliasSet(function, group))
+                {
+                    return false;
+                }
+            }
+            foreach (var mapping in mappings)
+            {
+                if (boundParameterByNative[mapping.NativeParameterIndex] >= 0)
+                {
+                    if (!IsValueArrayAddressParameter(function, mapping.NativeParameterIndex))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+                boundParameterByNative[mapping.NativeParameterIndex] = mapping.BoundParameterIndex;
             }
         }
 
         for (var boundIndex = 0; boundIndex < function.ParameterCount; boundIndex++)
         {
-            var mapping = mappings.IsDefaultOrEmpty ? null
-                : mappings.FirstOrDefault(item => item.BoundParameterIndex == boundIndex);
-            var nativeIndex = mapping?.NativeParameterIndex ?? boundIndex;
-            if (mapping is null
-                && (nativeIndex >= nativeParameters.Length || mappedNativeParameters.Contains(nativeIndex)))
+            if (mappedParameters.Contains(boundIndex))
             {
                 continue;
             }
-            if (boundParameterByNative[nativeIndex] >= 0)
+            var nativeIndex = boundIndex;
+            if (nativeIndex >= nativeParameters.Length || mappedNativeParameters.Contains(nativeIndex))
             {
-                if (!IsValueArrayAddressParameter(function, nativeIndex))
-                {
-                    return false;
-                }
                 continue;
             }
             boundParameterByNative[nativeIndex] = boundIndex;
         }
         return true;
+    }
+
+    private static bool IsComObjectBufferContentsAliasSet(BoundFunction function,
+        IEnumerable<NativeComBoundParameterMapping> mappings)
+    {
+        if (function.NativeComMethod is not NativeComMethodDefinition method)
+        {
+            return false;
+        }
+        var nativeIndices = mappings.Select(static mapping => mapping.NativeParameterIndex)
+            .Order().ToArray();
+        return !method.ParameterAdaptations.IsDefaultOrEmpty
+            && method.ParameterAdaptations.Any(adaptation =>
+                adaptation?.Kind == NativeComParameterAdaptationKind.ComObjectBufferContents
+                && nativeIndices.SequenceEqual([adaptation.ParameterIndex, adaptation.ParameterIndex + 1]));
     }
 
     internal static int[] BoundParameterIndices(BoundFunction function, int nativeIndex)
@@ -800,9 +911,35 @@ internal static class NativeComCallContract
         && method.ParameterAdaptations.Any(adaptation => adaptation.ParameterIndex == nativeIndex
             && adaptation.Kind == NativeComParameterAdaptationKind.ValueArrayAddress);
 
+    internal static NativeComParameterAdaptation? ComObjectBufferContentsAdaptation(
+        NativeComMethodDefinition method, int nativeIndex) =>
+        method.ParameterAdaptations.IsDefaultOrEmpty ? null
+            : method.ParameterAdaptations.SingleOrDefault(adaptation =>
+                adaptation.Kind == NativeComParameterAdaptationKind.ComObjectBufferContents
+                && (adaptation.ParameterIndex == nativeIndex
+                    || adaptation.ParameterIndex + 1 == nativeIndex));
+
+    internal static bool IsComObjectBufferSizeParameter(
+        NativeComParameterAdaptation adaptation, int nativeIndex) =>
+        adaptation.Kind == NativeComParameterAdaptationKind.ComObjectBufferContents
+        && adaptation.ParameterIndex + 1 == nativeIndex;
+
     private static bool IsValidBoundParameterType(PrimitiveType boundType, string signatureType,
         int nativeIndex, NativeComMethodDefinition method, NativeImportCatalog catalog, BoundProgram program)
     {
+        var bufferContents = ComObjectBufferContentsAdaptation(method, nativeIndex);
+        if (bufferContents is not null)
+        {
+            return Owner(boundType, program) is NativeComOwnerDefinition bufferOwner
+                && bufferContents.SourceType == bufferOwner.InterfaceIdentity + "*"
+                && (IsComObjectBufferSizeParameter(bufferContents, nativeIndex)
+                    ? signatureType == "SIZE_T"
+                    : method.BorrowedOwnerParameters.Contains(nativeIndex)
+                        && bufferContents.TargetType == signatureType
+                        && bufferContents.BufferPointerMethodIdentity is not null
+                        && bufferContents.BufferSizeMethodIdentity is not null);
+        }
+
         if (NativeStorageRecordContract.TryGetParameter(method, nativeIndex,
                 out var storageRecordParameter))
         {
@@ -1196,6 +1333,11 @@ internal static class NativeComCallContract
     private static bool IsAcquisition(BoundFunction target, NativeComOwnerDefinition owner,
         int parameter, BoundProgram program)
     {
+        if (TryGetForwardedImportOutput(target, parameter, owner, program, out _, out _))
+        {
+            return true;
+        }
+
         if (target.NativeComAcquisitionMethodIdentity is string acquisitionIdentity)
         {
             return target.NativeComMethod is null
@@ -1228,20 +1370,135 @@ internal static class NativeComCallContract
                 && (isMethodOutput || isAdditionalAcquisition || isAdditionalOutputAcquisition);
         }
         var key = target.NativeComAcquisitionImportKey;
+        if (key is not null && !target.IsExternal)
+        {
+            return IsNativeImportOutputAcquisition(owner, key, owner.OutputParameterIndex, program);
+        }
         if (key is null && target.IsExternal)
         {
             key = target.NativeImportKey;
         }
-        return key is not null && owner.AcquisitionKind == NativeComOwnerAcquisitionKind.NativeImportOutput
-            && owner.AcquisitionIdentity == key
-            && program.NativeImportCatalog is NativeImportCatalog importCatalog
-            && importCatalog.TryGetImport(key, out var import) && import is not null
-            && owner.OutputParameterIndex >= 0 && owner.OutputParameterIndex < import.ParameterContracts.Length
-            && import.ParameterContracts[owner.OutputParameterIndex]
+        return key is not null && IsNativeImportOutputAcquisition(owner, key, parameter, program);
+    }
+
+    private static bool IsNativeImportOutputAcquisition(NativeComOwnerDefinition owner, string importKey,
+        int parameter, BoundProgram program) =>
+        owner.AcquisitionKind == NativeComOwnerAcquisitionKind.NativeImportOutput
+        && owner.AcquisitionIdentity == importKey
+        && (owner.OutputParameterIndex == parameter
+            || owner.AdditionalOutputParameterIndexes.Contains(parameter))
+        && program.NativeImportCatalog is NativeImportCatalog importCatalog
+        && importCatalog.TryGetImport(importKey, out var import) && import is not null
+        && parameter >= 0 && parameter < import.ParameterContracts.Length
+        && import.ParameterContracts[parameter]
                 == NativeImportParameterContract.OwnedNativeComInterfaceOutput
-            && import.ComOutputs.Any(output => output.ParameterIndex == owner.OutputParameterIndex
+        && import.ComOutputs.Any(output => output.ParameterIndex == parameter
                 && output.InterfaceIdentity == owner.InterfaceIdentity
                 && output.Effects.HasFlag(NativeComEffects.AcquiresReference));
+
+    private static bool TryGetForwardedImportOutput(BoundFunction function, int parameter,
+        NativeComOwnerDefinition owner, BoundProgram program, out int importFunctionIndex,
+        out int importParameterIndex)
+    {
+        importFunctionIndex = -1;
+        importParameterIndex = -1;
+        if (function.IsExternal || function.IsCleanup || function.IsConstructor || function.IsClassConstructor
+            || function.DoesNotReturn || function.Intrinsic != BoundIntrinsic.None
+            || function.NativeImportKey is not null || function.NativeComMethod is not null
+            || function.Variables.IsDefault || function.ParameterCount != function.Variables.Length
+            || parameter < 0 || parameter >= function.ParameterCount
+            || !function.Variables[parameter].IsOut
+            || Owner(function.Variables[parameter].Type, program) != owner
+            || function.ReturnType != PrimitiveType.Bool
+            || function.Body is not BoundBlock body || body.Statements.Length != 1
+            || body.Statements[0] is not BoundTryFinally outputScope
+            || outputScope.Body.Statements is not [BoundReturn {
+                Value: BoundBinary {
+                    Type: PrimitiveType.Bool,
+                    Operator: Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals,
+                    Left: BoundCall { Type: PrimitiveType.Int32 } call,
+                    Right: BoundConstant { Type: PrimitiveType.Int32, Value: 0 },
+                },
+            }]
+            || !BoundTreeTraversal.IsWithinLimits(function.Body)
+            || !call.ArgumentParameterIndices.IsDefault || call.IsUnsafeAuthorized
+            || call.Function < 0 || call.Function >= program.Functions.Length)
+        {
+            return false;
+        }
+
+        var importFunction = program.Functions[call.Function];
+        if (importFunction is not { IsExternal: true, NativeImportKey: string importKey })
+        {
+            return false;
+        }
+        if (program.NativeImportCatalog is not NativeImportCatalog catalog
+            || !catalog.TryGetImport(importKey, out var import) || import is null
+            || !catalog.MatchesFunction(importFunction, import, program.Structures)
+            || import.ComOutputs.IsDefaultOrEmpty
+            || import.ComOutputs.Any(static output => output is null
+                || !output.Effects.HasFlag(NativeComEffects.SignedHResult))
+            || outputScope.Finally.Statements.IsDefault)
+        {
+            return false;
+        }
+
+        for (var parameterIndex = 0; parameterIndex < function.ParameterCount; parameterIndex++)
+        {
+            var outputType = function.Variables[parameterIndex].Type;
+            if (!function.Variables[parameterIndex].IsOut
+                || Owner(outputType, program) is not NativeComOwnerDefinition)
+            {
+                continue;
+            }
+            if (!outputScope.Finally.Statements.Any(statement => statement is BoundDrop {
+                    Variable: var outputVariable, IsOutput: true,
+                } && outputVariable == parameterIndex))
+            {
+                return false;
+            }
+        }
+
+        var foundParameter = false;
+        foreach (var outputDefinition in import.ComOutputs)
+        {
+            var outputArgument = -1;
+            for (var argument = 0; argument < call.Arguments.Length; argument++)
+            {
+                if (call.ParameterIndex(argument) == outputDefinition.ParameterIndex)
+                {
+                    if (outputArgument >= 0)
+                    {
+                        return false;
+                    }
+                    outputArgument = argument;
+                }
+            }
+            if (outputArgument < 0
+                || call.Arguments[outputArgument] is not BoundOutArgument output
+                || output.DeclaresVariable || output.IsInit
+                || output.Variable < 0 || output.Variable >= function.ParameterCount
+                || !function.Variables[output.Variable].IsOut
+                || function.Variables[output.Variable].Type != output.Type
+                || Owner(output.Type, program) is not NativeComOwnerDefinition outputOwner
+                || !IsNativeImportOutputAcquisition(outputOwner, importKey,
+                    outputDefinition.ParameterIndex, program))
+            {
+                return false;
+            }
+            if (output.Variable == parameter && outputOwner == owner)
+            {
+                foundParameter = true;
+                importParameterIndex = outputDefinition.ParameterIndex;
+            }
+        }
+
+        if (!foundParameter)
+        {
+            return false;
+        }
+        importFunctionIndex = call.Function;
+        return true;
     }
 
     private static ArgumentException Invalid(string? reason = null) =>

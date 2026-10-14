@@ -11,12 +11,19 @@ public static partial class SemanticVerifier
     private static bool IsNativeComImportOutputParameter(BoundFunction function, int parameter,
         BoundProgram program)
     {
-        return function.IsExternal && program.NativeImportCatalog is NativeImportCatalog catalog
+        if (function.IsExternal && program.NativeImportCatalog is NativeImportCatalog catalog
             && function.NativeImportKey is string key
             && catalog.TryGetImport(key, out var definition) && definition is not null
             && parameter >= 0 && parameter < definition.ParameterTypes.Length
             && definition.ParameterTypes[parameter] == PrimitiveType.NativeComInterfaceOutputAddress
-            && catalog.MatchesFunction(function, definition, program.Structures);
+            && catalog.MatchesFunction(function, definition, program.Structures))
+        {
+            return true;
+        }
+        return parameter >= 0 && parameter < function.ParameterCount
+            && parameter < function.Variables.Length && function.Variables[parameter].IsOut
+            && NativeComCallContract.Owner(function.Variables[parameter].Type, program) is not null
+            && NativeComAcquisitions(function, program)?.ContainsKey(parameter) == true;
     }
 
     private static NativeComOwnerDefinition? VerifiedNativeComOwner(PrimitiveType type, BoundProgram program)

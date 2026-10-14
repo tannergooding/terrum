@@ -148,7 +148,7 @@ public sealed class PublicFixedLayoutStorageTests
             _ = Assert.Throws<ArgumentException>(() => FixedLayoutStorage.Validate(program.Structures))!;
         }
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program))!;
-        if (change == "native-handle")
+        if (change is "native-handle" or "native-carrier")
         {
             _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
         }

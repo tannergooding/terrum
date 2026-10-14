@@ -2285,6 +2285,21 @@ internal sealed partial class Binder
                     View = ResolveConstExpression(read.View, locals, functions, variableCount),
                     Index = ResolveConstExpression(read.Index, locals, functions, variableCount),
                 };
+            case BoundNativeFixedArrayInitialization fixedArray:
+            {
+                var elements = ImmutableArray.CreateBuilder<BoundExpression>(fixedArray.Elements.Length);
+                foreach (var element in fixedArray.Elements)
+                {
+                    elements.Add(ResolveConstExpression(element, locals, functions, variableCount));
+                }
+                return fixedArray with { Elements = elements.MoveToImmutable() };
+            }
+            case BoundNativeFixedArrayElement fixedArrayElement:
+                return fixedArrayElement with {
+                    Index = ResolveConstExpression(fixedArrayElement.Index, locals, functions, variableCount),
+                };
+            case BoundNativeStorageAddress address:
+                return address with { Index = ResolveConstExpression(address.Index, locals, functions, variableCount) };
             case BoundSpanAdvance advance:
                 return advance with { View = ResolveConstExpression(advance.View, locals, functions, variableCount) };
             case BoundOptionalLift lift:

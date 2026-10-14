@@ -13,4 +13,9 @@
     <None Include="Fixtures\Native\*.trng" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Keep unconverted prototypes out while retaining the tracked generic import regression tests. -->
+  <ItemGroup>
+    <Compile Remove="BoundTreeTraversalTests.cs;CliTests.Dx11Sample.cs;CliTests.NativeInputElement.cs;NativeSourceImportTests.Blob.cs;NativeSourceImportTests.Dx11*.cs;NativeSourceImportTests.InputElement.cs;NativeSourceImportTests.NativeWindowMessage.cs;NativeSourceImportTests.SampleArray.cs;NativeSourceImportTests.ShaderCompile.cs;NativeSourceImportTests.Vertex3.cs;NativeSourceImportTests.Win32Window*.cs;NativeSourceImportTests.WindowLifetime.cs" />
+  </ItemGroup>
+
 </Project>

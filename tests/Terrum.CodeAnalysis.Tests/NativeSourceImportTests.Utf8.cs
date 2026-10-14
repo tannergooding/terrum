@@ -77,8 +77,9 @@ public sealed partial class NativeSourceImportTests
             true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
             "test-native-utf8z-without-contract-v1", [missingContract]))!;
-        _ = Assert.Throws<ArgumentException>(() =>
-            new NativeImportCatalog("production-native-utf8z-v1", [CreateUtf8ZImportDefinition()]))!;
+        var productionCatalog = new NativeImportCatalog("production-native-utf8z-v1",
+            [CreateUtf8ZImportDefinition()]);
+        Assert.That(productionCatalog.SupportsParameterType(PrimitiveType.NativeUtf8ZPointer), Is.True);
     }
 
     [Test]

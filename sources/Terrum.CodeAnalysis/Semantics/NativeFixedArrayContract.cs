@@ -16,10 +16,15 @@ internal static class NativeFixedArrayContract
     internal static bool MatchesCatalog(NativeImportCatalog? catalog) =>
         catalog?.SupportsNativeFixedArrayStorage == true;
 
+    internal static bool SupportsRuntimePolicy(NativeImportCatalog? catalog,
+        BoundRuntimePolicy runtimePolicy) =>
+        MatchesCatalog(catalog)
+        && (runtimePolicy == BoundRuntimePolicy.FailFast
+            || runtimePolicy == BoundRuntimePolicy.CheckedExceptions
+                && catalog?.SupportsCheckedFixedArrayStorage == true);
+
     internal static bool MatchesProgram(BoundProgram program) =>
-        (MatchesCatalog(program.NativeImportCatalog)
-            && program.RuntimePolicy == BoundRuntimePolicy.FailFast)
-        || NativeWindowsModulePathContract.MatchesPathStorageProgram(program);
+        SupportsRuntimePolicy(program.NativeImportCatalog, program.RuntimePolicy);
 
     internal static bool TryGetLayout(PrimitiveType carrierType, PrimitiveType elementType, int elementCount,
         IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog,
