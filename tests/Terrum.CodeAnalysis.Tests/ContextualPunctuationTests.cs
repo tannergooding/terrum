@@ -140,12 +140,22 @@ public sealed class ContextualPunctuationTests
         Assert.That(tree.HasErrors, Is.True);
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
-    [TestCase("interface I : Other { }")]
     [TestCase("enum E : int32 { A = 1 }")]
     [TestCase("[param(value): Policy] void F(int32 value) { }")]
     [TestCase("void F() { var pair = (name: 1, other: 2); }")]
     public void UnsupportedColonRolesDoNotBecomeImplemented(string source) =>
         Assert.That(SyntaxTree.Parse(source).HasErrors, Is.True);
+
+    [Test]
+    public void InterfaceBaseListUsesTheDeclaredInterfaceCompositionSyntax()
+    {
+        const string source = "interface I : Other, Third { }";
+        var tree = SyntaxTree.Parse(source);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+        Assert.That(tree.Root.DescendantNodes().Count(static node => node.Kind == SyntaxKind.ConformanceList),
+            Is.EqualTo(1));
+    }
 
     [Test]
     public void StringInteriorsRemainOutsidePunctuationRoles()

@@ -325,6 +325,23 @@ internal sealed class Parser
                         attribute.Add(Take());
                     }
                 }
+                else if (attributeName == "Terrum.Interop.NativeImport")
+                {
+                    attribute.Add(Expect(TokenKind.StringLiteral));
+                    if (Current.Kind == TokenKind.Comma)
+                    {
+                        attribute.Add(Take());
+                        attribute.Add(Expect(TokenKind.StringLiteral));
+                    }
+                }
+                else if (attributeName == "Terrum.Interop.NativeOutput")
+                {
+                    attribute.Add(Expect(TokenKind.NumericLiteral));
+                }
+                else if (attributeName == "Terrum.Interop.NativeComAcquisition")
+                {
+                    attribute.Add(Expect(TokenKind.NumericLiteral));
+                }
                 else if (Current.Kind == TokenKind.StringLiteral)
                 {
                     attribute.Add(Take());
@@ -392,7 +409,14 @@ internal sealed class Parser
         {
             children.Add(Take());
             children.Add(Expect(TokenKind.Identifier));
-            children.Add(ParseTypeParameters(interfaceParameters: true));
+            if (Current.Kind == TokenKind.Less)
+            {
+                children.Add(ParseTypeParameters(interfaceParameters: true));
+            }
+            if (Current.Kind == TokenKind.Colon)
+            {
+                children.Add(ParseConformances());
+            }
             children.Add(Expect(TokenKind.OpenBrace));
             while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
             {
