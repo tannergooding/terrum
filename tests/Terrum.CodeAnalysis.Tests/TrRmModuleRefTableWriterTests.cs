@@ -2,13 +2,13 @@
 
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmModuleRefTableWriterTests
 {
-    [Fact]
+    [Test]
     public void ComposesPackedAndExternalReferencesWithModulePartitions()
     {
         var nameBytes = TrRmStringTableWriter.EncodeNames([("A", 0), ("B", 2), ("X", 1)]);
@@ -33,13 +33,13 @@ public sealed class TrRmModuleRefTableWriterTests
 
         rows[0] = rows[0] with { ProducerIdentityStringRow = 3 };
         var refs = new TrRmModuleRefTableReader(refBytes, 2, names, modules);
-        Assert.Equal("B", refs.GetProducerIdentity(1));
-        Assert.Equal("X", refs.GetProducerIdentity(2));
-        Assert.Equal(1, refs.GetOwnerModule(1));
-        Assert.Equal(2, refs.GetOwnerModule(2));
+        Assert.That(refs.GetProducerIdentity(1), Is.EqualTo("B"));
+        Assert.That(refs.GetProducerIdentity(2), Is.EqualTo("X"));
+        Assert.That(refs.GetOwnerModule(1), Is.EqualTo(1));
+        Assert.That(refs.GetOwnerModule(2), Is.EqualTo(2));
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidProducerIdentityRequirementsAndModulePartition()
     {
         var packed = new TrRmModuleRefRow(2, 1, 1);

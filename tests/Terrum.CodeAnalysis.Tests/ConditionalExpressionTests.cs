@@ -11,74 +11,67 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ConditionalExpressionTests
 {
-    [Fact]
+    [Test]
     public void ConditionalIsRightAssociativeAndBelowBinaryOperators()
     {
         const string Source = "int32 Main() { return true || false ? 1 + 2 : false ? 4 : 5; }";
         var tree = SyntaxTree.Parse(Source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(Source, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         var choices = tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ConditionalExpression).ToArray();
-        Assert.Equal(2, choices.Length);
-        Assert.Equal(SyntaxKind.BinaryExpression, Assert.IsType<SyntaxNode>(choices[0].Children[0]).Kind);
-        Assert.Equal(SyntaxKind.BinaryExpression, Assert.IsType<SyntaxNode>(choices[0].Children[2]).Kind);
-        Assert.Same(choices[1], choices[0].Children[4]);
+        Assert.That(choices.Length, Is.EqualTo(2));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual0 = choices[0].Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual0!; }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual1 = choices[0].Children[2]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual1!; }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
+        Assert.That(choices[0].Children[4], Is.SameAs(choices[1]));
     }
 
-    [Fact]
+    [Test]
     public void SuppliedScannerTokensAndOrdinarySyntaxPreserveTheSameChoice()
     {
         const string Source = "int32 Main() { return /* choice */ true ? 42 : false ? 1 : 2; }";
         var lexical = Lexer.Lex(SourceText.From(Source));
         var supplied = SyntaxTree.Parse(lexical);
         var ordinary = SyntaxTree.Parse(lexical.Source);
-        Assert.False(supplied.HasErrors);
-        Assert.Equal(Source, supplied.Root.ToFullString());
-        Assert.Equal(ordinary.ContentId, supplied.ContentId);
-        Assert.Equal<Diagnostic>(ordinary.Diagnostics, supplied.Diagnostics);
-        Assert.Equal(ordinary.Root.DescendantNodes().Select(node => node.Kind),
-            supplied.Root.DescendantNodes().Select(node => node.Kind));
-        Assert.Contains(lexical.Tokens, token => token.Kind == TokenKind.Question);
+        Assert.That(supplied.HasErrors, Is.False);
+        Assert.That(supplied.Root.ToFullString(), Is.EqualTo(Source));
+        Assert.That(supplied.ContentId, Is.EqualTo(ordinary.ContentId));
+        Assert.That(supplied.Diagnostics, Is.EqualTo(ordinary.Diagnostics));
+        Assert.That(supplied.Root.DescendantNodes().Select(node => node.Kind), Is.EqualTo(ordinary.Root.DescendantNodes().Select(node => node.Kind)));
+        Assert.That(global::System.Linq.Enumerable.Any(lexical.Tokens,token => token.Kind == TokenKind.Question),Is.True);
     }
-
-    [Theory]
-    [InlineData("true ? : 1", TokenKind.Identifier)]
-    [InlineData("true ? 1 2", TokenKind.Colon)]
-    [InlineData("true ? 1 : ", TokenKind.Identifier)]
+    [TestCase("true ? : 1",TokenKind.Identifier)]
+    [TestCase("true ? 1 2",TokenKind.Colon)]
+    [TestCase("true ? 1 : ",TokenKind.Identifier)]
     public void MissingConditionalPartPreservesSourceAndFollowingStatement(string expression, TokenKind missing)
     {
         var source = "int32 Main() { int32 n = " + expression + "; return 42; }";
         var tree = SyntaxTree.Parse(source);
-        Assert.True(tree.HasErrors);
-        Assert.Equal(source, tree.Root.ToFullString());
-        var choice = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ConditionalExpression);
-        Assert.Contains(choice.DescendantTokens(), token => token.Kind == missing && token.IsMissing);
-        Assert.Equal(1, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ReturnStatement));
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+        var choice = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ConditionalExpression);
+        Assert.That(global::System.Linq.Enumerable.Any(choice.DescendantTokens(),token => token.Kind == missing && token.IsMissing),Is.True);
+        Assert.That(tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ReturnStatement), Is.EqualTo(1));
     }
-
-    [Theory]
-    [InlineData("var value = true ? 1 : 2;")]
-    [InlineData("var value = false ? null : null;")]
-    [InlineData("var value = true ? int32(1) : uint32(2);")]
-    [InlineData("int32 value = true ? 1 : uint32(2);")]
+    [TestCase("var value = true ? 1 : 2;")]
+    [TestCase("var value = false ? null : null;")]
+    [TestCase("var value = true ? int32(1) : uint32(2);")]
+    [TestCase("int32 value = true ? 1 : uint32(2);")]
     public void NoLiteralFallbackOrUnapprovedSourceJoin(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { " + declaration + " return 42; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007"
-            || diagnostic.Code == "TRM3014");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"
+            || diagnostic.Code == "TRM3014"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void OnlySelectedArmExecutesAndResultLiteralsUseTheirContext(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -89,12 +82,10 @@ public sealed class ConditionalExpressionTests
                 return Choose(true) + int32(number) - 42;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(Source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void GenericAndRequiredConstantsEvaluateSelectedArm(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -107,22 +98,18 @@ public sealed class ConditionalExpressionTests
                 return Select<int32>(false, 0, selected + 1);
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(Source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("[NoThrow] int32 F() { return false ? 1 / 0 : 42; }")]
-    [InlineData("[NoThrow] int32 F() { return true ? 42 : Throw(); } int32 Throw() { require false; return 0; }")]
+    [TestCase("[NoThrow] int32 F() { return false ? 1 / 0 : 42; }")]
+    [TestCase("[NoThrow] int32 F() { return true ? 42 : Throw(); } int32 Throw() { require false; return 0; }")]
     public void NoThrowChecksInactiveArm(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ConditionOutputsAreAvailableOnlyOnTheirEstablishedPath(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -137,18 +124,16 @@ public sealed class ConditionalExpressionTests
                 return first + second;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(Source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
 
         var invalid = Compilation.Create(SyntaxTree.Parse("""
             bool Produce(out int32 value) { return false; }
             int32 Main() { return Produce(out var missing) ? 42 : missing; }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.True(invalid.HasErrors);
+        Assert.That(invalid.HasErrors, Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void SelectedCopyStructUsesItsIndirectReturnStorage(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -160,36 +145,36 @@ public sealed class ConditionalExpressionTests
             Pair Pick(bool first) { return first ? new Pair(42, 0) : new Pair(0, 42); }
             int32 Main() { Pair value = Pick(true); return int32(value.First); }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(Source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void VerifierRejectsMalformedConditionAndResultArms()
     {
         var program = Compile("int32 Main() { bool flag = true; return flag ? 42 : 0; }",
             NativeRuntimePolicy.FailFast);
         var function = program.Functions[program.EntryPoint];
-        var result = Assert.IsType<BoundReturn>(function.Body.Statements[^1]);
-        var choice = Assert.IsType<BoundConditional>(result.Value);
+        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual2 = function.Body.Statements[^1]; Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual2!; }))();
+        var choice = ((global::System.Func<BoundConditional>)(() => { var __nunitActual3 = result.Value; Assert.That(__nunitActual3, Is.TypeOf<BoundConditional>()); return (BoundConditional)__nunitActual3!; }))();
         foreach (var malformed in new[] {
             choice with { Condition = choice.WhenTrue },
             choice with { WhenFalse = choice.Condition },
         })
         {
-            var changed = function with { Body = function.Body with {
-                Statements = function.Body.Statements.SetItem(function.Body.Statements.Length - 1,
+            var changed = function with {
+                Body = function.Body with {
+                    Statements = function.Body.Statements.SetItem(function.Body.Statements.Length - 1,
                     result with { Value = malformed }),
-            } };
+                }
+            };
             Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
                 Functions = program.Functions.SetItem(program.EntryPoint, changed),
             }));
         }
 
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void CheckedConditionalOutcomePublishesEitherSelectedOutput(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -201,12 +186,10 @@ public sealed class ConditionalExpressionTests
             }
             int32 Main() { return Pick(false); }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(Source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ConditionalMoveTransfersOnlySelectedOwner(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -222,12 +205,10 @@ public sealed class ConditionalExpressionTests
                 return selected.Value;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(Source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ManagedSelectedResultRemainsRootedAcrossCollection(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -242,48 +223,45 @@ public sealed class ConditionalExpressionTests
                 return retained.Value;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(Source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ConditionalPersistsOnlyInFeatureSelectedProducerAndServicesBothConsumers(NativeRuntimePolicy policy)
     {
         const string Library = "public int32 Choose(bool first) { return first ? 42 : 1; }";
         const string Consumer = "int32 Main() { return Choose(true); }";
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(Library), (BoundRuntimePolicy)policy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producerProgram = Assert.IsType<BoundProgram>(library.Program);
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = library.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Choose"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var forgedOldReader = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forgedOldReader.AsSpan(4, 4), 40);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedOldReader));
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer), reference,
             runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = Assert.IsType<BoundProgram>(consumerCompilation.Program);
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Choose"], "Conditional", policy);
         var nativeConsumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(nativeConsumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
+        Assert.That(nativeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(nativeConsumerCompilation.Program), [nativeProducer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = nativeConsumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), [nativeProducer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     private static BoundProgram Compile(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
     }
 }

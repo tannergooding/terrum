@@ -7,13 +7,13 @@ using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Fact]
+    [Test]
     public async Task ValidateTrRmStructureAcceptsMinimalArtifactAndRejectsCorruptionAsync()
     {
         var module = new byte[44];
@@ -31,13 +31,12 @@ public sealed partial class CliTests
         {
             await File.WriteAllBytesAsync(path, artifact);
             var (exit, output, error) = await RunAsync([], "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using (var result = JsonDocument.Parse(output))
             {
-                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
-                Assert.Equal("framing-and-structural-metadata",
-                    result.RootElement.GetProperty("scope").GetString());
+                Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
+                Assert.That(result.RootElement.GetProperty("scope").GetString(), Is.EqualTo("framing-and-structural-metadata"));
             }
 
             var stringStart = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(48 + 8)));
@@ -45,12 +44,12 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, artifact);
             var (invalidExit, invalidOutput, invalidError) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(1, invalidExit);
-            Assert.Empty(invalidError);
+            Assert.That(invalidExit, Is.EqualTo(1));
+            Assert.That(invalidError, Is.Empty);
             using var invalid = JsonDocument.Parse(invalidOutput);
-            Assert.False(invalid.RootElement.GetProperty("success").GetBoolean());
-            Assert.Equal("TRM5001", invalid.RootElement.GetProperty("diagnostics")[0]
-                .GetProperty("code").GetString());
+            Assert.That(invalid.RootElement.GetProperty("success").GetBoolean(), Is.False);
+            Assert.That(invalid.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
         }
         finally
         {
@@ -58,27 +57,27 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ValidateTrRmStructureReportsMissingInputAndUsageAsync()
     {
         var missing = Path.Combine(Path.GetTempPath(), $"terrum-trrm-missing-{Guid.NewGuid():N}.trrm");
         var (missingExit, missingOutput, _) = await RunAsync([],
             "validate-trrm-structure", missing, "--json");
-        Assert.Equal(2, missingExit);
+        Assert.That(missingExit, Is.EqualTo(2));
         using (var result = JsonDocument.Parse(missingOutput))
         {
-            Assert.Equal("TRM2001", result.RootElement.GetProperty("diagnostics")[0]
-                .GetProperty("code").GetString());
+            Assert.That(result.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
         }
         var (usageExit, usageOutput, _) = await RunAsync([],
             "validate-trrm-structure", "-", "--json");
-        Assert.Equal(2, usageExit);
+        Assert.That(usageExit, Is.EqualTo(2));
         using var usage = JsonDocument.Parse(usageOutput);
-        Assert.Equal("TRM2000", usage.RootElement.GetProperty("diagnostics")[0]
-            .GetProperty("code").GetString());
+        Assert.That(usage.RootElement.GetProperty("diagnostics")[0]
+            .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
     }
 
-    [Fact]
+    [Test]
     public async Task ValidateTrRmCompactLinearChecksBodiesWithoutChangingStructuralValidationAsync()
     {
         var module = new byte[44];
@@ -132,50 +131,49 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Encode());
             var (exit, output, error) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(0, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using (var result = JsonDocument.Parse(output))
             {
-                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
-                Assert.Equal("framing-structural-metadata-and-compact-linear-shapes",
-                    result.RootElement.GetProperty("scope").GetString());
+                Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
+                Assert.That(result.RootElement.GetProperty("scope").GetString(), Is.EqualTo("framing-structural-metadata-and-compact-linear-shapes"));
             }
 
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 0);
             await File.WriteAllBytesAsync(path, Encode());
             var (operationExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(0, operationExit);
+            Assert.That(operationExit, Is.EqualTo(0));
 
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 2);
             await File.WriteAllBytesAsync(path, Encode());
             var (structuralMapExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structuralMapExit);
+            Assert.That(structuralMapExit, Is.EqualTo(0));
             var (invalidMapExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(1, invalidMapExit);
+            Assert.That(invalidMapExit, Is.EqualTo(1));
 
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(12), 2);
             await File.WriteAllBytesAsync(path, Encode());
             var (invalidBlockExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(1, invalidBlockExit);
+            Assert.That(invalidBlockExit, Is.EqualTo(1));
 
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(12), 1);
             body[8] = 0x08;
             await File.WriteAllBytesAsync(path, Encode());
             var (structuralExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structuralExit);
+            Assert.That(structuralExit, Is.EqualTo(0));
             var (invalidExit, invalidOutput, invalidError) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(1, invalidExit);
-            Assert.Empty(invalidError);
+            Assert.That(invalidExit, Is.EqualTo(1));
+            Assert.That(invalidError, Is.Empty);
             using var invalid = JsonDocument.Parse(invalidOutput);
-            Assert.Equal("TRM5001", invalid.RootElement.GetProperty("diagnostics")[0]
-                .GetProperty("code").GetString());
+            Assert.That(invalid.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
         }
         finally
         {
@@ -183,7 +181,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ValidateTrRmCompactLinearChecksPersistedLocalCallAsync()
     {
         var module = new byte[44];
@@ -267,17 +265,17 @@ public sealed partial class CliTests
                 "validate-trrm-compact-linear", "validate-trrm-compact" })
             {
                 var (valid, output, error) = await RunAsync([], command, path, "--json");
-                Assert.True(valid == 0, output + error);
+                Assert.That(valid == 0, Is.True, output + error);
             }
 
             caller[9] = 0;
             await File.WriteAllBytesAsync(path, Artifact(module, 1, caller));
             var (structural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structural);
+            Assert.That(structural, Is.EqualTo(0));
             var (invalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(1, invalid);
+            Assert.That(invalid, Is.EqualTo(1));
 
             var packedModule = new byte[88];
             module.CopyTo(packedModule, 0);
@@ -296,15 +294,15 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Artifact(packedModule, 2, packedCaller));
             var (packedValid, packedOutput, packedError) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.True(packedValid == 0, packedOutput + packedError);
+            Assert.That(packedValid == 0, Is.True, packedOutput + packedError);
             methods[40] = 0;
             await File.WriteAllBytesAsync(path, Artifact(packedModule, 2, packedCaller));
             var (packedStructural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, packedStructural);
+            Assert.That(packedStructural, Is.EqualTo(0));
             var (packedInvalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(1, packedInvalid);
+            Assert.That(packedInvalid, Is.EqualTo(1));
 
             methods[40] = 2;
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(52), 0);
@@ -313,17 +311,17 @@ public sealed partial class CliTests
                 imported: true));
             var (importedValid, importedOutput, importedError) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.True(importedValid == 0, importedOutput + importedError);
+            Assert.That(importedValid == 0, Is.True, importedOutput + importedError);
 
             BinaryPrimitives.WriteUInt32LittleEndian(moduleRef.AsSpan(8), 1);
             await File.WriteAllBytesAsync(path, Artifact(module, 1, importedCaller,
                 imported: true));
             var (importedStructural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, importedStructural);
+            Assert.That(importedStructural, Is.EqualTo(0));
             var (importedInvalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(1, importedInvalid);
+            Assert.That(importedInvalid, Is.EqualTo(1));
 
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(28), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(moduleRef.AsSpan(8), 0);
@@ -341,7 +339,7 @@ public sealed partial class CliTests
                     "validate-trrm-compact-linear", "validate-trrm-compact" })
                 {
                     var (valid, output, error) = await RunAsync([], command, path, "--json");
-                    Assert.True(valid == 0, output + error);
+                    Assert.That(valid == 0, Is.True, output + error);
                 }
 
                 BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(8), 4);
@@ -349,10 +347,10 @@ public sealed partial class CliTests
                     callBody, imported, typeOwned: true));
                 var (ownerStructural, _, _) = await RunAsync([],
                     "validate-trrm-structure", path, "--json");
-                Assert.Equal(0, ownerStructural);
+                Assert.That(ownerStructural, Is.EqualTo(0));
                 var (ownerInvalid, _, _) = await RunAsync([],
                     "validate-trrm-compact-linear", path, "--json");
-                Assert.Equal(1, ownerInvalid);
+                Assert.That(ownerInvalid, Is.EqualTo(1));
                 BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(8), 6);
             }
         }
@@ -362,7 +360,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ValidateTrRmCompactIndexedChecksBodiesAndSourceLocationsAsync()
     {
         var module = new byte[44];
@@ -430,43 +428,42 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Encode());
             var (exit, output, error) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(0, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using (var result = JsonDocument.Parse(output))
             {
-                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
-                Assert.Equal("framing-structural-metadata-and-compact-indexed-shapes",
-                    result.RootElement.GetProperty("scope").GetString());
+                Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
+                Assert.That(result.RootElement.GetProperty("scope").GetString(), Is.EqualTo("framing-structural-metadata-and-compact-indexed-shapes"));
             }
 
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 2);
             await File.WriteAllBytesAsync(path, Encode());
             var (structuralExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structuralExit);
+            Assert.That(structuralExit, Is.EqualTo(0));
             var (invalidMapExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, invalidMapExit);
+            Assert.That(invalidMapExit, Is.EqualTo(1));
 
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(12), 4);
             await File.WriteAllBytesAsync(path, Encode());
             var (invalidBlockExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, invalidBlockExit);
+            Assert.That(invalidBlockExit, Is.EqualTo(1));
 
             BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(12), 2);
             body[77] = 4;
             await File.WriteAllBytesAsync(path, Encode());
             var (opaqueExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, opaqueExit);
+            Assert.That(opaqueExit, Is.EqualTo(0));
             var (invalidBodyExit, invalidOutput, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, invalidBodyExit);
+            Assert.That(invalidBodyExit, Is.EqualTo(1));
             using var invalid = JsonDocument.Parse(invalidOutput);
-            Assert.Equal("TRM5001", invalid.RootElement.GetProperty("diagnostics")[0]
-                .GetProperty("code").GetString());
+            Assert.That(invalid.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
 
             body[77] = 2;
             var methodRows = new byte[56];
@@ -496,32 +493,31 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Encode(methodRows, 2, bodyRows, 2, mixedMap, 2));
             var (mixedExit, mixedOutput, _) = await RunAsync([],
                 "validate-trrm-compact", path, "--json");
-            Assert.Equal(0, mixedExit);
+            Assert.That(mixedExit, Is.EqualTo(0));
             using (var result = JsonDocument.Parse(mixedOutput))
             {
-                Assert.Equal("framing-structural-metadata-and-compact-shapes",
-                    result.RootElement.GetProperty("scope").GetString());
+                Assert.That(result.RootElement.GetProperty("scope").GetString(), Is.EqualTo("framing-structural-metadata-and-compact-shapes"));
             }
 
             var (indexedOnlyExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
             var (linearOnlyExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
-            Assert.Equal(1, indexedOnlyExit);
-            Assert.Equal(1, linearOnlyExit);
+            Assert.That(indexedOnlyExit, Is.EqualTo(1));
+            Assert.That(linearOnlyExit, Is.EqualTo(1));
 
             BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(48), 1);
             await File.WriteAllBytesAsync(path, Encode(methodRows, 2, bodyRows, 2, mixedMap, 2));
             var (invalidLinearLocationExit, _, _) = await RunAsync([],
                 "validate-trrm-compact", path, "--json");
-            Assert.Equal(1, invalidLinearLocationExit);
+            Assert.That(invalidLinearLocationExit, Is.EqualTo(1));
 
             BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(48), 0);
             bodyRows[12 + body.Length - 8] = 0;
             await File.WriteAllBytesAsync(path, Encode(methodRows, 2, bodyRows, 2, mixedMap, 2));
             var (unsupportedExit, _, _) = await RunAsync([],
                 "validate-trrm-compact", path, "--json");
-            Assert.Equal(1, unsupportedExit);
+            Assert.That(unsupportedExit, Is.EqualTo(1));
         }
         finally
         {
@@ -529,7 +525,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ValidateTrRmCompactIndexedChecksPersistedCallMethodRowsAsync()
     {
         var module = new byte[44];
@@ -605,33 +601,33 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Artifact());
             var (valid, output, error) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(0, valid);
-            Assert.Empty(error);
+            Assert.That(valid, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using (var result = JsonDocument.Parse(output))
             {
-                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+                Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
             }
 
             byte[] operationBytes = [0x12, 1, 1, 0, 0x83, 1];
             var operation = body.AsSpan().IndexOf(operationBytes);
-            Assert.True(operation >= 0);
+            Assert.That(operation >= 0, Is.True);
             body[operation + 2] = 2;
             await File.WriteAllBytesAsync(path, Artifact());
             var (structural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structural);
+            Assert.That(structural, Is.EqualTo(0));
             var (invalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, invalid);
+            Assert.That(invalid, Is.EqualTo(1));
 
             await File.WriteAllBytesAsync(path, Artifact(withImport: true));
             var (imported, importedOutput, importedError) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(0, imported);
-            Assert.Empty(importedError);
+            Assert.That(imported, Is.EqualTo(0));
+            Assert.That(importedError, Is.Empty);
             using (var result = JsonDocument.Parse(importedOutput))
             {
-                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+                Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
             }
 
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(4), 0);
@@ -642,10 +638,10 @@ public sealed partial class CliTests
                     Artifact(withImport: true, importTarget: target, importPolicy: policy));
                 var (importStructure, _, _) = await RunAsync([],
                     "validate-trrm-structure", path, "--json");
-                Assert.Equal(0, importStructure);
+                Assert.That(importStructure, Is.EqualTo(0));
                 var (incompatibleImport, _, _) = await RunAsync([],
                     "validate-trrm-compact-indexed", path, "--json");
-                Assert.Equal(1, incompatibleImport);
+                Assert.That(incompatibleImport, Is.EqualTo(1));
             }
         }
         finally
@@ -654,7 +650,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ValidateTrRmCompactIndexedChecksPersistedChar16RangeConvertAsync()
     {
         var module = new byte[44];
@@ -712,17 +708,17 @@ public sealed partial class CliTests
                     "validate-trrm-compact-indexed", "validate-trrm-compact" })
                 {
                     var (valid, output, error) = await RunAsync([], command, path, "--json");
-                    Assert.True(valid == 0, output + error);
+                    Assert.That(valid == 0, Is.True, output + error);
                 }
             }
 
             await File.WriteAllBytesAsync(path, Artifact([6, 2, 2, 1, 1], 1, 2));
             var (structural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structural);
+            Assert.That(structural, Is.EqualTo(0));
             var (invalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, invalid);
+            Assert.That(invalid, Is.EqualTo(1));
         }
         finally
         {
@@ -730,7 +726,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ValidateTrRmCompactIndexedChecksPackedCallDefIdsAsync()
     {
         var modules = new byte[88];
@@ -813,76 +809,74 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Artifact());
             var (valid, output, error) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(0, valid);
-            Assert.Empty(error);
+            Assert.That(valid, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using (var result = JsonDocument.Parse(output))
             {
-                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+                Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.True);
             }
 
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 0);
             await File.WriteAllBytesAsync(path, Artifact());
             var (privateStructural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, privateStructural);
+            Assert.That(privateStructural, Is.EqualTo(0));
             var (privateCall, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, privateCall);
+            Assert.That(privateCall, Is.EqualTo(1));
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 2);
 
             BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(4), 0);
             await File.WriteAllBytesAsync(path, Artifact());
             var (targetStructural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, targetStructural);
+            Assert.That(targetStructural, Is.EqualTo(0));
             var (targetMismatch, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, targetMismatch);
+            Assert.That(targetMismatch, Is.EqualTo(1));
             BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(4), 1);
             await File.WriteAllBytesAsync(path, Artifact());
             var (compatibleTarget, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(0, compatibleTarget);
+            Assert.That(compatibleTarget, Is.EqualTo(0));
 
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(28), 1);
             await File.WriteAllBytesAsync(path, Artifact(typeOwned: true));
             var (ownedValid, ownedOutput, ownedError) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.True(ownedValid == 0, ownedOutput + ownedError);
+            Assert.That(ownedValid == 0, Is.True, ownedOutput + ownedError);
 
             BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(20), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(24), 1);
             await File.WriteAllBytesAsync(path, Artifact(typeOwned: true, genericOwner: true));
             var (genericStructural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, genericStructural);
+            Assert.That(genericStructural, Is.EqualTo(0));
             var (genericInvalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, genericInvalid);
+            Assert.That(genericInvalid, Is.EqualTo(1));
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(28), 0);
 
             byte[] encodedCall = [0x12, 2, 0, 2, 0, 0, 0x16, 1, 1];
             var call = body.AsSpan().IndexOf(encodedCall);
-            Assert.True(call >= 0);
+            Assert.That(call >= 0, Is.True);
             body[call + 3] = 1;
             await File.WriteAllBytesAsync(path, Artifact());
             var (structural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structural);
+            Assert.That(structural, Is.EqualTo(0));
             var (invalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, invalid);
+            Assert.That(invalid, Is.EqualTo(1));
         }
         finally
         {
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
+    [TestCase(false,false)]
+    [TestCase(true,false)]
+    [TestCase(false,true)]
     public async Task ValidateTrRmCompactIndexedChecksPersistedLoopRegionAsync(
         bool siblingLoop, bool nestedLoop)
     {
@@ -930,20 +924,20 @@ public sealed partial class CliTests
                 "validate-trrm-compact-indexed", "validate-trrm-compact" })
             {
                 var (valid, output, error) = await RunAsync([], command, path, "--json");
-                Assert.True(valid == 0, output + error);
+                Assert.That(valid == 0, Is.True, output + error);
             }
 
             var region = body.AsSpan().IndexOf(nestedLoop
                 ? new byte[] { 1, 1, 2, 4, 0 } : [1, 0, 2, 4, 0]);
-            Assert.True(region >= 0);
+            Assert.That(region >= 0, Is.True);
             body[region + 2] = 3;
             await File.WriteAllBytesAsync(path, Artifact());
             var (structural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.Equal(0, structural);
+            Assert.That(structural, Is.EqualTo(0));
             var (invalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
-            Assert.Equal(1, invalid);
+            Assert.That(invalid, Is.EqualTo(1));
         }
         finally
         {

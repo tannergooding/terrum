@@ -4,43 +4,43 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmVariableTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EncodesEmptyAndNonemptyBlobRowsWithIndependentStorage()
     {
         byte[] source = [1, 2, 3];
         var bytes = TrRmVariableTableWriter.EncodeBlobs([ReadOnlyMemory<byte>.Empty, source]);
         source[0] = 0;
 
-        Assert.Equal(new uint[] { 0, 0, 3 }, Offsets(bytes, 2));
+        Assert.That(Offsets(bytes, 2), Is.EqualTo(new uint[] { 0, 0, 3 }));
         var reader = new TrRmBlobTableReader(bytes, 2);
-        Assert.Equal(2, reader.Count);
-        Assert.True(reader.GetRow(1).IsEmpty);
-        Assert.Equal(new byte[] { 1, 2, 3 }, reader.GetRow(2).ToArray());
+        Assert.That(reader.Count, Is.EqualTo(2));
+        Assert.That(reader.GetRow(1).IsEmpty, Is.True);
+        Assert.That(reader.GetRow(2).ToArray(), Is.EqualTo(new byte[] { 1, 2, 3 }));
     }
 
-    [Fact]
+    [Test]
     public void BlobContentsRemainOpaqueAndRowsAreIndependentlyIndexed()
     {
         var first = new byte[] { 0x16, 0, 0, 1 };
         var last = new byte[] { 0xFF, 0, 0x16, 0 };
         var section = TrRmVariableTableWriter.EncodeBlobs([first, ReadOnlyMemory<byte>.Empty, last]);
         var reader = new TrRmBlobTableReader(section, 3);
-        Assert.Equal(3, reader.Count);
+        Assert.That(reader.Count, Is.EqualTo(3));
 
-        Assert.Equal(first, reader.GetRow(1).ToArray());
-        Assert.True(reader.GetRow(2).IsEmpty);
-        Assert.Equal(last, reader.GetRow(3).ToArray());
+        Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(first));
+        Assert.That(reader.GetRow(2).IsEmpty, Is.True);
+        Assert.That(reader.GetRow(3).ToArray(), Is.EqualTo(last));
         Assert.Throws<InvalidDataException>(() => ReadBlob(section, 0, 3));
         Assert.Throws<InvalidDataException>(() => ReadBlob(section, 4, 3));
     }
 
-    [Fact]
+    [Test]
     public void RejectsMalformedBlobIndexes()
     {
         byte[] section = TrRmVariableTableWriter.EncodeBlobs([
@@ -66,23 +66,23 @@ public sealed class TrRmVariableTableWriterTests
         return reader.GetRow(row).ToArray();
     }
 
-    [Fact]
+    [Test]
     public void EncodesNonemptyBodyRowsWithoutInterpretingInstructions()
     {
         var bytes = TrRmVariableTableWriter.EncodeBodies([
             new byte[] { 0xFF }, new byte[] { 1, 2 },
         ]);
 
-        Assert.Equal(new uint[] { 0, 1, 3 }, Offsets(bytes, 2));
+        Assert.That(Offsets(bytes, 2), Is.EqualTo(new uint[] { 0, 1, 3 }));
         var reader = new TrRmBodyTableReader(bytes, 2);
-        Assert.Equal(2, reader.Count);
-        Assert.Equal(new byte[] { 0xFF }, reader.GetRow(1).ToArray());
-        Assert.Equal(new byte[] { 1, 2 }, reader.GetRow(2).ToArray());
+        Assert.That(reader.Count, Is.EqualTo(2));
+        Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(new byte[] { 0xFF }));
+        Assert.That(reader.GetRow(2).ToArray(), Is.EqualTo(new byte[] { 1, 2 }));
         Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 0, 2));
         Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 3, 2));
     }
 
-    [Fact]
+    [Test]
     public void RejectsEmptyOrMalformedBodyRows()
     {
         byte[] section = TrRmVariableTableWriter.EncodeBodies([new byte[] { 1 },
@@ -103,7 +103,7 @@ public sealed class TrRmVariableTableWriterTests
         return reader.GetRow(row).ToArray();
     }
 
-    [Fact]
+    [Test]
     public void RejectsAbsentTablesAndEmptyBodies()
     {
         Assert.Throws<ArgumentNullException>(() => TrRmVariableTableWriter.EncodeBlobs(null!));

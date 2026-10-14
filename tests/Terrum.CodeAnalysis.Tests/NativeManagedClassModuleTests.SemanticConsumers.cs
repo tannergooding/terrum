@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -74,10 +74,8 @@ public sealed partial class NativeManagedClassModuleTests
             return root.Data{{(bias ? " + Bias()" : "")}};
         }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedSingleConsumerLinksPrivateClassesAndServesReplacementsAsync(NativeRuntimePolicy policy)
     {
         string[] exports = ["Read", "TryRead", "Fail", "CollectProvider"];
@@ -86,20 +84,19 @@ public sealed partial class NativeManagedClassModuleTests
             "box.Data.First + 1", StringComparison.Ordinal), policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, exports);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(76));
         var source = ManagedConsumerSource(policy, linked: true, bias: false);
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
         var consumerHash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Equal(["Cell", "$producer.Cell"],
-            linked.Classes.Select(static @class => @class.Name));
-        Assert.Equal(41, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
-            .ConfigureAwait(true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(42, await RunSemanticModuleJitAsync(consumer, replacement, policy).ConfigureAwait(true));
-        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+        Assert.That(linked.Classes.Select(static @class => @class.Name), Is.EqualTo(["Cell", "$producer.Cell"]));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
+            .ConfigureAwait(true), Is.EqualTo(41));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunSemanticModuleJitAsync(consumer, replacement, policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(consumerHash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram, exports, "NodeB", policy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram, exports, "NodeB", policy);
@@ -107,16 +104,14 @@ public sealed partial class NativeManagedClassModuleTests
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(Compile(nativeSource, policy,
             NativeModuleCompiler.CreateReference(nativeOriginal), library: false), nativeOriginal, policy);
         var nativeHash = SHA256.HashData(nativeConsumer);
-        Assert.Equal(41, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeOriginal,
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeOriginal,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(41));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedCopyConsumerSampleServesUnchangedSemanticArtifactAsync(NativeRuntimePolicy policy)
     {
         var samples = Path.Combine(RepositoryRoot(), "samples", "native");
@@ -131,22 +126,19 @@ public sealed partial class NativeManagedClassModuleTests
         var replacement = ModuleCompiler.CreateProducer(Compile(replacementSource, policy), exports);
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
         var hash = SHA256.HashData(consumer);
         var linkedOriginal = ModuleCompiler.Link(consumer, original);
         var linkedReplacement = ModuleCompiler.Link(consumer, replacement);
-        Assert.Equal(["Record", "$producer.Record"],
-            linkedReplacement.Classes.Select(static @class => @class.Name));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linkedOriginal, policy)).ConfigureAwait(true));
-        Assert.Equal(44, await ExecuteAsync(NativeEmitter.Emit(linkedReplacement, policy)).ConfigureAwait(true));
-        Assert.Equal(42, await RunSemanticModuleJitAsync(consumer, original, policy).ConfigureAwait(true));
-        Assert.Equal(44, await RunSemanticModuleJitAsync(consumer, replacement, policy).ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(linkedReplacement.Classes.Select(static @class => @class.Name), Is.EqualTo(["Record", "$producer.Record"]));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linkedOriginal, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linkedReplacement, policy)).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(await RunSemanticModuleJitAsync(consumer, original, policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunSemanticModuleJitAsync(consumer, replacement, policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedConsumerSetUsesIndependentHeapsAndUnchangedProvidersAsync(NativeRuntimePolicy policy)
     {
         string[] exports = ["Read", "TryRead", "Fail", "CollectProvider"];
@@ -162,11 +154,11 @@ public sealed partial class NativeManagedClassModuleTests
             library: false);
         var consumer = NativeModuleCompiler.CreateConsumerSet(program, [original, bias], policy);
         var hash = SHA256.HashData(consumer);
-        Assert.Equal("native-20", NativeModuleCompiler.InspectConsumerSet(consumer).NativeProfileVersion);
-        Assert.Equal(41, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [bias, original],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [replacement, bias],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(NativeModuleCompiler.InspectConsumerSet(consumer).NativeProfileVersion, Is.EqualTo("native-20"));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [bias, original],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(41));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [replacement, bias],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var graph = NativeModuleCompiler.CreateGraphConsumer(Compile(source, policy,
             NativeModuleCompiler.CreateGraphReference([original, bias]), library: false),
             [original, bias], policy);
@@ -175,14 +167,12 @@ public sealed partial class NativeManagedClassModuleTests
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(graph, [bias, replacement],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(graph, [bias, replacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NodeOnlySemanticConsumerKeepsRootAcrossUnmanagedImportAsync(NativeRuntimePolicy policy)
     {
         const string ConsumerSource = """
@@ -198,17 +188,15 @@ public sealed partial class NativeManagedClassModuleTests
             ["Value"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile(ConsumerSource, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
-        Assert.Empty(ModuleCompiler.Link(consumer, replacement).Classes);
-        Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
-            .ConfigureAwait(true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, replacement), policy))
-            .ConfigureAwait(true));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(ModuleCompiler.Link(consumer, replacement).Classes, Is.Empty);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
+            .ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, replacement), policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void CurrentSemanticConsumerRetainsCopyOnlyBoundary(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(ConsumerProducerSource, policy),
@@ -217,7 +205,7 @@ public sealed partial class NativeManagedClassModuleTests
             bias: false), policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var oldConsumer = (byte[])consumer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldConsumer.AsSpan(4, 4), 31);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer))!;
         using (var reader = new BinaryReader(new MemoryStream(consumer)))
         {
             reader.BaseStream.Position = 8;
@@ -228,7 +216,7 @@ public sealed partial class NativeManagedClassModuleTests
             _ = reader.ReadInt32();
             _ = reader.ReadInt32();
             _ = reader.ReadInt32();
-            Assert.Equal(1, reader.ReadInt32());
+            Assert.That(reader.ReadInt32(), Is.EqualTo(1));
             SkipString(reader);
             _ = reader.ReadInt32();
             _ = reader.ReadBoolean();
@@ -245,31 +233,31 @@ public sealed partial class NativeManagedClassModuleTests
                 SkipString(reader);
                 reader.BaseStream.Position += 4 + 4 + 4 + 4;
             }
-            Assert.Equal(1, reader.ReadInt32());
+            Assert.That(reader.ReadInt32(), Is.EqualTo(1));
             SkipString(reader);
             reader.BaseStream.Position += 4 + 2;
-            Assert.Equal(2, reader.ReadInt32());
+            Assert.That(reader.ReadInt32(), Is.EqualTo(2));
             SkipString(reader);
             reader.BaseStream.Position += 4 + 4 + 4 + 3;
             SkipString(reader);
             var classTypeOffset = (int)reader.BaseStream.Position;
-            Assert.True(ManagedClassTypes.IsManaged((PrimitiveType)reader.ReadInt32()));
+            Assert.That(ManagedClassTypes.IsManaged((PrimitiveType)reader.ReadInt32()), Is.True);
             var invalidClass = (byte[])consumer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(invalidClass.AsSpan(classTypeOffset, 4), int.MaxValue);
-            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(invalidClass, producer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(invalidClass, producer))!;
         }
 
         var scalarProducer = ModuleCompiler.CreateProducer(Compile(
             "public int32 Value() { return 42; }", policy), ["Value"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(scalarProducer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(scalarProducer.AsSpan(4, 4)), Is.EqualTo(76));
         var scalarConsumer = ModuleCompiler.CreateConsumer(Compile(
             "int32 Main() { return Value(); }", policy,
             ModuleCompiler.CreateReference(scalarProducer), library: false), scalarProducer);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(scalarConsumer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(scalarConsumer.AsSpan(4, 4)), Is.EqualTo(76));
         _ = ModuleCompiler.Link(scalarConsumer, scalarProducer);
         var forged = (byte[])scalarConsumer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), 32);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, scalarProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, scalarProducer))!;
 
         const string OwningProducer = """
             public unique struct Token {
@@ -288,14 +276,14 @@ public sealed partial class NativeManagedClassModuleTests
             """;
         var invalid = Compilation.Create(SyntaxTree.Parse(ManagedConsumer),
             ModuleCompiler.CreateReference(unique), (BoundRuntimePolicy)policy);
-        Assert.Contains(invalid.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(invalid.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
         var nativeUnique = NativeModuleCompiler.CreateProducer(Compile(OwningProducer, policy),
             ["Pass"], "NodeB", policy);
         var nativeBias = NativeModuleCompiler.CreateProducer(Compile(
             "public int32 Bias() { return 0; }", policy), ["Bias"], "NodeA", policy);
         var invalidSet = Compilation.Create(SyntaxTree.Parse(ManagedConsumer),
             NativeModuleCompiler.CreateReferenceSet([nativeUnique, nativeBias]), (BoundRuntimePolicy)policy);
-        Assert.Contains(invalidSet.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(invalidSet.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
 
     private static void SkipString(BinaryReader reader)
@@ -334,7 +322,7 @@ public sealed partial class NativeManagedClassModuleTests
                 ?? throw new InvalidOperationException("Failed to start semantic module JIT.");
             var stderr = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(true);
-            Assert.True(process.ExitCode is >= 0 and <= 255, await stderr.ConfigureAwait(true));
+            Assert.That(process.ExitCode is >= 0 and <= 255, Is.True, await stderr.ConfigureAwait(true));
             return process.ExitCode;
         }
         finally

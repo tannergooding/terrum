@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -27,28 +27,27 @@ public sealed partial class CliTests
     private delegate int TokenCopyOutputExport(
         int index, NativeToken first, NativeToken second, ref NativeToken result);
 
-    [Fact]
+    [Test]
     public void CompilerPrimitivesLibraryExecutesConcreteCopyAlgorithms()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "Compiler-primitives exports require Windows x64.");
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True, "Compiler-primitives exports require Windows x64.");
 
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing configuration directory.");
         var libraryPath = Path.Combine(RepositoryRoot(), "artifacts", "bin", "self-host", configuration,
             "terrum-compiler-primitives.dll");
-        Assert.True(File.Exists(libraryPath), $"Compiler-primitives library was not built: {libraryPath}");
+        Assert.That(File.Exists(libraryPath), Is.True, $"Compiler-primitives library was not built: {libraryPath}");
 
-        Assert.Equal(12, Marshal.SizeOf<NativeToken>());
-        Assert.Equal(0, Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Kind)).ToInt32());
-        Assert.Equal(4, Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Range)).ToInt32());
-        Assert.Equal(8, Marshal.SizeOf<NativeSourceRange>());
-        Assert.Equal(4, Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedNativeToken>(nameof(GuardedNativeToken.Before)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedNativeToken>(nameof(GuardedNativeToken.Value)).ToInt32());
-        Assert.Equal(20, Marshal.OffsetOf<GuardedNativeToken>(nameof(GuardedNativeToken.After)).ToInt32());
-        Assert.Equal(28, Marshal.SizeOf<GuardedNativeToken>());
+        Assert.That(Marshal.SizeOf<NativeToken>(), Is.EqualTo(12));
+        Assert.That(Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Kind)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Range)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.SizeOf<NativeSourceRange>(), Is.EqualTo(8));
+        Assert.That(Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.OffsetOf<GuardedNativeToken>(nameof(GuardedNativeToken.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedNativeToken>(nameof(GuardedNativeToken.Value)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.OffsetOf<GuardedNativeToken>(nameof(GuardedNativeToken.After)).ToInt32(), Is.EqualTo(20));
+        Assert.That(Marshal.SizeOf<GuardedNativeToken>(), Is.EqualTo(28));
 
         var handle = NativeLibrary.Load(libraryPath);
         try
@@ -69,7 +68,7 @@ public sealed partial class CliTests
             NativeToken CreateToken(int kind, int start, int length)
             {
                 var range = default(NativeSourceRange);
-                Assert.Equal(1, tryCreateRange(start, length, ref range));
+                Assert.That(tryCreateRange(start, length, ref range), Is.EqualTo(1));
                 return construct(kind, range);
             }
 
@@ -93,60 +92,56 @@ public sealed partial class CliTests
             const ulong AfterCanary = 0x0ECA86425A5A5A5AUL;
             foreach (var (expected, index) in new[] { (first, 0), (second, 1) })
             {
-                var guarded = new GuardedNativeToken
-                {
+                var guarded = new GuardedNativeToken {
                     Before = BeforeCanary,
                     Value = sentinel,
                     After = AfterCanary,
                 };
-                Assert.Equal(1, selectInit(index, first, second, ref guarded.Value));
-                Assert.Equal(BeforeCanary, guarded.Before);
+                Assert.That(selectInit(index, first, second, ref guarded.Value), Is.EqualTo(1));
+                Assert.That(guarded.Before, Is.EqualTo(BeforeCanary));
                 AssertNativeToken(expected, guarded.Value, $"TrySelectTokenCopyInitForAbiTest({index})");
-                Assert.Equal(AfterCanary, guarded.After);
+                Assert.That(guarded.After, Is.EqualTo(AfterCanary));
             }
 
             foreach (var index in new[] { -1, 2, int.MinValue, int.MaxValue })
             {
-                var guarded = new GuardedNativeToken
-                {
+                var guarded = new GuardedNativeToken {
                     Before = BeforeCanary,
                     Value = sentinel,
                     After = AfterCanary,
                 };
-                Assert.Equal(0, selectInit(index, first, second, ref guarded.Value));
-                Assert.Equal(BeforeCanary, guarded.Before);
+                Assert.That(selectInit(index, first, second, ref guarded.Value), Is.EqualTo(0));
+                Assert.That(guarded.Before, Is.EqualTo(BeforeCanary));
                 AssertNativeToken(sentinel, guarded.Value,
                     $"TrySelectTokenCopyInitForAbiTest({index}) failure storage");
-                Assert.Equal(AfterCanary, guarded.After);
+                Assert.That(guarded.After, Is.EqualTo(AfterCanary));
             }
 
             foreach (var (expected, index) in new[] { (first, 0), (second, 1) })
             {
-                var guarded = new GuardedNativeToken
-                {
+                var guarded = new GuardedNativeToken {
                     Before = BeforeCanary,
                     Value = sentinel,
                     After = AfterCanary,
                 };
-                Assert.Equal(1, selectOut(index, first, second, ref guarded.Value));
-                Assert.Equal(BeforeCanary, guarded.Before);
+                Assert.That(selectOut(index, first, second, ref guarded.Value), Is.EqualTo(1));
+                Assert.That(guarded.Before, Is.EqualTo(BeforeCanary));
                 AssertNativeToken(expected, guarded.Value, $"TrySelectTokenCopyForAbiTest({index})");
-                Assert.Equal(AfterCanary, guarded.After);
+                Assert.That(guarded.After, Is.EqualTo(AfterCanary));
             }
 
             foreach (var index in new[] { -1, 2, int.MinValue, int.MaxValue })
             {
-                var guarded = new GuardedNativeToken
-                {
+                var guarded = new GuardedNativeToken {
                     Before = BeforeCanary,
                     Value = sentinel,
                     After = AfterCanary,
                 };
-                Assert.Equal(0, selectOut(index, first, second, ref guarded.Value));
-                Assert.Equal(BeforeCanary, guarded.Before);
+                Assert.That(selectOut(index, first, second, ref guarded.Value), Is.EqualTo(0));
+                Assert.That(guarded.Before, Is.EqualTo(BeforeCanary));
                 AssertNativeToken(sentinel, guarded.Value,
                     $"TrySelectTokenCopyForAbiTest({index}) failure storage");
-                Assert.Equal(AfterCanary, guarded.After);
+                Assert.That(guarded.After, Is.EqualTo(AfterCanary));
             }
 
             AssertNativeToken(firstBefore, first, "first input");
@@ -163,9 +158,7 @@ public sealed partial class CliTests
     private static void AssertNativeSourceRange(
         NativeSourceRange expected, NativeSourceRange actual, string operation)
     {
-        Assert.True(expected.Start == actual.Start,
-            $"{operation}: expected start {expected.Start}, got {actual.Start}.");
-        Assert.True(expected.Length == actual.Length,
-            $"{operation}: expected length {expected.Length}, got {actual.Length}.");
+        Assert.That(expected.Start == actual.Start, Is.True, $"{operation}: expected start {expected.Start}, got {actual.Start}.");
+        Assert.That(expected.Length == actual.Length, Is.True, $"{operation}: expected length {expected.Length}, got {actual.Length}.");
     }
 }

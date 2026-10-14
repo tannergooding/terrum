@@ -5,15 +5,14 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData(true, 42)]
-    [InlineData(false, unchecked((int)0xE0540003))]
+    [TestCase(true,42)]
+    [TestCase(false,unchecked((int)0xE0540003))]
     public async Task NoReturnOutputBranchesExecuteWithoutManufacturedValuesAsync(bool success, int expected)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -23,23 +22,23 @@ public sealed partial class CliTests
             source = source.Replace("return Select(true);", "return Select(false);", StringComparison.Ordinal);
         }
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "jit", "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(expected, exit);
-        Assert.Empty(output);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(expected));
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public async Task NonReturningTailCallNeedsNoInventedReturnValueAsync()
     {
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
             "[DoesNotReturn] void Stop() { require false; } int32 Main() { Stop(); }"),
             "jit", "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(unchecked((int)0xE0540003), exit);
-        Assert.Empty(output);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540003)));
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public async Task UnprovedNoReturnDeclarationPreservesPriorArtifactAsync()
     {
         var path = Path.Combine(Path.GetTempPath(), $"terrum-no-return-{Guid.NewGuid():N}.exe");
@@ -50,11 +49,11 @@ public sealed partial class CliTests
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
                 "[DoesNotReturn] void Stop() { return; } int32 Main() { Stop(); }"),
                 "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
-            Assert.Equal(1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("TRM3018", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM3018"));
+            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
         }
         finally
         {

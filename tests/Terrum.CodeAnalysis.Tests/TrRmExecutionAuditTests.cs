@@ -10,17 +10,15 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmExecutionAuditTests
 {
     private static readonly byte[] s_return42 = [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
-
-    [Theory]
-    [InlineData(true, 20)]
-    [InlineData(false, 42)]
+    [TestCase(true,20)]
+    [TestCase(false,42)]
     public void IndependentEagerSelectUsesAlreadyDefinedValues(bool chooseFirst, int expected)
     {
         byte[] body =
@@ -35,90 +33,78 @@ public sealed class TrRmExecutionAuditTests
         var artifact = Artifact(body);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(PrimitiveType.Int32, 0xFFFF_FFF9UL, 3UL, 0xFFFF_FFFEUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt32, 0xFFFF_FFFFUL, 3UL, 0x5555_5555UL, 0UL)]
-    [InlineData(PrimitiveType.Int64, 0xFFFF_FFFF_FFFF_FFF9UL, 3UL,
-        0xFFFF_FFFF_FFFF_FFFEUL, 0xFFFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, 0xFFFF_FFFF_FFFF_FFFFUL, 10UL,
-        0x1999_9999_9999_9999UL, 5UL)]
+    [TestCase(PrimitiveType.Int32,0xFFFF_FFF9UL,3UL,0xFFFF_FFFEUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt32,0xFFFF_FFFFUL,3UL,0x5555_5555UL,0UL)]
+    [TestCase(PrimitiveType.Int64,0xFFFF_FFFF_FFFF_FFF9UL,3UL,        0xFFFF_FFFF_FFFF_FFFEUL,0xFFFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,0xFFFF_FFFF_FFFF_FFFFUL,10UL,        0x1999_9999_9999_9999UL,5UL)]
     public void IndependentCheckedDivRemDefinesAndExecutesBothResults(PrimitiveType type,
         ulong dividend, ulong divisor, ulong quotient, ulong remainder)
     {
         var artifact = Artifact(CheckedDivRemBody(type, dividend, divisor, quotient, remainder));
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(PrimitiveType.Int32, 7UL, 0UL, unchecked((int)0xE0540002))]
-    [InlineData(PrimitiveType.Int32, 0x8000_0000UL, 0xFFFF_FFFFUL, unchecked((int)0xE0540001))]
-    [InlineData(PrimitiveType.Int64, 0x8000_0000_0000_0000UL, 0xFFFF_FFFF_FFFF_FFFFUL,
-        unchecked((int)0xE0540001))]
+    [TestCase(PrimitiveType.Int32,7UL,0UL,unchecked((int)0xE0540002))]
+    [TestCase(PrimitiveType.Int32,0x8000_0000UL,0xFFFF_FFFFUL,unchecked((int)0xE0540001))]
+    [TestCase(PrimitiveType.Int64,0x8000_0000_0000_0000UL,0xFFFF_FFFF_FFFF_FFFFUL,        unchecked((int)0xE0540001))]
     public async Task IndependentCheckedDivRemPreservesFailureStatuses(PrimitiveType type,
         ulong dividend, ulong divisor, int expectedStatus)
     {
         var artifact = Artifact(CheckedDivRemBody(type, dividend, divisor, 0, 0));
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expectedStatus,
-            await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
-                .ConfigureAwait(true));
+        Assert.That(await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
+                .ConfigureAwait(true), Is.EqualTo(expectedStatus));
     }
-
-    [Theory]
-    [InlineData(PrimitiveType.Int32, 10, 0x7FFF_FFFFUL, 1UL, 0x8000_0000UL)]
-    [InlineData(PrimitiveType.UInt32, 10, 0xFFFF_FFFFUL, 1UL, 0UL)]
-    [InlineData(PrimitiveType.Int64, 10, 0x7FFF_FFFF_FFFF_FFFFUL, 1UL, 0x8000_0000_0000_0000UL)]
-    [InlineData(PrimitiveType.UInt64, 10, 0xFFFF_FFFF_FFFF_FFFFUL, 1UL, 0UL)]
-    [InlineData(PrimitiveType.Int32, 11, 0x8000_0000UL, 1UL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt32, 11, 0UL, 1UL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, 11, 0x8000_0000_0000_0000UL, 1UL, 0x7FFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, 11, 0UL, 1UL, 0xFFFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int32, 12, 0x4000_0000UL, 4UL, 0UL)]
-    [InlineData(PrimitiveType.UInt32, 12, 0x8000_0000UL, 2UL, 0UL)]
-    [InlineData(PrimitiveType.Int64, 12, 0x4000_0000_0000_0000UL, 4UL, 0UL)]
-    [InlineData(PrimitiveType.UInt64, 12, 0x8000_0000_0000_0000UL, 2UL, 0UL)]
+    [TestCase(PrimitiveType.Int32,(byte)(10),0x7FFF_FFFFUL,1UL,0x8000_0000UL)]
+    [TestCase(PrimitiveType.UInt32,(byte)(10),0xFFFF_FFFFUL,1UL,0UL)]
+    [TestCase(PrimitiveType.Int64,(byte)(10),0x7FFF_FFFF_FFFF_FFFFUL,1UL,0x8000_0000_0000_0000UL)]
+    [TestCase(PrimitiveType.UInt64,(byte)(10),0xFFFF_FFFF_FFFF_FFFFUL,1UL,0UL)]
+    [TestCase(PrimitiveType.Int32,(byte)(11),0x8000_0000UL,1UL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt32,(byte)(11),0UL,1UL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,(byte)(11),0x8000_0000_0000_0000UL,1UL,0x7FFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,(byte)(11),0UL,1UL,0xFFFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int32,(byte)(12),0x4000_0000UL,4UL,0UL)]
+    [TestCase(PrimitiveType.UInt32,(byte)(12),0x8000_0000UL,2UL,0UL)]
+    [TestCase(PrimitiveType.Int64,(byte)(12),0x4000_0000_0000_0000UL,4UL,0UL)]
+    [TestCase(PrimitiveType.UInt64,(byte)(12),0x8000_0000_0000_0000UL,2UL,0UL)]
     public void IndependentWrappingBinaryExecutesAtTheOperandWidth(PrimitiveType type,
         byte kind, ulong left, ulong right, ulong expected)
     {
         var artifact = Artifact(WrappingBinaryBody(type, kind, left, right, expected));
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
-        Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 1, 0xFFFF_FFFFUL, 0xFFFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 1, 0xFFFF_FFFF_7FFF_FFFFUL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 1, 0x1_0000_0001UL, 1UL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 1, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 1, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int64, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.Int64, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 2, 0xFFFF_FFFFUL, 0UL)]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt32, 2, 0xFFFF_FFFFUL, 0UL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 2, 0xFFFF_FFFFUL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 2, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 2, 0x8000_0000_0000_0000UL, 0x8000_0000UL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 2, 0xFFFF_FFFF_7FFF_FFFFUL, 0x8000_0000UL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 2, 0x0000_0000_8000_0000UL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 2, 0xFFFF_FFFF_FFFF_FFFFUL, 0UL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 2, 0x0000_0001_0000_0000UL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 2, 1UL, 1UL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 2, 0xFFFF_FFFF_FFFF_FFFFUL, 0UL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 2, 0x7FFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 2, 0xFFFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 2, 0x0000_0000_8000_0000UL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 2, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 2, 0x0000_0001_0000_0000UL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 2, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.UInt64,(byte)(1),0xFFFF_FFFFUL,0xFFFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,(byte)(1),0xFFFF_FFFF_7FFF_FFFFUL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.UInt32,(byte)(1),0x1_0000_0001UL,1UL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.Int32,(byte)(1),0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt32,(byte)(1),0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.Int64,(byte)(2),0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.Int64,(byte)(2),0xFFFF_FFFFUL,0xFFFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.UInt64,(byte)(2),0xFFFF_FFFFUL,0UL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.UInt32,(byte)(2),0xFFFF_FFFFUL,0UL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.Int32,(byte)(2),0xFFFF_FFFFUL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.Int32,(byte)(2),0x7FFF_FFFFUL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,(byte)(2),0x8000_0000_0000_0000UL,0x8000_0000UL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,(byte)(2),0xFFFF_FFFF_7FFF_FFFFUL,0x8000_0000UL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,(byte)(2),0x0000_0000_8000_0000UL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt32,(byte)(2),0xFFFF_FFFF_FFFF_FFFFUL,0UL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt32,(byte)(2),0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt32,(byte)(2),0x0000_0001_0000_0000UL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt64,(byte)(2),1UL,1UL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt64,(byte)(2),0xFFFF_FFFF_FFFF_FFFFUL,0UL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int64,(byte)(2),0x7FFF_FFFF_FFFF_FFFFUL,0x7FFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int64,(byte)(2),0xFFFF_FFFF_FFFF_FFFFUL,0x7FFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int32,(byte)(2),0x0000_0000_8000_0000UL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int32,(byte)(2),0x7FFF_FFFFUL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.UInt32,(byte)(2),0x0000_0001_0000_0000UL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.UInt32,(byte)(2),0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
     public void IndependentIntegerConvertExecutesWrapAndSaturation(PrimitiveType sourceType,
         PrimitiveType destinationType, byte policy, ulong sourceBits, ulong expectedBits)
     {
@@ -126,39 +112,35 @@ public sealed class TrRmExecutionAuditTests
             sourceBits, expectedBits));
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(1, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(false, 0xD800u, 55296)]
-    [InlineData(false, 0xFFFFu, 65535)]
-    [InlineData(true, 0u, 0)]
-    [InlineData(true, 0xD800u, 55296)]
-    [InlineData(true, 0xFFFFu, 65535)]
+    [TestCase(false,0xD800u,55296)]
+    [TestCase(false,0xFFFFu,65535)]
+    [TestCase(true,0u,0)]
+    [TestCase(true,0xD800u,55296)]
+    [TestCase(true,0xFFFFu,65535)]
     public void IndependentCheckedConvertExecutesChar16Boundaries(
         bool narrowing, uint sourceBits, int expected)
     {
         var artifact = Artifact(CheckedChar16ConvertBody(narrowing, sourceBits));
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.Int64, 0x8000_0000UL, 0xFFFF_FFFF_8000_0000UL)]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 42UL, 42UL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int64, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.UInt64, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt32, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 0xFFFF_FFFF_8000_0000UL, 0x8000_0000UL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 0x7FFF_FFFFUL, 0x7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 0xFFFF_FFFFUL, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 0x7FFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 0x7FFF_FFFF_FFFF_FFFFUL, 0x7FFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.Int64,0x8000_0000UL,0xFFFF_FFFF_8000_0000UL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.UInt64,42UL,42UL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.Int64,0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.UInt64,0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.Int32,0x7FFF_FFFFUL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.UInt32,0x7FFF_FFFFUL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,0xFFFF_FFFF_8000_0000UL,0x8000_0000UL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt32,0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int32,0x7FFF_FFFFUL,0x7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.UInt32,0xFFFF_FFFFUL,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int64,0x7FFF_FFFF_FFFF_FFFFUL,0x7FFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt64,0x7FFF_FFFF_FFFF_FFFFUL,0x7FFF_FFFF_FFFF_FFFFUL)]
     public void IndependentCheckedConvertExecutesIntegerBoundaries(PrimitiveType sourceType,
         PrimitiveType destinationType, ulong sourceBits, ulong expectedBits)
     {
@@ -166,126 +148,112 @@ public sealed class TrRmExecutionAuditTests
             destinationType, sourceBits, expectedBits));
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(1, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(0xFFFF_FFFFu)]
-    [InlineData(0x1_0000u)]
+    [TestCase(0xFFFF_FFFFu)]
+    [TestCase(0x1_0000u)]
     public async Task IndependentCheckedConvertRejectsOutOfRangeChar16(uint sourceBits)
     {
         var artifact = Artifact(CheckedChar16ConvertBody(narrowing: true, sourceBits: sourceBits));
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(unchecked((int)0xE0540001),
-            await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
-                .ConfigureAwait(true));
+        Assert.That(await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
+                .ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540001)));
     }
-
-    [Theory]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt64, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.UInt32, PrimitiveType.Int32, 0x8000_0000UL)]
-    [InlineData(PrimitiveType.Int32, PrimitiveType.UInt32, 0xFFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 0xFFFF_FFFF_7FFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.Int32, 0x0000_0000_8000_0000UL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 0xFFFF_FFFF_FFFF_FFFFUL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt32, 0x0000_0001_0000_0000UL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int32, 0x0000_0000_8000_0000UL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.UInt32, 0x0000_0001_0000_0000UL)]
-    [InlineData(PrimitiveType.UInt64, PrimitiveType.Int64, 0x8000_0000_0000_0000UL)]
-    [InlineData(PrimitiveType.Int64, PrimitiveType.UInt64, 0xFFFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.UInt64,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.UInt32,PrimitiveType.Int32,0x8000_0000UL)]
+    [TestCase(PrimitiveType.Int32,PrimitiveType.UInt32,0xFFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,0xFFFF_FFFF_7FFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,0x0000_0000_8000_0000UL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt32,0xFFFF_FFFF_FFFF_FFFFUL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt32,0x0000_0001_0000_0000UL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int32,0x0000_0000_8000_0000UL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.UInt32,0x0000_0001_0000_0000UL)]
+    [TestCase(PrimitiveType.UInt64,PrimitiveType.Int64,0x8000_0000_0000_0000UL)]
+    [TestCase(PrimitiveType.Int64,PrimitiveType.UInt64,0xFFFF_FFFF_FFFF_FFFFUL)]
     public async Task IndependentCheckedConvertRejectsOutOfRangeIntegers(
         PrimitiveType sourceType, PrimitiveType destinationType, ulong sourceBits)
     {
         var artifact = Artifact(CheckedIntegerConvertBody(sourceType,
             destinationType, sourceBits, expectedBits: 0));
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(unchecked((int)0xE0540001),
-            await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
-                .ConfigureAwait(true));
+        Assert.That(await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))
+                .ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540001)));
     }
 
-    [Fact]
+    [Test]
     public void IndependentBytesExecuteWithoutCompilerOrTableWriter()
     {
         var bytes = Artifact(s_return42);
         var program = TrRmExecutableCompiler.Load(bytes);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
         Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 2, 1, 1, 0xFF, 0x83, 1 }, -1)]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 2, 1, 1, 200, 0, 0x83, 1 }, 200)]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 2, 1, 1, 1, 42, 3, 2, 1, 0x83, 2 }, 42)]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 2, 1, 1, 0xFF, 0x83, 1 },-1)]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 2, 1, 1, 200, 0, 0x83, 1 },200)]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 2, 1, 1, 1, 42, 3, 2, 1, 0x83, 2 },42)]
     public void IndependentSignedWidthsAndCopyAreTyped(byte[] body, int expected)
     {
         var program = TrRmExecutableCompiler.Load(Artifact(body));
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
 
-    [Fact]
+    [Test]
     public void IndependentUnsignedSignedLiteralRetainsFullBitPattern()
     {
         byte[] body = [4, 1, 4, 0, 0, 0, 1, 0xF0, 0x30, 2, 1, 1,
             0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0x83, 1];
         var program = TrRmExecutableCompiler.Load(Artifact(body, resultRow: 4, entry: false));
-        var constant = Assert.IsType<BoundConstant>(
-            Assert.IsType<BoundLocal>(program.Functions[0].Body.Statements[0]).Initializer);
-        Assert.Equal(PrimitiveType.UInt32, constant.Type);
-        Assert.Equal(-1, constant.Value);
+        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual1 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual0 = program.Functions[0].Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual0!; }))().Initializer; Assert.That(__nunitActual1, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual1!; }))();
+        Assert.That(constant.Type, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(constant.Value, Is.EqualTo(-1));
     }
 
-    [Fact]
+    [Test]
     public void IndependentCheckedSumPreservesOneDefinitionPerEvaluation()
     {
         byte[] body = [4, 1, 1, 0, 0, 0, 3,
             1, 1, 1, 20, 1, 2, 1, 1, 0x15, 3, 1, 1, 2, 0x83, 3];
         var program = TrRmExecutableCompiler.Load(Artifact(body));
-        Assert.Equal(21, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.Equal(3, program.Functions[0].Variables.Length);
-        Assert.Equal(4, program.Functions[0].Body.Statements.Length);
-        var sum = Assert.IsType<BoundBinary>(
-            Assert.IsType<BoundLocal>(program.Functions[0].Body.Statements[2]).Initializer);
-        Assert.IsType<BoundRead>(sum.Left);
-        Assert.IsType<BoundRead>(sum.Right);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(21));
+        Assert.That(program.Functions[0].Variables.Length, Is.EqualTo(3));
+        Assert.That(program.Functions[0].Body.Statements.Length, Is.EqualTo(4));
+        var sum = ((global::System.Func<BoundBinary>)(() => { var __nunitActual3 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = program.Functions[0].Body.Statements[2]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))().Initializer; Assert.That(__nunitActual3, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual3!; }))();
+        Assert.That(sum.Left, Is.TypeOf<BoundRead>());
+        Assert.That(sum.Right, Is.TypeOf<BoundRead>());
     }
-
-    [Theory]
-    [InlineData(1, 4, 2u)]
-    [InlineData(1, 8, 1u)]
-    [InlineData(1, 12, 2u)]
-    [InlineData(1, 16, 1u)]
-    [InlineData(0x16, 8, 0x11000001u)]
-    [InlineData(0x16, 12, 3u)]
-    [InlineData(0x16, 24, 0u)]
-    [InlineData(0x17, 0, 2u)]
-    [InlineData(0x17, 4, 1u)]
+    [TestCase(1,4,2u)]
+    [TestCase(1,8,1u)]
+    [TestCase(1,12,2u)]
+    [TestCase(1,16,1u)]
+    [TestCase(0x16,8,0x11000001u)]
+    [TestCase(0x16,12,3u)]
+    [TestCase(0x16,24,0u)]
+    [TestCase(0x17,0,2u)]
+    [TestCase(0x17,4,1u)]
     public void RejectsIndependentMetadataTampering(int kind, int offset, uint value)
     {
         var artifact = Artifact(s_return42);
         WriteWord(artifact, SectionOffset(artifact, kind) + offset, value);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(5)]
-    [InlineData(6)]
-    [InlineData(7)]
-    [InlineData(8)]
-    [InlineData(9)]
-    [InlineData(10)]
-    [InlineData(11)]
-    [InlineData(12)]
-    [InlineData(13)]
-    [InlineData(14)]
-    [InlineData(15)]
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
+    [TestCase(4)]
+    [TestCase(5)]
+    [TestCase(6)]
+    [TestCase(7)]
+    [TestCase(8)]
+    [TestCase(9)]
+    [TestCase(10)]
+    [TestCase(11)]
+    [TestCase(12)]
+    [TestCase(13)]
+    [TestCase(14)]
+    [TestCase(15)]
     public void RejectsEveryReservedContractFlagBit(int bit)
     {
         var artifact = Artifact(s_return42, effect: 1);
@@ -293,19 +261,17 @@ public sealed class TrRmExecutionAuditTests
         BinaryPrimitives.WriteUInt16LittleEndian(artifact.AsSpan(data + 6), (ushort)(1 << bit));
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
-
-    [Theory]
-    [InlineData(8)]
+    [TestCase((uint)(8))]
     public void UnsupportedEffectsNeverDisappear(uint effect)
         => Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(Artifact(s_return42, effect: effect)));
 
-    [Fact]
+    [Test]
     public void DoesNotReturnEffectRejectsAReachableNormalReturn()
         => Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(Artifact(s_return42, effect: 2)));
 
-    [Fact]
+    [Test]
     public void NoThrowAuditRejectsEvenConstantSafeCheckedOperations()
     {
         byte[] body = [4, 1, 1, 0, 0, 0, 3,
@@ -315,7 +281,7 @@ public sealed class TrRmExecutionAuditTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
-    [Fact]
+    [Test]
     public void NoThrowAuditRejectsCheckedDivRem()
     {
         var artifact = Artifact(CheckedDivRemBody(PrimitiveType.Int32, 7, 3, 2, 1), effect: 1);
@@ -323,16 +289,16 @@ public sealed class TrRmExecutionAuditTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
-    [Fact]
+    [Test]
     public void NoThrowAllowsTotalWrappingBinary()
     {
         var artifact = Artifact(WrappingBinaryBody(PrimitiveType.Int32, 10,
             0x7FFF_FFFF, 1, 0x8000_0000), effect: 1);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void CheckedDivRemResultsMustBeConsecutiveAndDistinct()
     {
         var body = CheckedDivRemBody(PrimitiveType.Int32, 7, 3, 2, 1);
@@ -342,7 +308,7 @@ public sealed class TrRmExecutionAuditTests
             TrRmExecutableCompiler.Load(Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void ContractOwnerMustBeTheExactMethodDef()
     {
         var artifact = Artifact(s_return42, effect: 1);
@@ -350,18 +316,18 @@ public sealed class TrRmExecutionAuditTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
-    [Fact]
+    [Test]
     public void SelfCallIsAuditedWithoutExecutingUnboundedRecursion()
     {
         byte[] body = [4, 1, 1, 0, 0, 0, 1, 0x12, 1, 1, 0, 0x83, 1];
         var artifact = Artifact(body);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        Assert.Empty(loaded.Functions[0].Body.Statements);
+        Assert.That(loaded.Functions[0].Body.Statements, Is.Empty);
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "source-free"));
     }
 
-    [Fact]
+    [Test]
     public void HandwrittenForwardLinearCallUsesModuleOrdinalAndParameterSignature()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 2,
@@ -369,11 +335,11 @@ public sealed class TrRmExecutionAuditTests
         byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
         var artifact = LocalCallArtifact(caller, callee);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
-        Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(41));
     }
 
-    [Fact]
+    [Test]
     public void CallerUnsafeEffectDoesNotAuthorizeAnExecutableCall()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 0, 0x83, 2];
@@ -381,10 +347,8 @@ public sealed class TrRmExecutionAuditTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             LocalCallArtifact(caller, callee, calleeCallerUnsafe: true)));
     }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(3)]
+    [TestCase((byte)(0))]
+    [TestCase((byte)(3))]
     public void HandwrittenCallRejectsForeignOrNonexistentOrdinal(byte ordinal)
     {
         byte[] caller = ordinal == 0
@@ -397,7 +361,7 @@ public sealed class TrRmExecutionAuditTests
             TrRmExecutableCompiler.Load(LocalCallArtifact(caller, callee)));
     }
 
-    [Fact]
+    [Test]
     public void HandwrittenIndexedForwardCallExecutesAndTracksUses()
     {
         byte[] caller =
@@ -410,11 +374,11 @@ public sealed class TrRmExecutionAuditTests
         byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
         var artifact = LocalCallArtifact(caller, callee);
         TrRmStructuralMetadataValidator.ValidateCompact(artifact);
-        Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(41));
     }
 
-    [Fact]
+    [Test]
     public void HandwrittenIndexedVoidCallHasNoDefinitionOrValueSlot()
     {
         byte[] caller =
@@ -427,27 +391,25 @@ public sealed class TrRmExecutionAuditTests
         byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 0];
         var artifact = LocalCallArtifact(caller, callee, resultRow: 7);
         TrRmStructuralMetadataValidator.ValidateCompact(artifact);
-        Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(41));
     }
 
-    [Fact]
+    [Test]
     public void HandwrittenLinearVoidCallBetweenDefinitionsKeepsValueNumbering()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 4,
             1, 1, 1, 41, 0x12, 0, 2, 1, 1,
             3, 2, 1, 0x12, 0, 2, 1, 2, 0x83, 2];
         byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 0];
-        Assert.Equal(41, NativeJit.Execute(
+        Assert.That(NativeJit.Execute(
             TrRmExecutableCompiler.Load(LocalCallArtifact(caller, callee, resultRow: 7)),
-            NativeRuntimePolicy.FailFast));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(41));
     }
-
-    [Theory]
-    [InlineData(0, 1, 0)]
-    [InlineData(2, 0, 1)]
-    [InlineData(2, 2, 1)]
-    [InlineData(3, 1, 0)]
+    [TestCase((byte)(0),(byte)(1),(byte)(0))]
+    [TestCase((byte)(2),(byte)(0),(byte)(1))]
+    [TestCase((byte)(2),(byte)(2),(byte)(1))]
+    [TestCase((byte)(3),(byte)(1),(byte)(0))]
     public void HandwrittenCallRejectsResultCountAndModeMismatch(byte result, byte argumentCount, byte mode)
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 2,
@@ -457,7 +419,7 @@ public sealed class TrRmExecutionAuditTests
             TrRmExecutableCompiler.Load(LocalCallArtifact(caller, callee, parameterMode: mode)));
     }
 
-    [Fact]
+    [Test]
     public void NoThrowCallRequiresCalleeDeclarationAndCannotBeForgedAfterLoad()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 2,
@@ -467,17 +429,14 @@ public sealed class TrRmExecutionAuditTests
             LocalCallArtifact(caller, callee, callerNoThrow: true)));
         var program = TrRmExecutableCompiler.Load(
             LocalCallArtifact(caller, callee, callerNoThrow: true, calleeNoThrow: true));
-        Assert.Equal(41, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        var changedEffect = program with
-        {
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(41));
+        var changedEffect = program with {
             Functions = program.Functions.SetItem(1, program.Functions[1] with { IsNoThrow = false }),
         };
         Assert.Throws<ArgumentException>(() =>
             NativeEmitter.Emit(changedEffect, NativeRuntimePolicy.FailFast));
-        var changedType = program with
-        {
-            Functions = program.Functions.SetItem(1, program.Functions[1] with
-            {
+        var changedType = program with {
+            Functions = program.Functions.SetItem(1, program.Functions[1] with {
                 Variables = program.Functions[1].Variables.SetItem(0,
                     program.Functions[1].Variables[0] with { Type = PrimitiveType.UInt32 }),
             }),
@@ -486,7 +445,7 @@ public sealed class TrRmExecutionAuditTests
             NativeEmitter.Emit(changedType, NativeRuntimePolicy.FailFast));
     }
 
-    [Fact]
+    [Test]
     public void UncalledCalleeStillRequiresACompleteAuditedBody()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
@@ -495,7 +454,7 @@ public sealed class TrRmExecutionAuditTests
             TrRmExecutableCompiler.Load(LocalCallArtifact(caller, unsupported)));
     }
 
-    [Fact]
+    [Test]
     public void CallArgumentTypeIsAuditedAgainstParameterMetadata()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 2,
@@ -516,8 +475,7 @@ public sealed class TrRmExecutionAuditTests
         bool calleeNoThrow = false, bool calleeCallerUnsafe = false)
     {
         byte[] codes = [8, 1, 3, 0x0D, 9, 0x0E, 0];
-        var strings = new[] { "independent", "Main", "Callee" }.Select(text =>
-        {
+        var strings = new[] { "independent", "Main", "Callee" }.Select(text => {
             var utf8 = Encoding.UTF8.GetBytes(text);
             var row = new byte[(4 + utf8.Length + 1 + 3) & ~3];
             WriteWord(row, 0, ((uint)utf8.Length << 8) | 1);
@@ -564,8 +522,7 @@ public sealed class TrRmExecutionAuditTests
         var typeRows = new List<int>();
         int TypeId(PrimitiveType type)
         {
-            var row = type switch
-            {
+            var row = type switch {
                 PrimitiveType.Int32 => 1,
                 PrimitiveType.Bool => 2,
                 PrimitiveType.UInt32 => 4,
@@ -628,8 +585,7 @@ public sealed class TrRmExecutionAuditTests
         var typeRows = new List<int>();
         int TypeId(PrimitiveType type)
         {
-            var row = type switch
-            {
+            var row = type switch {
                 PrimitiveType.Int32 => 1,
                 PrimitiveType.Bool => 2,
                 PrimitiveType.UInt32 => 4,
@@ -726,8 +682,7 @@ public sealed class TrRmExecutionAuditTests
         var typeRows = new List<int>();
         int TypeId(PrimitiveType value)
         {
-            var row = value switch
-            {
+            var row = value switch {
                 PrimitiveType.Int32 => 1,
                 PrimitiveType.Bool => 2,
                 PrimitiveType.UInt32 => 4,
@@ -793,8 +748,7 @@ public sealed class TrRmExecutionAuditTests
         var typeRows = new List<int>();
         int TypeId(PrimitiveType value)
         {
-            var row = value switch
-            {
+            var row = value switch {
                 PrimitiveType.Int32 => 1,
                 PrimitiveType.Bool => 2,
                 PrimitiveType.UInt32 => 4,
@@ -851,31 +805,30 @@ public sealed class TrRmExecutionAuditTests
         }
     }
 
-    [Fact]
+    [Test]
     public void PublicVisibilityWithoutAnExportCannotPublishNativeSymbols()
     {
         var artifact = Artifact(s_return42, entry: false, exported: true);
-        Assert.NotEmpty(NativeEmitter.EmitLibrary(TrRmExecutableCompiler.Load(artifact),
-            ["Main"], NativeRuntimePolicy.FailFast));
+        Assert.That(NativeEmitter.EmitLibrary(TrRmExecutableCompiler.Load(artifact),
+            ["Main"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
         artifact = Artifact(s_return42, entry: false);
         WriteWord(artifact, SectionOffset(artifact, 0x16) + 12, 2);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
-    [Fact]
+    [Test]
     public void AuditChecksNonentryMethodsAsWellAsTheEntry()
     {
         byte[] invalid = [4, 1, 4, 0, 0, 0, 3,
             1, 1, 1, 20, 1, 2, 1, 22, 0x15, 3, 1, 1, 2, 0x83, 3];
         var original = TrRmExecutableCompiler.Load(Artifact(s_return42));
-        var source = original with
-        {
+        var source = original with {
             Functions = original.Functions.Add(original.Functions[0] with { Name = "Other", IsNoThrow = true }),
         };
         var bytes = TrRmExecutableCompiler.Emit(source, "two-bodies");
         var index = new TrRmArtifactIndex(bytes);
-        Assert.True(index.TryGetSection(0x20, out var bodies, out var bodyCount));
+        Assert.That(index.TryGetSection(0x20, out var bodies, out var bodyCount), Is.True);
         var firstBody = new TrRmBodyTableReader(bodies, bodyCount).GetRow(1).ToArray();
         var sections = new List<TrRmSection>();
         for (var section = 0; section < index.SectionCount; section++)
@@ -888,19 +841,17 @@ public sealed class TrRmExecutionAuditTests
         TrRmStructuralMetadataValidator.ValidateCompactLinear(tampered);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(tampered));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 2 })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 3, 1, 1, 0x83, 1 })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 1, 2, 1, 42, 0x83, 2 })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1, 0 })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 1, 1, 1, 42, 0, 0x83, 1 })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x01, 1, 1, 0, 1, 0, 42, 0x83, 1 })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0x19, 1, 1, 42, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 2 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 3, 1, 1, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 1, 2, 1, 42, 0x83, 2 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1, 0 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 1, 1, 1, 42, 0, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x01, 1, 1, 0, 1, 0, 42, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0x19, 1, 1, 42, 0x83, 1 })]
     public void RejectsIndependentInvalidBodyAndNoncanonicalWidths(byte[] body)
         => Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(Artifact(body)));
 
-    [Fact]
+    [Test]
     public void RejectsEveryTruncatedArtifactPrefix()
     {
         var artifact = Artifact(s_return42);

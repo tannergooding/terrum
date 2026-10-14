@@ -1,14 +1,13 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             require ManagedNode.TryCreate(40, out var kept);
             mut int32 reclaimed = 0;
@@ -24,7 +23,7 @@ public sealed partial class JitTests
             return kept.Value + reclaimed + 1;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         void DiscardCycle() {
             require ManagedNode.TryCreate(1, out var first);
             require ManagedNode.TryCreate(2, out var second);
@@ -43,7 +42,7 @@ public sealed partial class JitTests
             return 0;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         ManagedNode Create() {
             require ManagedNode.TryCreate(42, out var node);
             return node;
@@ -59,7 +58,7 @@ public sealed partial class JitTests
             }
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         bool CreateAndFail(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out result);
             require false;
@@ -77,7 +76,7 @@ public sealed partial class JitTests
             return 0;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         unique struct CollectOnExit {
             private int32 _value;
             public CollectOnExit() { _value = 0; }
@@ -99,7 +98,7 @@ public sealed partial class JitTests
             return node.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             require ManagedNode.TryCreate(40, out var kept);
             mut int32 released = 0;
@@ -118,7 +117,7 @@ public sealed partial class JitTests
             }
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             unsafe {
                 try {
@@ -135,7 +134,7 @@ public sealed partial class JitTests
             return 0;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         bool Refuse(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out result);
             return false;
@@ -149,7 +148,7 @@ public sealed partial class JitTests
     public Task CheckedManagedRootsRetireAcrossAotAndJitAsync(string source) =>
         AssertCheckedExecutionAsync(source, 42);
 
-    [Fact]
+    [Test]
     public Task UnhandledManagedCheckedFailureRetainsPrivateReasonAsync() =>
         AssertCheckedExecutionAsync("""
             int32 Main() {

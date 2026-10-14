@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -32,10 +32,8 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         "IntegerFloatConversion", "Char16FloatConversion", "ScalarParserTypes",
         "ScalarFrontend", "ScalarFrontendProgram", "ScalarFrontendProjection", "ScalarFrontendProgramReader",
     ];
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompleteFrontendWithoutInvocationProfileCannotCaptureSpansAsync(BoundRuntimePolicy policy)
     {
         var trees = await ReadComponentsAsync(s_frontendComponents, """
@@ -48,24 +46,20 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             }
             """).ConfigureAwait(true);
         var source = SourceText.From(TenFunctions);
-        Assert.Equal(61, Lexer.Lex(source).Tokens.Length);
+        Assert.That(Lexer.Lex(source).Tokens.Length, Is.EqualTo(61));
         var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var window = Assert.Single(program.Functions,
-            static function => function.Name == "Terrum.CodeAnalysis.TryGetScalarWindowToken");
-        Assert.Contains(window.Variables, static variable => variable.Type == PrimitiveType.TokenSpan);
-        Assert.DoesNotContain(program.Structures,
-            static structure => structure.Name == "Terrum.CodeAnalysis.TokenCursor");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var window = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Terrum.CodeAnalysis.TryGetScalarWindowToken");
+        Assert.That(global::System.Linq.Enumerable.Any(window.Variables,static variable => variable.Type == PrimitiveType.TokenSpan),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Structures,static structure => structure.Name == "Terrum.CodeAnalysis.TokenCursor"),Is.False);
 
         var exception = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateProducer(program, ["Terrum.CodeAnalysis.PublishAndSummarize"]));
-        Assert.Equal("Compilation-local span and capture metadata cannot be persisted.", exception.Message);
+            ModuleCompiler.CreateProducer(program, ["Terrum.CodeAnalysis.PublishAndSummarize"]))!;
+        Assert.That(exception.Message, Is.EqualTo("Compilation-local span and capture metadata cannot be persisted."));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SummaryReaderPersistenceRejectsCapturedFrontendBuffersAsync(BoundRuntimePolicy policy)
     {
         var trees = await ReadComponentsAsync(["ScalarFrontendProgramReader"], """
@@ -77,19 +71,16 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             """).ConfigureAwait(true);
         var compilation = Compilation.Create(trees,
             ScalarFrontendHost.CreateBuffers(SourceText.From(TenFunctions)), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.DoesNotContain(program.Functions,
-            static function => function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function => function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan)),Is.False);
 
         var exception = Assert.Throws<ModuleFormatException>(() =>
-            ModuleCompiler.CreateProducer(program, ["Terrum.CodeAnalysis.Summarize"]));
-        Assert.Equal("Only one invocation-scoped readonly Host.Source buffer is persistable.", exception.Message);
+            ModuleCompiler.CreateProducer(program, ["Terrum.CodeAnalysis.Summarize"]))!;
+        Assert.That(exception.Message, Is.EqualTo("Only one invocation-scoped readonly Host.Source buffer is persistable."));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SummaryReaderRejectsEmptyPublicationWithoutWritingAsync(BoundRuntimePolicy policy)
     {
         var trees = await ReadComponentsAsync(["ScalarFrontendProgramReader"], """
@@ -101,23 +92,21 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             """).ConfigureAwait(true);
         var source = SourceText.From(TenFunctions);
         var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var actual = NativeJit.ExecuteWithData(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var actual = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
             (NativeRuntimePolicy)policy);
-        Assert.Equal(42, actual.ExitCode);
+        Assert.That(actual.ExitCode, Is.EqualTo(42));
         var summary = actual.Data.AsSpan(actual.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         var publication = actual.Data.AsSpan(actual.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
             ScalarFrontendHost.ProgramWordCount * sizeof(int)).ToArray();
-        Assert.All(summary, static value => Assert.Equal(0, value));
-        Assert.All(publication, static value => Assert.Equal(0, value));
+        {var __nunitItems0 = summary;        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems0) { Assert.That(__nunitItem3, Is.EqualTo(0)); } });}
+        {var __nunitItems1 = publication;        Assert.Multiple(() => { foreach (var __nunitItem4 in __nunitItems1) { Assert.That(__nunitItem4, Is.EqualTo(0)); } });}
         Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadProgram(source, summary, publication, policy));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void ScannerProfileRejectsFrontendBuffersIdentityAndCapacityChanges(BoundRuntimePolicy policy)
     {
         var source = SourceText.From(TenFunctions);
@@ -141,14 +130,12 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         {
             var compilation = Compilation.Create(
                 SyntaxTree.Parse("int32 Main() { return Host.Source.Length; }"), buffers, policy);
-            Assert.True(compilation.HasErrors);
-            Assert.Null(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.True);
+            Assert.That(compilation.Program, Is.Null);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task Scanner10RebindsFreshFrontendFixturesWithoutPublicationAsync(BoundRuntimePolicy policy)
     {
         var trees = await ReadComponentsAsync(s_scannerComponents, """
@@ -159,35 +146,33 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var seed = SourceText.From("seed");
         var buffers = ScannerHost.CreateInvocationProfileBuffers(seed);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(),
             ["Terrum.CodeAnalysis.ScanFrontendFixture"]);
         var alternateCompilation = Compilation.Create(trees,
             ScannerHost.CreateInvocationProfileBuffers(SourceText.From("different seed 123")), policy);
-        Assert.False(alternateCompilation.HasErrors,
-            string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
-        Assert.Equal(producer, ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(alternateCompilation.Program),
-            ["Terrum.CodeAnalysis.ScanFrontendFixture"]));
+        Assert.That(alternateCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
+        Assert.That(ModuleCompiler.CreateProducer(
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = alternateCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(),
+            ["Terrum.CodeAnalysis.ScanFrontendFixture"]), Is.EqualTo(producer));
         var reference = ModuleCompiler.CreateReference(producer);
-        Assert.Equal(ScannerHost.InvocationProfileIdentity, reference.InvocationProfileId);
+        Assert.That(reference.InvocationProfileId, Is.EqualTo(ScannerHost.InvocationProfileIdentity));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return ScanFrontendFixture(); }
             """), reference, policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = consumerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.True(linked.RequiresSourceGrant);
-        Assert.Equal(ScannerHost.InvocationProfileIdentity, linked.InvocationProfileId);
-        Assert.Equal(10, linked.Buffers.Length);
-        Assert.All(linked.Buffers, static buffer => Assert.Empty(buffer.Values));
+        Assert.That(linked.RequiresSourceGrant, Is.True);
+        Assert.That(linked.InvocationProfileId, Is.EqualTo(ScannerHost.InvocationProfileIdentity));
+        Assert.That(linked.Buffers.Length, Is.EqualTo(10));
+        {var __nunitItems2 = linked.Buffers;        Assert.Multiple(() => { foreach (var __nunitItem8 in __nunitItems2) { Assert.That(__nunitItem8.Values, Is.Empty); } });}
 
         var maximumSource = new string(' ', ScannerHost.MaximumSourceLength - TenFunctions.Length)
             + TenFunctions;
-        Assert.Equal(ScannerHost.MaximumSourceLength, maximumSource.Length);
+        Assert.That(maximumSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         ScannerInvocationResult? retained = null;
         foreach (var text in new[] {
             TenFunctions,
@@ -201,35 +186,30 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         {
             var source = SourceText.From(text);
             var expected = Lexer.Lex(source);
-            Assert.InRange(expected.Tokens.Length, 1, 64);
+            Assert.That(expected.Tokens.Length, Is.InRange(1, 64));
             var actual = NativeJit.ExecuteWithScannerProfile(linked, source, (NativeRuntimePolicy)policy);
-            Assert.Equal(expected.Tokens.Length, actual.TokenCount);
-            Assert.Equal(expected.Tokens.Select(static token => (token.Kind, token.Span)),
-                actual.LexResult.Tokens.Select(static token => (token.Kind, token.Span)));
-            Assert.Equal(expected.Tokens.SelectMany(static token => token.LeadingTrivia)
-                .Select(static trivia => (trivia.Kind, trivia.Span)),
-                actual.LexResult.Tokens.SelectMany(static token => token.LeadingTrivia)
-                    .Select(static trivia => (trivia.Kind, trivia.Span)));
-            Assert.Equal(expected.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)),
-                actual.LexResult.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)));
+            Assert.That(actual.TokenCount, Is.EqualTo(expected.Tokens.Length));
+            Assert.That(actual.LexResult.Tokens.Select(static token => (token.Kind, token.Span)), Is.EqualTo(expected.Tokens.Select(static token => (token.Kind, token.Span))));
+            Assert.That(actual.LexResult.Tokens.SelectMany(static token => token.LeadingTrivia)
+                    .Select(static trivia => (trivia.Kind, trivia.Span)), Is.EqualTo(expected.Tokens.SelectMany(static token => token.LeadingTrivia)
+                .Select(static trivia => (trivia.Kind, trivia.Span))));
+            Assert.That(actual.LexResult.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)), Is.EqualTo(expected.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span))));
             if (text.Contains("42", StringComparison.Ordinal))
             {
-                Assert.Equal(new ScannerIntegerValue(14, "", false, 42),
-                    Assert.Single(actual.IntegerValues));
+                Assert.That(global::System.Linq.Enumerable.Single(actual.IntegerValues), Is.EqualTo(new ScannerIntegerValue(14, "", false, 42)));
                 retained = actual;
             }
             else
             {
-                Assert.Empty(actual.IntegerValues);
+                Assert.That(actual.IntegerValues, Is.Empty);
             }
         }
 
-        Assert.NotNull(retained);
-        Assert.Equal(17, retained.TokenCount);
-        Assert.Equal(42UL, Assert.Single(retained.IntegerValues).Magnitude);
-        Assert.Equal("seed", seed.Text);
-        Assert.All(buffers.Where(static buffer => buffer.IsWritable),
-            static buffer => Assert.All(buffer.Values, static value => Assert.Equal(0, value)));
+        TestAssertions.NotNull(retained);
+        Assert.That(retained.TokenCount, Is.EqualTo(17));
+        Assert.That(global::System.Linq.Enumerable.Single(retained.IntegerValues).Magnitude, Is.EqualTo(42UL));
+        Assert.That(seed.Text, Is.EqualTo("seed"));
+        {var __nunitItems4 = buffers.Where(static buffer => buffer.IsWritable);        Assert.Multiple(() => { foreach (var __nunitItem10 in __nunitItems4) { {var __nunitItems3 = __nunitItem10.Values;Assert.Multiple(() => { foreach (var __nunitItem9 in __nunitItems3) { Assert.That(__nunitItem9, Is.EqualTo(0)); } });} } });}
         Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithScannerProfile(linked,
             SourceText.From(new string(' ', ScannerHost.MaximumSourceLength + 1)),
             (NativeRuntimePolicy)policy));
@@ -243,7 +223,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         {
             var path = Path.Combine(root, "self-host", name + ".terrum");
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             trees.Add(tree);
         }
         trees.Add(SyntaxTree.Parse(entry, "scalar-frontend-invocation-profile-entry.terrum"));

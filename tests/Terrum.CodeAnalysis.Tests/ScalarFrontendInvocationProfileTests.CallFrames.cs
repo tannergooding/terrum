@@ -7,15 +7,14 @@ using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class ScalarFrontendInvocationProfileTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SummaryReaderIndependentlyValidatesSelectedCallFramesAsync(BoundRuntimePolicy policy)
     {
         var writerTrees = await ReadComponentsAsync(s_frontendComponents, """
@@ -76,13 +75,13 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             var source = SourceText.From(text);
             var buffers = ScalarFrontendHost.CreateBuffers(source);
             var writerCompilation = Compilation.Create(writerTrees, buffers, policy);
-            Assert.False(writerCompilation.HasErrors, string.Join(Environment.NewLine, writerCompilation.Diagnostics));
-            var writer = Assert.IsType<BoundProgram>(writerCompilation.Program);
+            Assert.That(writerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, writerCompilation.Diagnostics));
+            var writer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = writerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
             var readerCompilation = Compilation.Create(readerTrees, buffers, policy);
-            Assert.False(readerCompilation.HasErrors, string.Join(Environment.NewLine, readerCompilation.Diagnostics));
-            var reader = Assert.IsType<BoundProgram>(readerCompilation.Program);
+            Assert.That(readerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, readerCompilation.Diagnostics));
+            var reader = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = readerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
             var publication = NativeJit.ExecuteWithData(writer, (NativeRuntimePolicy)policy);
-            Assert.Equal(42, publication.ExitCode);
+            Assert.That(publication.ExitCode, Is.EqualTo(42));
             buffers = WithPublishedTokens(buffers, publication);
             var programBytes = publication.Data.AsSpan(
                 publication.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
@@ -100,9 +99,9 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             var caller = audited.Projection.Functions[0];
             var node = caller.Nodes.Last(static node => node.Operation == 105);
             var call = caller.Nodes.IndexOf(node);
-            Assert.True(call >= 0);
+            Assert.That(call >= 0, Is.True);
             var target = caller.CallTargets[call];
-            Assert.True(target > 0);
+            Assert.That(target > 0, Is.True);
             var callee = 8 + target * ScalarFrontendHost.ProgramFrameWordCount;
             var callOffset = NodeOffset(call);
             var targetOffset = 8 + ScalarFrontendHost.ProgramBodyWordCount + call;
@@ -124,10 +123,8 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                     }
                 }
             }
-            Assert.Equal(
-                text.Contains("true", StringComparison.Ordinal)
-                    || text.Contains("false", StringComparison.Ordinal),
-                hasBooleanLiteral);
+            Assert.That(hasBooleanLiteral, Is.EqualTo(text.Contains("true", StringComparison.Ordinal)
+                    || text.Contains("false", StringComparison.Ordinal)));
 
             if (node.High == 0)
             {
@@ -206,25 +203,25 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                             Values = ImmutableArray.CreateRange(candidate),
                         }),
                 }, (NativeRuntimePolicy)policy);
-                Assert.Equal(expectedSuccess ? 42 : 2, execution.ExitCode);
+                Assert.That(execution.ExitCode, Is.EqualTo(expectedSuccess ? 42 : 2));
                 var summary = execution.Data.AsSpan(execution.BufferOffsets[ScalarFrontendHost.BufferIndex],
                     ScalarFrontendHost.WordCount * sizeof(int));
                 if (expectedSuccess)
                 {
-                    Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(summary));
-                    Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(summary[sizeof(int)..]));
+                    Assert.That(BinaryPrimitives.ReadInt32LittleEndian(summary), Is.EqualTo(88));
+                    Assert.That(BinaryPrimitives.ReadInt32LittleEndian(summary[sizeof(int)..]), Is.EqualTo(1));
                 }
                 else
                 {
-                    Assert.All(summary.ToArray(), static value => Assert.Equal(0, value));
+                    {var __nunitItems0 = summary.ToArray();                    Assert.Multiple(() => { foreach (var __nunitItem2 in __nunitItems0) { Assert.That(__nunitItem2, Is.EqualTo(0)); } });}
                 }
                 var retained = execution.Data.AsSpan(
                     execution.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
                     ScalarFrontendHost.ProgramWordCount * sizeof(int));
                 for (var word = 0; word < candidate.Length; word++)
                 {
-                    Assert.Equal(candidate[word], BinaryPrimitives.ReadInt32LittleEndian(
-                        retained.Slice(word * sizeof(int), sizeof(int))));
+                    Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                        retained.Slice(word * sizeof(int), sizeof(int))), Is.EqualTo(candidate[word]));
                 }
             }
 
@@ -255,22 +252,16 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 ? 42 + node * 8 : 392 + (node - 32) * 8);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo.Tools; int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo.Tools; int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo.Tools { int32 Main() => 42; }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo.Tools { int32 Main() => 42; }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo.Tools.Inner; int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo.Tools.Inner; int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast,
-        "namespace /* header */ Demo.\U00010400 /* end */; int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions,
-        "namespace /* header */ Demo.\U00010400 /* end */; int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast,
-        "namespace Demo.Tools { namespace Inner { int32 Main() => 42; } }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions,
-        "namespace Demo.Tools { namespace Inner { int32 Main() => 42; } }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo.Tools; int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo.Tools; int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo.Tools { int32 Main() => 42; }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo.Tools { int32 Main() => 42; }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo.Tools.Inner; int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo.Tools.Inner; int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,        "namespace /* header */ Demo.\U00010400 /* end */; int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,        "namespace /* header */ Demo.\U00010400 /* end */; int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,        "namespace Demo.Tools { namespace Inner { int32 Main() => 42; } }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,        "namespace Demo.Tools { namespace Inner { int32 Main() => 42; } }")]
     public async Task SummaryReaderValidatesNamespaceTokenSpansAsync(
         BoundRuntimePolicy policy, string sourceText)
     {
@@ -292,15 +283,13 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var source = SourceText.From(sourceText);
         var buffers = ScalarFrontendHost.CreateBuffers(source);
         var writerCompilation = Compilation.Create(writerTrees, buffers, policy);
-        Assert.False(writerCompilation.HasErrors,
-            string.Join(Environment.NewLine, writerCompilation.Diagnostics));
-        var writer = Assert.IsType<BoundProgram>(writerCompilation.Program);
+        Assert.That(writerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, writerCompilation.Diagnostics));
+        var writer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = writerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         var readerCompilation = Compilation.Create(readerTrees, buffers, policy);
-        Assert.False(readerCompilation.HasErrors,
-            string.Join(Environment.NewLine, readerCompilation.Diagnostics));
-        var reader = Assert.IsType<BoundProgram>(readerCompilation.Program);
+        Assert.That(readerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, readerCompilation.Diagnostics));
+        var reader = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = readerCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var publication = NativeJit.ExecuteWithData(writer, (NativeRuntimePolicy)policy);
-        Assert.Equal(42, publication.ExitCode);
+        Assert.That(publication.ExitCode, Is.EqualTo(42));
         buffers = WithPublishedTokens(buffers, publication);
         var programBytes = publication.Data.AsSpan(
             publication.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
@@ -316,7 +305,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var namespaceOffset = 8 + 21;
         var nameStart = words[namespaceOffset];
         var nameLength = words[namespaceOffset + 1];
-        Assert.True(nameLength > 1);
+        Assert.That(nameLength > 1, Is.True);
         AssertRejected((namespaceOffset, nameStart + 1),
             (namespaceOffset + 1, nameLength - 1));
         AssertRejected((namespaceOffset + 1, nameLength - 1));
@@ -373,7 +362,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var forgedEof = tokenWords.ToArray();
         forgedEof[eofToken * 3 + 1] = source.Length - 1;
         AssertReaderResult(words, expectedSuccess: false, forgedEof);
-        Assert.True(eofToken + 1 < tokenWords.Length / 3);
+        Assert.That(eofToken + 1 < tokenWords.Length / 3, Is.True);
         var tokenAfterEof = tokenWords.ToArray();
         tokenAfterEof[(eofToken + 1) * 3] = 2;
         AssertReaderResult(words, expectedSuccess: false, tokenAfterEof);
@@ -393,17 +382,17 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             var execution = NativeJit.ExecuteWithData(reader with {
                 Buffers = candidateBuffers,
             }, (NativeRuntimePolicy)policy);
-            Assert.Equal(expectedSuccess ? 42 : 2, execution.ExitCode);
+            Assert.That(execution.ExitCode, Is.EqualTo(expectedSuccess ? 42 : 2));
             var summary = execution.Data.AsSpan(execution.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int));
             if (expectedSuccess)
             {
-                Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(summary));
-                Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(summary[sizeof(int)..]));
+                Assert.That(BinaryPrimitives.ReadInt32LittleEndian(summary), Is.EqualTo(88));
+                Assert.That(BinaryPrimitives.ReadInt32LittleEndian(summary[sizeof(int)..]), Is.EqualTo(1));
             }
             else
             {
-                Assert.All(summary.ToArray(), static value => Assert.Equal(0, value));
+                {var __nunitItems1 = summary.ToArray();                Assert.Multiple(() => { foreach (var __nunitItem5 in __nunitItems1) { Assert.That(__nunitItem5, Is.EqualTo(0)); } });}
             }
         }
 
@@ -425,10 +414,8 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 ScalarFrontendHost.ReadProgram(source, originalPublication, forged, policy));
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SummaryReaderAcceptsElseAndElseIfStatementLayoutsAsync(BoundRuntimePolicy policy)
     {
         var writerTrees = await ReadComponentsAsync(s_frontendComponents, """
@@ -451,15 +438,13 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 + "int32 Other() => 0;");
         var buffers = ScalarFrontendHost.CreateBuffers(source);
         var writerCompilation = Compilation.Create(writerTrees, buffers, policy);
-        Assert.False(writerCompilation.HasErrors,
-            string.Join(Environment.NewLine, writerCompilation.Diagnostics));
-        var writer = Assert.IsType<BoundProgram>(writerCompilation.Program);
+        Assert.That(writerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, writerCompilation.Diagnostics));
+        var writer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = writerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
         var readerCompilation = Compilation.Create(readerTrees, buffers, policy);
-        Assert.False(readerCompilation.HasErrors,
-            string.Join(Environment.NewLine, readerCompilation.Diagnostics));
-        var reader = Assert.IsType<BoundProgram>(readerCompilation.Program);
+        Assert.That(readerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, readerCompilation.Diagnostics));
+        var reader = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = readerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
         var publication = NativeJit.ExecuteWithData(writer, (NativeRuntimePolicy)policy);
-        Assert.Equal(42, publication.ExitCode);
+        Assert.That(publication.ExitCode, Is.EqualTo(42));
         buffers = WithPublishedTokens(buffers, publication);
         var programBytes = publication.Data.AsSpan(
             publication.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
@@ -470,12 +455,12 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             words[word] = BinaryPrimitives.ReadInt32LittleEndian(
                 programBytes.Slice(word * sizeof(int), sizeof(int)));
         }
-        Assert.Equal(2, words[2]);
+        Assert.That(words[2], Is.EqualTo(2));
         var body = 8;
         var statementKinds = Enumerable.Range(0, words[body + 298])
             .Select(statement => words[body + 332 + statement * 5]).ToArray();
-        Assert.Contains(5, statementKinds);
-        Assert.Contains(23, statementKinds);
+        Assert.That(statementKinds, Does.Contain(5));
+        Assert.That(statementKinds, Does.Contain(23));
 
         var originalPublication = new byte[ScalarFrontendHost.WordCount * sizeof(int)];
         ScalarFrontendHost.ReadProgram(source, originalPublication, programBytes.ToArray(), policy);
@@ -486,7 +471,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 }),
         };
         var decoding = NativeJit.ExecuteWithData(decodingProgram, (NativeRuntimePolicy)policy);
-        Assert.Equal(42, decoding.ExitCode);
+        Assert.That(decoding.ExitCode, Is.EqualTo(42));
 
         foreach (var statement in Enumerable.Range(0, statementKinds.Length)
             .Where(statement => statementKinds[statement] is 5 or 23))
@@ -502,11 +487,11 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                         }),
                 };
                 var rejected = NativeJit.ExecuteWithData(candidateReader, (NativeRuntimePolicy)policy);
-                Assert.Equal(2, rejected.ExitCode);
+                Assert.That(rejected.ExitCode, Is.EqualTo(2));
                 var summary = rejected.Data.AsSpan(
                     rejected.BufferOffsets[ScalarFrontendHost.BufferIndex],
                     ScalarFrontendHost.WordCount * sizeof(int));
-                Assert.All(summary.ToArray(), static value => Assert.Equal(0, value));
+                {var __nunitItems2 = summary.ToArray();                Assert.Multiple(() => { foreach (var __nunitItem8 in __nunitItems2) { Assert.That(__nunitItem8, Is.EqualTo(0)); } });}
 
                 var forgedProgram = new byte[candidate.Length * sizeof(int)];
                 for (var word = 0; word < candidate.Length; word++)
@@ -520,10 +505,8 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             }
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SummaryReaderRejectsMismatchedReturnAndConditionTypesBeforePublishingAsync(
         BoundRuntimePolicy policy)
     {
@@ -574,15 +557,13 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 + "bool Negated(bool input) { return !input; }");
         var buffers = ScalarFrontendHost.CreateBuffers(source);
         var writerCompilation = Compilation.Create(writerTrees, buffers, policy);
-        Assert.False(writerCompilation.HasErrors,
-            string.Join(Environment.NewLine, writerCompilation.Diagnostics));
-        var writer = Assert.IsType<BoundProgram>(writerCompilation.Program);
+        Assert.That(writerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, writerCompilation.Diagnostics));
+        var writer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = writerCompilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
         var readerCompilation = Compilation.Create(readerTrees, buffers, policy);
-        Assert.False(readerCompilation.HasErrors,
-            string.Join(Environment.NewLine, readerCompilation.Diagnostics));
-        var reader = Assert.IsType<BoundProgram>(readerCompilation.Program);
+        Assert.That(readerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, readerCompilation.Diagnostics));
+        var reader = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = readerCompilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
         var publication = NativeJit.ExecuteWithData(writer, (NativeRuntimePolicy)policy);
-        Assert.Equal(42, publication.ExitCode);
+        Assert.That(publication.ExitCode, Is.EqualTo(42));
         buffers = WithPublishedTokens(buffers, publication);
         var programBytes = publication.Data.AsSpan(
             publication.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
@@ -597,15 +578,13 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         const int firstFrame = 4;
         const int body = firstFrame + 4;
         const int otherBody = firstFrame + ScalarFrontendHost.ProgramFrameWordCount + 4;
-        Assert.True(words[otherBody + 37] > 0,
-            $"functionCount={words[2]}, nodeCount={words[otherBody + 37]}, "
+        Assert.That(words[otherBody + 37] > 0, Is.True, $"functionCount={words[2]}, nodeCount={words[otherBody + 37]}, "
                 + $"frameStart={words[firstFrame + ScalarFrontendHost.ProgramFrameWordCount]}");
-        Assert.Contains(Enumerable.Range(0, words[otherBody + 37]),
-            node => words[NodeOffset(otherBody, node)] == 105);
+        Assert.That(global::System.Linq.Enumerable.Any(Enumerable.Range(0, words[otherBody + 37]),node => words[NodeOffset(otherBody, node)] == 105),Is.True);
         var root = words[body + 39];
-        Assert.InRange(root, 0, words[body + 37] - 1);
+        Assert.That(root, Is.InRange(0, words[body + 37] - 1));
         var rootTypeOffset = NodeOffset(body, root) + 1;
-        Assert.Equal(words[body + 5], words[rootTypeOffset]);
+        Assert.That(words[rootTypeOffset], Is.EqualTo(words[body + 5]));
         foreach (var unsupportedOperation in new[] { 64, int.MaxValue })
         {
             var forgedOperation = words.ToArray();
@@ -614,7 +593,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         }
         var binaryBody = firstFrame + 12 * ScalarFrontendHost.ProgramFrameWordCount + 4;
         var binaryNode = 8;
-        Assert.Equal(91, words[NodeOffset(binaryBody, binaryNode)]);
+        Assert.That(words[NodeOffset(binaryBody, binaryNode)], Is.EqualTo(91));
         var binaryOffset = NodeOffset(binaryBody, binaryNode);
         foreach (var (field, value) in new[] {
             (4, binaryNode),
@@ -632,7 +611,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var unaryBody = firstFrame + 20 * ScalarFrontendHost.ProgramFrameWordCount + 4;
         var unaryOperations = Enumerable.Range(0, words[unaryBody + 37])
             .Select(node => words[NodeOffset(unaryBody, node)]).ToArray();
-        Assert.Contains(62, unaryOperations);
+        Assert.That(unaryOperations, Does.Contain(62));
         var unaryNode = Array.IndexOf(unaryOperations, 62);
         var forgedUnaryChild = words.ToArray();
         forgedUnaryChild[NodeOffset(unaryBody, unaryNode) + 4] = unaryNode;
@@ -645,10 +624,10 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         AssertReaderResult(negativeReturnSpan, expectedSuccess: false);
         var conditionalFrame = firstFrame + ScalarFrontendHost.ProgramFrameWordCount;
         var conditionalBody = conditionalFrame + 4;
-        Assert.InRange(words[conditionalBody + 15], 1, 2);
+        Assert.That(words[conditionalBody + 15], Is.InRange(1, 2));
         var conditionRoot = words[conditionalBody + 38];
         var conditionTypeOffset = NodeOffset(conditionalBody, conditionRoot) + 1;
-        Assert.Equal(5, words[conditionTypeOffset]);
+        Assert.That(words[conditionTypeOffset], Is.EqualTo(5));
         var statementFrame = conditionalFrame + ScalarFrontendHost.ProgramFrameWordCount;
         var statementBody = statementFrame + 4;
         var statementOffset = statementBody + 332;
@@ -736,7 +715,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             AssertReaderResult(forgedUnusedParameterType, expectedSuccess: false);
         }
         var looseBody = firstFrame + 12 * ScalarFrontendHost.ProgramFrameWordCount + 4;
-        Assert.Equal(1, words[looseBody + 299]);
+        Assert.That(words[looseBody + 299], Is.EqualTo(1));
         foreach (var invalidLocalType in new[] { -1, 0, 9 })
         {
             var forgedLocalType = words.ToArray();
@@ -767,16 +746,16 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         AssertReaderResult(forgedMismatchedLocalType, expectedSuccess: false);
         var sourceText = source.ToString();
         var mutableKeywordStart = sourceText.IndexOf("mut int32 value", StringComparison.Ordinal);
-        Assert.True(mutableKeywordStart >= 0);
+        Assert.That(mutableKeywordStart >= 0, Is.True);
         var keywordAsLocalName = words.ToArray();
         keywordAsLocalName[looseBody + 302] = mutableKeywordStart;
         keywordAsLocalName[looseBody + 303] = 3;
         AssertReaderResult(keywordAsLocalName, expectedSuccess: false);
         var syntheticSwitchBody = firstFrame + 18 * ScalarFrontendHost.ProgramFrameWordCount + 4;
-        Assert.Equal(8, words[syntheticSwitchBody + 301]);
+        Assert.That(words[syntheticSwitchBody + 301], Is.EqualTo(8));
         var switchNameStart = words[syntheticSwitchBody + 302];
         var returnKeywordStart = sourceText.IndexOf("return", switchNameStart, StringComparison.Ordinal);
-        Assert.True(returnKeywordStart >= switchNameStart);
+        Assert.That(returnKeywordStart >= switchNameStart, Is.True);
         var forgedSyntheticLocalName = words.ToArray();
         forgedSyntheticLocalName[syntheticSwitchBody + 302] = returnKeywordStart;
         AssertReaderResult(forgedSyntheticLocalName, expectedSuccess: false);
@@ -786,7 +765,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             var statement = Enumerable.Range(0, words[constantBody + 298])
                 .Single(index => words[constantBody + 332 + index * 5] == kind);
             var slot = words[constantBody + 332 + statement * 5 + 1];
-            Assert.InRange(slot, 1, words[constantBody + 6] + words[constantBody + 299]);
+            Assert.That(slot, Is.InRange(1, words[constantBody + 6] + words[constantBody + 299]));
             var localTypeOffset = constantBody + 300 + (slot - words[constantBody + 6] - 1) * 4;
             var forgedConstantType = words.ToArray();
             forgedConstantType[localTypeOffset] = 2;
@@ -795,11 +774,11 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var bareReturnBody = firstFrame + 15 * ScalarFrontendHost.ProgramFrameWordCount + 4;
         var bareReturnKinds = Enumerable.Range(0, words[bareReturnBody + 298])
             .Select(statement => words[bareReturnBody + 332 + statement * 5]).ToArray();
-        Assert.Contains(22, bareReturnKinds);
+        Assert.That(bareReturnKinds, Does.Contain(22));
         var bareReturnStatement = Array.IndexOf(bareReturnKinds, 22);
         var bareReturnOffset = bareReturnBody + 332 + bareReturnStatement * 5;
-        Assert.Equal(0, words[bareReturnOffset + 1]);
-        Assert.Equal(-1, words[bareReturnOffset + 2]);
+        Assert.That(words[bareReturnOffset + 1], Is.EqualTo(0));
+        Assert.That(words[bareReturnOffset + 2], Is.EqualTo(-1));
         var slottedBareReturn = words.ToArray();
         slottedBareReturn[bareReturnOffset + 1] = 1;
         AssertReaderResult(slottedBareReturn, expectedSuccess: false);
@@ -844,7 +823,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var switchTransferStatement = Enumerable.Range(0, words[switchTransferBody + 298])
             .Single(statement => words[switchTransferBody + 332 + statement * 5] == 40);
         var switchTransferOffset = switchTransferBody + 332 + switchTransferStatement * 5;
-        Assert.InRange(words[switchTransferOffset + 1], 0, switchTransferStatement - 1);
+        Assert.That(words[switchTransferOffset + 1], Is.InRange(0, switchTransferStatement - 1));
         foreach (var invalidTarget in new[] { -1, switchTransferStatement })
         {
             var forgedTransferTarget = words.ToArray();
@@ -859,7 +838,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             var assignmentOffset = assignmentBody + 332 + assignmentStatement * 5;
             var assignmentSlot = words[assignmentOffset + 1];
             var assignmentRoot = words[assignmentOffset + 2];
-            Assert.InRange(assignmentRoot, 0, words[assignmentBody + 37] - 1);
+            Assert.That(assignmentRoot, Is.InRange(0, words[assignmentBody + 37] - 1));
             var assignmentTypeOffset = NodeOffset(assignmentBody, assignmentRoot) + 1;
             var mismatchedAssignmentType = words.ToArray();
             mismatchedAssignmentType[assignmentTypeOffset] =
@@ -876,7 +855,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             .Single(statement => words[looseBody + 332 + statement * 5] == 1);
         var initializerOffset = looseBody + 332 + initializerStatement * 5;
         var initializerRoot = words[initializerOffset + 2];
-        Assert.NotEqual(105, words[NodeOffset(looseBody, initializerRoot)]);
+        Assert.That(words[NodeOffset(looseBody, initializerRoot)], Is.Not.EqualTo(105));
         foreach (var invalidLocalSlot in new[] { 0, 2 })
         {
             var forgedLocalSlot = words.ToArray();
@@ -891,7 +870,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var nonRootNode = Enumerable.Range(0, words[nodeTypesBody + 37])
             .First(node => node != returnRoot
                 && words[NodeOffset(nodeTypesBody, node)] != 105);
-        Assert.Equal(0, words[nodeTypesBody + 15]);
+        Assert.That(words[nodeTypesBody + 15], Is.EqualTo(0));
         foreach (var invalidNodeType in new[] { -1, 0, 9 })
         {
             var forgedNodeType = words.ToArray();
@@ -940,7 +919,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 .ToArray();
             foreach (var kind in expectedKinds)
             {
-                Assert.Contains(kind, kinds);
+                Assert.That(kinds, Does.Contain(kind));
             }
             if (expectedKinds.Contains(35))
             {
@@ -967,9 +946,9 @@ public sealed partial class ScalarFrontendInvocationProfileTests
             }
             if (optionalForCondition)
             {
-                Assert.Contains(Enumerable.Range(0, count), statement =>
+                Assert.That(global::System.Linq.Enumerable.Any(Enumerable.Range(0, count),statement =>
                     (kinds[statement] is 12 or 18)
-                        && words[statementBody + 332 + statement * 5 + 2] == -1);
+                        && words[statementBody + 332 + statement * 5 + 2] == -1),Is.True);
             }
             for (var statement = 0; statement < count; statement++)
             {
@@ -991,12 +970,12 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 var conditionRoot = words[statementBody + 332 + statement * 5 + 2];
                 if (conditionRoot == -1)
                 {
-                    Assert.True(kind is 12 or 18);
+                    Assert.That(kind is 12 or 18, Is.True);
                     continue;
                 }
-                Assert.InRange(conditionRoot, 0, words[statementBody + 37] - 1);
+                Assert.That(conditionRoot, Is.InRange(0, words[statementBody + 37] - 1));
                 var typeOffset = NodeOffset(statementBody, conditionRoot) + 1;
-                Assert.Equal(5, words[typeOffset]);
+                Assert.That(words[typeOffset], Is.EqualTo(5));
                 var forgedStatementCondition = words.ToArray();
                 forgedStatementCondition[typeOffset] = 1;
                 AssertReaderResult(forgedStatementCondition, expectedSuccess: false);
@@ -1017,25 +996,25 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                         Values = ImmutableArray.CreateRange(candidate),
                     }),
             }, (NativeRuntimePolicy)policy);
-            Assert.Equal(expectedSuccess ? 42 : 2, execution.ExitCode);
+            Assert.That(execution.ExitCode, Is.EqualTo(expectedSuccess ? 42 : 2));
             var summary = execution.Data.AsSpan(execution.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int));
             if (expectedSuccess)
             {
-                Assert.Equal(88, BinaryPrimitives.ReadInt32LittleEndian(summary));
-                Assert.Equal(1, BinaryPrimitives.ReadInt32LittleEndian(summary[sizeof(int)..]));
+                Assert.That(BinaryPrimitives.ReadInt32LittleEndian(summary), Is.EqualTo(88));
+                Assert.That(BinaryPrimitives.ReadInt32LittleEndian(summary[sizeof(int)..]), Is.EqualTo(1));
             }
             else
             {
-                Assert.All(summary.ToArray(), static value => Assert.Equal(0, value));
+                {var __nunitItems3 = summary.ToArray();                Assert.Multiple(() => { foreach (var __nunitItem11 in __nunitItems3) { Assert.That(__nunitItem11, Is.EqualTo(0)); } });}
             }
             var retained = execution.Data.AsSpan(
                 execution.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
                 ScalarFrontendHost.ProgramWordCount * sizeof(int));
             for (var word = 0; word < candidate.Length; word++)
             {
-                Assert.Equal(candidate[word], BinaryPrimitives.ReadInt32LittleEndian(
-                    retained.Slice(word * sizeof(int), sizeof(int))));
+                Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+                    retained.Slice(word * sizeof(int), sizeof(int))), Is.EqualTo(candidate[word]));
             }
         }
 

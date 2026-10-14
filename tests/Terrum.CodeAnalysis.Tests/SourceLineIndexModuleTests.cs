@@ -9,15 +9,14 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class SourceLineIndexModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceLineIndexModuleIndexesFreshSourceGrants(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -28,7 +27,7 @@ public sealed class SourceLineIndexModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -102,9 +101,8 @@ public sealed class SourceLineIndexModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             [
                 "Terrum.CodeAnalysis.GetIndexedLineCount",
                 "Terrum.CodeAnalysis.GetIndexedLineRange",
@@ -137,9 +135,8 @@ public sealed class SourceLineIndexModuleTests
                 int32 Main() { {{body}} }
                 """, "source-line-index-consumer.terrum");
             var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-            var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
             return ModuleCompiler.Link(consumer, producer);
         }
 
@@ -201,18 +198,17 @@ public sealed class SourceLineIndexModuleTests
                 [.. text.Select(static unit => (int)unit)], false) {
                 IsInvocationScoped = true,
             };
-            Assert.Equal(source.Lines.Length,
-                NativeJit.ExecuteWithSourceGrant(consumers[0], [grant], (NativeRuntimePolicy)policy));
+            Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[0], [grant], (NativeRuntimePolicy)policy), Is.EqualTo(source.Lines.Length));
             for (var line = 0; line < maximumLineCount; line++)
             {
                 var includingBreak = line < source.Lines.Length
                     ? PackRange(source.Lines[line].SpanIncludingLineBreak)
                     : -2;
                 var content = line < source.Lines.Length ? PackRange(source.Lines[line].Span) : -2;
-                Assert.Equal(includingBreak, NativeJit.ExecuteWithSourceGrant(consumers[line * 2 + 1],
-                    [grant], (NativeRuntimePolicy)policy));
-                Assert.Equal(content, NativeJit.ExecuteWithSourceGrant(consumers[line * 2 + 2],
-                    [grant], (NativeRuntimePolicy)policy));
+                Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[line * 2 + 1],
+                    [grant], (NativeRuntimePolicy)policy), Is.EqualTo(includingBreak));
+                Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[line * 2 + 2],
+                    [grant], (NativeRuntimePolicy)policy), Is.EqualTo(content));
             }
             for (var query = 0; query < positionInputs.Length; query++)
             {
@@ -220,8 +216,8 @@ public sealed class SourceLineIndexModuleTests
                 var expectedPosition = position < 0 || position > source.Length
                     ? -1
                     : PackPosition(source.GetLinePosition(position));
-                Assert.Equal(expectedPosition, NativeJit.ExecuteWithSourceGrant(positionConsumers[query],
-                    [grant], (NativeRuntimePolicy)policy));
+                Assert.That(NativeJit.ExecuteWithSourceGrant(positionConsumers[query],
+                    [grant], (NativeRuntimePolicy)policy), Is.EqualTo(expectedPosition));
             }
             for (var query = 0; query < offsetInputs.Count; query++)
             {
@@ -229,20 +225,19 @@ public sealed class SourceLineIndexModuleTests
                 var expectedOffset = source.TryGetOffset(input.Line, input.Character, out var offset)
                     ? offset
                     : -1;
-                Assert.Equal(expectedOffset, NativeJit.ExecuteWithSourceGrant(offsetConsumers[query],
-                    [grant], (NativeRuntimePolicy)policy));
+                Assert.That(NativeJit.ExecuteWithSourceGrant(offsetConsumers[query],
+                    [grant], (NativeRuntimePolicy)policy), Is.EqualTo(expectedOffset));
             }
         }
 
         var maximumCrLfSource = string.Concat(Enumerable.Repeat("\r\n", ScannerHost.MaximumSourceLength / 2));
-        Assert.Equal(ScannerHost.MaximumSourceLength, maximumCrLfSource.Length);
+        Assert.That(maximumCrLfSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var maximumCrLfGrant = new HostBuffer("Source", PrimitiveType.Char16,
             [.. maximumCrLfSource.Select(static unit => (int)unit)], false) {
             IsInvocationScoped = true,
         };
         var maximumCrLfConsumer = CreateConsumer("return VerifyMaximumCrLfLineIndex();");
-        Assert.Equal(SourceText.From(maximumCrLfSource).Lines.Length,
-            NativeJit.ExecuteWithSourceGrant(maximumCrLfConsumer, [maximumCrLfGrant], (NativeRuntimePolicy)policy));
+        Assert.That(NativeJit.ExecuteWithSourceGrant(maximumCrLfConsumer, [maximumCrLfGrant], (NativeRuntimePolicy)policy), Is.EqualTo(SourceText.From(maximumCrLfSource).Lines.Length));
     }
 
     private static int PackRange(TextSpan range) => range.Start * 256 + range.Length;

@@ -1,14 +1,13 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         ManagedNode Create(int32 value) {
             require ManagedNode.TryCreate(value, out var node);
             return node;
@@ -21,7 +20,7 @@ public sealed partial class JitTests
             return Observe(Create(42), ManagedHeap.Collect());
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         ManagedNode Create(int32 value) {
             require ManagedNode.TryCreate(value, out var node);
             return node;
@@ -34,7 +33,7 @@ public sealed partial class JitTests
             return Observe(Create(20), Create(22), ManagedHeap.Collect());
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         unique struct CollectOnExit {
             private int32 _value;
             public CollectOnExit() { _value = 0; }
@@ -55,7 +54,7 @@ public sealed partial class JitTests
             return node.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 CollectNested(int32 depth) {
             if (depth == 0) { return ManagedHeap.Collect(); }
             return CollectNested(depth - 1);
@@ -79,7 +78,7 @@ public sealed partial class JitTests
             return child.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         void CheckRetainedNode() {
             require ManagedNode.TryCreate(0, out var list);
             require ManagedNode.TryCreate(41, out var item);
@@ -100,7 +99,7 @@ public sealed partial class JitTests
             return 42;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         bool Refuse(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out var created);
             result = created;
@@ -112,7 +111,7 @@ public sealed partial class JitTests
             return 42;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         bool CreateAndCollect(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out result);
             require ManagedHeap.Collect() == 0;
@@ -124,7 +123,7 @@ public sealed partial class JitTests
             return node.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         write ManagedNode Create() {
             require ManagedNode.TryCreate(1, out var node);
             return node;
@@ -140,7 +139,7 @@ public sealed partial class JitTests
             return 42;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         void Attach(write ManagedNode parent) {
             require ManagedNode.TryCreate(42, out var child);
             parent.SetNext(child);
@@ -155,7 +154,7 @@ public sealed partial class JitTests
             return 42;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         bool CreatePair(out write ManagedNode first, out write ManagedNode second) {
             require ManagedNode.TryCreate(20, out first);
             require ManagedHeap.Collect() == 0;
@@ -170,7 +169,7 @@ public sealed partial class JitTests
             return first.Value + second.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             {
                 require ManagedNode.TryCreate(1, out var discarded);
@@ -180,7 +179,7 @@ public sealed partial class JitTests
             return 42;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             mut int32 iteration = 0;
             while (iteration < 64) {
@@ -197,7 +196,7 @@ public sealed partial class JitTests
             return 42;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         void MakeGarbage() {
             require ManagedNode.TryCreate(0, out var node);
             node.SetNext(node);
@@ -214,7 +213,7 @@ public sealed partial class JitTests
             return original.Value + current.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             mut int32 count = 0;
             while (count < 4096) {
@@ -228,7 +227,7 @@ public sealed partial class JitTests
             return recycled.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         write ManagedNode Create() {
             require ManagedNode.TryCreate(0, out var node);
             return node;
@@ -241,7 +240,7 @@ public sealed partial class JitTests
             return 42;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             require ManagedNode.TryCreate(0, out var head);
             mut write ManagedNode tail = head;

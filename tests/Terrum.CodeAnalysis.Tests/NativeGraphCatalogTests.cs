@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -26,8 +26,8 @@ public sealed class NativeGraphCatalogTests
                 : Compilation.CreateLibrary(tree, reference, (BoundRuntimePolicy)policy)
             : reference is null ? Compilation.Create(tree, (BoundRuntimePolicy)policy)
                 : Compilation.Create(tree, reference, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
 
     private static byte[] Producer(string name, int value, NativeRuntimePolicy policy, bool incompatible = false,
@@ -52,10 +52,8 @@ public sealed class NativeGraphCatalogTests
             [middle], policy);
         return (root, middle, original, replacement, incompatible, unrelated);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task UniqueCompatibleCatalogServicesUnchangedRootAndIntermediateAsync(NativeRuntimePolicy policy)
     {
         var (root, middle, _, replacement, incompatible, unrelated) = Graph(policy);
@@ -67,18 +65,18 @@ public sealed class NativeGraphCatalogTests
         string[] expectedIdentities = ["NodeA", "NodeB"];
         var selectedRoot = selection.Consumer.ToArray();
         var selectedProviders = selection.Producers.Select(static bytes => bytes.ToArray()).ToArray();
-        Assert.Equal(expectedIndexes, selection.CandidateIndexes.Order());
-        Assert.Equal(expectedIdentities, selectedProviders
+        Assert.That(selection.CandidateIndexes.Order(), Is.EqualTo(expectedIndexes));
+        Assert.That(selectedProviders
             .Select(item => NativeModuleCompiler.InspectGraphArtifact(item).Identity
                 ?? throw new InvalidOperationException("Selected graph producer has no identity."))
-            .Order(StringComparer.Ordinal));
+            .Order(StringComparer.Ordinal), Is.EqualTo(expectedIdentities));
         root[0] ^= 1;
         replacement[0] ^= 1;
         middle[0] ^= 1;
-        Assert.Equal(persistedRoot, selectedRoot);
+        Assert.That(selectedRoot, Is.EqualTo(persistedRoot));
         NativeModuleCompiler.ValidateGraph(selectedRoot, selectedProviders);
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(selectedRoot, selectedProviders,
-            TimeSpan.FromSeconds(10), policy));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(selectedRoot, selectedProviders,
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
@@ -86,46 +84,46 @@ public sealed class NativeGraphCatalogTests
             "..", "..", "..", "..", "..", ".."));
         var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
             configuration, frameworkDirectory.Name, "terrumc.exe");
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(selectedRoot, selectedProviders, apphost,
-            TimeSpan.FromSeconds(30), policy));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(selectedRoot, selectedProviders, apphost,
+            TimeSpan.FromSeconds(30), policy), Is.EqualTo(44));
         selectedRoot[0] ^= 1;
         selectedProviders[0][0] ^= 1;
-        Assert.Equal(persistedRoot, selection.Consumer.ToArray());
-        Assert.Equal(persistedMiddle, selection.Producers[0].ToArray());
+        Assert.That(selection.Consumer.ToArray(), Is.EqualTo(persistedRoot));
+        Assert.That(selection.Producers[0].ToArray(), Is.EqualTo(persistedMiddle));
     }
 
-    [Fact]
+    [Test]
     public void CatalogRejectsMissingIncompatibleAmbiguousAndMalformedChoices()
     {
         var (root, middle, original, replacement, incompatible, unrelated) = Graph(NativeRuntimePolicy.FailFast);
-        Assert.Contains("Missing", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle])).Message, StringComparison.Ordinal);
-        Assert.Contains("no compatible", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, incompatible])).Message, StringComparison.Ordinal);
-        Assert.Contains("multiple compatible", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, original, replacement])).Message, StringComparison.Ordinal);
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle]))!.Message, Does.Contain("Missing"));
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, incompatible]))!.Message, Does.Contain("no compatible"));
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, original, replacement]))!.Message, Does.Contain("multiple compatible"));
         var malformed = (byte[])unrelated.Clone();
         malformed[^1] ^= 1;
         _ = Assert.Throws<ModuleFormatException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, replacement, malformed]));
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, replacement, malformed]))!;
         var caseVariant = NativeModuleCompiler.CreateProducer(
             Compile("public int32 Leaf() { return 42; }", NativeRuntimePolicy.FailFast), ["Leaf"],
             "nodeb", NativeRuntimePolicy.FailFast);
-        Assert.Contains("no compatible", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, caseVariant])).Message, StringComparison.Ordinal);
-        Assert.Contains("Case-ambiguous", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, replacement, caseVariant])).Message, StringComparison.Ordinal);
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, caseVariant]))!.Message, Does.Contain("no compatible"));
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, replacement, caseVariant]))!.Message, Does.Contain("Case-ambiguous"));
         var wrongPolicy = Producer("Leaf", 42, NativeRuntimePolicy.CheckedExceptions, identity: "NodeB");
-        Assert.Contains("no compatible", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, wrongPolicy])).Message, StringComparison.Ordinal);
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, wrongPolicy]))!.Message, Does.Contain("no compatible"));
     }
 
-    [Fact]
+    [Test]
     public void CatalogRejectsCyclicSelectedClosure()
     {
         var (root, middle, _, _, _, _) = Graph(NativeRuntimePolicy.FailFast);
         var cycle = (byte[])middle.Clone();
-        Assert.True(cycle.AsSpan(19, 5).SequenceEqual("NodeA"u8));
+        Assert.That(cycle.AsSpan(19, 5).SequenceEqual("NodeA"u8), Is.True);
         "NodeB"u8.CopyTo(cycle.AsSpan(19, 5));
         for (var index = 24; index <= cycle.Length - 32 - 5; index++)
         {
@@ -135,12 +133,12 @@ public sealed class NativeGraphCatalogTests
             }
         }
         SHA256.HashData(cycle.AsSpan(0, cycle.Length - 32)).CopyTo(cycle, cycle.Length - 32);
-        Assert.Equal("NodeB", NativeModuleCompiler.InspectGraphArtifact(cycle).Identity);
-        Assert.Contains("cycle", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, cycle])).Message, StringComparison.Ordinal);
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(cycle).Identity, Is.EqualTo("NodeB"));
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [middle, cycle]))!.Message, Does.Contain("cycle"));
     }
 
-    [Fact]
+    [Test]
     public void CatalogCandidateAndAggregateByteBoundsAreExact()
     {
         var (root, middle, _, replacement, _, unrelated) = Graph(NativeRuntimePolicy.FailFast);
@@ -151,22 +149,22 @@ public sealed class NativeGraphCatalogTests
         {
             catalog[index] = unrelated;
         }
-        Assert.Equal(2, NativeModuleCompiler.ResolveGraphCatalog(root, catalog).Producers.Length);
-        Assert.Contains("1 to 32", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, [.. catalog, unrelated])).Message, StringComparison.Ordinal);
+        Assert.That(NativeModuleCompiler.ResolveGraphCatalog(root, catalog).Producers.Length, Is.EqualTo(2));
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, [.. catalog, unrelated]))!.Message, Does.Contain("1 to 32"));
 
         const int MaximumPackageBytes = 16 * 1024 * 1024;
         var large = new byte[MaximumPackageBytes];
         var final = new byte[MaximumPackageBytes - root.Length];
         var atLimit = new[] { large, large, large, final };
         _ = Assert.Throws<ModuleFormatException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, atLimit));
+            NativeModuleCompiler.ResolveGraphCatalog(root, atLimit))!;
         atLimit[3] = new byte[final.Length + 1];
-        Assert.Contains("64 MiB", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, atLimit)).Message, StringComparison.Ordinal);
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, atLimit))!.Message, Does.Contain("64 MiB"));
     }
 
-    [Fact]
+    [Test]
     public void CatalogCannotReturnFirstSolutionBeforeAssignmentBudgetProvesUniqueness()
     {
         const int Pairs = 12;
@@ -190,7 +188,7 @@ public sealed class NativeGraphCatalogTests
             Compile(calls.ToString(), NativeRuntimePolicy.FailFast,
                 NativeModuleCompiler.CreateGraphReference(originals), library: false),
             originals, NativeRuntimePolicy.FailFast);
-        Assert.Contains("4096 candidate assignments", Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ResolveGraphCatalog(root, catalog)).Message, StringComparison.Ordinal);
+        Assert.That(Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ResolveGraphCatalog(root, catalog))!.Message, Does.Contain("4096 candidate assignments"));
     }
 }

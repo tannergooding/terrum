@@ -4,7 +4,7 @@ using System;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -43,7 +43,7 @@ public sealed class NativeCallbackCatalogTests
             ],
         };
 
-    [Fact]
+    [Test]
     public void CallbackSignatureIsSelectedFromTheNativeCatalog()
     {
         var source = $$"""
@@ -63,14 +63,14 @@ public sealed class NativeCallbackCatalogTests
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
             BoundRuntimePolicy.FailFast);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var callback = Assert.Single(program.Functions, static function => function.Name == "Callback");
-        Assert.True(catalog.MatchesCallbackFunction(PrimitiveType.NativeCallbackAddress, callback));
-        Assert.NotEmpty(NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var callback = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Callback");
+        Assert.That(catalog.MatchesCallbackFunction(PrimitiveType.NativeCallbackAddress, callback), Is.True);
+        Assert.That(NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void CallbackSignatureRejectsFunctionsWithDifferentParameters()
     {
         var source = $$"""
@@ -89,25 +89,23 @@ public sealed class NativeCallbackCatalogTests
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], CreateCatalog(),
             BoundRuntimePolicy.FailFast);
 
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3030");
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3030"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void CallbackParameterRequiresCatalogSignatureMetadata()
     {
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
             "test.generic-callback.missing-signature.v1", [
                 CreateImport() with { CallbackParameters = [] },
-            ]));
+            ]))!;
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("NativeCallback")]
-    [InlineData("Terrum..Interop.NativeCallback")]
-    [InlineData("Terrum.Interop.Native Callback")]
-    [InlineData("1Terrum.Interop.NativeCallback")]
+    [TestCase("")]
+    [TestCase("NativeCallback")]
+    [TestCase("Terrum..Interop.NativeCallback")]
+    [TestCase("Terrum.Interop.Native Callback")]
+    [TestCase("1Terrum.Interop.NativeCallback")]
     public void CallbackParameterRequiresQualifiedSourceTypeName(string sourceTypeName)
     {
         var import = CreateImport() with {
@@ -117,10 +115,10 @@ public sealed class NativeCallbackCatalogTests
         };
 
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-            "test.generic-callback.invalid-type-name.v1", [import]));
+            "test.generic-callback.invalid-type-name.v1", [import]))!;
     }
 
-    [Fact]
+    [Test]
     public void WindowProcedureAliasRequiresItsCataloguedSignature()
     {
         var source = $$"""
@@ -132,18 +130,18 @@ public sealed class NativeCallbackCatalogTests
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], CreateCatalog(),
             BoundRuntimePolicy.FailFast);
 
-        Assert.Null(compilation.Program);
-        Assert.NotEmpty(compilation.Diagnostics);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics, Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void CallbackCatalogSupportsWindowHandlesOnlyWhenCallbackSignatureUsesThem()
     {
-        Assert.False(CreateCatalog().SupportsParameterType(PrimitiveType.NativeWindowHandle));
-        Assert.True(NativeImportCatalog.WindowsX64.SupportsParameterType(PrimitiveType.NativeWindowHandle));
+        Assert.That(CreateCatalog().SupportsParameterType(PrimitiveType.NativeWindowHandle), Is.False);
+        Assert.That(NativeImportCatalog.WindowsX64.SupportsParameterType(PrimitiveType.NativeWindowHandle), Is.True);
     }
 
-    [Fact]
+    [Test]
     public void CallbackSignatureIsSelectedFromEachImportParameter()
     {
         var source = $$"""
@@ -173,15 +171,15 @@ public sealed class NativeCallbackCatalogTests
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
             BoundRuntimePolicy.FailFast);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.NotEmpty(NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var mismatchedSource = source.Replace("InvokeCallback(&Callback);",
             "InvokeCallback(&WindowCallback);", StringComparison.Ordinal);
         var mismatched = Compilation.CreateWithNativeImports([SyntaxTree.Parse(mismatchedSource)], catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.Null(mismatched.Program);
-        Assert.Contains(mismatched.Diagnostics, static diagnostic => diagnostic.Code == "TRM3030");
+        Assert.That(mismatched.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(mismatched.Diagnostics,static diagnostic => diagnostic.Code == "TRM3030"),Is.True);
     }
 }

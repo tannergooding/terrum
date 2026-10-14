@@ -10,15 +10,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeRetainedImportTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void RetainedCleanupDeclarationDoesNotCreateAnUnusedMachineImport(NativeRuntimePolicy policy)
     {
         var leaf = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -29,21 +28,21 @@ public sealed class NativeRetainedImportTests
             }
             public Token Make() { return new Token(42); }
             """), (BoundRuntimePolicy)policy);
-        Assert.False(leaf.HasErrors, string.Join(Environment.NewLine, leaf.Diagnostics));
+        Assert.That(leaf.HasErrors, Is.False, string.Join(Environment.NewLine, leaf.Diagnostics));
         var reference = ModuleCompiler.CreateReference(ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(leaf.Program), ["Make", "Token.Close"]));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = leaf.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Make", "Token.Close"]));
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public Token Forward() { return Make(); }"), reference, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         BoundFunction[] external = [.. program.Functions.Where(static function => function.IsExternal)];
-        Assert.Contains(external, static function => function.Name == "Token.Close");
+        Assert.That(global::System.Linq.Enumerable.Any(external,static function => function.Name == "Token.Close"),Is.True);
         NativeImportBinding[] bindings = [.. external.Select(static function =>
             new NativeImportBinding(function.Name, "retained-leaf.dll", function.Name))];
         var image = NativeEmitter.EmitLibraryWithImports(program, ["Forward"], bindings, policy);
-        Assert.Equal(["Make"], ReadImports(image, "retained-leaf.dll"));
+        Assert.That(ReadImports(image, "retained-leaf.dll"), Is.EqualTo(["Make"]));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibraryWithImports(program,
-            ["Forward"], [new NativeImportBinding("Make", "retained-leaf.dll", "Make")], policy));
+            ["Forward"], [new NativeImportBinding("Make", "retained-leaf.dll", "Make")], policy))!;
     }
 
     private static List<string> ReadImports(byte[] image, string library)
@@ -71,7 +70,7 @@ public sealed class NativeRetainedImportTests
             var entries = pe.GetSectionData(lookup).GetReader();
             for (var entry = entries.ReadUInt64(); entry != 0; entry = entries.ReadUInt64())
             {
-                Assert.Equal(0UL, entry & 0x8000_0000_0000_0000UL);
+                Assert.That(entry & 0x8000_0000_0000_0000UL, Is.EqualTo(0UL));
                 result.Add(ReadName(pe, checked((int)entry + 2)));
             }
             return result;

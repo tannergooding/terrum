@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -72,20 +72,20 @@ public sealed partial class NativeManagedClassModuleTests
         public int32 CollectGarbage() { return ManagedHeap.Collect(); }
         """;
 
-    [Fact]
+    [Test]
     public void ManagedLeafExportsExistingCompactCopyValues()
     {
         var program = Compile(ValueExportSource, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Echo"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
-        Assert.Equal("native-19", ModuleCompiler.GetNativeProfileVersion(producer, false));
-        Assert.Equal("Echo", Assert.Single(ModuleCompiler.CreateReference(producer).Functions).Name);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-19"));
+        Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions).Name, Is.EqualTo("Echo"));
         var native = NativeModuleCompiler.CreateProducer(program, ["Echo"], "NodeB",
             NativeRuntimePolicy.FailFast);
-        Assert.Equal("native-19", NativeModuleCompiler.Inspect(native).NativeProfileVersion);
+        Assert.That(NativeModuleCompiler.Inspect(native).NativeProfileVersion, Is.EqualTo("native-19"));
     }
 
-    [Fact]
+    [Test]
     public void CurrentSemanticRevisionSupportsScalarOnlyManagedLeaf()
     {
         var program = Compile("""
@@ -99,18 +99,16 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, NativeRuntimePolicy.FailFast);
         var original = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(76));
         _ = ModuleCompiler.CreateReference(original);
         var forged = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), 31);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged))!;
     }
-
-    [Theory]
-    [InlineData(false, NativeRuntimePolicy.FailFast)]
-    [InlineData(false, NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData(true, NativeRuntimePolicy.FailFast)]
-    [InlineData(true, NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(false,NativeRuntimePolicy.FailFast)]
+    [TestCase(false,NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(true,NativeRuntimePolicy.FailFast)]
+    [TestCase(true,NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedStaticScalarOwnerPreservesCurrentArtifactAndNativeGraphAsync(
         bool unique, NativeRuntimePolicy policy)
     {
@@ -137,20 +135,19 @@ public sealed partial class NativeManagedClassModuleTests
         var originalProgram = Compile(originalSource, policy);
         var replacementProgram = Compile(replacementSource, policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, ["Vault.Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(76));
         var reference = ModuleCompiler.CreateReference(original);
-        Assert.Equal("Vault", Assert.Single(reference.Structures).Name);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).Name, Is.EqualTo("Vault"));
         var consumer = ModuleCompiler.CreateConsumer(Compile(Consumer, policy, reference,
             library: false), original);
         var consumerHash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Vault.Read"]);
-        Assert.Equal(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)),
-            BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
-        Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
-            .ConfigureAwait(true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, replacement), policy))
-            .ConfigureAwait(true));
-        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4))));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
+            .ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, replacement), policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(consumerHash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram, ["Vault.Read"],
             "NodeB", policy);
@@ -160,23 +157,21 @@ public sealed partial class NativeManagedClassModuleTests
         var nativeHash = SHA256.HashData(nativeConsumer);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram,
             ["Vault.Read"], "NodeB", policy);
-        Assert.Equal(40, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task DeepCompactCopyValuesCrossManagedModuleAndNativeGraphAsync(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
@@ -218,36 +213,34 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source.ToString(), policy);
         string[] exports = ["Make", "Echo", "CollectGarbage"];
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var reference = ModuleCompiler.CreateReference(producer);
-        Assert.Equal(21, reference.Structures.Length);
-        Assert.All(reference.Structures, static structure => Assert.Equal(4, structure.Size));
+        Assert.That(reference.Structures.Length, Is.EqualTo(21));
+        {var __nunitItems0 = reference.Structures;        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0.Size, Is.EqualTo(4)); } });}
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             reference, library: false), producer);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer), policy))
-            .ConfigureAwait(true));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer), policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
         var downgraded = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 30);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded))!;
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "NodeB", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(consumerSource, policy,
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), library: false),
             [nativeProducer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedCompactValueReplacementKeepsPublicOriginAndPrivateClassStateAsync(
         NativeRuntimePolicy policy)
     {
@@ -287,19 +280,19 @@ public sealed partial class NativeManagedClassModuleTests
         var consumerHash = SHA256.HashData(consumer);
         var replacementProgram = Compile(replacementSource, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
         var reference = ModuleCompiler.CreateReference(replacement);
-        Assert.Equal("PublicPair", Assert.Single(reference.Structures).Name);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).Name, Is.EqualTo("PublicPair"));
         var downgraded = (byte[])replacement.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 30);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
-            .ConfigureAwait(true));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded))!;
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Contains(linked.Structures, structure => structure.Name == "$producer.Stamp");
-        Assert.Contains(linked.Structures, structure => structure.Name == "Stamp");
-        Assert.Equal(44, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Structures,structure => structure.Name == "$producer.Stamp"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Structures,structure => structure.Name == "Stamp"),Is.True);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(consumerHash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram, exports, "NodeB", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(Consumer, policy,
@@ -308,23 +301,21 @@ public sealed partial class NativeManagedClassModuleTests
         var nativeHash = SHA256.HashData(nativeConsumer);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram,
             exports, "NodeB", policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(44));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedCompactConditionalOutputsRespectPublicationAcrossNativeImportsAsync(
         NativeRuntimePolicy policy)
     {
@@ -385,13 +376,13 @@ public sealed partial class NativeManagedClassModuleTests
         var originalProducer = ModuleCompiler.CreateProducer(originalProgram, exports);
         var program = Compile(ConditionalValueSource, policy);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(originalProducer), library: false), originalProducer);
         var consumerHash = SHA256.HashData(consumer);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer), policy))
-            .ConfigureAwait(true));
-        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer), policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(consumerHash));
 
         var originalNativeProducer = NativeModuleCompiler.CreateProducer(originalProgram, exports, "NodeB", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(consumerSource, policy,
@@ -399,19 +390,19 @@ public sealed partial class NativeManagedClassModuleTests
             [originalNativeProducer], policy);
         var nativeConsumerHash = SHA256.HashData(nativeConsumer);
         var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "NodeB", policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeConsumerHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeConsumerHash));
     }
 
-    [Fact]
+    [Test]
     public async Task NonBooleanCopyOutputsRemainUnpublishedOnCheckedExceptionAsync()
     {
         const string providerSource = """
@@ -525,7 +516,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             int32 Main() { return 0; }
             """), ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.Contains(invalidCopyConsumer.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.That(global::System.Linq.Enumerable.Any(invalidCopyConsumer.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
         var invalidVoidConsumer = Compilation.Create(SyntaxTree.Parse("""
             int32 ReadVoidAfterFailure(out Pair value) {
                 unsafe {
@@ -537,33 +528,31 @@ public sealed partial class NativeManagedClassModuleTests
             }
             int32 Main() { return 0; }
             """), ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.Contains(invalidVoidConsumer.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.That(global::System.Linq.Enumerable.Any(invalidVoidConsumer.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
 
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(providerProgram, exports,
             "CopyOutputFailureProvider", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(consumerSource, policy,
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), library: false),
             [nativeProducer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NamespacedNestedCopyValuesCrossManagedNativeGraphWithoutPrivateTypeLeakAsync(
         NativeRuntimePolicy policy)
     {
@@ -605,30 +594,27 @@ public sealed partial class NativeManagedClassModuleTests
         string[] exports = ["Values.Make", "Values.Echo"];
         var program = Compile(Source, policy);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(["Values.Word", "Values.Nested"],
-            ModuleCompiler.CreateReference(producer).Structures.Select(static structure => structure.Name));
+        Assert.That(ModuleCompiler.CreateReference(producer).Structures.Select(static structure => structure.Name), Is.EqualTo(["Values.Word", "Values.Nested"]));
         var consumer = ModuleCompiler.CreateConsumer(Compile(Consumer, policy,
             ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer), policy))
-            .ConfigureAwait(true));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer), policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
         var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "NodeB", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(Consumer, policy,
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), library: false),
             [nativeProducer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeProducer],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedCopyContractSampleReplacesUnchangedConsumerAsync(NativeRuntimePolicy policy)
     {
         var directory = Path.Combine(RepositoryRoot(), "samples", "native", "graph");
@@ -646,15 +632,15 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(managedProgram, exports);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
-        var publicStructure = Assert.Single(ModuleCompiler.CreateReference(replacement).Structures);
-        Assert.Equal("Snapshot", publicStructure.Name);
-        Assert.Equal(12, publicStructure.Size);
-        Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
-            .ConfigureAwait(true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, replacement), policy))
-            .ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        var publicStructure = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Structures);
+        Assert.That(publicStructure.Name, Is.EqualTo("Snapshot"));
+        Assert.That(publicStructure.Size, Is.EqualTo(12));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
+            .ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, replacement), policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram, exports, "NodeB", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(consumerSource, policy,
@@ -662,36 +648,34 @@ public sealed partial class NativeManagedClassModuleTests
             [nativeOriginal], policy);
         var nativeHash = SHA256.HashData(nativeConsumer);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(managedProgram, exports, "NodeB", policy);
-        Assert.Equal(40, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
-
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         public unique struct Owned {
             public int32 Number;
             public Owned(int32 number) { Number = number; }
         }
         public Owned Leak(Owned value) { return move value; }
         """)]
-    [InlineData("""
+    [TestCase("""
         public unique struct Owned {
             public OwnedInt32Buffer Words;
             public Owned(OwnedInt32Buffer words) { Words = move words; }
         }
         public Owned Leak(Owned value) { return move value; }
         """)]
-    [InlineData("""
+    [TestCase("""
         public struct Hidden {
             private int32 Number;
             public Hidden(int32 number) { Number = number; }
@@ -701,8 +685,8 @@ public sealed partial class NativeManagedClassModuleTests
     public void ManagedValueExportsRejectUniqueAndPrivateLayouts(string declaration)
     {
         var program = Compile(ValueExportSource + declaration, NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Leak"]));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Leak"]))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(program,
-            ["Leak"], "NodeB", NativeRuntimePolicy.FailFast));
+            ["Leak"], "NodeB", NativeRuntimePolicy.FailFast))!;
     }
 }

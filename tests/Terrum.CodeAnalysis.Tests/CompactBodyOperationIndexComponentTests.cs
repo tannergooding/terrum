@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -73,29 +73,23 @@ public sealed class CompactBodyOperationIndexComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceMapOperationIndexMatchesBodyOwnersAsync(BoundRuntimePolicy policy)
     {
         var testCase = CreateValidCase();
         await VerifyAsync(testCase, policy).ConfigureAwait(true);
         await VerifyAsync(testCase with { ScratchCapacity = 6 }, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceMapOperationIndexHandlesManyReverseOwnedLinearBodiesAsync(
         BoundRuntimePolicy policy)
     {
         await VerifyAsync(CreateManyLinearCase(512), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceMapOperationIndexFramesLocalAndPackedCallWidthsAsync(
         BoundRuntimePolicy policy)
     {
@@ -141,19 +135,15 @@ public sealed class CompactBodyOperationIndexComponentTests
             1,
             true), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceMapOperationIndexHandlesManyReverseOwnedIndexedBodiesAsync(
         BoundRuntimePolicy policy)
     {
         await VerifyAsync(CreateManyIndexedCase(512), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceMapOperationIndexHandlesEmptyBodyTablesAsync(
         BoundRuntimePolicy policy)
     {
@@ -164,10 +154,8 @@ public sealed class CompactBodyOperationIndexComponentTests
             ExpectedValid = false,
         }, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceMapOperationIndexFeedsCompactLocationValidationAsync(
         BoundRuntimePolicy policy)
     {
@@ -192,10 +180,8 @@ public sealed class CompactBodyOperationIndexComponentTests
         await VerifySourceMapConsumerAsync(ordinal: 0, expectedValid: false, policy,
             indexedBody: true, block: 3).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceMapOperationIndexDoesNotPublishMalformedOrOversizedRowsAsync(
         BoundRuntimePolicy policy)
     {
@@ -264,11 +250,11 @@ public sealed class CompactBodyOperationIndexComponentTests
                 [.. Enumerable.Repeat(-1, testCase.ScratchCapacity)], true),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static IndexCase CreateValidCase()
@@ -466,11 +452,11 @@ public sealed class CompactBodyOperationIndexComponentTests
             new HostBuffer("GenericSignatureOwners", PrimitiveType.Int32, [0, 0], true),
             new HostBuffer("Expected", PrimitiveType.Int32, [expectedValid ? 1 : 0], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static async Task<List<SyntaxTree>> LoadComponentsAsync(string root,
@@ -501,7 +487,7 @@ public sealed class CompactBodyOperationIndexComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
 

@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -19,10 +19,8 @@ public sealed class NativeManagedNodeModuleTests
     private const string Original = "public int32 Leaf() { return 40; }";
     private const string Middle = "public int32 Middle() { return Leaf() + 1; }";
     private const string Root = "int32 Main() { return Middle() + 1; }";
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PrivateNodeLeafReplacesAnUnchangedRootAndIntermediateAsync(NativeRuntimePolicy policy)
     {
         var original = NativeModuleCompiler.CreateProducer(Compile(Original, policy), ["Leaf"], "NodeB", policy);
@@ -34,13 +32,13 @@ public sealed class NativeManagedNodeModuleTests
         var middleHash = SHA256.HashData(middle);
         var replacement = NativeModuleCompiler.CreateProducer(Compile(Sample(), policy),
             ["Leaf"], "NodeB", policy);
-        Assert.Equal("native-18", NativeModuleCompiler.Inspect(replacement).NativeProfileVersion);
+        Assert.That(NativeModuleCompiler.Inspect(replacement).NativeProfileVersion, Is.EqualTo("native-18"));
         NativeModuleCompiler.ValidateGraph(root, [middle, original]);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
-            TimeSpan.FromSeconds(10), policy));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(44));
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
@@ -48,25 +46,23 @@ public sealed class NativeManagedNodeModuleTests
             "..", "..", "..", "..", "..", ".."));
         var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
             configuration, frameworkDirectory.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, original], apphost,
-            TimeSpan.FromSeconds(30), policy));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
-            TimeSpan.FromSeconds(30), policy));
-        Assert.Equal(rootHash, SHA256.HashData(root));
-        Assert.Equal(middleHash, SHA256.HashData(middle));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, original], apphost,
+            TimeSpan.FromSeconds(30), policy), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
+            TimeSpan.FromSeconds(30), policy), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
+        Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
-
-    [Theory]
-    [InlineData("public ManagedNode Leak() { require ManagedNode.TryCreate(42, out var node); return node; }", "Leak")]
-    [InlineData("public bool Leak(out write ManagedNode node) { return ManagedNode.TryCreate(42, out node); }", "Leak")]
+    [TestCase("public ManagedNode Leak() { require ManagedNode.TryCreate(42, out var node); return node; }","Leak")]
+    [TestCase("public bool Leak(out write ManagedNode node) { return ManagedNode.TryCreate(42, out node); }","Leak")]
     public void ManagedHandlesCannotCrossNativePackageExports(string source, string export)
     {
         var program = Compile(source, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.CreateProducer(program, [export], "NodeB", NativeRuntimePolicy.FailFast));
+            NativeModuleCompiler.CreateProducer(program, [export], "NodeB", NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void PrivateSourceClassSelectsItsOwnNativeProfile()
     {
         var program = Compile("""
@@ -81,27 +77,27 @@ public sealed class NativeManagedNodeModuleTests
             """, NativeRuntimePolicy.FailFast);
         var package = NativeModuleCompiler.CreateProducer(program, ["Proof"], "NodeB",
             NativeRuntimePolicy.FailFast);
-        Assert.Equal("native-19", NativeModuleCompiler.Inspect(package).NativeProfileVersion);
+        Assert.That(NativeModuleCompiler.Inspect(package).NativeProfileVersion, Is.EqualTo("native-19"));
     }
 
-    [Fact]
+    [Test]
     public void NodeProfileAndLexicalRootMetadataAreCheckedOnReload()
     {
         var program = Compile(Sample(), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
-        Assert.Equal("native-18", ModuleCompiler.GetNativeProfileVersion(contract, false));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-18"));
         var profile = (byte[])contract.Clone();
         var label = Encoding.UTF8.GetBytes("native-18");
         var profileOffset = Find(profile, label);
         profile[profileOffset + label.Length - 1] = (byte)'7';
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(profile));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(profile))!;
         BinaryPrimitives.WriteInt32LittleEndian(profile.AsSpan(4), 17);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(profile));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(profile))!;
 
-        var make = Assert.Single(program.Functions, function => function.Name == "MakeValue");
-        Assert.True(make.Body.IsManagedLexicalScope);
-        Assert.Equal(2, make.Body.RetiredManagedLocals.Length);
+        var make = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "MakeValue");
+        Assert.That(make.Body.IsManagedLexicalScope, Is.True);
+        Assert.That(make.Body.RetiredManagedLocals.Length, Is.EqualTo(2));
         var marker = new byte[14 + (4 * make.Body.RetiredManagedLocals.Length)];
         marker[0] = 1;
         BinaryPrimitives.WriteInt32LittleEndian(marker.AsSpan(1), make.Body.Span.Start);
@@ -116,36 +112,36 @@ public sealed class NativeManagedNodeModuleTests
         var scopeOffset = Find(contract, marker) + 9;
         var noncanonical = (byte[])contract.Clone();
         noncanonical[scopeOffset] = 2;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(noncanonical));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(noncanonical))!;
         var retired = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(retired.AsSpan(scopeOffset + 1), 257);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retired));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retired))!;
         var wrongSlot = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(wrongSlot.AsSpan(scopeOffset + 5), 250);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(wrongSlot));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(wrongSlot))!;
     }
 
-    [Fact]
+    [Test]
     public void NativePackageRejectsProfileDowngradeAndUnlistedHeapImport()
     {
         var package = NativeModuleCompiler.CreateProducer(Compile(Sample(), NativeRuntimePolicy.FailFast),
             ["Leaf"], "NodeB", NativeRuntimePolicy.FailFast);
         var downgraded = (byte[])package.Clone();
         var profileOffset = 18 + downgraded[7];
-        Assert.Equal("native-18", Encoding.ASCII.GetString(downgraded, profileOffset, downgraded[8]));
+        Assert.That(Encoding.ASCII.GetString(downgraded, profileOffset, downgraded[8]), Is.EqualTo("native-18"));
         downgraded[profileOffset + downgraded[8] - 1] = (byte)'7';
         Rehash(downgraded);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded))!;
 
         var import = (byte[])package.Clone();
         var imageOffset = 18 + import[7] + import[8] + 2
             + BinaryPrimitives.ReadInt32LittleEndian(import.AsSpan(10, 4));
         var heapName = import.AsSpan(imageOffset,
             BinaryPrimitives.ReadInt32LittleEndian(import.AsSpan(14, 4))).IndexOf("HeapAlloc\0"u8);
-        Assert.True(heapName >= 0);
+        Assert.That(heapName >= 0, Is.True);
         import[imageOffset + heapName + 4] = (byte)'X';
         Rehash(import);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(import));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(import))!;
     }
 
     private static void Rehash(byte[] package) =>
@@ -154,8 +150,8 @@ public sealed class NativeManagedNodeModuleTests
     private static int Find(byte[] bytes, byte[] pattern)
     {
         var index = bytes.AsSpan().IndexOf(pattern);
-        Assert.True(index >= 0);
-        Assert.Equal(-1, bytes.AsSpan(index + 1).IndexOf(pattern));
+        Assert.That(index >= 0, Is.True);
+        Assert.That(bytes.AsSpan(index + 1).IndexOf(pattern), Is.EqualTo(-1));
         return index;
     }
 
@@ -167,9 +163,9 @@ public sealed class NativeManagedNodeModuleTests
         var compilation = library
             ? reference is null ? Compilation.CreateLibrary(syntax, boundPolicy)
                 : Compilation.CreateLibrary(syntax, reference, boundPolicy)
-            : Compilation.Create(syntax, Assert.IsType<CompilationReference>(reference), boundPolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), boundPolicy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
     private static string Sample()

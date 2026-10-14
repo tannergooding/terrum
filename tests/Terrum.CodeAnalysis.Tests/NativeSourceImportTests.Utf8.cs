@@ -4,7 +4,7 @@ using System;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -12,7 +12,7 @@ public sealed partial class NativeSourceImportTests
 {
     private const string Utf8ZFixtureKey = "test.application.native-import-abi.NativeFfiUtf8Z";
 
-    [Fact]
+    [Test]
     public void Utf8ZRequiresAnAsciiLiteralAtACataloguedNoEscapeArgument()
     {
         var catalog = NativeImportCatalog.CreateForTesting("test-native-utf8z-v1",
@@ -35,8 +35,8 @@ public sealed partial class NativeSourceImportTests
                 + "utf8z(\"second\"), 3, utf8z(\"third\")); }";
             var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
                 BoundRuntimePolicy.FailFast);
-            Assert.Null(compilation.Program);
-            Assert.NotEmpty(compilation.Diagnostics);
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
         }
 
         foreach (var malformedType in new[] {
@@ -50,16 +50,16 @@ public sealed partial class NativeSourceImportTests
             var malformedCompilation = Compilation.CreateWithNativeImports(
                 [SyntaxTree.Parse(malformedDeclaration + "\nvoid Main() {}")], catalog,
                 BoundRuntimePolicy.FailFast);
-            Assert.Null(malformedCompilation.Program);
-            Assert.NotEmpty(malformedCompilation.Diagnostics);
+            Assert.That(malformedCompilation.Program, Is.Null);
+            Assert.That(malformedCompilation.Diagnostics, Is.Not.Empty);
         }
 
         var storedLiteral = declaration
             + "\nint32 Main() { ptr<char8> value = utf8z(\"first\"); return 0; }";
         var storedCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(storedLiteral)], catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.Null(storedCompilation.Program);
-        Assert.NotEmpty(storedCompilation.Diagnostics);
+        Assert.That(storedCompilation.Program, Is.Null);
+        Assert.That(storedCompilation.Diagnostics, Is.Not.Empty);
 
         foreach (var escapingFunction in new[] {
             declaration + "\nptr<char8> Escape(ptr<char8> value) { return value; }\nvoid Main() {}",
@@ -68,20 +68,20 @@ public sealed partial class NativeSourceImportTests
         {
             var escapingCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(escapingFunction)],
                 catalog, BoundRuntimePolicy.FailFast);
-            Assert.Null(escapingCompilation.Program);
-            Assert.NotEmpty(escapingCompilation.Diagnostics);
+            Assert.That(escapingCompilation.Program, Is.Null);
+            Assert.That(escapingCompilation.Diagnostics, Is.Not.Empty);
         }
 
         var missingContract = new NativeImportDefinition(Utf8ZFixtureKey, "native-import-abi-probe.dll",
             "NativeFfiUtf8Z", [PrimitiveType.NativeUtf8ZPointer], PrimitiveType.Int32,
             true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-            "test-native-utf8z-without-contract-v1", [missingContract]));
+            "test-native-utf8z-without-contract-v1", [missingContract]))!;
         _ = Assert.Throws<ArgumentException>(() =>
-            new NativeImportCatalog("production-native-utf8z-v1", [CreateUtf8ZImportDefinition()]));
+            new NativeImportCatalog("production-native-utf8z-v1", [CreateUtf8ZImportDefinition()]))!;
     }
 
-    [Fact]
+    [Test]
     public void Utf8PointerElementDoesNotOverrideSourceTypesNamedChar8()
     {
         const string importKey = "test.application.native-import-abi.NativeFfiWideAlias";
@@ -100,7 +100,7 @@ public sealed partial class NativeSourceImportTests
             """;
         var aliasCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(aliasSource)], wideCatalog,
             BoundRuntimePolicy.FailFast);
-        Assert.False(aliasCompilation.HasErrors, string.Join(Environment.NewLine, aliasCompilation.Diagnostics));
+        Assert.That(aliasCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, aliasCompilation.Diagnostics));
 
         var utf8Catalog = NativeImportCatalog.CreateForTesting("test-native-char8-struct-v1",
             [CreateUtf8ZImportDefinition()]);
@@ -114,26 +114,26 @@ public sealed partial class NativeSourceImportTests
             """;
         var structCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(structSource)], utf8Catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.Null(structCompilation.Program);
-        Assert.NotEmpty(structCompilation.Diagnostics);
+        Assert.That(structCompilation.Program, Is.Null);
+        Assert.That(structCompilation.Diagnostics, Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void Utf8ZLiteralPoolValidatesAsciiTerminationAndSharedStorageLimit()
     {
         var maximum = new string('x', NativeUtf8ZContract.MaximumStorageBytes - 1);
-        Assert.True(NativeUtf8ZContract.IsValidLiteral(maximum));
-        Assert.False(NativeUtf8ZContract.IsValidLiteral(maximum + "x"));
-        Assert.False(NativeUtf8ZContract.IsValidLiteral("before\0after"));
-        Assert.False(NativeUtf8ZContract.IsValidLiteral("caf\u00E9"));
-        Assert.False(NativeUtf8ZContract.IsValidLiteral(new string('\uD800', 1)));
+        Assert.That(NativeUtf8ZContract.IsValidLiteral(maximum), Is.True);
+        Assert.That(NativeUtf8ZContract.IsValidLiteral(maximum + "x"), Is.False);
+        Assert.That(NativeUtf8ZContract.IsValidLiteral("before\0after"), Is.False);
+        Assert.That(NativeUtf8ZContract.IsValidLiteral("caf\u00E9"), Is.False);
+        Assert.That(NativeUtf8ZContract.IsValidLiteral(new string('\uD800', 1)), Is.False);
 
         var maximumUtf16 = new string('u', NativeUtf16ZContract.MaximumStorageBytes / sizeof(char) - 1);
-        Assert.True(NativeStringZPoolContract.IsValid([maximumUtf16], []));
-        Assert.False(NativeStringZPoolContract.IsValid([maximumUtf16], ["x"]));
+        Assert.That(NativeStringZPoolContract.IsValid([maximumUtf16], []), Is.True);
+        Assert.That(NativeStringZPoolContract.IsValid([maximumUtf16], ["x"]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void Utf8AndUtf16LiteralsShareTheAggregateStorageLimitDuringBinding()
     {
         const string importKey = "test.application.native-import-abi.NativeFfiMixedZ";
@@ -156,18 +156,18 @@ public sealed partial class NativeSourceImportTests
             exactLimitLiteral, "\"), utf8z(\"x\")); }");
         var exactCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(exactSource)], catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.False(exactCompilation.HasErrors, string.Join(Environment.NewLine, exactCompilation.Diagnostics));
+        Assert.That(exactCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, exactCompilation.Diagnostics));
 
         var overLimitLiteral = new string('u', NativeStringZPoolContract.MaximumStorageBytes / sizeof(char) - 1);
         var overLimitSource = string.Concat(declaration, "\nvoid Main() { NativeFfiMixedZ(utf16z(\"",
             overLimitLiteral, "\"), utf8z(\"x\")); }");
         var overLimitCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(overLimitSource)], catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.Null(overLimitCompilation.Program);
-        Assert.Contains(overLimitCompilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3013");
+        Assert.That(overLimitCompilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(overLimitCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3013"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void Utf8ZLiteralIndexIsRecheckedBeforeNativeEmission()
     {
         var catalog = NativeImportCatalog.CreateForTesting("test-native-utf8z-v1",
@@ -184,11 +184,11 @@ public sealed partial class NativeSourceImportTests
             """;
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
 
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImportsForTesting(
-            program with { NativeUtf8ZLiterals = [] }, NativeRuntimePolicy.FailFast));
+            program with { NativeUtf8ZLiterals = [] }, NativeRuntimePolicy.FailFast))!;
     }
 
     private static NativeImportDefinition CreateUtf8ZImportDefinition() =>

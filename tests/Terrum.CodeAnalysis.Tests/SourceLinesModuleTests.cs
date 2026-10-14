@@ -8,15 +8,14 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class SourceLinesModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceLinesModuleQueriesFreshSourceGrants(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -27,7 +26,7 @@ public sealed class SourceLinesModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -52,9 +51,8 @@ public sealed class SourceLinesModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
         [
             "Terrum.CodeAnalysis.GetStreamingLineExtent",
             "Terrum.CodeAnalysis.GetStreamingPosition",
@@ -76,9 +74,8 @@ public sealed class SourceLinesModuleTests
                 int32 Main() { {{body}} }
                 """, "source-lines-consumer.terrum");
             var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-            var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
             return ModuleCompiler.Link(consumer, producer);
         }
 
@@ -146,8 +143,8 @@ public sealed class SourceLinesModuleTests
                 var expected = line >= 0 && line < source.Lines.Length
                     ? PackRange(source.Lines[line].SpanIncludingLineBreak)
                     : -1;
-                Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(lineConsumers[query],
-                    [grant], (NativeRuntimePolicy)policy));
+                Assert.That(NativeJit.ExecuteWithSourceGrant(lineConsumers[query],
+                    [grant], (NativeRuntimePolicy)policy), Is.EqualTo(expected));
             }
             for (var query = 0; query < positionInputs.Length; query++)
             {
@@ -155,8 +152,8 @@ public sealed class SourceLinesModuleTests
                 var expected = position < 0 || position > source.Length
                     ? -1
                     : PackPosition(source.GetLinePosition(position));
-                Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(positionConsumers[query],
-                    [grant], (NativeRuntimePolicy)policy));
+                Assert.That(NativeJit.ExecuteWithSourceGrant(positionConsumers[query],
+                    [grant], (NativeRuntimePolicy)policy), Is.EqualTo(expected));
             }
             for (var query = 0; query < offsetInputs.Count; query++)
             {
@@ -164,8 +161,8 @@ public sealed class SourceLinesModuleTests
                 var expected = source.TryGetOffset(input.Line, input.Character, out var offset)
                     ? offset
                     : -1;
-                Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(offsetConsumers[query],
-                    [grant], (NativeRuntimePolicy)policy));
+                Assert.That(NativeJit.ExecuteWithSourceGrant(offsetConsumers[query],
+                    [grant], (NativeRuntimePolicy)policy), Is.EqualTo(expected));
             }
         }
     }

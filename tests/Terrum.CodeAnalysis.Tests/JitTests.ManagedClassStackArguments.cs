@@ -6,18 +6,17 @@ using System.Linq;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(4)]
-    [InlineData(7)]
-    [InlineData(8)]
-    [InlineData(15)]
-    [InlineData(63)]
+    [TestCase(4)]
+    [TestCase(7)]
+    [TestCase(8)]
+    [TestCase(15)]
+    [TestCase(63)]
     public async Task ClassStackArgumentsPreserveScalarPositionsThroughTheOrdinaryLimitAsync(int count)
     {
         var parameters = string.Join(", ", Enumerable.Range(1, count).Select(
@@ -48,10 +47,8 @@ public sealed partial class JitTests
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(4)]
-    [InlineData(63)]
+    [TestCase(4)]
+    [TestCase(63)]
     public async Task ClassStackArgumentsPreserveIndependentIndirectCopyPayloadsAsync(int count)
     {
         var parameters = string.Join(", ", Enumerable.Range(1, count).Select(
@@ -90,7 +87,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task ClassStackArgumentsKeepSparseHighArityRootsThroughCollectionAndUnwindAsync()
     {
         static bool IsHandle(int index)
@@ -151,7 +148,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public void ClassStackArgumentsReserveOneOrdinaryArgumentForReceiverAndOutput()
     {
         var parameters = string.Join(", ", Enumerable.Range(0, 64).Select(
@@ -159,13 +156,11 @@ public sealed partial class JitTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "class Box { public int32 Value; public Box(" + parameters
             + ") { Value = 42; } } int32 Main() { return 0; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ClassStackArgumentsKeepManagedHandlesRootedAcrossCollectionAsync(bool checkedFailures)
     {
         const string Source = """

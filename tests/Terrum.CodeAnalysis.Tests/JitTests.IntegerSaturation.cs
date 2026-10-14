@@ -9,15 +9,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingIntegerConversionsClampAcrossIndependentModuleAotAndJitAsync(
         NativeRuntimePolicy policy)
     {
@@ -142,7 +141,7 @@ public sealed partial class JitTests
         var component = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(component, componentPath),
             (BoundRuntimePolicy)policy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
         var exports = new[] {
             "SaturateInt32ToInt64", "SaturateInt32ToUInt64",
             "SaturateUInt32ToInt64", "SaturateUInt32ToUInt64",
@@ -155,18 +154,17 @@ public sealed partial class JitTests
             "SaturateChar16ToInt32", "SaturateChar16ToUInt32",
             "SaturateChar16ToInt64", "SaturateChar16ToUInt64",
         }.Select(name => $"Terrum.CodeAnalysis.Numerics64.{name}").ToArray();
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), exports);
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = library.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), exports);
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerSource = "using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n"
             + assertions + "\nreturn 42;\n}";
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource), reference,
             (BoundRuntimePolicy)policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = Assert.IsType<BoundProgram>(consumerCompilation.Program);
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
 
         AssertWindowsX64();
         var directory = Directory.CreateTempSubdirectory("terrum-saturation-module-").FullName;
@@ -178,7 +176,7 @@ public sealed partial class JitTests
                 UseShellExecute = false,
                 CreateNoWindow = true,
             }, []).ConfigureAwait(true);
-            Assert.Equal(42, exitCode);
+            Assert.That(exitCode, Is.EqualTo(42));
         }
         finally
         {

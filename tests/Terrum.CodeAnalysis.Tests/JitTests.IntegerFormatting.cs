@@ -7,31 +7,30 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData("0", false)]
-    [InlineData("1", false)]
-    [InlineData("9", false)]
-    [InlineData("10", false)]
-    [InlineData("99", false)]
-    [InlineData("100", false)]
-    [InlineData("1000", false)]
-    [InlineData("4294967296", false)]
-    [InlineData("9223372036854775808", false)]
-    [InlineData("18446744073709551615", false)]
-    [InlineData("0", true)]
-    [InlineData("42", true)]
-    [InlineData("-1", true)]
-    [InlineData("-10", true)]
-    [InlineData("-1000", true)]
-    [InlineData("-4294967296", true)]
-    [InlineData("9223372036854775807", true)]
-    [InlineData("-9223372036854775808", true)]
+    [TestCase("0",false)]
+    [TestCase("1",false)]
+    [TestCase("9",false)]
+    [TestCase("10",false)]
+    [TestCase("99",false)]
+    [TestCase("100",false)]
+    [TestCase("1000",false)]
+    [TestCase("4294967296",false)]
+    [TestCase("9223372036854775808",false)]
+    [TestCase("18446744073709551615",false)]
+    [TestCase("0",true)]
+    [TestCase("42",true)]
+    [TestCase("-1",true)]
+    [TestCase("-10",true)]
+    [TestCase("-1000",true)]
+    [TestCase("-4294967296",true)]
+    [TestCase("9223372036854775807",true)]
+    [TestCase("-9223372036854775808",true)]
     public async Task IntegerFormattingReusesWorkspaceAcrossAotAndJitAsync(string value, bool allowNegative)
     {
         var expected = allowNegative
@@ -62,7 +61,7 @@ public sealed partial class JitTests
         await AssertIntegerFormattingCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task IntegerFormattingRejectsInsufficientWorkspaceAcrossAotAndJitAsync()
     {
         var component = await File.ReadAllTextAsync(
@@ -88,18 +87,16 @@ public sealed partial class JitTests
                 }
                 """, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("0", false, 1)]
-    [InlineData("42", false, 2)]
-    [InlineData("18446744073709551615", false, 20)]
-    [InlineData("0", true, 1)]
-    [InlineData("-1", true, 2)]
-    [InlineData("-9223372036854775808", true, 20)]
-    [InlineData("4294967295", false, 10, true)]
-    [InlineData("2147483647", true, 10, true)]
-    [InlineData("-2147483648", true, 11, true)]
-    [InlineData("0", false, 1, true)]
+    [TestCase("0",false,1)]
+    [TestCase("42",false,2)]
+    [TestCase("18446744073709551615",false,20)]
+    [TestCase("0",true,1)]
+    [TestCase("-1",true,2)]
+    [TestCase("-9223372036854775808",true,20)]
+    [TestCase("4294967295",false,10,true)]
+    [TestCase("2147483647",true,10,true)]
+    [TestCase("-2147483648",true,11,true)]
+    [TestCase("0",false,1,true)]
     public async Task DecimalFormattingAcceptsExactOutputCapacityAsync(
         string value, bool isSigned, int capacity, bool isNarrow = false)
     {
@@ -122,13 +119,11 @@ public sealed partial class JitTests
         await AssertIntegerFormattingFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertIntegerFormattingCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("0", false, 0)]
-    [InlineData("-1", true, 1)]
-    [InlineData("-9223372036854775808", true, 19)]
-    [InlineData("4294967295", false, 9, true)]
-    [InlineData("-2147483648", true, 10, true)]
+    [TestCase("0",false,0)]
+    [TestCase("-1",true,1)]
+    [TestCase("-9223372036854775808",true,19)]
+    [TestCase("4294967295",false,9,true)]
+    [TestCase("-2147483648",true,10,true)]
     public async Task DecimalFormattingRejectsUndersizedOutputAsync(
         string value, bool isSigned, int capacity, bool isNarrow = false)
     {
@@ -154,23 +149,21 @@ public sealed partial class JitTests
             }
             """, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [MemberData(nameof(EveryRadix))]
-    [InlineData("0", 2, false)]
-    [InlineData("0", 10, false)]
-    [InlineData("12345678901234567890", 3, false)]
-    [InlineData("12345678901234567890", 17, false)]
-    [InlineData("0", 36, true)]
-    [InlineData("9223372036854775807", 16, true)]
-    [InlineData("-9223372036854775808", 2, true)]
-    [InlineData("-9223372036854775808", 10, true)]
-    [InlineData("-9223372036854775808", 16, true)]
-    [InlineData("-10", 10, true)]
-    [InlineData("-35", 36, true, false, true)]
-    [InlineData("-1", 36, true)]
-    [InlineData("-1234567890123456789", 35, true)]
-    [InlineData("4294967295", 16, false, true, true)]
+    [TestCaseSource(nameof(EveryRadix))]
+    [TestCase("0",2,false)]
+    [TestCase("0",10,false)]
+    [TestCase("12345678901234567890",3,false)]
+    [TestCase("12345678901234567890",17,false)]
+    [TestCase("0",36,true)]
+    [TestCase("9223372036854775807",16,true)]
+    [TestCase("-9223372036854775808",2,true)]
+    [TestCase("-9223372036854775808",10,true)]
+    [TestCase("-9223372036854775808",16,true)]
+    [TestCase("-10",10,true)]
+    [TestCase("-35",36,true,false,true)]
+    [TestCase("-1",36,true)]
+    [TestCase("-1234567890123456789",35,true)]
+    [TestCase("4294967295",16,false,true,true)]
     public async Task IntegerBaseFormattingUsesExactWorkspaceAcrossAotAndJitAsync(
         string value, int radix, bool signed, bool isNarrow = false, bool uppercase = false)
     {
@@ -232,14 +225,12 @@ public sealed partial class JitTests
             yield return [int.MinValue.ToString(CultureInfo.InvariantCulture), radix, true, true, true];
         }
     }
-
-    [Theory]
-    [MemberData(nameof(EveryChar16Radix))]
-    [InlineData(0, 10)]
-    [InlineData(55296, 16)]
-    [InlineData(65535, 2)]
-    [InlineData(65535, 16, true)]
-    [InlineData(65535, 36, true)]
+    [TestCaseSource(nameof(EveryChar16Radix))]
+    [TestCase(0,10)]
+    [TestCase(55296,16)]
+    [TestCase(65535,2)]
+    [TestCase(65535,16,true)]
+    [TestCase(65535,36,true)]
     public async Task Char16FormattingMeasuresExactCapacityAcrossAotAndJitAsync(
         int value, int radix, bool uppercase = false)
     {
@@ -294,13 +285,11 @@ public sealed partial class JitTests
             yield return [65535, radix, true];
         }
     }
-
-    [Theory]
-    [InlineData(1, 16)]
-    [InlineData(1, 16, true)]
-    [InlineData(37, 16)]
-    [InlineData(37, 16, true)]
-    [InlineData(2, 15)]
+    [TestCase(1,16)]
+    [TestCase(1,16,true)]
+    [TestCase(37,16)]
+    [TestCase(37,16,true)]
+    [TestCase(2,15)]
     public async Task Char16FormattingRejectsInvalidBaseAndInsufficientStorageAsync(
         int radix, int capacity, bool uppercase = false)
     {
@@ -326,17 +315,15 @@ public sealed partial class JitTests
             }
             """, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(1, 16, false)]
-    [InlineData(1, 16, false, false, true)]
-    [InlineData(37, 16, false)]
-    [InlineData(37, 16, false, false, true)]
-    [InlineData(16, 15, false)]
-    [InlineData(2, 63, false)]
-    [InlineData(2, 64, true)]
-    [InlineData(2, 31, false, true)]
-    [InlineData(2, 32, true, true)]
+    [TestCase(1,16,false)]
+    [TestCase(1,16,false,false,true)]
+    [TestCase(37,16,false)]
+    [TestCase(37,16,false,false,true)]
+    [TestCase(16,15,false)]
+    [TestCase(2,63,false)]
+    [TestCase(2,64,true)]
+    [TestCase(2,31,false,true)]
+    [TestCase(2,32,true,true)]
     public async Task IntegerBaseFormattingRejectsInvalidRadixAndInsufficientStorageAsync(
         int radix, int capacity, bool signed, bool isNarrow = false, bool uppercase = false)
     {

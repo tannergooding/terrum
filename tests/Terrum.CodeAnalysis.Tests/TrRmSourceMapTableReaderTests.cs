@@ -4,30 +4,28 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmSourceMapTableReaderTests
 {
-    [Fact]
+    [Test]
     public void ChecksOneBodyInstructionSpanAgainstItsModulesSourceFile()
     {
         Create(Map());
         Assert.Throws<InvalidDataException>(() => Create(Map(), crossModule: true));
     }
-
-    [Theory]
-    [InlineData(4, 0)]
-    [InlineData(6, 0)]
-    [InlineData(8, 2)]
-    [InlineData(12, 0)]
-    [InlineData(20, 0)]
-    [InlineData(24, 2)]
-    [InlineData(36, 0)]
-    [InlineData(36, 2)]
-    [InlineData(40, 0)]
-    [InlineData(40, 1)]
+    [TestCase(4,(byte)(0))]
+    [TestCase(6,(byte)(0))]
+    [TestCase(8,(byte)(2))]
+    [TestCase(12,(byte)(0))]
+    [TestCase(20,(byte)(0))]
+    [TestCase(24,(byte)(2))]
+    [TestCase(36,(byte)(0))]
+    [TestCase(36,(byte)(2))]
+    [TestCase(40,(byte)(0))]
+    [TestCase(40,(byte)(1))]
     public void RejectsInvalidSlotTargetsSelectorsAndRowReferences(int offset, byte value)
     {
         var bytes = Map();
@@ -35,7 +33,7 @@ public sealed class TrRmSourceMapTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnsortedRowsOverflowedSpansAndMissingPrelude()
     {
         var duplicate = new byte[68];
@@ -49,7 +47,7 @@ public sealed class TrRmSourceMapTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(Map()[..^1]));
     }
 
-    [Fact]
+    [Test]
     public void RejectsRowsThatReferenceSlotsOfTheWrongKind()
     {
         var bytes = Map();
@@ -57,7 +55,7 @@ public sealed class TrRmSourceMapTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
-    [Fact]
+    [Test]
     public void MultipleMappedInstructionsMustFollowSlotOrder()
     {
         var section = new byte[84];
@@ -79,21 +77,21 @@ public sealed class TrRmSourceMapTableReaderTests
             Create(section, recordCount: 2, twoMethods: true));
     }
 
-    [Fact]
+    [Test]
     public void WriterMatchesWorkedBytesAndSharesSourceFileSlots()
     {
         var first = new TrRmSourceMapEntry(1, 1, 0, 1, 0, 2);
-        Assert.Equal(Map(), Encode([first]));
+        Assert.That(Encode([first]), Is.EqualTo(Map()));
         var second = first with { Ordinal = 1, StartUtf16 = 2, LengthUtf16 = 3 };
         var section = Encode([first, second]);
-        Assert.Equal(84, section.Length);
-        Assert.Equal((uint)3, BinaryPrimitives.ReadUInt32LittleEndian(section));
-        Assert.Equal((uint)3, BinaryPrimitives.ReadUInt32LittleEndian(section.AsSpan(56)));
-        Assert.Equal((uint)3, BinaryPrimitives.ReadUInt32LittleEndian(section.AsSpan(72)));
+        Assert.That(section.Length, Is.EqualTo(84));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(section), Is.EqualTo((uint)3));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(section.AsSpan(56)), Is.EqualTo((uint)3));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(section.AsSpan(72)), Is.EqualTo((uint)3));
         Create(section, recordCount: 2);
     }
 
-    [Fact]
+    [Test]
     public void WriterRejectsUnboundDuplicateAndOverflowedMappings()
     {
         var entry = new TrRmSourceMapEntry(1, 1, 0, 1, 0, 2);

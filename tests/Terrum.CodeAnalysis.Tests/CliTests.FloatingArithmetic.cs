@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -31,10 +31,10 @@ public sealed partial class CliTests
             [NoThrow] public float64 Float64Multiply(float64 left, float64 right) { return left * right; }
             [NoThrow] public float64 Float64Divide(float64 left, float64 right) { return left / right; }
             """, "floating-arithmetic-native-abi-oracle.terrum");
-        Assert.False(oracleSyntaxTree.HasErrors, string.Join(Environment.NewLine, oracleSyntaxTree.Diagnostics));
+        Assert.That(oracleSyntaxTree.HasErrors, Is.False, string.Join(Environment.NewLine, oracleSyntaxTree.Diagnostics));
         var oracleCompilation = Compilation.CreateLibrary(oracleSyntaxTree);
-        Assert.False(oracleCompilation.HasErrors, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
-        var oracleProgram = Assert.IsType<BoundProgram>(oracleCompilation.Program);
+        Assert.That(oracleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
+        var oracleProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = oracleCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
 
         var oraclePath = Path.Combine(Path.GetTempPath(), $"terrum-floating-arithmetic-abi-{Guid.NewGuid():N}.dll");
         IntPtr oracleHandle = IntPtr.Zero;
@@ -116,11 +116,11 @@ public sealed partial class CliTests
                     var actual = unchecked((uint)candidate(unchecked((int)pair.Left), unchecked((int)pair.Right)));
                     if (IsFloat32NaN(expected))
                     {
-                        Assert.True(IsFloat32NaN(actual), $"{name}({pair.Left:X8}, {pair.Right:X8}) was not NaN.");
+                        Assert.That(IsFloat32NaN(actual), Is.True, $"{name}({pair.Left:X8}, {pair.Right:X8}) was not NaN.");
                     }
                     else
                     {
-                        Assert.Equal(expected, actual);
+                        Assert.That(actual, Is.EqualTo(expected));
                     }
                 }
             }
@@ -132,11 +132,11 @@ public sealed partial class CliTests
                     var actual = unchecked((ulong)candidate(unchecked((long)pair.Left), unchecked((long)pair.Right)));
                     if (IsFloat64NaN(expected))
                     {
-                        Assert.True(IsFloat64NaN(actual), $"{name}({pair.Left:X16}, {pair.Right:X16}) was not NaN.");
+                        Assert.That(IsFloat64NaN(actual), Is.True, $"{name}({pair.Left:X16}, {pair.Right:X16}) was not NaN.");
                     }
                     else
                     {
-                        Assert.Equal(expected, actual);
+                        Assert.That(actual, Is.EqualTo(expected));
                     }
                 }
             }

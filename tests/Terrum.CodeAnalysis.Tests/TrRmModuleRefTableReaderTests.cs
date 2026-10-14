@@ -4,27 +4,27 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmModuleRefTableReaderTests
 {
-    [Fact]
+    [Test]
     public void ResolvesPackedProducerRequirementsAndModuleOwnership()
     {
         var strings = new TrRmStringTableReader(ThreeNames(), 3);
         var modules = new TrRmModuleTableReader(TwoModules(), 2, strings, 2, 0, 2, 0);
         var refs = new TrRmModuleRefTableReader(TwoRefs(), 2, strings, modules);
-        Assert.Equal("B", refs.GetProducerIdentity(1));
-        Assert.Equal(1, refs.GetOwnerModule(1));
-        Assert.Equal("A", refs.GetProducerIdentity(2));
-        Assert.Equal(2, refs.GetOwnerModule(2));
+        Assert.That(refs.GetProducerIdentity(1), Is.EqualTo("B"));
+        Assert.That(refs.GetOwnerModule(1), Is.EqualTo(1));
+        Assert.That(refs.GetProducerIdentity(2), Is.EqualTo("A"));
+        Assert.That(refs.GetOwnerModule(2), Is.EqualTo(2));
         Assert.Throws<InvalidDataException>(() => GetProducerIdentity(TwoRefs(), 0));
         Assert.Throws<InvalidDataException>(() => GetOwnerModule(TwoRefs(), 3));
     }
 
-    [Fact]
+    [Test]
     public void RetainsExternalProducerForLaterBinding()
     {
         var bytes = TwoRefs();
@@ -32,17 +32,15 @@ public sealed class TrRmModuleRefTableReaderTests
         var strings = new TrRmStringTableReader(ThreeNames(), 3);
         var modules = new TrRmModuleTableReader(TwoModules(), 2, strings, 2, 0, 2, 0);
         var refs = new TrRmModuleRefTableReader(bytes, 2, strings, modules);
-        Assert.Equal("X", refs.GetProducerIdentity(2));
-        Assert.Equal(2, refs.GetOwnerModule(2));
+        Assert.That(refs.GetProducerIdentity(2), Is.EqualTo("X"));
+        Assert.That(refs.GetOwnerModule(2), Is.EqualTo(2));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(3, 1)]
-    [InlineData(4, 0)]
-    [InlineData(4, 2)]
-    [InlineData(8, 2)]
-    [InlineData(12 + 8, 1)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(3,(byte)(1))]
+    [TestCase(4,(byte)(0))]
+    [TestCase(4,(byte)(2))]
+    [TestCase(8,(byte)(2))]
+    [TestCase(12 + 8,(byte)(1))]
     public void RejectsInvalidReferencesAndPackedProducerMismatches(int byteIndex, byte replacement)
     {
         var bytes = TwoRefs();
@@ -50,7 +48,7 @@ public sealed class TrRmModuleRefTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsTruncatedSectionsAndCountMismatch()
     {
         Assert.Throws<InvalidDataException>(() => Create(TwoRefs()[..^1]));

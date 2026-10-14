@@ -3,42 +3,39 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class FixtureTests
 {
-    [Theory]
-    [InlineData("hello.terrum")]
-    [InlineData("control-flow.terrum")]
+    [TestCase("hello.terrum")]
+    [TestCase("control-flow.terrum")]
     public void PublishedSyntaxFixtureParsesAndRoundTrips(string name)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var path = Path.Combine(root, "samples", "syntax", name);
         var text = File.ReadAllText(path);
         var tree = SyntaxTree.Parse(text, path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(text, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
     }
-
-    [Theory]
-    [InlineData("SourceRange.terrum")]
-    [InlineData("Utf16CodeUnits.terrum")]
-    [InlineData("Utf16Scalar.terrum")]
-    [InlineData("CharacterFacts.terrum")]
-    [InlineData("RangeTests.terrum")]
-    [InlineData("Token.terrum")]
-    [InlineData("TokenTests.terrum")]
-    [InlineData("WideIntegerFacts.terrum")]
-    [InlineData("WideIntegerTests.terrum")]
+    [TestCase("SourceRange.terrum")]
+    [TestCase("Utf16CodeUnits.terrum")]
+    [TestCase("Utf16Scalar.terrum")]
+    [TestCase("CharacterFacts.terrum")]
+    [TestCase("RangeTests.terrum")]
+    [TestCase("Token.terrum")]
+    [TestCase("TokenTests.terrum")]
+    [TestCase("WideIntegerFacts.terrum")]
+    [TestCase("WideIntegerTests.terrum")]
     public void InitialSelfHostCandidateHasSupportedSyntaxOnly(string name)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var path = Path.Combine(root, "self-host", name);
         var text = File.ReadAllText(path);
         var tree = SyntaxTree.Parse(text, path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(text, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
     }
 }

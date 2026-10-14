@@ -4,29 +4,29 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmArtifactIndexTests
 {
-    [Fact]
+    [Test]
     public void LocatesRequiredSectionsAndResolvesModuleIdentity()
     {
         var artifact = MinimalArtifact();
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x0002, out var stringSection, out var stringCount));
+        Assert.That(index.TryGetSection(0x0002, out var stringSection, out var stringCount), Is.True);
         var strings = new TrRmStringTableReader(stringSection, stringCount);
-        Assert.False(index.TryGetSection(0x0004, out _, out _));
-        Assert.True(index.TryGetSection(0x0001, out var moduleSection, out var moduleCount));
+        Assert.That(index.TryGetSection(0x0004, out _, out _), Is.False);
+        Assert.That(index.TryGetSection(0x0001, out var moduleSection, out var moduleCount), Is.True);
         var modules = new TrRmModuleTableReader(moduleSection, moduleCount, strings, 0, 0, 0, 0);
-        Assert.Equal("A", modules.GetIdentity(1));
-        Assert.False(index.TryGetSection(0x0010, out var absent, out var absentCount));
-        Assert.True(absent.IsEmpty);
-        Assert.Equal(0, absentCount);
+        Assert.That(modules.GetIdentity(1), Is.EqualTo("A"));
+        Assert.That(index.TryGetSection(0x0010, out var absent, out var absentCount), Is.False);
+        Assert.That(absent.IsEmpty, Is.True);
+        Assert.That(absentCount, Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public void FindsSectionsAtDirectoryBoundariesAndRejectsMissingKinds()
     {
         var artifact = TrRmArtifactWriter.Encode([
@@ -37,50 +37,48 @@ public sealed class TrRmArtifactIndexTests
         ]);
         var index = new TrRmArtifactIndex(artifact);
 
-        Assert.True(index.TryGetSection(0x0001, out var first, out var firstCount));
-        Assert.Equal(44, first.Length);
-        Assert.Equal(1, firstCount);
-        Assert.True(index.TryGetSection(0xFFFF, out var last, out var lastCount));
-        Assert.Equal((byte)2, last[0]);
-        Assert.Equal(1, lastCount);
+        Assert.That(index.TryGetSection(0x0001, out var first, out var firstCount), Is.True);
+        Assert.That(first.Length, Is.EqualTo(44));
+        Assert.That(firstCount, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0xFFFF, out var last, out var lastCount), Is.True);
+        Assert.That(last[0], Is.EqualTo((byte)2));
+        Assert.That(lastCount, Is.EqualTo(1));
         foreach (var missing in new ushort[] { 0, 3, 0x7FFF, 0x8001 })
         {
-            Assert.False(index.TryGetSection(missing, out var absent, out var count));
-            Assert.True(absent.IsEmpty);
-            Assert.Equal(0, count);
+            Assert.That(index.TryGetSection(missing, out var absent, out var count), Is.False);
+            Assert.That(absent.IsEmpty, Is.True);
+            Assert.That(count, Is.EqualTo(0));
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadsTheProvisionalScalarInitOutputFeatureAndModuleRange()
     {
         var artifact = FeatureArtifact(1, 1,
             TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]));
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x0004, out var featureBytes, out var featureCount));
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
-        Assert.Equal(TrRmFeatureRow.ScalarInitOutput, features.GetFeature(1));
-        Assert.True(features.TryGetFeature(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
-            out var feature));
-        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputRuleRevision,
-            feature.MinimumRuleRevision);
+        Assert.That(features.GetFeature(1), Is.EqualTo(TrRmFeatureRow.ScalarInitOutput));
+        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
+            out var feature), Is.True);
+        Assert.That(feature.MinimumRuleRevision, Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
 
         var legacyBytes = TrRmFeatureTableWriter.Encode(
             [new TrRmFeatureRow(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
                 TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision)]);
         var legacy = new TrRmFeatureTableReader(legacyBytes, 1);
-        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision,
-            legacy.GetFeature(1).MinimumRuleRevision);
+        Assert.That(legacy.GetFeature(1).MinimumRuleRevision, Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision));
 
-        Assert.True(index.TryGetSection(0x0002, out var stringBytes, out var stringCount));
+        Assert.That(index.TryGetSection(0x0002, out var stringBytes, out var stringCount), Is.True);
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
-        Assert.True(index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount));
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount), Is.True);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
             0, 0, 0, 0, featureCount);
-        Assert.Equal((1, 1), modules.GetFeatureRange(1));
+        Assert.That(modules.GetFeatureRange(1), Is.EqualTo((1, 1)));
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnsupportedFeaturesMalformedPayloadsAndModuleRanges()
     {
         var feature = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]);
@@ -106,30 +104,30 @@ public sealed class TrRmArtifactIndexTests
             FeatureArtifact(2, 1, feature)));
     }
 
-    [Fact]
+    [Test]
     public void IndexesModuleReferencesAndSourceFilesThroughOneArtifact()
     {
         var artifact = ArtifactWithMetadataTables();
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x0002, out var nameBytes, out var nameCount));
+        Assert.That(index.TryGetSection(0x0002, out var nameBytes, out var nameCount), Is.True);
         var names = new TrRmStringTableReader(nameBytes, nameCount);
-        Assert.True(index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount));
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount), Is.True);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, names, 1, 0, 0, 1);
-        Assert.True(index.TryGetSection(0x0010, out var refBytes, out var refCount));
+        Assert.That(index.TryGetSection(0x0010, out var refBytes, out var refCount), Is.True);
         var refs = new TrRmModuleRefTableReader(refBytes, refCount, names, modules);
-        Assert.Equal("B", refs.GetProducerIdentity(1));
-        Assert.Equal(1, refs.GetOwnerModule(1));
-        Assert.True(index.TryGetSection(0x001F, out var sourceBytes, out var sourceCount));
+        Assert.That(refs.GetProducerIdentity(1), Is.EqualTo("B"));
+        Assert.That(refs.GetOwnerModule(1), Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x001F, out var sourceBytes, out var sourceCount), Is.True);
         var sources = new TrRmSourceFileTableReader(sourceBytes, sourceCount, names, modules);
-        Assert.Equal("src/A.terrum", sources.GetPath(1));
-        Assert.Equal(1, sources.GetOwnerModule(1));
+        Assert.That(sources.GetPath(1), Is.EqualTo("src/A.terrum"));
+        Assert.That(sources.GetOwnerModule(1), Is.EqualTo(1));
     }
 
-    [Fact]
+    [Test]
     public void ComposesFramedStringTypeSpecSignatureAndCallableMetadata()
     {
         var artifact = ArtifactWithCallableMetadata();
-        Assert.Equal("Run", ReadCallableName(artifact));
+        Assert.That(ReadCallableName(artifact), Is.EqualTo("Run"));
 
         var namesLength = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
         var methodOffset = 32 + 5 * 16 + 44 + namesLength + 11;
@@ -138,7 +136,7 @@ public sealed class TrRmArtifactIndexTests
         Assert.Throws<InvalidDataException>(() => ReadCallableName(artifact));
     }
 
-    [Fact]
+    [Test]
     public void StructuralValidatorComposesAllPresentKnownMetadataTables()
     {
         TrRmStructuralMetadataValidator.Validate(MinimalArtifact());
@@ -186,12 +184,10 @@ public sealed class TrRmArtifactIndexTests
         _ = new TrRmArtifactIndex(invalid);
         Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(invalid));
     }
-
-    [Theory]
-    [InlineData(0, 4)]
-    [InlineData(1, 0xFF)]
-    [InlineData(10, 1)]
-    [InlineData(11, 1)]
+    [TestCase(0,(byte)(4))]
+    [TestCase(1,(byte)(0xFF))]
+    [TestCase(10,(byte)(1))]
+    [TestCase(11,(byte)(1))]
     public void StructuralValidatorRejectsMalformedUnreferencedStringRows(int rowOffset,
         byte replacement)
     {
@@ -203,12 +199,12 @@ public sealed class TrRmArtifactIndexTests
             new TrRmSection(0x0002, 0, 2, strings),
         ]);
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x0002, out var section, out var count));
-        Assert.Equal("A", new TrRmStringTableReader(section, count).DecodeName(1));
+        Assert.That(index.TryGetSection(0x0002, out var section, out var count), Is.True);
+        Assert.That(new TrRmStringTableReader(section, count).DecodeName(1), Is.EqualTo("A"));
         Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(artifact));
     }
 
-    [Fact]
+    [Test]
     public void StructuralValidatorPermitsUnreferencedStringContentWithNul()
     {
         var strings = TrRmStringTableWriter.EncodeNames([("A", 0), ("Unused", 0)]);
@@ -220,27 +216,25 @@ public sealed class TrRmArtifactIndexTests
         ]);
         TrRmStructuralMetadataValidator.Validate(artifact);
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x0002, out var section, out var count));
+        Assert.That(index.TryGetSection(0x0002, out var section, out var count), Is.True);
         var sectionBytes = section.ToArray();
         Assert.Throws<InvalidDataException>(() =>
             new TrRmStringTableReader(sectionBytes, count).DecodeName(2));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(4, 2)]
-    [InlineData(6, 1)]
-    [InlineData(8, 0)]
-    [InlineData(12, 0)]
-    [InlineData(16, 0)]
-    [InlineData(20, 0)]
-    [InlineData(24, 1)]
-    [InlineData(32 + 2, 1)]
-    [InlineData(32 + 4, 0)]
-    [InlineData(32 + 12, 43)]
-    [InlineData(48, 1)]
-    [InlineData(48 + 2, 1)]
-    [InlineData(48 + 8, 109)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(4,(byte)(2))]
+    [TestCase(6,(byte)(1))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(12,(byte)(0))]
+    [TestCase(16,(byte)(0))]
+    [TestCase(20,(byte)(0))]
+    [TestCase(24,(byte)(1))]
+    [TestCase(32 + 2,(byte)(1))]
+    [TestCase(32 + 4,(byte)(0))]
+    [TestCase(32 + 12,(byte)(43))]
+    [TestCase(48,(byte)(1))]
+    [TestCase(48 + 2,(byte)(1))]
+    [TestCase(48 + 8,(byte)(109))]
     public void RejectsMalformedHeaderAndDirectory(int byteIndex, byte replacement)
     {
         var artifact = MinimalArtifact();
@@ -248,7 +242,7 @@ public sealed class TrRmArtifactIndexTests
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(artifact));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOverlapsNonzeroGapsAndTrailingBytes()
     {
         var overlap = MinimalArtifact();
@@ -269,7 +263,7 @@ public sealed class TrRmArtifactIndexTests
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(gap));
     }
 
-    [Fact]
+    [Test]
     public void PermitsZeroFilledAlignmentGaps()
     {
         var original = MinimalArtifact();
@@ -279,11 +273,11 @@ public sealed class TrRmArtifactIndexTests
         Write(gap, 16, (uint)gap.Length);
         Write(gap, 48 + 8, 112);
         var index = new TrRmArtifactIndex(gap);
-        Assert.True(index.TryGetSection(0x0002, out var strings, out var count));
-        Assert.Equal("A", new TrRmStringTableReader(strings, count).DecodeName(1));
+        Assert.That(index.TryGetSection(0x0002, out var strings, out var count), Is.True);
+        Assert.That(new TrRmStringTableReader(strings, count).DecodeName(1), Is.EqualTo("A"));
     }
 
-    [Fact]
+    [Test]
     public void AcceptsOutOfOrderSectionPayloads()
     {
         var artifact = TrRmArtifactWriter.Encode([
@@ -297,20 +291,20 @@ public sealed class TrRmArtifactIndexTests
         Write(artifact, 72, firstStart);
 
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x8001, out var first, out _));
-        Assert.True(index.TryGetSection(0x8002, out var second, out _));
-        Assert.Equal((byte)0x22, first[0]);
-        Assert.Equal((byte)0x11, second[0]);
+        Assert.That(index.TryGetSection(0x8001, out var first, out _), Is.True);
+        Assert.That(index.TryGetSection(0x8002, out var second, out _), Is.True);
+        Assert.That(first[0], Is.EqualTo((byte)0x22));
+        Assert.That(second[0], Is.EqualTo((byte)0x11));
     }
 
-    [Fact]
+    [Test]
     public void ValidatesReferenceSlottedExtensionsAndTargetRows()
     {
         var artifact = WithReferenceSlottedExtension();
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x8000, out var section, out var count));
-        Assert.Equal(1, count);
-        Assert.Equal(21, section.Length);
+        Assert.That(index.TryGetSection(0x8000, out var section, out var count), Is.True);
+        Assert.That(count, Is.EqualTo(1));
+        Assert.That(section.Length, Is.EqualTo(21));
 
         var missingTarget = WithReferenceSlottedExtension();
         Write(missingTarget, 144 + 4, 2);
@@ -326,17 +320,15 @@ public sealed class TrRmArtifactIndexTests
         Write(danglingBody, 152, 1);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(danglingBody));
     }
-
-    [Theory]
-    [InlineData((ushort)1)]
-    [InlineData((ushort)2)]
-    [InlineData((ushort)3)]
+    [TestCase((ushort)1)]
+    [TestCase((ushort)2)]
+    [TestCase((ushort)3)]
     public void EnumeratesOrderedSectionsIncludingOptionalExtensionPolicies(ushort policy)
     {
         var artifact = WithReferenceSlottedExtension();
         WriteU16(artifact, 66, policy);
         var index = new TrRmArtifactIndex(artifact);
-        Assert.Equal(3, index.SectionCount);
+        Assert.That(index.SectionCount, Is.EqualTo(3));
         var preserved = new TrRmSection[index.SectionCount];
         for (var entry = 0; entry < index.SectionCount; entry++)
         {
@@ -344,9 +336,9 @@ public sealed class TrRmArtifactIndexTests
             preserved[entry] = new TrRmSection(kind, flags, (uint)count, payload.ToArray());
         }
 
-        Assert.Equal((ushort)0x8000, preserved[2].Kind);
-        Assert.Equal(policy, preserved[2].Flags);
-        Assert.Equal(artifact, TrRmArtifactWriter.Encode(preserved));
+        Assert.That(preserved[2].Kind, Is.EqualTo((ushort)0x8000));
+        Assert.That(preserved[2].Flags, Is.EqualTo(policy));
+        Assert.That(TrRmArtifactWriter.Encode(preserved), Is.EqualTo(artifact));
         var sectionCount = index.SectionCount;
         Assert.Throws<InvalidDataException>(() =>
             GetIndexedSection(artifact, -1));
@@ -360,7 +352,7 @@ public sealed class TrRmArtifactIndexTests
         index.GetSection(entry, out _, out _, out _, out _);
     }
 
-    [Fact]
+    [Test]
     public void RemapsOnlyOptionalExtensionSlotsAndRejectsDanglingTargets()
     {
         var original = WithReferenceSlottedExtension();
@@ -375,13 +367,12 @@ public sealed class TrRmArtifactIndexTests
         var extension = sections[2];
         sections[2] = TrRmOptionalSectionSlots.Replace(extension,
             [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]);
-        Assert.Equal(extension.Bytes.Span[20], sections[2].Bytes.Span[20]);
-        Assert.Equal((ushort)0x0002,
-            BinaryPrimitives.ReadUInt16LittleEndian(extension.Bytes.Span[4..]));
+        Assert.That(sections[2].Bytes.Span[20], Is.EqualTo(extension.Bytes.Span[20]));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(extension.Bytes.Span[4..]), Is.EqualTo((ushort)0x0002));
         var remapped = new TrRmArtifactIndex(TrRmArtifactWriter.Encode(sections));
-        Assert.True(remapped.TryGetSection(0x8000, out var payload, out _));
-        Assert.Equal((ushort)0x0001, BinaryPrimitives.ReadUInt16LittleEndian(payload[4..]));
-        Assert.Equal(extension.Bytes.Span[20], payload[20]);
+        Assert.That(remapped.TryGetSection(0x8000, out var payload, out _), Is.True);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(payload[4..]), Is.EqualTo((ushort)0x0001));
+        Assert.That(payload[20], Is.EqualTo(extension.Bytes.Span[20]));
 
         sections[2] = TrRmOptionalSectionSlots.Replace(extension,
             [new TrRmReferenceSlot(0x0001, 0, 2, 0, 0)]);
@@ -394,10 +385,8 @@ public sealed class TrRmArtifactIndexTests
 
         var atomic = TrRmOptionalSectionSlots.ReplaceInArtifact(original, 0x8000,
             [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]);
-        Assert.Equal((ushort)0x0002,
-            BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(144)));
-        Assert.Equal((ushort)0x0001,
-            BinaryPrimitives.ReadUInt16LittleEndian(atomic.AsSpan(144)));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(144)), Is.EqualTo((ushort)0x0002));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(atomic.AsSpan(144)), Is.EqualTo((ushort)0x0001));
         Assert.Throws<InvalidDataException>(() =>
             TrRmOptionalSectionSlots.ReplaceInArtifact(original, 0x8000,
                 [new TrRmReferenceSlot(0x0001, 0, 2, 0, 0)]));
@@ -414,19 +403,19 @@ public sealed class TrRmArtifactIndexTests
                 [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]));
     }
 
-    [Fact]
+    [Test]
     public void InsertsSlottedExtensionWithoutMutatingExistingArtifact()
     {
         var baseArtifact = MinimalArtifact();
         var framed = WithReferenceSlottedExtension();
         var existing = new TrRmArtifactIndex(framed);
-        Assert.True(existing.TryGetSection(0x8000, out var payload, out var count));
+        Assert.That(existing.TryGetSection(0x8000, out var payload, out var count), Is.True);
         var section = new TrRmSection(0x8000, 2, (uint)count, payload.ToArray());
         var authored = TrRmOptionalSectionSlots.Create(0x8000, 1,
             [new TrRmReferenceSlot(0x0002, 0, 1, 0, 0)], new byte[] { 0 });
-        Assert.Equal(section.Bytes.ToArray(), authored.Bytes.ToArray());
-        Assert.Equal(framed, TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact, authored));
-        Assert.Equal(2u, BinaryPrimitives.ReadUInt32LittleEndian(baseArtifact.AsSpan(12)));
+        Assert.That(authored.Bytes.ToArray(), Is.EqualTo(section.Bytes.ToArray()));
+        Assert.That(TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact, authored), Is.EqualTo(framed));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(baseArtifact.AsSpan(12)), Is.EqualTo(2u));
 
         Assert.Throws<ArgumentException>(() =>
             TrRmOptionalSectionSlots.InsertInArtifact(framed, section));
@@ -444,7 +433,7 @@ public sealed class TrRmArtifactIndexTests
             TrRmOptionalSectionSlots.Create(0x8000, 0, [], ReadOnlyMemory<byte>.Empty));
     }
 
-    [Fact]
+    [Test]
     public void ArtifactChangesDropDiscardOnRewriteExtensions()
     {
         var original = WithReferenceSlottedExtension();
@@ -461,29 +450,27 @@ public sealed class TrRmArtifactIndexTests
         var replacement = new[] { new TrRmReferenceSlot(0x0001, 0, 1, 0, 0) };
         var remapped = new TrRmArtifactIndex(
             TrRmOptionalSectionSlots.ReplaceInArtifact(withDiscard, 0x8000, replacement));
-        Assert.True(remapped.TryGetSection(0x8001, out _, out _));
-        Assert.False(remapped.TryGetSection(0x8002, out _, out _));
-        Assert.Equal(4, remapped.SectionCount);
+        Assert.That(remapped.TryGetSection(0x8001, out _, out _), Is.True);
+        Assert.That(remapped.TryGetSection(0x8002, out _, out _), Is.False);
+        Assert.That(remapped.SectionCount, Is.EqualTo(4));
 
         var added = new TrRmArtifactIndex(TrRmOptionalSectionSlots.InsertInArtifact(withDiscard,
             TrRmOptionalSectionSlots.Create(0x8003, 1, [], new byte[] { 1 })));
-        Assert.True(added.TryGetSection(0x8001, out _, out _));
-        Assert.False(added.TryGetSection(0x8002, out _, out _));
-        Assert.True(added.TryGetSection(0x8003, out _, out _));
+        Assert.That(added.TryGetSection(0x8001, out _, out _), Is.True);
+        Assert.That(added.TryGetSection(0x8002, out _, out _), Is.False);
+        Assert.That(added.TryGetSection(0x8003, out _, out _), Is.True);
     }
-
-    [Theory]
-    [InlineData((ushort)1)]
-    [InlineData((ushort)3)]
+    [TestCase((ushort)1)]
+    [TestCase((ushort)3)]
     public void SkipsNonsemanticExtensionsUnderTheirRegisteredPolicy(ushort policy)
     {
         var artifact = WithReferenceSlottedExtension();
         WriteU16(artifact, 66, policy);
-        Assert.True(new TrRmArtifactIndex(artifact).TryGetSection(0x8000, out _, out var count));
-        Assert.Equal(1, count);
+        Assert.That(new TrRmArtifactIndex(artifact).TryGetSection(0x8000, out _, out var count), Is.True);
+        Assert.That(count, Is.EqualTo(1));
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnknownRequiredAndUnregisteredExtensionPolicies()
     {
         var required = WithReferenceSlottedExtension();
@@ -635,16 +622,16 @@ public sealed class TrRmArtifactIndexTests
     private static string ReadCallableName(byte[] artifact)
     {
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x0002, out var stringRows, out var stringCount));
+        Assert.That(index.TryGetSection(0x0002, out var stringRows, out var stringCount), Is.True);
         var strings = new TrRmStringTableReader(stringRows, stringCount);
-        Assert.True(index.TryGetSection(0x0001, out var moduleRows, out var moduleCount));
+        Assert.That(index.TryGetSection(0x0001, out var moduleRows, out var moduleCount), Is.True);
         var modules = new TrRmModuleTableReader(moduleRows, moduleCount, strings, 0, 0, 1, 0);
         var types = new TrRmTypeDefTableReader([], 0, strings, modules, 0, 0, 0, 0);
-        Assert.True(index.TryGetSection(0x0011, out var typeRows, out var typeCount));
+        Assert.That(index.TryGetSection(0x0011, out var typeRows, out var typeCount), Is.True);
         var typeSpecs = new TrRmTypeSpecTableReader(typeRows, typeCount, 0, 0, 0, 0);
-        Assert.True(index.TryGetSection(0x0017, out var signatureRows, out var signatureCount));
+        Assert.That(index.TryGetSection(0x0017, out var signatureRows, out var signatureCount), Is.True);
         var signatures = new TrRmMethodSigTableReader(signatureRows, signatureCount, typeSpecs, 0, 0);
-        Assert.True(index.TryGetSection(0x0016, out var methodRows, out var methodCount));
+        Assert.That(index.TryGetSection(0x0016, out var methodRows, out var methodCount), Is.True);
         var methods = new TrRmMethodDefTableReader(methodRows, methodCount, strings,
             modules, types, signatures, 0, 0);
         return methods.GetName(1);

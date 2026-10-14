@@ -10,65 +10,62 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ScalarFrontendMutationAuditTests
 {
-    [Theory]
-    [InlineData(false, "<<", 88)]
-    [InlineData(true, "<<", 88)]
-    [InlineData(false, ">>", 89)]
-    [InlineData(true, ">>", 89)]
-    [InlineData(false, ">>>", 90)]
-    [InlineData(true, ">>>", 90)]
+    [TestCase(false,"<<",88)]
+    [TestCase(true,"<<",88)]
+    [TestCase(false,">>",89)]
+    [TestCase(true,">>",89)]
+    [TestCase(false,">>>",90)]
+    [TestCase(true,">>>",90)]
     public void ShiftCountCannotProvideTheShiftedValuesInferredType(bool inferred, string operation, int opcode)
     {
         var (source, bytes) = ShiftFixture(inferred, operation, opcode);
         var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(source.Text));
-        Assert.Equal(inferred, hosted.HasErrors);
+        Assert.That(hosted.HasErrors, Is.EqualTo(inferred));
         if (inferred)
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         }
         else
         {
-            Assert.Equal(4, ScalarFrontendHost.ReadResult(source, bytes).Nodes.Length);
+            Assert.That(ScalarFrontendHost.ReadResult(source, bytes).Nodes.Length, Is.EqualTo(4));
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task IndependentlyProjectedShiftsServiceUnchangedSemanticAndNativeConsumers(NativeRuntimePolicy policy)
     {
         var (source, bytes) = ShiftFixture(false);
         var program = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var producer = ModuleCompiler.CreateProducer(program, ["Value"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(76));
         var obsolete = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(obsolete.AsSpan(4), 44);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(obsolete));
         const string client = "int32 Main() { return Value(5) + 10; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(client),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), producer);
 
         var (replacementSource, replacementBytes) = ShiftFixture(false, initial: 2);
         var replacementProgram = ScalarFrontendHost.BindLibrary(
             replacementSource, replacementBytes, (BoundRuntimePolicy)policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Value"]);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
-        Assert.Equal(74, NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy), Is.EqualTo(74));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(program, ["Value"], "FrontendShifts", policy);
         var nativeClient = Compilation.Create(SyntaxTree.Parse(client),
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), (BoundRuntimePolicy)policy);
-        Assert.False(nativeClient.HasErrors, string.Join(Environment.NewLine, nativeClient.Diagnostics));
+        Assert.That(nativeClient.HasErrors, Is.False, string.Join(Environment.NewLine, nativeClient.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(nativeClient.Program), [nativeProducer], policy);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = nativeClient.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), [nativeProducer], policy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(
             replacementProgram, ["Value"], "FrontendShifts", policy);
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
@@ -80,14 +77,14 @@ public sealed class ScalarFrontendMutationAuditTests
         foreach (var (dependency, expected) in new[] { (nativeProducer, 42), (nativeReplacement, 74) })
         {
             NativeModuleCompiler.ValidateGraph(nativeConsumer, [dependency]);
-            Assert.Equal(expected, await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
-                [dependency], TimeSpan.FromSeconds(10), policy));
-            Assert.Equal(expected, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer,
-                [dependency], apphost, TimeSpan.FromSeconds(30), policy));
+            Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer,
+                [dependency], TimeSpan.FromSeconds(10), policy), Is.EqualTo(expected));
+            Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer,
+                [dependency], apphost, TimeSpan.FromSeconds(30), policy), Is.EqualTo(expected));
         }
     }
 
-    [Fact]
+    [Test]
     public void IndependentlyGroupedCompoundRetainsItsPlaceAndSourceOrder()
     {
         const string text = "public int32 Value() { mut int32 x = 4; ((x)) += x++; return x; }";
@@ -124,10 +121,9 @@ public sealed class ScalarFrontendMutationAuditTests
         Statement(1, 9, 1, 6, compound, update + 4);
         Statement(2, 8, 0, 7, result, text.LastIndexOf(';') + 1);
         var program = ScalarFrontendHost.BindLibrary(source, Bytes(), BoundRuntimePolicy.FailFast);
-        var operation = Assert.IsType<BoundCompoundAssignment>(
-            Assert.IsType<BoundExpressionStatement>(program.Functions[0].Body.Statements[1]).Expression);
-        Assert.IsType<BoundRead>(operation.Place);
-        Assert.IsType<BoundUpdate>(operation.Right);
+        var operation = ((global::System.Func<BoundCompoundAssignment>)(() => { var __nunitActual3 = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual2 = program.Functions[0].Body.Statements[1]; Assert.That(__nunitActual2, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual2!; }))().Expression; Assert.That(__nunitActual3, Is.TypeOf<BoundCompoundAssignment>()); return (BoundCompoundAssignment)__nunitActual3!; }))();
+        Assert.That(operation.Place, Is.TypeOf<BoundRead>());
+        Assert.That(operation.Right, Is.TypeOf<BoundUpdate>());
         for (var version = 1; version <= 84; version++)
         {
             Reject(0, version);

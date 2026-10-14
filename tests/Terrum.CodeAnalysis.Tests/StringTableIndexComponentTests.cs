@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -82,10 +82,8 @@ public sealed class StringTableIndexComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringTableIndexMatchesHostedVariableRows(BoundRuntimePolicy policy)
     {
         byte[] valid = TrRmStringTableWriter.EncodeTextRows([
@@ -97,14 +95,13 @@ public sealed class StringTableIndexComponentTests
         for (var row = 1; row <= recordCount; row++)
         {
             var rowBytes = validIndex.GetRow(row);
-            Assert.Equal(TrRmStringRowReader.DecodeNamespace(rowBytes),
-                row switch {
-                    1 => "A",
-                    2 => "\u00E9",
-                    3 => "\U0001F600",
-                    4 => "Z",
-                    _ => "",
-                });
+            Assert.That(row switch {
+                1 => "A",
+                2 => "\u00E9",
+                3 => "\U0001F600",
+                4 => "Z",
+                _ => "",
+            }, Is.EqualTo(TrRmStringRowReader.DecodeNamespace(rowBytes)));
             var rowStart = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(valid.AsSpan((row - 1) * 4)));
             var width = rowBytes[0] switch {
                 0 or 1 => 1,
@@ -188,13 +185,13 @@ public sealed class StringTableIndexComponentTests
         var root = RepositoryRoot();
         var componentPath = Path.Combine(root, "self-host", "StringRowLayout.terrum");
         var layout = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
-        Assert.False(layout.HasErrors, string.Join(Environment.NewLine, layout.Diagnostics));
+        Assert.That(layout.HasErrors, Is.False, string.Join(Environment.NewLine, layout.Diagnostics));
         componentPath = Path.Combine(root, "self-host", "VariableTableIndex.terrum");
         var variableIndexTree = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
-        Assert.False(variableIndexTree.HasErrors, string.Join(Environment.NewLine, variableIndexTree.Diagnostics));
+        Assert.That(variableIndexTree.HasErrors, Is.False, string.Join(Environment.NewLine, variableIndexTree.Diagnostics));
         componentPath = Path.Combine(root, "self-host", "StringTableIndex.terrum");
         var indexTree = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
-        Assert.False(indexTree.HasErrors, string.Join(Environment.NewLine, indexTree.Diagnostics));
+        Assert.That(indexTree.HasErrors, Is.False, string.Join(Environment.NewLine, indexTree.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "string-table-index-component.terrum");
 
         foreach (var testCase in validCases)
@@ -204,16 +201,14 @@ public sealed class StringTableIndexComponentTests
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Section], false),
                 new HostBuffer("Expected", PrimitiveType.Int32, [.. testCase.Expected.SelectMany(static item => item)], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-            Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringTableIndexValidatesOnceThenReadsLargeBatches(BoundRuntimePolicy policy)
     {
         const int recordCount = 512;
@@ -262,8 +257,7 @@ public sealed class StringTableIndexComponentTests
         {
             components[index] = SyntaxTree.Parse(
                 await File.ReadAllTextAsync(paths[index]).ConfigureAwait(true), paths[index]);
-            Assert.False(components[index].HasErrors,
-                string.Join(Environment.NewLine, components[index].Diagnostics));
+            Assert.That(components[index].HasErrors, Is.False, string.Join(Environment.NewLine, components[index].Diagnostics));
         }
         var entry = SyntaxTree.Parse(BatchVerificationSource, "string-table-index-batch-component.terrum");
         var compilation = Compilation.Create([.. components, entry],
@@ -271,10 +265,10 @@ public sealed class StringTableIndexComponentTests
             new HostBuffer("Rows", PrimitiveType.Int32, [.. section.Select(static value => (int)value)], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static TableCase InvalidTable(int[] section, int recordCount)

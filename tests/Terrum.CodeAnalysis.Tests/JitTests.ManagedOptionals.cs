@@ -6,15 +6,14 @@ using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task OptionalCycleSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -28,10 +27,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ConstructorCompletesOptionalFieldsBeforeSelfCycleAsync(bool checkedFailures)
     {
         const string Source = """
@@ -59,10 +56,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NullableConstructorArgumentSurvivesFactoryAndDetachmentAsync(bool checkedFailures)
     {
         const string Source = """
@@ -93,10 +88,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task LinkedTokenCandidateRejectsInvalidMutationsAndCollectsClearedLinksAsync(bool checkedFailures)
     {
         string[] components = [
@@ -143,10 +136,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42, components).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task LinkedTokenCopiesMatchHostMetadataAfterCollectionAsync(bool checkedFailures)
     {
         string[] components = [
@@ -155,7 +146,7 @@ public sealed partial class JitTests
             Path.Combine(RepositoryRoot(), "self-host", "ManagedTokenChain.terrum"),
         ];
         var lexical = Lexer.Lex(SourceText.From("// header\r\nint32 \U00010400() { return 42; }"));
-        Assert.Empty(lexical.Diagnostics);
+        Assert.That(lexical.Diagnostics, Is.Empty);
         var source = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -189,7 +180,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public Task CheckedFailureAbandonsPartiallyInitializedOptionalEdgesAsync()
     {
         const string Source = """

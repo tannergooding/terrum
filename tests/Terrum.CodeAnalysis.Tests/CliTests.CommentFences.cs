@@ -6,49 +6,43 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScannerPublishesDocumentationKindsAndCurrentProfileAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/// line\n//* block *// /** ordinary **/ int32 Main() { return 42; }";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
             Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
-        Assert.Equal(0, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(0));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(10, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-10", document.RootElement.GetProperty("component").GetString());
-        Assert.Equal(["DocumentationLineComment", "NewLine", "DocumentationBlockComment", "Whitespace",
-                "MultiLineComment", "Whitespace"],
-            document.RootElement.GetProperty("tokens")[0].GetProperty("leadingTrivia")
-                .EnumerateArray().Select(item => item.GetProperty("kind").GetString()));
+        Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(10));
+        Assert.That(document.RootElement.GetProperty("component").GetString(), Is.EqualTo("scanner-10"));
+        Assert.That(document.RootElement.GetProperty("tokens")[0].GetProperty("leadingTrivia")
+                .EnumerateArray().Select(item => item.GetProperty("kind").GetString()), Is.EqualTo(["DocumentationLineComment", "NewLine", "DocumentationBlockComment", "Whitespace",
+                "MultiLineComment", "Whitespace"]));
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task FrontendExecutesThroughCurrentCommentFencesAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/// heading\nint32 Main() { //** doc **// /** ordinary **/ return 42; }";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "frontend-run", Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
-        Assert.Equal(42, exit);
-        Assert.Empty(output);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(42));
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task CompiledComponentExecutesWithDocumentationFencesAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -59,21 +53,19 @@ public sealed partial class CliTests
                 Encoding.UTF8.GetBytes("/// heading\nint32 Main() { //** block **// return 42; }"),
                 "build-component", Path.Combine(root, "self-host"), "-",
                 "-o", image, "--runtime", policy, "--json");
-            Assert.Equal(0, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.True(document.RootElement.GetProperty("success").GetBoolean());
-            Assert.Equal(42, await ExecuteNativeImageAsync(image).ConfigureAwait(true));
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
+            Assert.That(await ExecuteNativeImageAsync(image).ConfigureAwait(true), Is.EqualTo(42));
         }
         finally
         {
-            File.Delete(image);
+            await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task OverlongFenceRejectsBuildComponentWithoutPublishingArtifactAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -84,12 +76,11 @@ public sealed partial class CliTests
                 Encoding.UTF8.GetBytes("int32 Main() { /* **/ */ return 42; }"),
                 "build-component", Path.Combine(root, "self-host"), "-",
                 "-o", image, "--runtime", policy, "--json");
-            Assert.Equal(1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
-                diagnostic => diagnostic.GetProperty("code").GetString() == "TRM0010");
-            Assert.False(File.Exists(image));
+            Assert.That(global::System.Linq.Enumerable.Any(document.RootElement.GetProperty("diagnostics").EnumerateArray(),diagnostic => diagnostic.GetProperty("code").GetString() == "TRM0010"),Is.True);
+            Assert.That(File.Exists(image), Is.False);
         }
         finally
         {

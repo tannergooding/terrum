@@ -5,7 +5,7 @@ using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -33,14 +33,12 @@ public sealed class StaticProtocolComparisonTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData("==", "op_Equality")]
-    [InlineData("!=", "op_Inequality")]
-    [InlineData("<", "op_LessThan")]
-    [InlineData("<=", "op_LessThanOrEqual")]
-    [InlineData(">", "op_GreaterThan")]
-    [InlineData(">=", "op_GreaterThanOrEqual")]
+    [TestCase("==","op_Equality")]
+    [TestCase("!=","op_Inequality")]
+    [TestCase("<","op_LessThan")]
+    [TestCase("<=","op_LessThanOrEqual")]
+    [TestCase(">","op_GreaterThan")]
+    [TestCase(">=","op_GreaterThanOrEqual")]
     public void ComparisonOperatorsHaveBoolResultsAndIndependentNames(string operation, string name)
     {
         var source = $$"""
@@ -61,58 +59,51 @@ public sealed class StaticProtocolComparisonTests
             }
             """;
         var syntax = SyntaxTree.Parse(source);
-        Assert.False(syntax.HasErrors, string.Join(Environment.NewLine, syntax.Diagnostics));
+        Assert.That(syntax.HasErrors, Is.False, string.Join(Environment.NewLine, syntax.Diagnostics));
         var compilation = Compilation.Create(syntax);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         SemanticVerifier.Verify(program);
-        Assert.Contains(program.Functions, function =>
-            function.Name == "Value." + name && function.ReturnType == PrimitiveType.Bool);
-        Assert.Contains(program.Functions, function =>
-            function.Name == "Compare<Value>" && function.ReturnType == PrimitiveType.Bool);
-        Assert.DoesNotContain(program.Functions, function => function.IsExternal
-            || function.Name.Contains('$', StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function =>
+            function.Name == "Value." + name && function.ReturnType == PrimitiveType.Bool),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function =>
+            function.Name == "Compare<Value>" && function.ReturnType == PrimitiveType.Bool),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
     }
-
-    [Theory]
-    [InlineData("struct Value : Less<Value, Value, bool>", "struct Value : Less<Value, Value, Value>", "TRM3007")]
-    [InlineData("struct Value : Less<Value, Value, bool>", "struct Value : Less<Value, Value, int32>", "TRM3007")]
-    [InlineData("struct Value : Less<Value, Value, bool>", "struct Value : Less<Value, Other, bool>", "TRM3007")]
-    [InlineData("public static bool operator <(Value left, Value right)",
-        "public static int32 operator <(Value left, Value right)", "TRM3007")]
-    [InlineData("public static bool operator <(Value left, Value right)",
-        "public static bool operator <(Value left, Other right)", "TRM3007")]
-    [InlineData("static C operator <(A left, B right)",
-        "static B operator <(A left, B right)", "TRM3001")]
-    [InlineData("where T : Less<T, T, bool>, [Copy]", "where T : Less<T, T, T>, [Copy]", "TRM3007")]
-    [InlineData("where T : Less<T, T, bool>, [Copy]", "where T : OtherLess<T, T, bool>, [Copy]", "TRM3007")]
-    [InlineData("where T : Less<T, T, bool>, [Copy]", "where T : [Copy]", "TRM3007")]
-    [InlineData("return left < right;", "return left == right;", "TRM3007")]
-    [InlineData("return left < right;", "return left >= right;", "TRM3007")]
+    [TestCase("struct Value : Less<Value, Value, bool>","struct Value : Less<Value, Value, Value>","TRM3007")]
+    [TestCase("struct Value : Less<Value, Value, bool>","struct Value : Less<Value, Value, int32>","TRM3007")]
+    [TestCase("struct Value : Less<Value, Value, bool>","struct Value : Less<Value, Other, bool>","TRM3007")]
+    [TestCase("public static bool operator <(Value left, Value right)",        "public static int32 operator <(Value left, Value right)","TRM3007")]
+    [TestCase("public static bool operator <(Value left, Value right)",        "public static bool operator <(Value left, Other right)","TRM3007")]
+    [TestCase("static C operator <(A left, B right)",        "static B operator <(A left, B right)","TRM3001")]
+    [TestCase("where T : Less<T, T, bool>, [Copy]","where T : Less<T, T, T>, [Copy]","TRM3007")]
+    [TestCase("where T : Less<T, T, bool>, [Copy]","where T : OtherLess<T, T, bool>, [Copy]","TRM3007")]
+    [TestCase("where T : Less<T, T, bool>, [Copy]","where T : [Copy]","TRM3007")]
+    [TestCase("return left < right;","return left == right;","TRM3007")]
+    [TestCase("return left < right;","return left >= right;","TRM3007")]
     public void InvalidComparisonShapesAndMissingWitnessesAreRejected(
         string before, string after, string diagnostic)
     {
-        Assert.Contains(before, LessSource, StringComparison.Ordinal);
+        Assert.That(LessSource, Does.Contain(before));
         var source = LessSource.Replace(before, after, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void NoThrowComparisonRequiresDeclaredAndVerifiedEffect(bool witnessNoThrow)
     {
         var source = LessSource.Replace("static C operator <",
             (witnessNoThrow ? "[NoThrow] " : "") + "static C operator <", StringComparison.Ordinal)
             .Replace("bool Compare<T>", "[NoThrow] bool Compare<T>", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void DistinctSymbolicTypesCannotBorrowComparisonFromEqualActuals()
     {
         var source = LessSource.Replace("bool Compare<T>(T left, T right) where T : Less<T, T, bool>, [Copy] {",
@@ -121,21 +112,21 @@ public sealed class StaticProtocolComparisonTests
             .Replace("Compare(new Value(20), new Value(22))",
                 "Compare<Value, Value>(new Value(20), new Value(22))", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void UninstantiatedComparisonBodyStillNeedsItsOwnWitness()
     {
         var source = LessSource[..LessSource.IndexOf("int32 Main()", StringComparison.Ordinal)]
             .Replace("where T : Less<T, T, bool>, [Copy]", "where T : [Copy]", StringComparison.Ordinal)
             + "int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ConcreteStructComparisonDoesNotRequireAProtocolWitness()
     {
         var source = LessSource.Replace("struct Value : Less<Value, Value, bool>", "struct Value",
@@ -145,22 +136,20 @@ public sealed class StaticProtocolComparisonTests
             .Replace("Compare(new Value(20), new Value(22))",
                 "new Value(20) < new Value(22)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))());
     }
 
-    [Fact]
+    [Test]
     public void PrimitiveOperandsDoNotAcquireNominalWitnesses()
     {
         var source = LessSource.Replace("Compare(new Value(20), new Value(22))",
             "Compare<int32>(20, 22)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         struct Plain {
             public int32 Number;
             public Plain(int32 value) { Number = value; }
@@ -170,7 +159,7 @@ public sealed class StaticProtocolComparisonTests
             return 0;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             require ManagedNode.TryCreate(1, out var node);
             if (node == node) { return 42; }
@@ -180,13 +169,11 @@ public sealed class StaticProtocolComparisonTests
     public void ComparisonDoesNotIntroduceUniversalOrManagedEquality(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void ComparisonEffectsComeFromTheDeclaredProtocolAndBody(bool valid)
     {
         var source = LessSource.Replace("static C operator <",
@@ -202,16 +189,16 @@ public sealed class StaticProtocolComparisonTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         if (valid)
         {
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))());
         }
         else
         {
-            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
         }
     }
 
-    [Fact]
+    [Test]
     public void IndependentComparisonConstraintsDriveConditionalCopyOutput()
     {
         var source = """
@@ -244,13 +231,13 @@ public sealed class StaticProtocolComparisonTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         SemanticVerifier.Verify(program);
-        Assert.Contains(program.Functions, function => function.Name == "TryChoose<First, Second>");
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "TryChoose<First, Second>"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ComparisonDrivenFalseOutputRemainsVacant()
     {
         var source = LessSource[..LessSource.IndexOf("int32 Main()", StringComparison.Ordinal)]
@@ -265,25 +252,25 @@ public sealed class StaticProtocolComparisonTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void VerifierRejectsForgedComparisonReturnType()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(LessSource));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var index = Array.FindIndex(program.Functions.ToArray(), static function =>
             function.Name == "Value.op_LessThan");
-        Assert.True(index >= 0);
+        Assert.That(index >= 0, Is.True);
         var forged = program with {
             Functions = program.Functions.SetItem(index, program.Functions[index] with {
                 ReturnType = PrimitiveType.Int32,
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(forged, NativeRuntimePolicy.FailFast))!;
     }
 }

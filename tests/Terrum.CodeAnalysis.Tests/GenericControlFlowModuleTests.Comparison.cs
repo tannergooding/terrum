@@ -7,15 +7,14 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class GenericControlFlowModuleTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PrivateComparisonSpecializationsReplaceUnchangedConsumersAsync(NativeRuntimePolicy policy)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -35,15 +34,15 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var replacementProgram = Compile(source, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["ComparisonProtocolProbe"]);
-        _ = Assert.Single(ModuleCompiler.CreateReference(replacement).Functions);
+        _ = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Functions);
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Equal(["Rank", "$producer.Rank"], linked.Structures.Select(static item => item.Name));
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Within<Rank>");
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Rank.op_Equality");
-        Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original),
-            policy)).ConfigureAwait(true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(linked.Structures.Select(static item => item.Name), Is.EqualTo(["Rank", "$producer.Rank"]));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Within<Rank>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Rank.op_Equality"),Is.True);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original),
+            policy)).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram,
             ["ComparisonProtocolProbe"], "NodeB", policy);
@@ -53,12 +52,12 @@ public sealed partial class GenericControlFlowModuleTests
             NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
             [nativeOriginal], policy);
         var nativeHash = SHA256.HashData(nativeConsumer);
-        Assert.Equal(40, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
 }

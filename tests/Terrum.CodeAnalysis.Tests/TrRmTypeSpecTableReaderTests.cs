@@ -4,23 +4,23 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmTypeSpecTableReaderTests
 {
-    [Fact]
+    [Test]
     public void DecodesWorkedInt32RowWithDirectIndex()
     {
         byte[] section = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         var reader = new TrRmTypeSpecTableReader(section, 1, 0, 0, 0, 0);
-        Assert.Equal(new byte[] { 1, 0, 8 }, reader.GetRow(1).ToArray());
+        Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(new byte[] { 1, 0, 8 }));
         Assert.Throws<InvalidDataException>(() => ReadRow(section, 0));
         Assert.Throws<InvalidDataException>(() => ReadRow(section, 2));
     }
 
-    [Fact]
+    [Test]
     public void ValidatesInlineAndIndexedFamiliesWithoutInventingExecutableSupport()
     {
         var section = Rows(
@@ -33,30 +33,28 @@ public sealed class TrRmTypeSpecTableReaderTests
             [0x06, 0, 1, 0, 0, 0],
             [0x05, 0, 4, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
         var reader = new TrRmTypeSpecTableReader(section, 8, 1, 0, 0, 1);
-        Assert.Equal((byte)0x0C, reader.GetRow(6)[0]);
-        Assert.Equal((byte)0x05, reader.GetRow(8)[0]);
+        Assert.That(reader.GetRow(6)[0], Is.EqualTo((byte)0x0C));
+        Assert.That(reader.GetRow(8)[0], Is.EqualTo((byte)0x05));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x00, 0, 8 })]
-    [InlineData(new byte[] { 0x01, 2, 8 })]
-    [InlineData(new byte[] { 0x01, 0, 0x1A })]
-    [InlineData(new byte[] { 0x01, 0, 0xFF })]
-    [InlineData(new byte[] { 0x01, 0, 0x80 })]
-    [InlineData(new byte[] { 0x01, 0, 0x80, 0x80 })]
-    [InlineData(new byte[] { 0x01, 0, 8, 0 })]
-    [InlineData(new byte[] { 0x02, 0, 0, 0, 0, 0 })]
-    [InlineData(new byte[] { 0x02, 0, 2, 0, 0, 0 })]
-    [InlineData(new byte[] { 0x03, 0, 1, 0, 0, 0 })]
-    [InlineData(new byte[] { 0x04, 0, 1, 0, 0, 0 })]
-    [InlineData(new byte[] { 0x06, 0, 1, 0, 0, 0 })]
-    [InlineData(new byte[] { 0x0C, 0, 0x8B, 1, 0, 0, 0 })]
+    [TestCase(new byte[] { 0x00, 0, 8 })]
+    [TestCase(new byte[] { 0x01, 2, 8 })]
+    [TestCase(new byte[] { 0x01, 0, 0x1A })]
+    [TestCase(new byte[] { 0x01, 0, 0xFF })]
+    [TestCase(new byte[] { 0x01, 0, 0x80 })]
+    [TestCase(new byte[] { 0x01, 0, 0x80, 0x80 })]
+    [TestCase(new byte[] { 0x01, 0, 8, 0 })]
+    [TestCase(new byte[] { 0x02, 0, 0, 0, 0, 0 })]
+    [TestCase(new byte[] { 0x02, 0, 2, 0, 0, 0 })]
+    [TestCase(new byte[] { 0x03, 0, 1, 0, 0, 0 })]
+    [TestCase(new byte[] { 0x04, 0, 1, 0, 0, 0 })]
+    [TestCase(new byte[] { 0x06, 0, 1, 0, 0, 0 })]
+    [TestCase(new byte[] { 0x0C, 0, 0x8B, 1, 0, 0, 0 })]
     public void RejectsInvalidRowShapesAndReferences(byte[] row)
     {
         Assert.Throws<InvalidDataException>(() => Create(Rows(row)));
     }
 
-    [Fact]
+    [Test]
     public void RejectsNoncanonicalIndexedAtomicArguments()
     {
         Assert.Throws<InvalidDataException>(() =>
@@ -64,17 +62,15 @@ public sealed class TrRmTypeSpecTableReaderTests
         Assert.Throws<InvalidDataException>(() =>
             Create(Rows([1, 0, 8], [0x0C, 0, 0x8A, 1, 0, 0, 0]), count: 2));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 5, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 })]
-    [InlineData(new byte[] { 5, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0 })]
+    [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 })]
+    [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0 })]
     public void RejectsInvalidConstructedArgumentRanges(byte[] constructed)
     {
         Assert.Throws<InvalidDataException>(() =>
             Create(Rows([2, 0, 1, 0, 0, 0], constructed), count: 2, typeArgCount: 1));
     }
 
-    [Fact]
+    [Test]
     public void ConstructedFormRequiresNominalGenericBase()
     {
         Assert.Throws<InvalidDataException>(() =>
@@ -82,7 +78,7 @@ public sealed class TrRmTypeSpecTableReaderTests
                 count: 2, typeArgCount: 1));
     }
 
-    [Fact]
+    [Test]
     public void RejectsWrongIndexAndReferencedTableCounts()
     {
         Assert.Throws<InvalidDataException>(() => Create([0, 0, 0, 0, 4, 0, 0, 0, 1, 0, 8]));

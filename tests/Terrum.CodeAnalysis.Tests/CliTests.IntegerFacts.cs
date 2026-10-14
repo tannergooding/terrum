@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -20,18 +20,17 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Int64UnaryPredicateExport(long value);
 
-    [Fact]
+    [Test]
     public void CompilerPrimitivesLibraryExecutesIntegerFactsPredicates()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "Compiler-primitives exports require Windows x64.");
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True, "Compiler-primitives exports require Windows x64.");
 
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
             ?? throw new InvalidOperationException("Missing configuration directory.");
         var libraryPath = Path.Combine(RepositoryRoot(), "artifacts", "bin", "self-host", configuration,
             "terrum-compiler-primitives.dll");
-        Assert.True(File.Exists(libraryPath), $"Compiler-primitives library was not built: {libraryPath}");
+        Assert.That(File.Exists(libraryPath), Is.True, $"Compiler-primitives library was not built: {libraryPath}");
 
         var handle = NativeLibrary.Load(libraryPath);
         try
@@ -92,8 +91,7 @@ public sealed partial class CliTests
                     {
                         var expected = IsSignedPredicate(operation, left, right, int.MinValue, int.MaxValue);
                         var actual = function(left, right);
-                        Assert.True(actual == (expected ? 1 : 0),
-                            $"{name}({left}, {right}) returned {actual}; expected {expected}.");
+                        Assert.That(actual == (expected ? 1 : 0), Is.True, $"{name}({left}, {right}) returned {actual}; expected {expected}.");
                     }
                 }
             }
@@ -109,8 +107,7 @@ public sealed partial class CliTests
                     {
                         var expected = IsUnsignedPredicate(operation, left, right, uint.MaxValue);
                         var actual = function(left, right);
-                        Assert.True(actual == (expected ? 1 : 0),
-                            $"{name}({left}, {right}) returned {actual}; expected {expected}.");
+                        Assert.That(actual == (expected ? 1 : 0), Is.True, $"{name}({left}, {right}) returned {actual}; expected {expected}.");
                     }
                 }
             }
@@ -127,8 +124,7 @@ public sealed partial class CliTests
                     {
                         var expected = IsSignedPredicate(operation, left, right, long.MinValue, long.MaxValue);
                         var actual = function(left, right);
-                        Assert.True(actual == (expected ? 1 : 0),
-                            $"{name}({left}, {right}) returned {actual}; expected {expected}.");
+                        Assert.That(actual == (expected ? 1 : 0), Is.True, $"{name}({left}, {right}) returned {actual}; expected {expected}.");
                     }
                 }
             }
@@ -145,8 +141,7 @@ public sealed partial class CliTests
                     {
                         var expected = IsUnsignedPredicate(operation, left, right, ulong.MaxValue);
                         var actual = function(left, right);
-                        Assert.True(actual == (expected ? 1 : 0),
-                            $"{name}({left}, {right}) returned {actual}; expected {expected}.");
+                        Assert.That(actual == (expected ? 1 : 0), Is.True, $"{name}({left}, {right}) returned {actual}; expected {expected}.");
                     }
                 }
             }
@@ -163,14 +158,14 @@ public sealed partial class CliTests
             foreach (var value in int32Values)
             {
                 var expected = value != int.MinValue ? 1 : 0;
-                Assert.Equal(expected, canNegateInt32(value));
-                Assert.Equal(expected, canAbsoluteInt32(value));
+                Assert.That(canNegateInt32(value), Is.EqualTo(expected));
+                Assert.That(canAbsoluteInt32(value), Is.EqualTo(expected));
             }
             foreach (var value in int64Values)
             {
                 var expected = value != long.MinValue ? 1 : 0;
-                Assert.Equal(expected, canNegateInt64(value));
-                Assert.Equal(expected, canAbsoluteInt64(value));
+                Assert.That(canNegateInt64(value), Is.EqualTo(expected));
+                Assert.That(canAbsoluteInt64(value), Is.EqualTo(expected));
             }
         }
         finally
@@ -181,8 +176,7 @@ public sealed partial class CliTests
 
     private static bool IsSignedPredicate(
         string operation, BigInteger left, BigInteger right, BigInteger minimum, BigInteger maximum) =>
-        operation switch
-        {
+        operation switch {
             "add" => IsInRange(left + right, minimum, maximum),
             "subtract" => IsInRange(left - right, minimum, maximum),
             "multiply" => IsInRange(left * right, minimum, maximum),
@@ -192,8 +186,7 @@ public sealed partial class CliTests
         };
 
     private static bool IsUnsignedPredicate(string operation, BigInteger left, BigInteger right, BigInteger maximum) =>
-        operation switch
-        {
+        operation switch {
             "add" => left + right <= maximum,
             "subtract" => left >= right,
             "multiply" => left * right <= maximum,

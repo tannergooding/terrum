@@ -14,23 +14,22 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class ManagedScannerComponentTests
 {
-    [Theory]
-    [InlineData("@await", true)]
-    [InlineData("@union", true)]
-    [InlineData("@ordinaryName", false)]
-    [InlineData("@int32", false)]
-    [InlineData("@out", false)]
-    [InlineData("x@await", false)]
-    [InlineData("@await_", false)]
-    [InlineData("@ await", false)]
-    [InlineData("@_", false)]
-    [InlineData("_", false)]
+    [TestCase("@await",true)]
+    [TestCase("@union",true)]
+    [TestCase("@ordinaryName",false)]
+    [TestCase("@int32",false)]
+    [TestCase("@out",false)]
+    [TestCase("x@await",false)]
+    [TestCase("@await_",false)]
+    [TestCase("@ await",false)]
+    [TestCase("@_",false)]
+    [TestCase("_",false)]
     public async Task KeywordEscapeSnapshotsAuditHandAuthoredRecordsAsync(string text, bool valid)
     {
         var entry = $$"""
@@ -51,26 +50,24 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy);
         }
     }
-
-    [Theory]
-    [InlineData("", false)]
-    [InlineData("// trivia\r\nalpha 42", false)]
-    [InlineData("//* *// /// heading\nalpha", false)]
-    [InlineData("//* */", true)]
-    [InlineData("/* **/ */", true)]
-    [InlineData(".. ..^ ?.", false)]
-    [InlineData("\U00010400 42", false)]
-    [InlineData("\uD800", true)]
-    [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a", true)]
+    [TestCase("",false)]
+    [TestCase("// trivia\r\nalpha 42",false)]
+    [TestCase("//* *// /// heading\nalpha",false)]
+    [TestCase("//* */",true)]
+    [TestCase("/* **/ */",true)]
+    [TestCase(".. ..^ ?.",false)]
+    [TestCase("\U00010400 42",false)]
+    [TestCase("\uD800",true)]
+    [TestCase("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a",true)]
     public async Task PublishedTokensMatchHostAndFailedScansDoNotPublishAsync(string text, bool fails)
     {
         var lexical = Lexer.Lex(SourceText.From(text));
         var expected = lexical.Tokens.ToArray();
-        Assert.Equal(lexical.Diagnostics.Length != 0 || expected.Length > 64, fails);
+        Assert.That(fails, Is.EqualTo(lexical.Diagnostics.Length != 0 || expected.Length > 64));
         var source = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -113,27 +110,23 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, source.ToString(), (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(63, false)]
-    [InlineData(64, true)]
+    [TestCase(63,false)]
+    [TestCase(64,true)]
     public Task CapacityCountsTheEndOfFileTokenAsync(int identifiers, bool fails) =>
         PublishedTokensMatchHostAndFailedScansDoNotPublishAsync(
             string.Join(" ", Enumerable.Repeat("a", identifiers)), fails);
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("alpha 1i32")]
-    [InlineData("0x")]
-    [InlineData("\uD800")]
-    [InlineData("\"unterminated\n\"\\q\"")]
-    [InlineData("/* **/ */")]
-    [InlineData("!!")]
-    [InlineData("\U00010400 +++")]
+    [TestCase("")]
+    [TestCase("alpha 1i32")]
+    [TestCase("0x")]
+    [TestCase("\uD800")]
+    [TestCase("\"unterminated\n\"\\q\"")]
+    [TestCase("/* **/ */")]
+    [TestCase("!!")]
+    [TestCase("\U00010400 +++")]
     public async Task OwnedDiagnosticsRemainAvailableOnLexicalFailureAsync(string text)
     {
         var expected = Lexer.Lex(SourceText.From(text)).Diagnostics;
@@ -162,20 +155,18 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("\uD800\r\uD800")]
-    [InlineData("a\r\n\uD800\n\uD800")]
-    [InlineData("a\uD800\rx\uD800")]
-    [InlineData("\uD800\r\n\"unterminated")]
+    [TestCase("\uD800\r\uD800")]
+    [TestCase("a\r\n\uD800\n\uD800")]
+    [TestCase("a\uD800\rx\uD800")]
+    [TestCase("\uD800\r\n\"unterminated")]
     public async Task DiagnosticLocationSnapshotMapsHostDiagnosticsAcrossLineBreaksAsync(string text)
     {
         var expected = Lexer.Lex(SourceText.From(text)).Diagnostics;
-        Assert.NotEmpty(expected);
+        Assert.That(expected, Is.Not.Empty);
 
         var entry = new StringBuilder("""
             using Terrum.CodeAnalysis;
@@ -215,19 +206,17 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy,
                 includeSourceLines: true).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task DiagnosticLocationSnapshotHandlesMaximumDenseLineSourceAsync(NativeRuntimePolicy policy)
     {
         var diagnosticCount = ScannerHost.MaximumSourceLength / 2;
         var text = string.Concat(Enumerable.Repeat("\uD800\r", diagnosticCount));
-        Assert.Equal(ScannerHost.MaximumSourceLength, text.Length);
+        Assert.That(text.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -247,20 +236,18 @@ public sealed partial class ManagedScannerComponentTests
 
         var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
             includeSourceLines: true).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(0, -1)]
-    [InlineData(0, int.MaxValue)]
-    [InlineData(1, 0)]
-    [InlineData(1, 13)]
-    [InlineData(2, -1)]
-    [InlineData(2, 2)]
-    [InlineData(3, -1)]
-    [InlineData(3, 0)]
-    [InlineData(3, 2)]
+    [TestCase(0,-1)]
+    [TestCase(0,int.MaxValue)]
+    [TestCase(1,0)]
+    [TestCase(1,13)]
+    [TestCase(2,-1)]
+    [TestCase(2,2)]
+    [TestCase(3,-1)]
+    [TestCase(3,0)]
+    [TestCase(3,2)]
     public async Task InvalidDiagnosticRecordsDoNotPublishSnapshotAsync(int word, int value)
     {
         var entry = $$"""
@@ -275,26 +262,24 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync("\uD800", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(0, 3, 3, 0, true)]
-    [InlineData(1, 3, 3, 0, false)]
-    [InlineData(0, 4, 3, 1, true)]
-    [InlineData(1, 4, 3, 1, false)]
-    [InlineData(0, 5, 4, 1, true)]
-    [InlineData(0, 6, 5, 1, true)]
-    [InlineData(715827881, int.MaxValue, 3, 0, true)]
-    [InlineData(715827882, int.MaxValue, 3, 0, false)]
-    [InlineData(536870910, int.MaxValue, 4, 1, true)]
-    [InlineData(536870911, int.MaxValue, 4, 1, false)]
-    [InlineData(429496728, int.MaxValue, 5, 1, true)]
-    [InlineData(429496729, int.MaxValue, 5, 1, false)]
-    [InlineData(-1, int.MaxValue, 3, 0, false)]
-    [InlineData(0, 0, 3, 1, false)]
+    [TestCase(0,3,3,0,true)]
+    [TestCase(1,3,3,0,false)]
+    [TestCase(0,4,3,1,true)]
+    [TestCase(1,4,3,1,false)]
+    [TestCase(0,5,4,1,true)]
+    [TestCase(0,6,5,1,true)]
+    [TestCase(715827881,int.MaxValue,3,0,true)]
+    [TestCase(715827882,int.MaxValue,3,0,false)]
+    [TestCase(536870910,int.MaxValue,4,1,true)]
+    [TestCase(536870911,int.MaxValue,4,1,false)]
+    [TestCase(429496728,int.MaxValue,5,1,true)]
+    [TestCase(429496729,int.MaxValue,5,1,false)]
+    [TestCase(-1,int.MaxValue,3,0,false)]
+    [TestCase(0,0,3,1,false)]
     public async Task ScannerRecordCapacityChecksCannotOverflowAsync(
         int count, int capacity, int width, int prefix, bool expected)
     {
@@ -312,14 +297,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync("", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedTokenSnapshotSupportsIndexedReadsBeyondManagedChainLimitAsync(
         NativeRuntimePolicy policy)
     {
@@ -344,19 +327,17 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var input = string.Join(" ", Enumerable.Repeat("a", 128));
         var program = await CompileAsync(input, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedTokenSnapshotScalesToMaximumScannerSourceAsync(NativeRuntimePolicy policy)
     {
         var identifierCount = ScannerHost.MaximumSourceLength / 2;
         var expectedTokenCount = identifierCount + 1;
         var input = string.Concat(Enumerable.Repeat("a ", identifierCount));
-        Assert.Equal(ScannerHost.MaximumSourceLength, input.Length);
+        Assert.That(input.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -378,19 +359,17 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync(input, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompilerInputSnapshotsPublishMaximumDensityRecordsAsync(NativeRuntimePolicy policy)
     {
         var integerCount = ScannerHost.MaximumSourceLength / 2;
         var tokenCount = integerCount + 1;
         var input = string.Concat(Enumerable.Repeat("1 ", integerCount));
-        Assert.Equal(ScannerHost.MaximumSourceLength, input.Length);
+        Assert.That(input.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -423,13 +402,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync(input, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task TokenSnapshotOwnsValidatedRecordsAndRejectsPartialCopiesAsync(
         NativeRuntimePolicy policy)
     {
@@ -454,13 +431,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("alpha beta", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task StandaloneTriviaBuilderRejectsInvalidTokenRecordsAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -473,13 +448,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("alpha", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task LexicalFailureLeavesOwnedTokenSnapshotVacantAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -490,13 +463,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("\uD800", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task DiagnosticSnapshotRetainsMaximumMalformedSourceRecordsAsync(NativeRuntimePolicy policy)
     {
         var entry = $$"""
@@ -519,15 +490,13 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var input = new string('\uD800', ScannerHost.MaximumSourceLength);
         var program = await CompileAsync(input, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("  // leading\r\nalpha /* block */ beta\t")]
-    [InlineData("alpha\u2028beta // trailing")]
-    [InlineData("/// heading\nalpha //** body **// beta /** tail **/")]
+    [TestCase("")]
+    [TestCase("  // leading\r\nalpha /* block */ beta\t")]
+    [TestCase("alpha\u2028beta // trailing")]
+    [TestCase("/// heading\nalpha //** body **// beta /** tail **/")]
     public async Task OwnedTriviaSnapshotMatchesHostedLeadingTriviaAsync(string text)
     {
         var expected = Lexer.Lex(SourceText.From(text)).Tokens
@@ -558,14 +527,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task LosslessTokenSnapshotMatchesStandaloneBuilderAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -591,13 +558,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("alpha beta", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedTriviaSnapshotSurvivesTheManagedChainLimitAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -616,13 +581,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var input = string.Concat(Enumerable.Repeat("a ", 128));
         var program = await CompileAsync(input, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task LexicalFailureLeavesBothLosslessSnapshotsVacantAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -633,18 +596,16 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("\uD800", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, int.MaxValue)]
-    [InlineData(1, -1)]
-    [InlineData(2, 1)]
-    [InlineData(3, 0)]
-    [InlineData(4, 0)]
-    [InlineData(4, 3)]
+    [TestCase(0,0)]
+    [TestCase(0,int.MaxValue)]
+    [TestCase(1,-1)]
+    [TestCase(2,1)]
+    [TestCase(3,0)]
+    [TestCase(4,0)]
+    [TestCase(4,3)]
     public async Task InvalidTriviaDoesNotPublishOwnedSnapshotAsync(int word, int value)
     {
         var entry = $$"""
@@ -661,14 +622,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync("alpha beta", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedIntegerRecordsRetainFullUnsignedMagnitudeAndOverflowAsync(
         NativeRuntimePolicy policy)
     {
@@ -701,13 +660,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         const string Text = "0xFFFF_FFFF_FFFF_FFFF 18446744073709551616 0b1_0 42";
         var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompilerInputSnapshotsOwnEveryRecordBufferAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -732,15 +689,13 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("alpha 42", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("alpha", NativeRuntimePolicy.FailFast)]
-    [InlineData("alpha", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("1.5", NativeRuntimePolicy.FailFast)]
-    [InlineData("1.5", NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("alpha",NativeRuntimePolicy.FailFast)]
+    [TestCase("alpha",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("1.5",NativeRuntimePolicy.FailFast)]
+    [TestCase("1.5",NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompilerInputPermitsNoDecodedIntegersAsync(string text, NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -756,13 +711,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync(text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task FindsDecodedIntegerByTokenIndexAndSkipsNonIntegerNumericsAsync(
         NativeRuntimePolicy policy)
     {
@@ -798,13 +751,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync("1 1.5 1e2 0x1p1 0x1e2 0b10 42", Entry,
             (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task IndexedIntegerLookupExceedsManagedChainLimitAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -828,16 +779,14 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync(string.Concat(Enumerable.Repeat("1 ", 128)),
             Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(0, 3)]
-    [InlineData(1, -1)]
-    [InlineData(2, 2)]
-    [InlineData(5, 1)]
-    [InlineData(6, 0)]
+    [TestCase(0,3)]
+    [TestCase(1,-1)]
+    [TestCase(2,2)]
+    [TestCase(5,1)]
+    [TestCase(6,0)]
     public async Task InvalidIntegerRecordsDoNotPublishCompilerInputAsync(int word, int value)
     {
         var entry = $$"""
@@ -853,14 +802,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync("42 3", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task MissingIntegerRecordsDoNotPublishCompilerInputAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -874,15 +821,13 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("42 3", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("42", 0, 43, 0)]
-    [InlineData("42", 1, 0, 0)]
-    [InlineData("18446744073709551616", 0, 0, 0)]
-    [InlineData("18446744073709551615", 0, -1, 0)]
+    [TestCase("42",0,43,0)]
+    [TestCase("42",1,0,0)]
+    [TestCase("18446744073709551616",0,0,0)]
+    [TestCase("18446744073709551615",0,-1,0)]
     public async Task CompilerInputRejectsIntegerMagnitudeRecordsThatDisagreeWithSourceAsync(
         string text, int status, int low, int high)
     {
@@ -901,14 +846,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendRejectsMismatchedScannerMagnitudeAsync(NativeRuntimePolicy policy)
     {
         const string Text = "int32 Value() { return 42; }";
@@ -923,13 +866,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
             .ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarProgramRejectsMismatchedScannerMagnitudeAsync(NativeRuntimePolicy policy)
     {
         const string Text = "int32 First() { return 42; } int32 Second() { return First(); }";
@@ -949,13 +890,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
             .ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendRejectsMissingScannerIntegerRecordAsync(NativeRuntimePolicy policy)
     {
         const string Text = "int32 Value() { return 42; }";
@@ -970,13 +909,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
             .ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarProgramRejectsMissingScannerIntegerRecordAsync(NativeRuntimePolicy policy)
     {
         const string Text = "int32 First() { return 42; } int32 Second() { return First(); }";
@@ -996,13 +933,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
             .ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OverflowIntegerRecordRequiresZeroPayloadAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -1017,37 +952,35 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("42", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("int32 Answer() { return 42; }", true)]
-    [InlineData("int32 Answer() { return -42; }", true)]
-    [InlineData("int32 Answer() { return +42; }", true)]
-    [InlineData("int32 Answer() { return ~42; }", true)]
-    [InlineData("uint32 Answer() { return 42; }", false)]
-    [InlineData("int32 Answer() { return (42); }", true)]
-    [InlineData("int32 Answer() { return (-42); }", true)]
-    [InlineData("int32 Answer() { return -(42); }", true)]
-    [InlineData("int32 Answer() { return true; }", false)]
-    [InlineData("int32 Answer() { return 42 }", false)]
+    [TestCase("int32 Answer() { return 42; }",true)]
+    [TestCase("int32 Answer() { return -42; }",true)]
+    [TestCase("int32 Answer() { return +42; }",true)]
+    [TestCase("int32 Answer() { return ~42; }",true)]
+    [TestCase("uint32 Answer() { return 42; }",false)]
+    [TestCase("int32 Answer() { return (42); }",true)]
+    [TestCase("int32 Answer() { return (-42); }",true)]
+    [TestCase("int32 Answer() { return -(42); }",true)]
+    [TestCase("int32 Answer() { return true; }",false)]
+    [TestCase("int32 Answer() { return 42 }",false)]
     public async Task BoundedScalarParserAgreesWithHostedSyntaxForItsAcceptedShapeAsync(
         string text, bool accepted)
     {
-        Assert.Equal(0, (int)TokenKind.EndOfFile);
-        Assert.Equal(2, (int)TokenKind.Identifier);
-        Assert.Equal(3, (int)TokenKind.NumericLiteral);
-        Assert.Equal(19, (int)TokenKind.ReturnKeyword);
-        Assert.Equal(46, (int)TokenKind.OpenParen);
-        Assert.Equal(47, (int)TokenKind.CloseParen);
-        Assert.Equal(48, (int)TokenKind.OpenBrace);
-        Assert.Equal(49, (int)TokenKind.CloseBrace);
-        Assert.Equal(52, (int)TokenKind.Semicolon);
-        Assert.Equal(57, (int)TokenKind.Plus);
-        Assert.Equal(58, (int)TokenKind.Minus);
-        Assert.Equal(62, (int)TokenKind.Bang);
-        Assert.Equal(63, (int)TokenKind.Tilde);
+        Assert.That((int)TokenKind.EndOfFile, Is.EqualTo(0));
+        Assert.That((int)TokenKind.Identifier, Is.EqualTo(2));
+        Assert.That((int)TokenKind.NumericLiteral, Is.EqualTo(3));
+        Assert.That((int)TokenKind.ReturnKeyword, Is.EqualTo(19));
+        Assert.That((int)TokenKind.OpenParen, Is.EqualTo(46));
+        Assert.That((int)TokenKind.CloseParen, Is.EqualTo(47));
+        Assert.That((int)TokenKind.OpenBrace, Is.EqualTo(48));
+        Assert.That((int)TokenKind.CloseBrace, Is.EqualTo(49));
+        Assert.That((int)TokenKind.Semicolon, Is.EqualTo(52));
+        Assert.That((int)TokenKind.Plus, Is.EqualTo(57));
+        Assert.That((int)TokenKind.Minus, Is.EqualTo(58));
+        Assert.That((int)TokenKind.Bang, Is.EqualTo(62));
+        Assert.That((int)TokenKind.Tilde, Is.EqualTo(63));
 
         var hosted = SyntaxTree.Parse(text);
         var name = hosted.Tokens[1].Span;
@@ -1071,31 +1004,29 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Answer() { return 42; }", 1)]
-    [InlineData("uint32 Answer() { return 42; }", 2)]
-    [InlineData("uint32 Answer() { return +42; }", 2)]
-    [InlineData("int64 Answer() { return -42; }", 3)]
-    [InlineData("uint64 Answer() { return 42; }", 4)]
-    [InlineData("int64 Answer() { return (42); }", 3)]
-    [InlineData("uint64 Answer() { return (+42); }", 4)]
-    [InlineData("bool Answer() { return true; }", 5)]
-    [InlineData("bool Answer() { return (false); }", 5)]
-    [InlineData("bool Answer() { return !true; }", 5)]
-    [InlineData("bool Answer() { return !(false); }", 5)]
-    [InlineData("uint64 Answer() { return +(42); }", 4)]
-    [InlineData("uint64 Answer() { return (~42); }", 4)]
-    [InlineData("float32 Answer() { return 42; }", 0)]
-    [InlineData("float64 Answer() { return 42; }", 0)]
-    [InlineData("int32 Answer () { return 42; }", 0)]
-    [InlineData("int32 Answer\n() { return 42; }", 0)]
-    [InlineData("int32 Answer/* boundary */() { return 42; }", 0)]
-    [InlineData("int32 Answer/// boundary\n() { return 42; }", 0)]
+    [TestCase("int32 Answer() { return 42; }",1)]
+    [TestCase("uint32 Answer() { return 42; }",2)]
+    [TestCase("uint32 Answer() { return +42; }",2)]
+    [TestCase("int64 Answer() { return -42; }",3)]
+    [TestCase("uint64 Answer() { return 42; }",4)]
+    [TestCase("int64 Answer() { return (42); }",3)]
+    [TestCase("uint64 Answer() { return (+42); }",4)]
+    [TestCase("bool Answer() { return true; }",5)]
+    [TestCase("bool Answer() { return (false); }",5)]
+    [TestCase("bool Answer() { return !true; }",5)]
+    [TestCase("bool Answer() { return !(false); }",5)]
+    [TestCase("uint64 Answer() { return +(42); }",4)]
+    [TestCase("uint64 Answer() { return (~42); }",4)]
+    [TestCase("float32 Answer() { return 42; }",0)]
+    [TestCase("float64 Answer() { return 42; }",0)]
+    [TestCase("int32 Answer () { return 42; }",0)]
+    [TestCase("int32 Answer\n() { return 42; }",0)]
+    [TestCase("int32 Answer/* boundary */() { return 42; }",0)]
+    [TestCase("int32 Answer/// boundary\n() { return 42; }",0)]
     public async Task TypedScalarParserMatchesHostedDeclarationSpansAsync(string text, int type)
     {
         var hosted = SyntaxTree.Parse(text);
@@ -1125,12 +1056,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task TypedScalarParserKeepsOutputsVacantWhenTypeFilterRejectsAsync()
     {
         const string Text = "uint32 Value() { return 42; }";
@@ -1157,23 +1088,21 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileParserAsync(Text, Entry, (BoundRuntimePolicy)policy)
                 .ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("bool Value() { return true; }", true, true)]
-    [InlineData("bool Value() { return false; }", true, false)]
-    [InlineData("bool Value() { return (true); }", true, true)]
-    [InlineData("bool Value() { return (false); }", true, false)]
-    [InlineData("bool Value() { return !true; }", true, false)]
-    [InlineData("bool Value() { return !false; }", true, true)]
-    [InlineData("bool Value() { return (!true); }", true, false)]
-    [InlineData("bool Value() { return !(false); }", true, true)]
-    [InlineData("bool Value() { return +true; }", false, false)]
-    [InlineData("bool Value() { return +(true); }", false, false)]
-    [InlineData("int32 Value() { return 1; }", false, false)]
+    [TestCase("bool Value() { return true; }",true,true)]
+    [TestCase("bool Value() { return false; }",true,false)]
+    [TestCase("bool Value() { return (true); }",true,true)]
+    [TestCase("bool Value() { return (false); }",true,false)]
+    [TestCase("bool Value() { return !true; }",true,false)]
+    [TestCase("bool Value() { return !false; }",true,true)]
+    [TestCase("bool Value() { return (!true); }",true,false)]
+    [TestCase("bool Value() { return !(false); }",true,true)]
+    [TestCase("bool Value() { return +true; }",false,false)]
+    [TestCase("bool Value() { return +(true); }",false,false)]
+    [TestCase("int32 Value() { return 1; }",false,false)]
     public async Task BoundedNativeBoolEvaluationMatchesHostedExecutedValuesAsync(
         string text, bool evaluable, bool value)
     {
@@ -1205,40 +1134,38 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(hostedSource), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = hosted.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32(1) == int32(1)", true, true)]
-    [InlineData("int32(1) != int32(2)", true, true)]
-    [InlineData("int32(0xFFFF_FFFF) < int32(0)", true, true)]
-    [InlineData("int32(1) <= int32(1)", true, true)]
-    [InlineData("uint32(4294967295) > uint32(1)", true, true)]
-    [InlineData("uint32(1) >= uint32(2)", true, false)]
-    [InlineData("int64(0x8000_0000_0000_0000) < int64(0)", true, true)]
-    [InlineData("uint64(18446744073709551615) > uint64(0)", true, true)]
-    [InlineData("int64(0xFFFF_FFFF_FFFF_FFFF) == int64(0)", true, false)]
-    [InlineData("char16(65535) > char16(1)", true, true)]
-    [InlineData("char16(0xFFFF) <= char16(65535)", true, true)]
-    [InlineData("char16(0) != char16(0)", true, false)]
-    [InlineData("int32(2147483648) == int32(0)", false, false)]
-    [InlineData("uint32(4294967296) == uint32(0)", false, false)]
-    [InlineData("int64(9223372036854775808) < int64(0)", false, false)]
-    [InlineData("uint64(18446744073709551616) > uint64(0)", false, false)]
-    [InlineData("char16(65536) > char16(0)", false, false)]
-    [InlineData("char16(1) < uint32(2)", false, false)]
-    [InlineData("int32(1) < int64(2)", false, false)]
-    [InlineData("int32(1) + int32(2)", false, false)]
-    [InlineData("int32 (1) == int32(1)", false, false)]
-    [InlineData("int32(1) == int32\n(1)", false, false)]
-    [InlineData("int32/* boundary */(1) == int32(1)", false, false)]
-    [InlineData("int32(1) == int32/// boundary\n(1)", false, false)]
+    [TestCase("int32(1) == int32(1)",true,true)]
+    [TestCase("int32(1) != int32(2)",true,true)]
+    [TestCase("int32(0xFFFF_FFFF) < int32(0)",true,true)]
+    [TestCase("int32(1) <= int32(1)",true,true)]
+    [TestCase("uint32(4294967295) > uint32(1)",true,true)]
+    [TestCase("uint32(1) >= uint32(2)",true,false)]
+    [TestCase("int64(0x8000_0000_0000_0000) < int64(0)",true,true)]
+    [TestCase("uint64(18446744073709551615) > uint64(0)",true,true)]
+    [TestCase("int64(0xFFFF_FFFF_FFFF_FFFF) == int64(0)",true,false)]
+    [TestCase("char16(65535) > char16(1)",true,true)]
+    [TestCase("char16(0xFFFF) <= char16(65535)",true,true)]
+    [TestCase("char16(0) != char16(0)",true,false)]
+    [TestCase("int32(2147483648) == int32(0)",false,false)]
+    [TestCase("uint32(4294967296) == uint32(0)",false,false)]
+    [TestCase("int64(9223372036854775808) < int64(0)",false,false)]
+    [TestCase("uint64(18446744073709551616) > uint64(0)",false,false)]
+    [TestCase("char16(65536) > char16(0)",false,false)]
+    [TestCase("char16(1) < uint32(2)",false,false)]
+    [TestCase("int32(1) < int64(2)",false,false)]
+    [TestCase("int32(1) + int32(2)",false,false)]
+    [TestCase("int32 (1) == int32(1)",false,false)]
+    [TestCase("int32(1) == int32\n(1)",false,false)]
+    [TestCase("int32/* boundary */(1) == int32(1)",false,false)]
+    [TestCase("int32(1) == int32/// boundary\n(1)",false,false)]
     public async Task BoundedNativeTypedScalarComparisonUsesOwnedRecordsAsync(
         string expression, bool evaluable, bool expected)
     {
@@ -1274,39 +1201,35 @@ public sealed partial class ManagedScannerComponentTests
                 var hosted = Compilation.Create(SyntaxTree.Parse(
                     text + " int32 Main() { if (Value() == true) { return 42; } return 1; }"),
                     (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(expected ? 42 : 1,
-                    NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = hosted.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), policy), Is.EqualTo(expected ? 42 : 1));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "37", "x + 5", true, "42")]
-    [InlineData("int32", "1", "x + 0xFFFF_FFFF", true, "0")]
-    [InlineData("int32", "int32.MaxValue", "x + 0x8000_0000", true, "-1")]
-    [InlineData("int32", "int32.MaxValue", "x + 1", false, "0")]
-    [InlineData("int32", "int32.MinValue", "x + 0xFFFF_FFFF", false, "0")]
-    [InlineData("int32", "0", "x + 2147483648", false, "0")]
-    [InlineData("int32", "1", "y + 5", false, "0")]
-    [InlineData("uint32", "0", "x + 0xFFFF_FFFF", true, "uint32.MaxValue")]
-    [InlineData("uint32", "uint32.MaxValue", "x + 1", false, "0")]
-    [InlineData("uint32", "0", "x + 4294967296", false, "0")]
-    [InlineData("int64", "int64.MaxValue", "x + 0x8000_0000_0000_0000", true, "-1")]
-    [InlineData("int64", "int64.MaxValue", "x + 1", false, "0")]
-    [InlineData("int64", "int64.MinValue", "x + 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
-    [InlineData("int64", "0", "x + 9223372036854775808", false, "0")]
-    [InlineData("uint64", "0", "x + 18446744073709551615", true, "uint64.MaxValue")]
-    [InlineData("uint64", "uint64.MaxValue", "x + 1", false, "0")]
-    [InlineData("uint64", "0", "x + 18446744073709551616", false, "0")]
+    [TestCase("int32","37","x + 5",true,"42")]
+    [TestCase("int32","1","x + 0xFFFF_FFFF",true,"0")]
+    [TestCase("int32","int32.MaxValue","x + 0x8000_0000",true,"-1")]
+    [TestCase("int32","int32.MaxValue","x + 1",false,"0")]
+    [TestCase("int32","int32.MinValue","x + 0xFFFF_FFFF",false,"0")]
+    [TestCase("int32","0","x + 2147483648",false,"0")]
+    [TestCase("int32","1","y + 5",false,"0")]
+    [TestCase("uint32","0","x + 0xFFFF_FFFF",true,"uint32.MaxValue")]
+    [TestCase("uint32","uint32.MaxValue","x + 1",false,"0")]
+    [TestCase("uint32","0","x + 4294967296",false,"0")]
+    [TestCase("int64","int64.MaxValue","x + 0x8000_0000_0000_0000",true,"-1")]
+    [TestCase("int64","int64.MaxValue","x + 1",false,"0")]
+    [TestCase("int64","int64.MinValue","x + 0xFFFF_FFFF_FFFF_FFFF",false,"0")]
+    [TestCase("int64","0","x + 9223372036854775808",false,"0")]
+    [TestCase("uint64","0","x + 18446744073709551615",true,"uint64.MaxValue")]
+    [TestCase("uint64","uint64.MaxValue","x + 1",false,"0")]
+    [TestCase("uint64","0","x + 18446744073709551616",false,"0")]
     public async Task BoundedNativeNamedParameterAdditionUsesOwnedRecordsAsync(
         string typeName, string parameter, string expression, bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32ParameterAddReturn",
             "uint32" => "TryEvaluateUInt32ParameterAddReturn",
             "int64" => "TryEvaluateInt64ParameterAddReturn",
@@ -1345,16 +1268,16 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = hosted.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task BoundedNativeNamedParameterAdditionKeepsOutputsVacantOnFailureAsync()
     {
         const string Text = "int32 Value(int32 x) { return x + 22; }";
@@ -1379,31 +1302,28 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileParserAsync(Text, Entry, (BoundRuntimePolicy)policy)
                 .ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "21", "21", "x + y", true, "42")]
-    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x + y", true, "-1")]
-    [InlineData("int32", "int32.MaxValue", "1", "x + y", false, "0")]
-    [InlineData("int32", "int32.MinValue", "-1", "x + y", false, "0")]
-    [InlineData("int32", "1", "2", "x + x", false, "0")]
-    [InlineData("int32", "1", "2", "y + x", false, "0")]
-    [InlineData("uint32", "uint32.MaxValue", "0", "x + y", true, "uint32.MaxValue")]
-    [InlineData("uint32", "uint32.MaxValue", "1", "x + y", false, "0")]
-    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x + y", true, "-1")]
-    [InlineData("int64", "int64.MaxValue", "1", "x + y", false, "0")]
-    [InlineData("int64", "int64.MinValue", "-1", "x + y", false, "0")]
-    [InlineData("uint64", "uint64.MaxValue", "0", "x + y", true, "uint64.MaxValue")]
-    [InlineData("uint64", "uint64.MaxValue", "1", "x + y", false, "0")]
+    [TestCase("int32","21","21","x + y",true,"42")]
+    [TestCase("int32","int32.MinValue","int32.MaxValue","x + y",true,"-1")]
+    [TestCase("int32","int32.MaxValue","1","x + y",false,"0")]
+    [TestCase("int32","int32.MinValue","-1","x + y",false,"0")]
+    [TestCase("int32","1","2","x + x",false,"0")]
+    [TestCase("int32","1","2","y + x",false,"0")]
+    [TestCase("uint32","uint32.MaxValue","0","x + y",true,"uint32.MaxValue")]
+    [TestCase("uint32","uint32.MaxValue","1","x + y",false,"0")]
+    [TestCase("int64","int64.MinValue","int64.MaxValue","x + y",true,"-1")]
+    [TestCase("int64","int64.MaxValue","1","x + y",false,"0")]
+    [TestCase("int64","int64.MinValue","-1","x + y",false,"0")]
+    [TestCase("uint64","uint64.MaxValue","0","x + y",true,"uint64.MaxValue")]
+    [TestCase("uint64","uint64.MaxValue","1","x + y",false,"0")]
     public async Task BoundedNativeTwoParameterAdditionBindsBothNamesAsync(
         string typeName, string first, string second, string expression,
         bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32TwoParameterAddReturn",
             "uint32" => "TryEvaluateUInt32TwoParameterAddReturn",
             "int64" => "TryEvaluateInt64TwoParameterAddReturn",
@@ -1448,24 +1368,22 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = hosted.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 x, int32 x) { return x + x; }")]
-    [InlineData("int32 Value(int32 x, uint32 y) { return x + y; }")]
-    [InlineData("int32 Value(int32 x int32 y) { return x + y; }")]
-    [InlineData("char16 Value(char16 x, char16 y) { return x + y; }")]
-    [InlineData("int32 Value (int32 x, int32 y) { return x + y; }")]
-    [InlineData("int32 Value\n(int32 x, int32 y) { return x + y; }")]
-    [InlineData("int32 Value/* boundary */(int32 x, int32 y) { return x + y; }")]
-    [InlineData("int32 Value/// boundary\n(int32 x, int32 y) { return x + y; }")]
+    [TestCase("int32 Value(int32 x, int32 x) { return x + x; }")]
+    [TestCase("int32 Value(int32 x, uint32 y) { return x + y; }")]
+    [TestCase("int32 Value(int32 x int32 y) { return x + y; }")]
+    [TestCase("char16 Value(char16 x, char16 y) { return x + y; }")]
+    [TestCase("int32 Value (int32 x, int32 y) { return x + y; }")]
+    [TestCase("int32 Value\n(int32 x, int32 y) { return x + y; }")]
+    [TestCase("int32 Value/* boundary */(int32 x, int32 y) { return x + y; }")]
+    [TestCase("int32 Value/// boundary\n(int32 x, int32 y) { return x + y; }")]
     public async Task BoundedNativeTwoParameterAdditionRejectsInvalidDeclarationsAsync(string text)
     {
         const string Entry = """
@@ -1480,12 +1398,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompilePairParserAsync(text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task BoundedNativeTwoParameterAdditionKeepsOutputsVacantOnFailureAsync()
     {
         const string Text = "int32 Value(int32 x, int32 y) { return x + y; }";
@@ -1509,36 +1427,33 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompilePairParserAsync(Text, Entry, (BoundRuntimePolicy)policy)
                 .ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "43", "1", "x - y", true, "42")]
-    [InlineData("int32", "int32.MinValue", "int32.MinValue", "x - y", true, "0")]
-    [InlineData("int32", "1", "2", "x - y", true, "-1")]
-    [InlineData("int32", "int32.MaxValue", "-1", "x - y", false, "0")]
-    [InlineData("int32", "int32.MinValue", "1", "x - y", false, "0")]
-    [InlineData("int32", "1", "2", "y - x", false, "0")]
-    [InlineData("int32", "1", "2", "x - x", false, "0")]
-    [InlineData("int32", "1", "2", "x + y", false, "0")]
-    [InlineData("uint32", "uint32.MaxValue", "0", "x - y", true, "uint32.MaxValue")]
-    [InlineData("uint32", "uint32.MaxValue", "uint32.MaxValue", "x - y", true, "0")]
-    [InlineData("uint32", "0", "1", "x - y", false, "0")]
-    [InlineData("int64", "int64.MinValue", "int64.MinValue", "x - y", true, "0")]
-    [InlineData("int64", "int64.MinValue", "-1", "x - y", true, "int64.MinValue + 1")]
-    [InlineData("int64", "int64.MaxValue", "-1", "x - y", false, "0")]
-    [InlineData("int64", "int64.MinValue", "1", "x - y", false, "0")]
-    [InlineData("uint64", "uint64.MaxValue", "0", "x - y", true, "uint64.MaxValue")]
-    [InlineData("uint64", "uint64.MaxValue", "uint64.MaxValue", "x - y", true, "0")]
-    [InlineData("uint64", "0", "1", "x - y", false, "0")]
+    [TestCase("int32","43","1","x - y",true,"42")]
+    [TestCase("int32","int32.MinValue","int32.MinValue","x - y",true,"0")]
+    [TestCase("int32","1","2","x - y",true,"-1")]
+    [TestCase("int32","int32.MaxValue","-1","x - y",false,"0")]
+    [TestCase("int32","int32.MinValue","1","x - y",false,"0")]
+    [TestCase("int32","1","2","y - x",false,"0")]
+    [TestCase("int32","1","2","x - x",false,"0")]
+    [TestCase("int32","1","2","x + y",false,"0")]
+    [TestCase("uint32","uint32.MaxValue","0","x - y",true,"uint32.MaxValue")]
+    [TestCase("uint32","uint32.MaxValue","uint32.MaxValue","x - y",true,"0")]
+    [TestCase("uint32","0","1","x - y",false,"0")]
+    [TestCase("int64","int64.MinValue","int64.MinValue","x - y",true,"0")]
+    [TestCase("int64","int64.MinValue","-1","x - y",true,"int64.MinValue + 1")]
+    [TestCase("int64","int64.MaxValue","-1","x - y",false,"0")]
+    [TestCase("int64","int64.MinValue","1","x - y",false,"0")]
+    [TestCase("uint64","uint64.MaxValue","0","x - y",true,"uint64.MaxValue")]
+    [TestCase("uint64","uint64.MaxValue","uint64.MaxValue","x - y",true,"0")]
+    [TestCase("uint64","0","1","x - y",false,"0")]
     public async Task BoundedNativeTwoParameterSubtractionChecksRangeAndOrderAsync(
         string typeName, string first, string second, string expression,
         bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32TwoParameterSubtractReturn",
             "uint32" => "TryEvaluateUInt32TwoParameterSubtractReturn",
             "int64" => "TryEvaluateInt64TwoParameterSubtractReturn",
@@ -1583,38 +1498,35 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = hosted.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "true", "int32.MinValue", "int32.MaxValue", "if (flag) { return x; } else { return y; }", true, "int32.MinValue")]
-    [InlineData("int32", "false", "int32.MinValue", "int32.MaxValue", "if (flag) { return x; } else { return y; }", true, "int32.MaxValue")]
-    [InlineData("uint32", "true", "uint32.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "uint32.MaxValue")]
-    [InlineData("uint32", "false", "uint32.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "0")]
-    [InlineData("int64", "true", "int64.MinValue", "int64.MaxValue", "if (flag) { return x; } else { return y; }", true, "int64.MinValue")]
-    [InlineData("int64", "false", "int64.MinValue", "int64.MaxValue", "if (flag) { return x; } else { return y; }", true, "int64.MaxValue")]
-    [InlineData("uint64", "true", "uint64.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "uint64.MaxValue")]
-    [InlineData("uint64", "false", "uint64.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "0")]
-    [InlineData("bool", "true", "false", "true", "if (flag) { return x; } else { return y; }", true, "false")]
-    [InlineData("bool", "false", "false", "true", "if (flag) { return x; } else { return y; }", true, "true")]
-    [InlineData("char16", "true", "char16(65535)", "char16(0)", "if (flag) { return x; } else { return y; }", true, "char16(65535)")]
-    [InlineData("char16", "false", "char16(65535)", "char16(0)", "if (flag) { return x; } else { return y; }", true, "char16(0)")]
-    [InlineData("int32", "true", "1", "2", "if (wrong) { return x; } else { return y; }", false, "0")]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return y; } else { return x; }", false, "0")]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return x; } else { return x; }", false, "0")]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return x; }", false, "0")]
+    [TestCase("int32","true","int32.MinValue","int32.MaxValue","if (flag) { return x; } else { return y; }",true,"int32.MinValue")]
+    [TestCase("int32","false","int32.MinValue","int32.MaxValue","if (flag) { return x; } else { return y; }",true,"int32.MaxValue")]
+    [TestCase("uint32","true","uint32.MaxValue","0","if (flag) { return x; } else { return y; }",true,"uint32.MaxValue")]
+    [TestCase("uint32","false","uint32.MaxValue","0","if (flag) { return x; } else { return y; }",true,"0")]
+    [TestCase("int64","true","int64.MinValue","int64.MaxValue","if (flag) { return x; } else { return y; }",true,"int64.MinValue")]
+    [TestCase("int64","false","int64.MinValue","int64.MaxValue","if (flag) { return x; } else { return y; }",true,"int64.MaxValue")]
+    [TestCase("uint64","true","uint64.MaxValue","0","if (flag) { return x; } else { return y; }",true,"uint64.MaxValue")]
+    [TestCase("uint64","false","uint64.MaxValue","0","if (flag) { return x; } else { return y; }",true,"0")]
+    [TestCase("bool","true","false","true","if (flag) { return x; } else { return y; }",true,"false")]
+    [TestCase("bool","false","false","true","if (flag) { return x; } else { return y; }",true,"true")]
+    [TestCase("char16","true","char16(65535)","char16(0)","if (flag) { return x; } else { return y; }",true,"char16(65535)")]
+    [TestCase("char16","false","char16(65535)","char16(0)","if (flag) { return x; } else { return y; }",true,"char16(0)")]
+    [TestCase("int32","true","1","2","if (wrong) { return x; } else { return y; }",false,"0")]
+    [TestCase("int32","true","1","2","if (flag) { return y; } else { return x; }",false,"0")]
+    [TestCase("int32","true","1","2","if (flag) { return x; } else { return x; }",false,"0")]
+    [TestCase("int32","true","1","2","if (flag) { return x; }",false,"0")]
     public async Task BoundedNativeConditionalReturnBindsBothBranchValuesAsync(
         string typeName, string condition, string first, string second, string body,
         bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32ScalarConditionalReturn",
             "uint32" => "TryEvaluateUInt32ScalarConditionalReturn",
             "int64" => "TryEvaluateInt64ScalarConditionalReturn",
@@ -1661,38 +1573,35 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = hosted.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarConditionalParser").ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return x + y; } else { return x; }", true, "3")]
-    [InlineData("int32", "false", "int32.MaxValue", "1", "if (flag) { return x + y; } else { return x; }", true, "int32.MaxValue")]
-    [InlineData("int32", "true", "int32.MaxValue", "1", "if (flag) { return x + y; } else { return x; }", false, "0")]
-    [InlineData("int32", "true", "int32.MinValue", "-1", "if (flag) { return x + y; } else { return x; }", false, "0")]
-    [InlineData("uint32", "true", "uint32.MaxValue", "1", "if (flag) { return x + y; } else { return x; }", false, "0")]
-    [InlineData("uint32", "false", "uint32.MaxValue", "1", "if (flag) { return x + y; } else { return x; }", true, "uint32.MaxValue")]
-    [InlineData("int64", "true", "int64.MaxValue", "-1", "if (flag) { return x + y; } else { return x; }", true, "int64.MaxValue - 1")]
-    [InlineData("int64", "true", "int64.MaxValue", "1", "if (flag) { return x + y; } else { return x; }", false, "0")]
-    [InlineData("uint64", "true", "uint64.MaxValue", "1", "if (flag) { return x + y; } else { return x; }", false, "0")]
-    [InlineData("uint64", "false", "uint64.MaxValue", "1", "if (flag) { return x + y; } else { return x; }", true, "uint64.MaxValue")]
-    [InlineData("int32", "true", "1", "2", "if (missing) { return x + y; } else { return x; }", false, "0")]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return y + x; } else { return x; }", false, "0")]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return x + x; } else { return x; }", false, "0")]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return x + y; } else { return y; }", false, "0")]
-    [InlineData("int32", "true", "1", "2", "if (flag) { return x - y; } else { return x; }", false, "0")]
+    [TestCase("int32","true","1","2","if (flag) { return x + y; } else { return x; }",true,"3")]
+    [TestCase("int32","false","int32.MaxValue","1","if (flag) { return x + y; } else { return x; }",true,"int32.MaxValue")]
+    [TestCase("int32","true","int32.MaxValue","1","if (flag) { return x + y; } else { return x; }",false,"0")]
+    [TestCase("int32","true","int32.MinValue","-1","if (flag) { return x + y; } else { return x; }",false,"0")]
+    [TestCase("uint32","true","uint32.MaxValue","1","if (flag) { return x + y; } else { return x; }",false,"0")]
+    [TestCase("uint32","false","uint32.MaxValue","1","if (flag) { return x + y; } else { return x; }",true,"uint32.MaxValue")]
+    [TestCase("int64","true","int64.MaxValue","-1","if (flag) { return x + y; } else { return x; }",true,"int64.MaxValue - 1")]
+    [TestCase("int64","true","int64.MaxValue","1","if (flag) { return x + y; } else { return x; }",false,"0")]
+    [TestCase("uint64","true","uint64.MaxValue","1","if (flag) { return x + y; } else { return x; }",false,"0")]
+    [TestCase("uint64","false","uint64.MaxValue","1","if (flag) { return x + y; } else { return x; }",true,"uint64.MaxValue")]
+    [TestCase("int32","true","1","2","if (missing) { return x + y; } else { return x; }",false,"0")]
+    [TestCase("int32","true","1","2","if (flag) { return y + x; } else { return x; }",false,"0")]
+    [TestCase("int32","true","1","2","if (flag) { return x + x; } else { return x; }",false,"0")]
+    [TestCase("int32","true","1","2","if (flag) { return x + y; } else { return y; }",false,"0")]
+    [TestCase("int32","true","1","2","if (flag) { return x - y; } else { return x; }",false,"0")]
     public async Task BoundedNativeConditionalAddSkipsUnselectedCheckedOperationAsync(
         string typeName, string condition, string first, string second, string body,
         bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32ScalarConditionalAddReturn",
             "uint32" => "TryEvaluateUInt32ScalarConditionalAddReturn",
             "int64" => "TryEvaluateInt64ScalarConditionalAddReturn",
@@ -1737,38 +1646,35 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = hosted.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarConditionalAddParser").ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x < y", true, "int32.MinValue")]
-    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x > y", true, "int32.MaxValue")]
-    [InlineData("int32", "1", "1", "x <= y", true, "1")]
-    [InlineData("int32", "1", "2", "x == y", true, "2")]
-    [InlineData("int32", "1", "2", "x != y", true, "1")]
-    [InlineData("int32", "1", "2", "x >= y", true, "2")]
-    [InlineData("uint32", "uint32.MaxValue", "0", "x > y", true, "uint32.MaxValue")]
-    [InlineData("uint32", "uint32.MaxValue", "0", "x < y", true, "0")]
-    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x < y", true, "int64.MinValue")]
-    [InlineData("uint64", "0", "uint64.MaxValue", "x >= y", true, "uint64.MaxValue")]
-    [InlineData("char16", "char16(65535)", "char16(0)", "x != y", true, "char16(65535)")]
-    [InlineData("char16", "char16(0)", "char16(65535)", "x > y", true, "char16(65535)")]
-    [InlineData("int32", "1", "2", "y < x", false, "0")]
-    [InlineData("int32", "1", "2", "x < x", false, "0")]
-    [InlineData("int32", "1", "2", "x + y", false, "0")]
+    [TestCase("int32","int32.MinValue","int32.MaxValue","x < y",true,"int32.MinValue")]
+    [TestCase("int32","int32.MinValue","int32.MaxValue","x > y",true,"int32.MaxValue")]
+    [TestCase("int32","1","1","x <= y",true,"1")]
+    [TestCase("int32","1","2","x == y",true,"2")]
+    [TestCase("int32","1","2","x != y",true,"1")]
+    [TestCase("int32","1","2","x >= y",true,"2")]
+    [TestCase("uint32","uint32.MaxValue","0","x > y",true,"uint32.MaxValue")]
+    [TestCase("uint32","uint32.MaxValue","0","x < y",true,"0")]
+    [TestCase("int64","int64.MinValue","int64.MaxValue","x < y",true,"int64.MinValue")]
+    [TestCase("uint64","0","uint64.MaxValue","x >= y",true,"uint64.MaxValue")]
+    [TestCase("char16","char16(65535)","char16(0)","x != y",true,"char16(65535)")]
+    [TestCase("char16","char16(0)","char16(65535)","x > y",true,"char16(65535)")]
+    [TestCase("int32","1","2","y < x",false,"0")]
+    [TestCase("int32","1","2","x < x",false,"0")]
+    [TestCase("int32","1","2","x + y",false,"0")]
     public async Task BoundedNativeComparisonConditionalBindsPredicateAndReturnsAsync(
         string typeName, string first, string second, string comparison,
         bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32ComparisonConditionalReturn",
             "uint32" => "TryEvaluateUInt32ComparisonConditionalReturn",
             "int64" => "TryEvaluateInt64ComparisonConditionalReturn",
@@ -1818,40 +1724,37 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = hosted.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarComparisonConditionalParser").ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "-1", "0", "x < y", true, true)]
-    [InlineData("int32", "-1", "0", "x <= y", true, true)]
-    [InlineData("int32", "-1", "0", "x > y", true, false)]
-    [InlineData("int32", "-1", "0", "x >= y", true, false)]
-    [InlineData("int32", "-1", "-1", "x == y", true, true)]
-    [InlineData("int32", "-1", "-1", "x != y", true, false)]
-    [InlineData("int32", "1", "2", "y < x", false, false)]
-    [InlineData("int32", "1", "2", "x < x", false, false)]
-    [InlineData("int32", "1", "2", "x + y", false, false)]
-    [InlineData("uint32", "uint32.MaxValue", "0", "x > y", true, true)]
-    [InlineData("uint32", "uint32.MaxValue", "uint32.MaxValue", "x >= y", true, true)]
-    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x < y", true, true)]
-    [InlineData("int64", "int64.MaxValue", "int64.MinValue", "x <= y", true, false)]
-    [InlineData("uint64", "uint64.MaxValue", "0", "x != y", true, true)]
-    [InlineData("uint64", "0", "uint64.MaxValue", "x > y", true, false)]
-    [InlineData("char16", "char16(65535)", "char16(0)", "x > y", true, true)]
-    [InlineData("char16", "char16(0)", "char16(65535)", "x == y", true, false)]
+    [TestCase("int32","-1","0","x < y",true,true)]
+    [TestCase("int32","-1","0","x <= y",true,true)]
+    [TestCase("int32","-1","0","x > y",true,false)]
+    [TestCase("int32","-1","0","x >= y",true,false)]
+    [TestCase("int32","-1","-1","x == y",true,true)]
+    [TestCase("int32","-1","-1","x != y",true,false)]
+    [TestCase("int32","1","2","y < x",false,false)]
+    [TestCase("int32","1","2","x < x",false,false)]
+    [TestCase("int32","1","2","x + y",false,false)]
+    [TestCase("uint32","uint32.MaxValue","0","x > y",true,true)]
+    [TestCase("uint32","uint32.MaxValue","uint32.MaxValue","x >= y",true,true)]
+    [TestCase("int64","int64.MinValue","int64.MaxValue","x < y",true,true)]
+    [TestCase("int64","int64.MaxValue","int64.MinValue","x <= y",true,false)]
+    [TestCase("uint64","uint64.MaxValue","0","x != y",true,true)]
+    [TestCase("uint64","0","uint64.MaxValue","x > y",true,false)]
+    [TestCase("char16","char16(65535)","char16(0)","x > y",true,true)]
+    [TestCase("char16","char16(0)","char16(65535)","x == y",true,false)]
     public async Task BoundedNativeTwoParameterComparisonsBindBothNamesAsync(
         string typeName, string first, string second, string expression,
         bool evaluable, bool expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32TwoParameterComparisonReturn",
             "uint32" => "TryEvaluateUInt32TwoParameterComparisonReturn",
             "int64" => "TryEvaluateInt64TwoParameterComparisonReturn",
@@ -1896,50 +1799,47 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = hosted.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "18", "21", "x + y + 3", true, "42")]
-    [InlineData("int32", "int32.MaxValue", "-1", "x + y + 1", true, "int32.MaxValue")]
-    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x + y + 1", true, "0")]
-    [InlineData("int32", "0", "0", "x + y + 0xFFFF_FFFF", true, "-1")]
-    [InlineData("int32", "int32.MaxValue", "1", "x + y + 0xFFFF_FFFF", false, "0")]
-    [InlineData("int32", "int32.MinValue", "-1", "x + y + 1", false, "0")]
-    [InlineData("int32", "int32.MaxValue", "0", "x + y + 1", false, "0")]
-    [InlineData("int32", "int32.MinValue", "0", "x + y + 0xFFFF_FFFF", false, "0")]
-    [InlineData("int32", "0", "0", "x + y + 2147483648", false, "0")]
-    [InlineData("int32", "0", "0", "x + y + 4294967296", false, "0")]
-    [InlineData("int32", "0", "0", "x + z + 3", false, "0")]
-    [InlineData("int32", "0", "0", "x + y + 3 + 4", false, "0")]
-    [InlineData("uint32", "uint32.MaxValue", "0", "x + y + 0", true, "uint32.MaxValue")]
-    [InlineData("uint32", "0", "0", "x + y + 0xFFFF_FFFF", true, "uint32.MaxValue")]
-    [InlineData("uint32", "uint32.MaxValue", "1", "x + y + 0xFFFF_FFFF", false, "0")]
-    [InlineData("uint32", "uint32.MaxValue", "0", "x + y + 1", false, "0")]
-    [InlineData("uint32", "0", "0", "x + y + 4294967296", false, "0")]
-    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x + y + 1", true, "0")]
-    [InlineData("int64", "int64.MaxValue", "0", "x + y + 0xFFFF_FFFF_FFFF_FFFF", true, "int64.MaxValue - 1")]
-    [InlineData("int64", "int64.MaxValue", "1", "x + y + 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
-    [InlineData("int64", "int64.MinValue", "0", "x + y + 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
-    [InlineData("int64", "int64.MaxValue", "0", "x + y + 1", false, "0")]
-    [InlineData("int64", "0", "0", "x + y + 9223372036854775808", false, "0")]
-    [InlineData("uint64", "uint64.MaxValue", "0", "x + y + 0", true, "uint64.MaxValue")]
-    [InlineData("uint64", "0", "0", "x + y + 18446744073709551615", true, "uint64.MaxValue")]
-    [InlineData("uint64", "uint64.MaxValue", "1", "x + y + 0", false, "0")]
-    [InlineData("uint64", "uint64.MaxValue", "0", "x + y + 1", false, "0")]
-    [InlineData("uint64", "0", "0", "x + y + 18446744073709551616", false, "0")]
+    [TestCase("int32","18","21","x + y + 3",true,"42")]
+    [TestCase("int32","int32.MaxValue","-1","x + y + 1",true,"int32.MaxValue")]
+    [TestCase("int32","int32.MinValue","int32.MaxValue","x + y + 1",true,"0")]
+    [TestCase("int32","0","0","x + y + 0xFFFF_FFFF",true,"-1")]
+    [TestCase("int32","int32.MaxValue","1","x + y + 0xFFFF_FFFF",false,"0")]
+    [TestCase("int32","int32.MinValue","-1","x + y + 1",false,"0")]
+    [TestCase("int32","int32.MaxValue","0","x + y + 1",false,"0")]
+    [TestCase("int32","int32.MinValue","0","x + y + 0xFFFF_FFFF",false,"0")]
+    [TestCase("int32","0","0","x + y + 2147483648",false,"0")]
+    [TestCase("int32","0","0","x + y + 4294967296",false,"0")]
+    [TestCase("int32","0","0","x + z + 3",false,"0")]
+    [TestCase("int32","0","0","x + y + 3 + 4",false,"0")]
+    [TestCase("uint32","uint32.MaxValue","0","x + y + 0",true,"uint32.MaxValue")]
+    [TestCase("uint32","0","0","x + y + 0xFFFF_FFFF",true,"uint32.MaxValue")]
+    [TestCase("uint32","uint32.MaxValue","1","x + y + 0xFFFF_FFFF",false,"0")]
+    [TestCase("uint32","uint32.MaxValue","0","x + y + 1",false,"0")]
+    [TestCase("uint32","0","0","x + y + 4294967296",false,"0")]
+    [TestCase("int64","int64.MinValue","int64.MaxValue","x + y + 1",true,"0")]
+    [TestCase("int64","int64.MaxValue","0","x + y + 0xFFFF_FFFF_FFFF_FFFF",true,"int64.MaxValue - 1")]
+    [TestCase("int64","int64.MaxValue","1","x + y + 0xFFFF_FFFF_FFFF_FFFF",false,"0")]
+    [TestCase("int64","int64.MinValue","0","x + y + 0xFFFF_FFFF_FFFF_FFFF",false,"0")]
+    [TestCase("int64","int64.MaxValue","0","x + y + 1",false,"0")]
+    [TestCase("int64","0","0","x + y + 9223372036854775808",false,"0")]
+    [TestCase("uint64","uint64.MaxValue","0","x + y + 0",true,"uint64.MaxValue")]
+    [TestCase("uint64","0","0","x + y + 18446744073709551615",true,"uint64.MaxValue")]
+    [TestCase("uint64","uint64.MaxValue","1","x + y + 0",false,"0")]
+    [TestCase("uint64","uint64.MaxValue","0","x + y + 1",false,"0")]
+    [TestCase("uint64","0","0","x + y + 18446744073709551616",false,"0")]
     public async Task BoundedNativeTwoParameterChainedAdditionChecksEachStepAsync(
         string typeName, string first, string second, string expression,
         bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32TwoParameterAddAndLiteralReturn",
             "uint32" => "TryEvaluateUInt32TwoParameterAddAndLiteralReturn",
             "int64" => "TryEvaluateInt64TwoParameterAddAndLiteralReturn",
@@ -1986,36 +1886,33 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = hosted.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "-1", "x < 0", true, true)]
-    [InlineData("int32", "-1", "x == 0xFFFF_FFFF", true, true)]
-    [InlineData("int32", "int32.MaxValue", "x <= 2147483647", true, true)]
-    [InlineData("int32", "0", "x < 2147483648", false, false)]
-    [InlineData("uint32", "uint32.MaxValue", "x >= 0xFFFF_FFFF", true, true)]
-    [InlineData("uint32", "0", "x < 4294967296", false, false)]
-    [InlineData("int64", "int64.MinValue", "x < 0", true, true)]
-    [InlineData("int64", "-1", "x == 0xFFFF_FFFF_FFFF_FFFF", true, true)]
-    [InlineData("int64", "0", "x < 9223372036854775808", false, false)]
-    [InlineData("uint64", "uint64.MaxValue", "x > 18446744073709551614", true, true)]
-    [InlineData("uint64", "0", "x > 18446744073709551616", false, false)]
-    [InlineData("char16", "char16(65535)", "x >= 65535", true, true)]
-    [InlineData("char16", "char16(0)", "x != 0", true, false)]
-    [InlineData("char16", "char16(0)", "x != 65536", false, false)]
-    [InlineData("int32", "1", "y == 1", false, false)]
+    [TestCase("int32","-1","x < 0",true,true)]
+    [TestCase("int32","-1","x == 0xFFFF_FFFF",true,true)]
+    [TestCase("int32","int32.MaxValue","x <= 2147483647",true,true)]
+    [TestCase("int32","0","x < 2147483648",false,false)]
+    [TestCase("uint32","uint32.MaxValue","x >= 0xFFFF_FFFF",true,true)]
+    [TestCase("uint32","0","x < 4294967296",false,false)]
+    [TestCase("int64","int64.MinValue","x < 0",true,true)]
+    [TestCase("int64","-1","x == 0xFFFF_FFFF_FFFF_FFFF",true,true)]
+    [TestCase("int64","0","x < 9223372036854775808",false,false)]
+    [TestCase("uint64","uint64.MaxValue","x > 18446744073709551614",true,true)]
+    [TestCase("uint64","0","x > 18446744073709551616",false,false)]
+    [TestCase("char16","char16(65535)","x >= 65535",true,true)]
+    [TestCase("char16","char16(0)","x != 0",true,false)]
+    [TestCase("char16","char16(0)","x != 65536",false,false)]
+    [TestCase("int32","1","y == 1",false,false)]
     public async Task BoundedNativeNamedParameterComparisonUsesOwnedRecordsAsync(
         string typeName, string parameter, string expression, bool evaluable, bool expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32ParameterComparisonReturn",
             "uint32" => "TryEvaluateUInt32ParameterComparisonReturn",
             "int64" => "TryEvaluateInt64ParameterComparisonReturn",
@@ -2060,24 +1957,22 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = hosted.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return 1 + 2; }", true, 3)]
-    [InlineData("int32 Main() { return 2147483647 + 0; }", true, int.MaxValue)]
-    [InlineData("int32 Main() { return 2147483647 + 1; }", false, 0)]
-    [InlineData("int32 Main() { return 0xFFFF_FFFF + 1; }", true, 0)]
-    [InlineData("int32 Main() { return 0x8000_0000 + 0; }", true, int.MinValue)]
-    [InlineData("int32 Main() { return 2147483648 + 0; }", false, 0)]
-    [InlineData("int32 Main() { return 1 - 2; }", false, 0)]
-    [InlineData("uint32 Main() { return 1 + 2; }", false, 0)]
+    [TestCase("int32 Main() { return 1 + 2; }",true,3)]
+    [TestCase("int32 Main() { return 2147483647 + 0; }",true,int.MaxValue)]
+    [TestCase("int32 Main() { return 2147483647 + 1; }",false,0)]
+    [TestCase("int32 Main() { return 0xFFFF_FFFF + 1; }",true,0)]
+    [TestCase("int32 Main() { return 0x8000_0000 + 0; }",true,int.MinValue)]
+    [TestCase("int32 Main() { return 2147483648 + 0; }",false,0)]
+    [TestCase("int32 Main() { return 1 - 2; }",false,0)]
+    [TestCase("uint32 Main() { return 1 + 2; }",false,0)]
     public async Task BoundedNativeInt32AdditionUsesOwnedIntegerRecordsAsync(
         string text, bool evaluable, int value)
     {
@@ -2103,22 +1998,20 @@ public sealed partial class ManagedScannerComponentTests
             if (evaluable)
             {
                 var hosted = Compilation.Create(SyntaxTree.Parse(text), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(value, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = hosted.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), policy), Is.EqualTo(value));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("uint32 Value() { return 1 + 2; }", true, 3u)]
-    [InlineData("uint32 Value() { return 4294967295 + 0; }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return 0xFFFF_FFFF + 0; }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return 4294967295 + 1; }", false, 0u)]
-    [InlineData("uint32 Value() { return 4294967296 + 0; }", false, 0u)]
-    [InlineData("int32 Value() { return 1 + 2; }", false, 0u)]
+    [TestCase("uint32 Value() { return 1 + 2; }",true,3u)]
+    [TestCase("uint32 Value() { return 4294967295 + 0; }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return 0xFFFF_FFFF + 0; }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return 4294967295 + 1; }",false,0u)]
+    [TestCase("uint32 Value() { return 4294967296 + 0; }",false,0u)]
+    [TestCase("int32 Value() { return 1 + 2; }",false,0u)]
     public async Task BoundedNativeUInt32AdditionUsesOwnedIntegerRecordsAsync(
         string text, bool evaluable, uint value)
     {
@@ -2146,23 +2039,21 @@ public sealed partial class ManagedScannerComponentTests
                 var source = text + FormattableString.Invariant(
                     $" int32 Main() {{ uint32 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = hosted.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int64 Value() { return 4294967296 + 1; }", true, 4294967297L)]
-    [InlineData("int64 Value() { return 9223372036854775807 + 0; }", true, long.MaxValue)]
-    [InlineData("int64 Value() { return 0x8000_0000_0000_0000 + 0; }", true, long.MinValue)]
-    [InlineData("int64 Value() { return 0xFFFF_FFFF_FFFF_FFFF + 1; }", true, 0L)]
-    [InlineData("int64 Value() { return 9223372036854775807 + 1; }", false, 0L)]
-    [InlineData("int64 Value() { return 0x8000_0000_0000_0000 + 0xFFFF_FFFF_FFFF_FFFF; }", false, 0L)]
-    [InlineData("int64 Value() { return 9223372036854775808 + 0; }", false, 0L)]
+    [TestCase("int64 Value() { return 4294967296 + 1; }",true,4294967297L)]
+    [TestCase("int64 Value() { return 9223372036854775807 + 0; }",true,long.MaxValue)]
+    [TestCase("int64 Value() { return 0x8000_0000_0000_0000 + 0; }",true,long.MinValue)]
+    [TestCase("int64 Value() { return 0xFFFF_FFFF_FFFF_FFFF + 1; }",true,0L)]
+    [TestCase("int64 Value() { return 9223372036854775807 + 1; }",false,0L)]
+    [TestCase("int64 Value() { return 0x8000_0000_0000_0000 + 0xFFFF_FFFF_FFFF_FFFF; }",false,0L)]
+    [TestCase("int64 Value() { return 9223372036854775808 + 0; }",false,0L)]
     public async Task BoundedNativeInt64AdditionUsesOwnedIntegerRecordsAsync(
         string text, bool evaluable, long value)
     {
@@ -2197,21 +2088,19 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = hosted.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("uint64 Value() { return 4294967296 + 1; }", true, 4294967297ul)]
-    [InlineData("uint64 Value() { return 18446744073709551615 + 0; }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return 0xFFFF_FFFF_FFFF_FFFF + 0; }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return 18446744073709551615 + 1; }", false, 0ul)]
-    [InlineData("uint64 Value() { return 18446744073709551616 + 0; }", false, 0ul)]
+    [TestCase("uint64 Value() { return 4294967296 + 1; }",true,4294967297ul)]
+    [TestCase("uint64 Value() { return 18446744073709551615 + 0; }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return 0xFFFF_FFFF_FFFF_FFFF + 0; }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return 18446744073709551615 + 1; }",false,0ul)]
+    [TestCase("uint64 Value() { return 18446744073709551616 + 0; }",false,0ul)]
     public async Task BoundedNativeUInt64AdditionUsesOwnedIntegerRecordsAsync(
         string text, bool evaluable, ulong value)
     {
@@ -2239,40 +2128,37 @@ public sealed partial class ManagedScannerComponentTests
                 var source = text + FormattableString.Invariant(
                     $" int32 Main() {{ uint64 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = hosted.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "8 - 3", true, "5")]
-    [InlineData("int32", "0 - 0xFFFF_FFFF", true, "1")]
-    [InlineData("int32", "0x8000_0000 - 0x8000_0000", true, "0")]
-    [InlineData("int32", "0x8000_0000 - 1", false, "0")]
-    [InlineData("int32", "2147483647 - 0xFFFF_FFFF", false, "0")]
-    [InlineData("int32", "2147483648 - 0", false, "0")]
-    [InlineData("uint32", "8 - 3", true, "5")]
-    [InlineData("uint32", "0xFFFF_FFFF - 1", true, "4294967294")]
-    [InlineData("uint32", "0 - 1", false, "0")]
-    [InlineData("uint32", "4294967296 - 0", false, "0")]
-    [InlineData("int64", "4294967296 - 1", true, "4294967295")]
-    [InlineData("int64", "0x8000_0000_0000_0000 - 0xFFFF_FFFF_FFFF_FFFF", true, "-9223372036854775807")]
-    [InlineData("int64", "0x8000_0000_0000_0000 - 1", false, "0")]
-    [InlineData("int64", "9223372036854775807 - 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
-    [InlineData("int64", "9223372036854775808 - 0", false, "0")]
-    [InlineData("uint64", "4294967296 - 1", true, "4294967295")]
-    [InlineData("uint64", "18446744073709551615 - 1", true, "18446744073709551614")]
-    [InlineData("uint64", "0 - 1", false, "0")]
-    [InlineData("uint64", "18446744073709551616 - 0", false, "0")]
+    [TestCase("int32","8 - 3",true,"5")]
+    [TestCase("int32","0 - 0xFFFF_FFFF",true,"1")]
+    [TestCase("int32","0x8000_0000 - 0x8000_0000",true,"0")]
+    [TestCase("int32","0x8000_0000 - 1",false,"0")]
+    [TestCase("int32","2147483647 - 0xFFFF_FFFF",false,"0")]
+    [TestCase("int32","2147483648 - 0",false,"0")]
+    [TestCase("uint32","8 - 3",true,"5")]
+    [TestCase("uint32","0xFFFF_FFFF - 1",true,"4294967294")]
+    [TestCase("uint32","0 - 1",false,"0")]
+    [TestCase("uint32","4294967296 - 0",false,"0")]
+    [TestCase("int64","4294967296 - 1",true,"4294967295")]
+    [TestCase("int64","0x8000_0000_0000_0000 - 0xFFFF_FFFF_FFFF_FFFF",true,"-9223372036854775807")]
+    [TestCase("int64","0x8000_0000_0000_0000 - 1",false,"0")]
+    [TestCase("int64","9223372036854775807 - 0xFFFF_FFFF_FFFF_FFFF",false,"0")]
+    [TestCase("int64","9223372036854775808 - 0",false,"0")]
+    [TestCase("uint64","4294967296 - 1",true,"4294967295")]
+    [TestCase("uint64","18446744073709551615 - 1",true,"18446744073709551614")]
+    [TestCase("uint64","0 - 1",false,"0")]
+    [TestCase("uint64","18446744073709551616 - 0",false,"0")]
     public async Task BoundedNativeSubtractionUsesOwnedIntegerRecordsAsync(
         string typeName, string expression, bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32SubtractReturn",
             "uint32" => "TryEvaluateUInt32SubtractReturn",
             "int64" => "TryEvaluateInt64SubtractReturn",
@@ -2310,37 +2196,34 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = hosted.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "0xFFFF_FFFF * 2", true, "-2")]
-    [InlineData("int32", "46340 * 46340", true, "2147395600")]
-    [InlineData("int32", "46341 * 46341", false, "0")]
-    [InlineData("int32", "2147483648 * 0", false, "0")]
-    [InlineData("uint32", "65535 * 65537", true, "4294967295")]
-    [InlineData("uint32", "65536 * 65536", false, "0")]
-    [InlineData("uint32", "4294967295 * 0", true, "0")]
-    [InlineData("int64", "0x8000_0000_0000_0000 * 1", true, "-9223372036854775808")]
-    [InlineData("int64", "0x8000_0000_0000_0000 * 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
-    [InlineData("int64", "0xFFFF_FFFF_FFFF_FFFF * 2", true, "-2")]
-    [InlineData("int64", "3037000499 * 3037000499", true, "9223372030926249001")]
-    [InlineData("int64", "3037000500 * 3037000500", false, "0")]
-    [InlineData("uint64", "4294967295 * 4294967297", true, "18446744073709551615")]
-    [InlineData("uint64", "4294967296 * 4294967296", false, "0")]
-    [InlineData("uint64", "18446744073709551615 * 0", true, "0")]
-    [InlineData("uint64", "18446744073709551616 * 0", false, "0")]
+    [TestCase("int32","0xFFFF_FFFF * 2",true,"-2")]
+    [TestCase("int32","46340 * 46340",true,"2147395600")]
+    [TestCase("int32","46341 * 46341",false,"0")]
+    [TestCase("int32","2147483648 * 0",false,"0")]
+    [TestCase("uint32","65535 * 65537",true,"4294967295")]
+    [TestCase("uint32","65536 * 65536",false,"0")]
+    [TestCase("uint32","4294967295 * 0",true,"0")]
+    [TestCase("int64","0x8000_0000_0000_0000 * 1",true,"-9223372036854775808")]
+    [TestCase("int64","0x8000_0000_0000_0000 * 0xFFFF_FFFF_FFFF_FFFF",false,"0")]
+    [TestCase("int64","0xFFFF_FFFF_FFFF_FFFF * 2",true,"-2")]
+    [TestCase("int64","3037000499 * 3037000499",true,"9223372030926249001")]
+    [TestCase("int64","3037000500 * 3037000500",false,"0")]
+    [TestCase("uint64","4294967295 * 4294967297",true,"18446744073709551615")]
+    [TestCase("uint64","4294967296 * 4294967296",false,"0")]
+    [TestCase("uint64","18446744073709551615 * 0",true,"0")]
+    [TestCase("uint64","18446744073709551616 * 0",false,"0")]
     public async Task BoundedNativeMultiplicationUsesOwnedIntegerRecordsAsync(
         string typeName, string expression, bool evaluable, string expected)
     {
-        var evaluator = typeName switch
-        {
+        var evaluator = typeName switch {
             "int32" => "TryEvaluateInt32MultiplyReturn",
             "uint32" => "TryEvaluateUInt32MultiplyReturn",
             "int64" => "TryEvaluateInt64MultiplyReturn",
@@ -2378,38 +2261,35 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = hosted.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "7 / 2", true, "3")]
-    [InlineData("int32", "0xFFFF_FFFF / 2", true, "0")]
-    [InlineData("int32", "7 % 2", true, "1")]
-    [InlineData("int32", "0xFFFF_FFFF % 2", true, "-1")]
-    [InlineData("int32", "0x8000_0000 / 0xFFFF_FFFF", false, "0")]
-    [InlineData("int32", "0x8000_0000 % 0xFFFF_FFFF", true, "0")]
-    [InlineData("uint32", "4294967295 / 2", true, "2147483647")]
-    [InlineData("uint32", "4294967295 % 2", true, "1")]
-    [InlineData("uint32", "7 / 0", false, "0")]
-    [InlineData("int64", "0x8000_0000_0000_0000 / 2", true, "-4611686018427387904")]
-    [InlineData("int64", "0xFFFF_FFFF_FFFF_FFFF % 2", true, "-1")]
-    [InlineData("int64", "0x8000_0000_0000_0000 / 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
-    [InlineData("int64", "0x8000_0000_0000_0000 % 0xFFFF_FFFF_FFFF_FFFF", true, "0")]
-    [InlineData("uint64", "18446744073709551615 / 2", true, "9223372036854775807")]
-    [InlineData("uint64", "18446744073709551615 % 2", true, "1")]
-    [InlineData("uint64", "18446744073709551616 / 2", false, "0")]
-    [InlineData("uint64", "7 % 0", false, "0")]
+    [TestCase("int32","7 / 2",true,"3")]
+    [TestCase("int32","0xFFFF_FFFF / 2",true,"0")]
+    [TestCase("int32","7 % 2",true,"1")]
+    [TestCase("int32","0xFFFF_FFFF % 2",true,"-1")]
+    [TestCase("int32","0x8000_0000 / 0xFFFF_FFFF",false,"0")]
+    [TestCase("int32","0x8000_0000 % 0xFFFF_FFFF",true,"0")]
+    [TestCase("uint32","4294967295 / 2",true,"2147483647")]
+    [TestCase("uint32","4294967295 % 2",true,"1")]
+    [TestCase("uint32","7 / 0",false,"0")]
+    [TestCase("int64","0x8000_0000_0000_0000 / 2",true,"-4611686018427387904")]
+    [TestCase("int64","0xFFFF_FFFF_FFFF_FFFF % 2",true,"-1")]
+    [TestCase("int64","0x8000_0000_0000_0000 / 0xFFFF_FFFF_FFFF_FFFF",false,"0")]
+    [TestCase("int64","0x8000_0000_0000_0000 % 0xFFFF_FFFF_FFFF_FFFF",true,"0")]
+    [TestCase("uint64","18446744073709551615 / 2",true,"9223372036854775807")]
+    [TestCase("uint64","18446744073709551615 % 2",true,"1")]
+    [TestCase("uint64","18446744073709551616 / 2",false,"0")]
+    [TestCase("uint64","7 % 0",false,"0")]
     public async Task BoundedNativeDivisionAndRemainderUseOwnedIntegerRecordsAsync(
         string typeName, string expression, bool evaluable, string expected)
     {
-        var width = typeName switch
-        {
+        var width = typeName switch {
             "int32" => "Int32",
             "uint32" => "UInt32",
             "int64" => "Int64",
@@ -2449,33 +2329,30 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = hosted.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "0xFFFF_FFFF & 0xAAAA_AAAA", "-1431655766")]
-    [InlineData("int32", "0x8000_0000 | 1", "-2147483647")]
-    [InlineData("int32", "0xFFFF_FFFF ^ 0xAAAA_AAAA", "1431655765")]
-    [InlineData("uint32", "0xFFFF_FFFF & 0xAAAA_AAAA", "2863311530")]
-    [InlineData("uint32", "0x8000_0000 | 1", "2147483649")]
-    [InlineData("uint32", "0xFFFF_FFFF ^ 0xAAAA_AAAA", "1431655765")]
-    [InlineData("int64", "0xFFFF_FFFF_FFFF_FFFF & 0xAAAA_AAAA_AAAA_AAAA", "-6148914691236517206")]
-    [InlineData("int64", "0x8000_0000_0000_0000 | 1", "-9223372036854775807")]
-    [InlineData("int64", "0xFFFF_FFFF_FFFF_FFFF ^ 0xAAAA_AAAA_AAAA_AAAA", "6148914691236517205")]
-    [InlineData("uint64", "0xFFFF_FFFF_FFFF_FFFF & 0xAAAA_AAAA_AAAA_AAAA", "12297829382473034410")]
-    [InlineData("uint64", "0x8000_0000_0000_0000 | 1", "9223372036854775809")]
-    [InlineData("uint64", "0xFFFF_FFFF_FFFF_FFFF ^ 0xAAAA_AAAA_AAAA_AAAA", "6148914691236517205")]
+    [TestCase("int32","0xFFFF_FFFF & 0xAAAA_AAAA","-1431655766")]
+    [TestCase("int32","0x8000_0000 | 1","-2147483647")]
+    [TestCase("int32","0xFFFF_FFFF ^ 0xAAAA_AAAA","1431655765")]
+    [TestCase("uint32","0xFFFF_FFFF & 0xAAAA_AAAA","2863311530")]
+    [TestCase("uint32","0x8000_0000 | 1","2147483649")]
+    [TestCase("uint32","0xFFFF_FFFF ^ 0xAAAA_AAAA","1431655765")]
+    [TestCase("int64","0xFFFF_FFFF_FFFF_FFFF & 0xAAAA_AAAA_AAAA_AAAA","-6148914691236517206")]
+    [TestCase("int64","0x8000_0000_0000_0000 | 1","-9223372036854775807")]
+    [TestCase("int64","0xFFFF_FFFF_FFFF_FFFF ^ 0xAAAA_AAAA_AAAA_AAAA","6148914691236517205")]
+    [TestCase("uint64","0xFFFF_FFFF_FFFF_FFFF & 0xAAAA_AAAA_AAAA_AAAA","12297829382473034410")]
+    [TestCase("uint64","0x8000_0000_0000_0000 | 1","9223372036854775809")]
+    [TestCase("uint64","0xFFFF_FFFF_FFFF_FFFF ^ 0xAAAA_AAAA_AAAA_AAAA","6148914691236517205")]
     public async Task BoundedNativeBitwiseOperationsUseOwnedIntegerRecordsAsync(
         string typeName, string expression, string expected)
     {
-        var width = typeName switch
-        {
+        var width = typeName switch {
             "int32" => "Int32",
             "uint32" => "UInt32",
             "int64" => "Int64",
@@ -2506,15 +2383,15 @@ public sealed partial class ManagedScannerComponentTests
                  }
                 """;
             var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-            Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = hosted.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), policy), Is.EqualTo(42));
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task BoundedNativeBinaryEvaluatorKeepsOutputsVacantOnFailureAsync()
     {
         const string Text = "int32 Value() { return 20 + 22; }";
@@ -2539,22 +2416,20 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileParserAsync(Text, Entry, (BoundRuntimePolicy)policy)
                 .ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Answer() { return 42; }", true, 42, 0)]
-    [InlineData("int32 Answer() { return -42; }", true, 42, 0)]
-    [InlineData("int32 Answer() { return +42; }", true, 42, 0)]
-    [InlineData("int32 Answer() { return ~42; }", true, 42, 0)]
-    [InlineData("int32 Answer() { return 0xFFFF_FFFF; }", true, -1, 0)]
-    [InlineData("int32 Answer() { return 18446744073709551616; }", false, 0, 0)]
-    [InlineData("int32 Answer() { return 1.5; }", false, 0, 0)]
-    [InlineData("int32 Answer() { return (42); }", true, 42, 0)]
-    [InlineData("int32 Answer() { return (-42); }", true, 42, 0)]
-    [InlineData("int32 Answer() { return -(42); }", true, 42, 0)]
+    [TestCase("int32 Answer() { return 42; }",true,42,0)]
+    [TestCase("int32 Answer() { return -42; }",true,42,0)]
+    [TestCase("int32 Answer() { return +42; }",true,42,0)]
+    [TestCase("int32 Answer() { return ~42; }",true,42,0)]
+    [TestCase("int32 Answer() { return 0xFFFF_FFFF; }",true,-1,0)]
+    [TestCase("int32 Answer() { return 18446744073709551616; }",false,0,0)]
+    [TestCase("int32 Answer() { return 1.5; }",false,0,0)]
+    [TestCase("int32 Answer() { return (42); }",true,42,0)]
+    [TestCase("int32 Answer() { return (-42); }",true,42,0)]
+    [TestCase("int32 Answer() { return -(42); }",true,42,0)]
     public async Task BoundedParserSelectsOwnedIntegerRecordsAsync(
         string text, bool accepted, int low, int high)
     {
@@ -2585,33 +2460,31 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return 2147483647; }", true, int.MaxValue)]
-    [InlineData("int32 Main() { return +2147483647; }", true, int.MaxValue)]
-    [InlineData("int32 Main() { return (2147483647); }", true, int.MaxValue)]
-    [InlineData("int32 Main() { return (-2147483648); }", true, int.MinValue)]
-    [InlineData("int32 Main() { return -(42); }", true, -42)]
-    [InlineData("int32 Main() { return -(2147483648); }", false, 0)]
-    [InlineData("int32 Main() { return +0xFFFF_FFFF; }", true, -1)]
-    [InlineData("int32 Main() { return ~0; }", true, -1)]
-    [InlineData("int32 Main() { return ~(0x8000_0000); }", true, int.MaxValue)]
-    [InlineData("int32 Main() { return -2147483648; }", true, int.MinValue)]
-    [InlineData("int32 Main() { return -2_147_483_648; }", true, int.MinValue)]
-    [InlineData("int32 Main() { return 2147483648; }", false, 0)]
-    [InlineData("int32 Main() { return +2147483648; }", false, 0)]
-    [InlineData("int32 Main() { return -2147483649; }", false, 0)]
-    [InlineData("int32 Main() { return 0xFFFF_FFFF; }", true, -1)]
-    [InlineData("int32 Main() { return 0x0000_0000_FFFF_FFFF; }", true, -1)]
-    [InlineData("int32 Main() { return 0b1000_0000_0000_0000_0000_0000_0000_0000; }", true, int.MinValue)]
-    [InlineData("int32 Main() { return -0x8000_0000; }", false, 0)]
-    [InlineData("int32 Main() { return -0xFFFF_FFFF; }", true, 1)]
-    [InlineData("int32 Main() { return 0x1_0000_0000; }", false, 0)]
-    [InlineData("int32 Main() { return 1.5; }", false, 0)]
+    [TestCase("int32 Main() { return 2147483647; }",true,int.MaxValue)]
+    [TestCase("int32 Main() { return +2147483647; }",true,int.MaxValue)]
+    [TestCase("int32 Main() { return (2147483647); }",true,int.MaxValue)]
+    [TestCase("int32 Main() { return (-2147483648); }",true,int.MinValue)]
+    [TestCase("int32 Main() { return -(42); }",true,-42)]
+    [TestCase("int32 Main() { return -(2147483648); }",false,0)]
+    [TestCase("int32 Main() { return +0xFFFF_FFFF; }",true,-1)]
+    [TestCase("int32 Main() { return ~0; }",true,-1)]
+    [TestCase("int32 Main() { return ~(0x8000_0000); }",true,int.MaxValue)]
+    [TestCase("int32 Main() { return -2147483648; }",true,int.MinValue)]
+    [TestCase("int32 Main() { return -2_147_483_648; }",true,int.MinValue)]
+    [TestCase("int32 Main() { return 2147483648; }",false,0)]
+    [TestCase("int32 Main() { return +2147483648; }",false,0)]
+    [TestCase("int32 Main() { return -2147483649; }",false,0)]
+    [TestCase("int32 Main() { return 0xFFFF_FFFF; }",true,-1)]
+    [TestCase("int32 Main() { return 0x0000_0000_FFFF_FFFF; }",true,-1)]
+    [TestCase("int32 Main() { return 0b1000_0000_0000_0000_0000_0000_0000_0000; }",true,int.MinValue)]
+    [TestCase("int32 Main() { return -0x8000_0000; }",false,0)]
+    [TestCase("int32 Main() { return -0xFFFF_FFFF; }",true,1)]
+    [TestCase("int32 Main() { return 0x1_0000_0000; }",false,0)]
+    [TestCase("int32 Main() { return 1.5; }",false,0)]
     public async Task BoundedNativeInt32EvaluationMatchesHostedExecutedValuesAsync(
         string text, bool evaluable, int value)
     {
@@ -2637,31 +2510,29 @@ public sealed partial class ManagedScannerComponentTests
             if (evaluable)
             {
                 var hosted = Compilation.Create(SyntaxTree.Parse(text), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(value, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = hosted.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(), policy), Is.EqualTo(value));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("uint32 Value() { return 0; }", true, 0u)]
-    [InlineData("uint32 Value() { return 4294967295; }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return +4294967295; }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return (4294967295); }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return (+4294967295); }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return +(4294967295); }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return ~0; }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return (~4294967295); }", true, 0u)]
-    [InlineData("uint32 Value() { return (-1); }", false, 0u)]
-    [InlineData("uint32 Value() { return 0xFFFF_FFFF; }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return 0x0000_0000_FFFF_FFFF; }", true, uint.MaxValue)]
-    [InlineData("uint32 Value() { return 4294967296; }", false, 0u)]
-    [InlineData("uint32 Value() { return 0x1_0000_0000; }", false, 0u)]
-    [InlineData("uint32 Value() { return -1; }", false, 0u)]
-    [InlineData("uint32 Value() { return 1.5; }", false, 0u)]
+    [TestCase("uint32 Value() { return 0; }",true,0u)]
+    [TestCase("uint32 Value() { return 4294967295; }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return +4294967295; }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return (4294967295); }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return (+4294967295); }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return +(4294967295); }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return ~0; }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return (~4294967295); }",true,0u)]
+    [TestCase("uint32 Value() { return (-1); }",false,0u)]
+    [TestCase("uint32 Value() { return 0xFFFF_FFFF; }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return 0x0000_0000_FFFF_FFFF; }",true,uint.MaxValue)]
+    [TestCase("uint32 Value() { return 4294967296; }",false,0u)]
+    [TestCase("uint32 Value() { return 0x1_0000_0000; }",false,0u)]
+    [TestCase("uint32 Value() { return -1; }",false,0u)]
+    [TestCase("uint32 Value() { return 1.5; }",false,0u)]
     public async Task BoundedNativeUInt32EvaluationMatchesHostedExecutedValuesAsync(
         string text, bool evaluable, uint value)
     {
@@ -2690,30 +2561,28 @@ public sealed partial class ManagedScannerComponentTests
                 var source = text + FormattableString.Invariant(
                     $" int32 Main() {{ uint32 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = hosted.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("uint64 Value() { return 0; }", true, 0ul)]
-    [InlineData("uint64 Value() { return 4294967296; }", true, 4294967296ul)]
-    [InlineData("uint64 Value() { return 9223372036854775808; }", true, 9223372036854775808ul)]
-    [InlineData("uint64 Value() { return 18446744073709551615; }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return +18446744073709551615; }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return (18446744073709551615); }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return (+18446744073709551615); }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return +(18446744073709551615); }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return ~0; }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return ~(18446744073709551615); }", true, 0ul)]
-    [InlineData("uint64 Value() { return (-1); }", false, 0ul)]
-    [InlineData("uint64 Value() { return 0xFFFF_FFFF_FFFF_FFFF; }", true, ulong.MaxValue)]
-    [InlineData("uint64 Value() { return 18446744073709551616; }", false, 0ul)]
-    [InlineData("uint64 Value() { return -1; }", false, 0ul)]
+    [TestCase("uint64 Value() { return 0; }",true,0ul)]
+    [TestCase("uint64 Value() { return 4294967296; }",true,4294967296ul)]
+    [TestCase("uint64 Value() { return 9223372036854775808; }",true,9223372036854775808ul)]
+    [TestCase("uint64 Value() { return 18446744073709551615; }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return +18446744073709551615; }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return (18446744073709551615); }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return (+18446744073709551615); }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return +(18446744073709551615); }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return ~0; }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return ~(18446744073709551615); }",true,0ul)]
+    [TestCase("uint64 Value() { return (-1); }",false,0ul)]
+    [TestCase("uint64 Value() { return 0xFFFF_FFFF_FFFF_FFFF; }",true,ulong.MaxValue)]
+    [TestCase("uint64 Value() { return 18446744073709551616; }",false,0ul)]
+    [TestCase("uint64 Value() { return -1; }",false,0ul)]
     public async Task BoundedNativeUInt64EvaluationMatchesHostedExecutedValuesAsync(
         string text, bool evaluable, ulong value)
     {
@@ -2742,37 +2611,35 @@ public sealed partial class ManagedScannerComponentTests
                 var source = text + FormattableString.Invariant(
                     $" int32 Main() {{ uint64 actual = Value(); if (actual == {value}) {{ return 42; }} return 1; }}");
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = hosted.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int64 Value() { return 0; }", true, 0L)]
-    [InlineData("int64 Value() { return 9223372036854775807; }", true, long.MaxValue)]
-    [InlineData("int64 Value() { return +9223372036854775807; }", true, long.MaxValue)]
-    [InlineData("int64 Value() { return (9223372036854775807); }", true, long.MaxValue)]
-    [InlineData("int64 Value() { return (-9223372036854775808); }", true, long.MinValue)]
-    [InlineData("int64 Value() { return -(9223372036854775807); }", true, -long.MaxValue)]
-    [InlineData("int64 Value() { return -(9223372036854775808); }", false, 0L)]
-    [InlineData("int64 Value() { return +0xFFFF_FFFF_FFFF_FFFF; }", true, -1L)]
-    [InlineData("int64 Value() { return ~0; }", true, -1L)]
-    [InlineData("int64 Value() { return (~0x8000_0000_0000_0000); }", true, long.MaxValue)]
-    [InlineData("int64 Value() { return -9223372036854775808; }", true, long.MinValue)]
-    [InlineData("int64 Value() { return -9_223_372_036_854_775_808; }", true, long.MinValue)]
-    [InlineData("int64 Value() { return 9223372036854775808; }", false, 0L)]
-    [InlineData("int64 Value() { return +9223372036854775808; }", false, 0L)]
-    [InlineData("int64 Value() { return -9223372036854775809; }", false, 0L)]
-    [InlineData("int64 Value() { return 0x8000_0000_0000_0000; }", true, long.MinValue)]
-    [InlineData("int64 Value() { return 0xFFFF_FFFF_FFFF_FFFF; }", true, -1L)]
-    [InlineData("int64 Value() { return -0xFFFF_FFFF_FFFF_FFFF; }", true, 1L)]
-    [InlineData("int64 Value() { return -0x8000_0000_0000_0000; }", false, 0L)]
-    [InlineData("int64 Value() { return 18446744073709551616; }", false, 0L)]
-    [InlineData("int64 Value() { return 0x1_0000_0000_0000_0000; }", false, 0L)]
+    [TestCase("int64 Value() { return 0; }",true,0L)]
+    [TestCase("int64 Value() { return 9223372036854775807; }",true,long.MaxValue)]
+    [TestCase("int64 Value() { return +9223372036854775807; }",true,long.MaxValue)]
+    [TestCase("int64 Value() { return (9223372036854775807); }",true,long.MaxValue)]
+    [TestCase("int64 Value() { return (-9223372036854775808); }",true,long.MinValue)]
+    [TestCase("int64 Value() { return -(9223372036854775807); }",true,-long.MaxValue)]
+    [TestCase("int64 Value() { return -(9223372036854775808); }",false,0L)]
+    [TestCase("int64 Value() { return +0xFFFF_FFFF_FFFF_FFFF; }",true,-1L)]
+    [TestCase("int64 Value() { return ~0; }",true,-1L)]
+    [TestCase("int64 Value() { return (~0x8000_0000_0000_0000); }",true,long.MaxValue)]
+    [TestCase("int64 Value() { return -9223372036854775808; }",true,long.MinValue)]
+    [TestCase("int64 Value() { return -9_223_372_036_854_775_808; }",true,long.MinValue)]
+    [TestCase("int64 Value() { return 9223372036854775808; }",false,0L)]
+    [TestCase("int64 Value() { return +9223372036854775808; }",false,0L)]
+    [TestCase("int64 Value() { return -9223372036854775809; }",false,0L)]
+    [TestCase("int64 Value() { return 0x8000_0000_0000_0000; }",true,long.MinValue)]
+    [TestCase("int64 Value() { return 0xFFFF_FFFF_FFFF_FFFF; }",true,-1L)]
+    [TestCase("int64 Value() { return -0xFFFF_FFFF_FFFF_FFFF; }",true,1L)]
+    [TestCase("int64 Value() { return -0x8000_0000_0000_0000; }",false,0L)]
+    [TestCase("int64 Value() { return 18446744073709551616; }",false,0L)]
+    [TestCase("int64 Value() { return 0x1_0000_0000_0000_0000; }",false,0L)]
     public async Task BoundedNativeInt64EvaluationMatchesHostedExecutedValuesAsync(
         string text, bool evaluable, long value)
     {
@@ -2808,18 +2675,16 @@ public sealed partial class ManagedScannerComponentTests
                      }
                     """;
                 var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+                Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = hosted.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))(), policy), Is.EqualTo(42));
             }
             var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("alpha 42 // trailing\r\n\uD801\uDC00")]
+    [TestCase("")]
+    [TestCase("alpha 42 // trailing\r\n\uD801\uDC00")]
     public async Task CursorReadsPublishedTokensAndStopsAtEndAsync(string text)
     {
         var expected = Lexer.Lex(SourceText.From(text)).Tokens.ToArray();
@@ -2850,18 +2715,16 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, source.ToString(), (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public Task CursorReadsFullCapacityAsync() =>
         CursorReadsPublishedTokensAndStopsAtEndAsync(string.Join(" ", Enumerable.Repeat("a", 63)));
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CursorLookaheadDoesNotConsumeAndRejectsInvalidDistancesAsync(
         NativeRuntimePolicy policy)
     {
@@ -2890,13 +2753,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("abc", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CursorKindMatchConsumesOnlyTheSelectedTokenAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -2921,17 +2782,15 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("ab", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("\uD800")]
-    [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a")]
+    [TestCase("\uD800")]
+    [TestCase("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a")]
     public async Task FailedManagedScansLeaveOutputsVacantAsync(string text)
     {
         var lexical = Lexer.Lex(SourceText.From(text));
-        Assert.True(lexical.Diagnostics.Length != 0 || lexical.Tokens.Length > 64);
+        Assert.That(lexical.Diagnostics.Length != 0 || lexical.Tokens.Length > 64, Is.True);
         const string Entry = """
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -2945,14 +2804,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task CursorRejectsMutationsWithoutPublishingOutputAsync(bool clear)
     {
         var mutation = clear ? "chain.TryClear()" : "chain.TryAppend(2, 1, 0)";
@@ -2977,14 +2834,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync("a", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CursorKeepsSourceGraphAliveAfterFactoryReturnsAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -3004,13 +2859,11 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("a", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task FailedMutationKeepsCursorCurrentAndInvalidatedReadReleasesLinksAsync(NativeRuntimePolicy policy)
     {
         const string Entry = """
@@ -3030,14 +2883,12 @@ public sealed partial class ManagedScannerComponentTests
             }
             """;
         var program = await CompileAsync("a", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(3, -1, 2)]
-    [InlineData(5, 100, 2)]
-    [InlineData(6, 1, 3)]
+    [TestCase(3,-1,2)]
+    [TestCase(5,100,2)]
+    [TestCase(6,1,3)]
     public async Task InvalidHostRecordDoesNotPublishPartiallyBuiltChainAsync(int word, int value, int collected)
     {
         var entry = $$"""
@@ -3054,14 +2905,12 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync("alpha beta", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(3, 107)]
-    [InlineData(5, 0)]
+    [TestCase(3,107)]
+    [TestCase(5,0)]
     public async Task UndefinedKindAndZeroLengthNonEofRecordDoNotPublishManagedChainAsync(int word, int value)
     {
         var entry = $$"""
@@ -3078,32 +2927,30 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync("alpha beta", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
 
     private static Task<BoundProgram> CompileParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarFunctionParser");
-
-    [Theory]
-    [InlineData("int32 Value(int32 x) { return x; }", "Value(42)", "42", 1, 1, 0, 1, 0, false)]
-    [InlineData("uint64 Value(uint64 x, uint64 y) { return x + y; }", "Value(uint64(40), uint64(2))", "uint64(42)", 4, 2, 57, 1, 2, false)]
-    [InlineData("int32 Value(int32 x, int32 y) { return x - y; }", "Value(50, 8)", "42", 1, 2, 58, 1, 2, false)]
-    [InlineData("int32 Value(int32 x, int32 y) { return y - x; }", "Value(8, 50)", "42", 1, 2, 58, 2, 1, false)]
-    [InlineData("int32 Value(int32 x, int32 y) { return x + y; }", "Value(int32.MaxValue - 1, 1)", "int32.MaxValue", 1, 2, 57, 1, 2, false)]
-    [InlineData("bool Value(int32 x, int32 y) { return x < y; }", "Value(1, 2)", "true", 5, 2, 67, 1, 2, false)]
-    [InlineData("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }", "Value(20, 22)", "42", 1, 2, 57, 1, 2, true)]
-    [InlineData("int32 Value(int32 x, int32 y) { if (x >= y) { return x; } else { return y; } }", "Value(42, 3)", "42", 1, 2, 0, 1, 0, true)]
-    [InlineData("uint32 Value(uint32 x) { return x - x; }", "Value(uint32.MaxValue)", "uint32(0)", 2, 1, 58, 1, 1, false)]
-    [InlineData("bool Value(bool x) { return x; }", "Value(true)", "true", 5, 1, 0, 1, 0, false)]
-    [InlineData("char16 Value(char16 x, char16 y) { if (x != y) { return y; } else { return x; } }", "Value(char16(1), char16(42))", "char16(42)", 6, 2, 0, 2, 0, true)]
+    [TestCase("int32 Value(int32 x) { return x; }","Value(42)","42",1,1,0,1,0,false)]
+    [TestCase("uint64 Value(uint64 x, uint64 y) { return x + y; }","Value(uint64(40), uint64(2))","uint64(42)",4,2,57,1,2,false)]
+    [TestCase("int32 Value(int32 x, int32 y) { return x - y; }","Value(50, 8)","42",1,2,58,1,2,false)]
+    [TestCase("int32 Value(int32 x, int32 y) { return y - x; }","Value(8, 50)","42",1,2,58,2,1,false)]
+    [TestCase("int32 Value(int32 x, int32 y) { return x + y; }","Value(int32.MaxValue - 1, 1)","int32.MaxValue",1,2,57,1,2,false)]
+    [TestCase("bool Value(int32 x, int32 y) { return x < y; }","Value(1, 2)","true",5,2,67,1,2,false)]
+    [TestCase("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }","Value(20, 22)","42",1,2,57,1,2,true)]
+    [TestCase("int32 Value(int32 x, int32 y) { if (x >= y) { return x; } else { return y; } }","Value(42, 3)","42",1,2,0,1,0,true)]
+    [TestCase("uint32 Value(uint32 x) { return x - x; }","Value(uint32.MaxValue)","uint32(0)",2,1,58,1,1,false)]
+    [TestCase("bool Value(bool x) { return x; }","Value(true)","true",5,1,0,1,0,false)]
+    [TestCase("char16 Value(char16 x, char16 y) { if (x != y) { return y; } else { return x; } }","Value(char16(1), char16(42))","char16(42)",6,2,0,2,0,true)]
     public async Task ScannerOwnedScalarFrontendPublishesTypedShapesAsync(
         string text, string call, string expected, int returnType, int count,
         int operation, int left, int right, bool conditional)
     {
         var syntax = SyntaxTree.Parse(text);
-        Assert.Empty(syntax.Diagnostics);
+        Assert.That(syntax.Diagnostics, Is.Empty);
         var functionName = syntax.Tokens[1].Span;
         var valueStart = text.IndexOf("return ", StringComparison.Ordinal) + "return ".Length;
         var valueLength = text.IndexOf(';', valueStart) - valueStart;
@@ -3119,10 +2966,13 @@ public sealed partial class ManagedScannerComponentTests
         var firstParameter = syntax.Tokens[4].Span;
         var secondParameter = count == 2 ? syntax.Tokens[7].Span : default;
         var firstTypeText = text.Substring(syntax.Tokens[3].Span.Start, syntax.Tokens[3].Span.Length);
-        var firstType = firstTypeText switch
-        {
-            "int32" => 1, "uint32" => 2, "int64" => 3, "uint64" => 4,
-            "bool" => 5, "char16" => 6,
+        var firstType = firstTypeText switch {
+            "int32" => 1,
+            "uint32" => 2,
+            "int64" => 3,
+            "uint64" => 4,
+            "bool" => 5,
+            "char16" => 6,
             _ => throw new InvalidOperationException(firstTypeText),
         };
         var assertion = $$"""
@@ -3164,26 +3014,18 @@ public sealed partial class ManagedScannerComponentTests
         {
             var hostedSource = text + $" int32 Main() {{ if (ValueResult()) {{ return 42; }} return 1; }} bool ValueResult() {{ return {call} == {expected}; }}";
             var hosted = Compilation.Create(SyntaxTree.Parse(hostedSource), (BoundRuntimePolicy)policy);
-            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-            Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = hosted.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))(), policy), Is.EqualTo(42));
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarFrontend").ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value() { return -#42; }", true, "ScalarFunctionParser",
-        "TryParseScalarReturnFunctionTyped(move tokens, init var scalarType, init var name, init var expression)")]
-    [InlineData("int32 Value(int32 x, int32 y) { return x#+#y; }", false, "ScalarParameterPairParser",
-        "TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, init var name, init var value)")]
-    [InlineData("int32 Value(bool c, int32 x, int32 y) { if (c) { return x#+#y; } else { return x; } }",
-        false, "ScalarConditionalAddParser",
-        "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, init var name, init var value)")]
-    [InlineData("int32 Value(int32 x, int32 y) { if (x#<#y) { return x; } else { return y; } }",
-        false, "ScalarComparisonConditionalParser",
-        "TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value() { return -#42; }",true,"ScalarFunctionParser",        "TryParseScalarReturnFunctionTyped(move tokens, init var scalarType, init var name, init var expression)")]
+    [TestCase("int32 Value(int32 x, int32 y) { return x#+#y; }",false,"ScalarParameterPairParser",        "TryEvaluateInt32TwoParameterAddReturn(move tokens, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value(bool c, int32 x, int32 y) { if (c) { return x#+#y; } else { return x; } }",        false,"ScalarConditionalAddParser",        "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value(int32 x, int32 y) { if (x#<#y) { return x; } else { return y; } }",        false,"ScalarComparisonConditionalParser",        "TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, init var name, init var value)")]
     public async Task MaintainedScalarProbesRejectOperatorSpacingBeforeLegacyFallbackAsync(
         string form, bool prefix, string module, string invocation)
     {
@@ -3202,19 +3044,14 @@ public sealed partial class ManagedScannerComponentTests
             foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
             {
                 var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy, module).ConfigureAwait(true);
-                Assert.Equal(42, NativeJit.Execute(program, policy));
+                Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
                 await ExecuteAotAsync(program, policy).ConfigureAwait(true);
             }
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x; } else { return y; } }",
-        "ScalarConditionalParser", "TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, init var name, init var value)")]
-    [InlineData("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x + y; } else { return x; } }",
-        "ScalarConditionalAddParser", "TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, init var name, init var value)")]
-    [InlineData("int32 Value#(int32 x, int32 y) { if (x < y) { return x; } else { return y; } }",
-        "ScalarComparisonConditionalParser", "TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x; } else { return y; } }",        "ScalarConditionalParser","TryEvaluateInt32ScalarConditionalReturn(move tokens, true, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value#(bool c, int32 x, int32 y) { if (c) { return x + y; } else { return x; } }",        "ScalarConditionalAddParser","TryEvaluateInt32ScalarConditionalAddReturn(move tokens, true, 20, 22, init var name, init var value)")]
+    [TestCase("int32 Value#(int32 x, int32 y) { if (x < y) { return x; } else { return y; } }",        "ScalarComparisonConditionalParser","TryEvaluateInt32ComparisonConditionalReturn(move tokens, 20, 22, init var name, init var value)")]
     public async Task MaintainedScalarProbesEnforceAttachedHeadersAsync(string form, string module, string invocation)
     {
         foreach (var gap in new[] { "", " ", "\n", "/* boundary */", "/// boundary\n" })
@@ -3232,20 +3069,18 @@ public sealed partial class ManagedScannerComponentTests
             foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
             {
                 var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy, module).ConfigureAwait(true);
-                Assert.Equal(42, NativeJit.Execute(program, policy));
+                Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
                 await ExecuteAotAsync(program, policy).ConfigureAwait(true);
             }
         }
     }
-
-    [Theory]
-    [InlineData("!!", TokenKind.Bang, TokenKind.Bang)]
-    [InlineData("+++", TokenKind.PlusPlus, TokenKind.Plus)]
-    [InlineData(">?>", TokenKind.Greater, TokenKind.Question, TokenKind.Greater)]
-    [InlineData(">>>>", TokenKind.ShiftRightUnsigned, TokenKind.Greater)]
-    [InlineData("+-*", TokenKind.Plus, TokenKind.Minus, TokenKind.Star)]
-    [InlineData("!!", TokenKind.Identifier)]
-    [InlineData("==", TokenKind.Equals, TokenKind.Equals)]
+    [TestCase("!!",TokenKind.Bang,TokenKind.Bang)]
+    [TestCase("+++",TokenKind.PlusPlus,TokenKind.Plus)]
+    [TestCase(">?>",TokenKind.Greater,TokenKind.Question,TokenKind.Greater)]
+    [TestCase(">>>>",TokenKind.ShiftRightUnsigned,TokenKind.Greater)]
+    [TestCase("+-*",TokenKind.Plus,TokenKind.Minus,TokenKind.Star)]
+    [TestCase("!!",TokenKind.Identifier)]
+    [TestCase("==",TokenKind.Equals,TokenKind.Equals)]
     public async Task NativeScalarRunGateRejectsIndependentHistoricAndForgedRecordsAsync(
         string text, params TokenKind[] kinds)
     {
@@ -3269,7 +3104,7 @@ public sealed partial class ManagedScannerComponentTests
                 + $" Host.Tokens[{index * 3 + 2}] = {width};");
             start += width;
         }
-        Assert.Equal(text.Length, start);
+        Assert.That(start, Is.EqualTo(text.Length));
         entry.Append(
             $"Host.Tokens[{kinds.Length * 3}] = 0;"
             + $" Host.Tokens[{kinds.Length * 3 + 1}] = {text.Length};"
@@ -3283,19 +3118,17 @@ public sealed partial class ManagedScannerComponentTests
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy, "ScalarFrontend");
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy);
         }
     }
-
-    [Theory]
-    [InlineData("b ? 1 : 2", "")]
-    [InlineData("b/* left */?/// right\n1//** left **//:\r\n2", "")]
-    [InlineData("b? 1 : 2", "?")]
-    [InlineData("b ?1 : 2", "?")]
-    [InlineData("b ? 1: 2", ":")]
-    [InlineData("b ? 1 :2", ":")]
-    [InlineData("b?1:2", "?")]
+    [TestCase("b ? 1 : 2","")]
+    [TestCase("b/* left */?/// right\n1//** left **//:\r\n2","")]
+    [TestCase("b? 1 : 2","?")]
+    [TestCase("b ?1 : 2","?")]
+    [TestCase("b ? 1: 2",":")]
+    [TestCase("b ? 1 :2",":")]
+    [TestCase("b?1:2","?")]
     public async Task NativeSnapshotAndFrontendRejectConditionalSpacingWithoutHostParseAuditAsync(
         string expression, string offending)
     {
@@ -3319,16 +3152,14 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarFrontend").ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 a, int32 b, int32 c, int32 d) { return a + b * c - d; }", "")]
-    [InlineData("int32 Value(int32 a, int32 b, int32 c) { return -a + b * c; }", "")]
-    [InlineData("int32 Value(int32 a, int32 b, int32 c) { return a + b *c; }", "*")]
-    [InlineData("int32 Value(int32 a, int32 b, int32 c, int32 d) { return a + b * c- d; }", "-")]
+    [TestCase("int32 Value(int32 a, int32 b, int32 c, int32 d) { return a + b * c - d; }","")]
+    [TestCase("int32 Value(int32 a, int32 b, int32 c) { return -a + b * c; }","")]
+    [TestCase("int32 Value(int32 a, int32 b, int32 c) { return a + b *c; }","*")]
+    [TestCase("int32 Value(int32 a, int32 b, int32 c, int32 d) { return a + b * c- d; }","-")]
     public async Task NativeSnapshotPreservesMultiTokenOperatorSpacingDecisionsAsync(
         string text, string offending)
     {
@@ -3349,51 +3180,49 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarFrontend").ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 x, int32 y) { return x+y; }", 1, "+")]
-    [InlineData("int32 Value(int32 x, int32 y) { return x+ y; }", 1, "+")]
-    [InlineData("int32 Value(int32 x, int32 y) { return x +y; }", 1, "+")]
-    [InlineData("int32 Value(int32 x) { return - x; }", 1, "-")]
-    [InlineData("int32 Value(int32 x) { return ~/* gap */x; }", 1, "~")]
-    [InlineData("bool Value(bool x) { return !/// gap\nx; }", 1, "!")]
-    [InlineData("int32 Value(int32 x) { return +\r\n(x); }", 1, "+")]
-    [InlineData("int32 Value() { mut int32 x= 4; return x; }", 1, "=")]
-    [InlineData("int32 Value() { mut int32 x =4; return x; }", 1, "=")]
-    [InlineData("int32 Value() { mut int32 x = 4; x+= 2; return x; }", 1, "+=")]
-    [InlineData("int32 Value() { mut int32 x = 4; x +=2; return x; }", 1, "+=")]
-    [InlineData("int32 Value() { mut int32 x = 4; return x /* gap */++; }", 1, "++")]
-    [InlineData("int32 Value() { mut int32 x = 4; return ++\nx; }", 1, "++")]
-    [InlineData("int32 Value()=> 42;", 1, "=>")]
-    [InlineData("int32 Value() =>42;", 1, "=>")]
-    [InlineData("int32 Value() { return - 2147483648; }", 1, "-")]
-    [InlineData("int32 Value () { return 42; }", 1, "()")]
-    [InlineData("int32 Value\n() { return 42; }", 1, "()")]
-    [InlineData("int32 Value/* boundary */() { return 42; }", 1, "()")]
-    [InlineData("int32 Value/// boundary\n() { return 42; }", 1, "()")]
-    [InlineData("int32 @await /* boundary */() { return 42; }", 1, "()")]
-    [InlineData("int32 Value() { return int32 (42); }", 1, "(42)")]
-    [InlineData("int32 Value() { return int32\n(42); }", 1, "(42)")]
-    [InlineData("int32 Value() { return int32/* boundary */(42); }", 1, "(42)")]
-    [InlineData("int32 Value() { return int32/// boundary\n(42); }", 1, "(42)")]
-    [InlineData("int32 Value(int32 x, int32 x) { return x; }", 4, "x)")]
-    [InlineData("int32 Value(int32 x) { return y; }", 3, "y;")]
-    [InlineData("int32 Value(uint32 x) { return x; }", 2, "x;")]
-    [InlineData("int32 Value(int32 x, uint32 y) { return x + y; }", 2, "+ y")]
-    [InlineData("bool Value(bool x, bool y) { return x < y; }", 2, "< y")]
-    [InlineData("int32 Value(int32 x) { return x + unknown; }", 3, "unknown")]
-    [InlineData("int32 Value(int32 x) { return x }", 1, "}")]
-    [InlineData("int32 Value(int32 x) { if (x) { return x; } else { return x; } }", 2, "x) { return x")]
-    [InlineData("int32 Value(int32 x) { return x; } int32 Other() { return x; }", 1, "int32 Other")]
+    [TestCase("int32 Value(int32 x, int32 y) { return x+y; }",1,"+")]
+    [TestCase("int32 Value(int32 x, int32 y) { return x+ y; }",1,"+")]
+    [TestCase("int32 Value(int32 x, int32 y) { return x +y; }",1,"+")]
+    [TestCase("int32 Value(int32 x) { return - x; }",1,"-")]
+    [TestCase("int32 Value(int32 x) { return ~/* gap */x; }",1,"~")]
+    [TestCase("bool Value(bool x) { return !/// gap\nx; }",1,"!")]
+    [TestCase("int32 Value(int32 x) { return +\r\n(x); }",1,"+")]
+    [TestCase("int32 Value() { mut int32 x= 4; return x; }",1,"=")]
+    [TestCase("int32 Value() { mut int32 x =4; return x; }",1,"=")]
+    [TestCase("int32 Value() { mut int32 x = 4; x+= 2; return x; }",1,"+=")]
+    [TestCase("int32 Value() { mut int32 x = 4; x +=2; return x; }",1,"+=")]
+    [TestCase("int32 Value() { mut int32 x = 4; return x /* gap */++; }",1,"++")]
+    [TestCase("int32 Value() { mut int32 x = 4; return ++\nx; }",1,"++")]
+    [TestCase("int32 Value()=> 42;",1,"=>")]
+    [TestCase("int32 Value() =>42;",1,"=>")]
+    [TestCase("int32 Value() { return - 2147483648; }",1,"-")]
+    [TestCase("int32 Value () { return 42; }",1,"()")]
+    [TestCase("int32 Value\n() { return 42; }",1,"()")]
+    [TestCase("int32 Value/* boundary */() { return 42; }",1,"()")]
+    [TestCase("int32 Value/// boundary\n() { return 42; }",1,"()")]
+    [TestCase("int32 @await /* boundary */() { return 42; }",1,"()")]
+    [TestCase("int32 Value() { return int32 (42); }",1,"(42)")]
+    [TestCase("int32 Value() { return int32\n(42); }",1,"(42)")]
+    [TestCase("int32 Value() { return int32/* boundary */(42); }",1,"(42)")]
+    [TestCase("int32 Value() { return int32/// boundary\n(42); }",1,"(42)")]
+    [TestCase("int32 Value(int32 x, int32 x) { return x; }",4,"x)")]
+    [TestCase("int32 Value(int32 x) { return y; }",3,"y;")]
+    [TestCase("int32 Value(uint32 x) { return x; }",2,"x;")]
+    [TestCase("int32 Value(int32 x, uint32 y) { return x + y; }",2,"+ y")]
+    [TestCase("bool Value(bool x, bool y) { return x < y; }",2,"< y")]
+    [TestCase("int32 Value(int32 x) { return x + unknown; }",3,"unknown")]
+    [TestCase("int32 Value(int32 x) { return x }",1,"}")]
+    [TestCase("int32 Value(int32 x) { if (x) { return x; } else { return x; } }",2,"x) { return x")]
+    [TestCase("int32 Value(int32 x) { return x; } int32 Other() { return x; }",1,"int32 Other")]
     public async Task ScannerOwnedScalarFrontendRejectsInvalidOrUnsupportedShapesAsync(
         string text, int code, string offending)
     {
         var expectedStart = text.IndexOf(offending, StringComparison.Ordinal);
-        Assert.True(expectedStart >= 0);
+        Assert.That(expectedStart >= 0, Is.True);
         var expectedLength = SyntaxTree.Parse(text).Tokens
             .Single(token => token.Span.Start == expectedStart).Span.Length;
         var entry = $$"""
@@ -3415,14 +3244,12 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
                 "ScalarFrontend").ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScannerOwnedScalarFrontendRejectsTrailingTokensAsync(NativeRuntimePolicy policy)
     {
         var text = "int32 Value(int32 x) { return x; } " + string.Join(' ', Enumerable.Repeat("extra", 65));
@@ -3443,13 +3270,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
             "ScalarFrontend").ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScannerOwnedScalarFrontendLeavesLexicalErrorsWithScannerAsync(
         NativeRuntimePolicy policy)
     {
@@ -3466,20 +3291,18 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var program = await CompileAsync("\uD800", Entry, (BoundRuntimePolicy)policy,
             "ScalarFrontend").ConfigureAwait(true);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("'é'", true)]
-    [InlineData("'\\u00E9'", true)]
-    [InlineData("'\\U000000E9'", true)]
-    [InlineData("'\\''", true)]
-    [InlineData("'\\\"'", true)]
-    [InlineData("'\\\\'", true)]
-    [InlineData("'\\0'", true)]
-    [InlineData("'😀'", false)]
-    [InlineData("'\\U0001F600'", false)]
+    [TestCase("'é'",true)]
+    [TestCase("'\\u00E9'",true)]
+    [TestCase("'\\U000000E9'",true)]
+    [TestCase("'\\''",true)]
+    [TestCase("'\\\"'",true)]
+    [TestCase("'\\\\'",true)]
+    [TestCase("'\\0'",true)]
+    [TestCase("'😀'",false)]
+    [TestCase("'\\U0001F600'",false)]
     public async Task ScalarFrontendDecodesCharacterLiteralScalarsAsync(
         string literal, bool valid)
     {
@@ -3498,18 +3321,16 @@ public sealed partial class ManagedScannerComponentTests
         {
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy, "ScalarFrontend")
                 .ConfigureAwait(true);
-            Assert.Equal(42, NativeJit.Execute(program, policy));
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 x) { return x; }", true, 0, 1, 0)]
-    [InlineData("int32 Value() { return 42; }", true, 0, 0, 3)]
-    [InlineData("int32 Value(int32 x, int32 y) { return x + ((y)); }", true, 0, 2, 57)]
-    [InlineData("int32 Value(int32 x, int32 y) { return ((x)) + y; }", true, 0, 2, 57)]
-    [InlineData("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }", true, 0, 2, 57)]
-    [InlineData("int32 Value(int32 x) { return y; }", false, 3, 0, 0)]
+    [TestCase("int32 Value(int32 x) { return x; }",true,0,1,0)]
+    [TestCase("int32 Value() { return 42; }",true,0,0,3)]
+    [TestCase("int32 Value(int32 x, int32 y) { return x + ((y)); }",true,0,2,57)]
+    [TestCase("int32 Value(int32 x, int32 y) { return ((x)) + y; }",true,0,2,57)]
+    [TestCase("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }",true,0,2,57)]
+    [TestCase("int32 Value(int32 x) { return y; }",false,3,0,0)]
     public async Task ScalarFrontendProjectionPublishesValidatedTypedResultAsync(
         string source, bool valid, int error, int parameters, int operation)
     {
@@ -3519,31 +3340,31 @@ public sealed partial class ManagedScannerComponentTests
                 "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
                 (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
             var native = NativeJit.ExecuteWithData(program, policy);
-            Assert.Equal(42, native.ExitCode);
+            Assert.That(native.ExitCode, Is.EqualTo(42));
             var projected = ScalarFrontendHost.ReadResult(SourceText.From(source),
                 native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                     ScalarFrontendHost.WordCount * sizeof(int)));
-            Assert.Equal(valid, projected.IsValid);
-            Assert.Equal(error, projected.ErrorCode);
-            Assert.Equal(parameters, projected.ParameterCount);
-            Assert.Equal(operation, projected.WhenTrue.Operation);
+            Assert.That(projected.IsValid, Is.EqualTo(valid));
+            Assert.That(projected.ErrorCode, Is.EqualTo(error));
+            Assert.That(projected.ParameterCount, Is.EqualTo(parameters));
+            Assert.That(projected.WhenTrue.Operation, Is.EqualTo(operation));
             if (valid)
             {
-                Assert.Equal("Value", source.Substring(projected.Name.Start, projected.Name.Length));
-                Assert.Equal(source.Contains("if (", StringComparison.Ordinal), projected.HasCondition);
+                Assert.That(source.Substring(projected.Name.Start, projected.Name.Length), Is.EqualTo("Value"));
+                Assert.That(projected.HasCondition, Is.EqualTo(source.Contains("if (", StringComparison.Ordinal)));
                 if (projected.HasCondition)
                 {
-                    Assert.Equal(67, projected.Condition.Operation);
-                    Assert.Equal(1, projected.Condition.LeftParameter);
-                    Assert.Equal(2, projected.Condition.RightParameter);
-                    Assert.Equal(58, projected.WhenFalse.Operation);
+                    Assert.That(projected.Condition.Operation, Is.EqualTo(67));
+                    Assert.That(projected.Condition.LeftParameter, Is.EqualTo(1));
+                    Assert.That(projected.Condition.RightParameter, Is.EqualTo(2));
+                    Assert.That(projected.WhenFalse.Operation, Is.EqualTo(58));
                 }
             }
             else
             {
-                Assert.Equal(default, projected.Name);
-                Assert.Equal(source.IndexOf("y;", StringComparison.Ordinal), projected.ErrorSpan.Start);
-                Assert.Equal(1, projected.ErrorSpan.Length);
+                Assert.That(projected.Name, Is.EqualTo(default(TextSpan)));
+                Assert.That(projected.ErrorSpan.Start, Is.EqualTo(source.IndexOf("y;", StringComparison.Ordinal)));
+                Assert.That(projected.ErrorSpan.Length, Is.EqualTo(1));
                 Assert.Throws<ArgumentException>(() => ScalarFrontendHost.BindLibrary(
                     SourceText.From(source),
                     native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
@@ -3552,20 +3373,18 @@ public sealed partial class ManagedScannerComponentTests
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(0, 4)]
-    [InlineData(1, 0)]
-    [InlineData(2, 1)]
-    [InlineData(3, -1)]
-    [InlineData(6, 3)]
-    [InlineData(9, 0)]
-    [InlineData(22, 7)]
-    [InlineData(27, int.MaxValue)]
-    [InlineData(0, 19)]
-    [InlineData(34, 1)]
-    [InlineData(35, 1)]
-    [InlineData(36, 1)]
+    [TestCase(0,4)]
+    [TestCase(1,0)]
+    [TestCase(2,1)]
+    [TestCase(3,-1)]
+    [TestCase(6,3)]
+    [TestCase(9,0)]
+    [TestCase(22,7)]
+    [TestCase(27,int.MaxValue)]
+    [TestCase(0,19)]
+    [TestCase(34,1)]
+    [TestCase(35,1)]
+    [TestCase(36,1)]
     public void ScalarFrontendProjectionRejectsMalformedHostWords(int index, int value)
     {
         var source = SourceText.From("int32 Value(int32 x) { return x; }");
@@ -3588,20 +3407,18 @@ public sealed partial class ManagedScannerComponentTests
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(at * 4), words[at]);
         }
-        Assert.True(ScalarFrontendHost.ReadResult(source, bytes).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).IsValid, Is.True);
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 2);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4), value);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return z + 5; }", 40157)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return (-5) + z; }", 41557)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return ~(z + 5); }", 44157)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return -(~(z + 5)); }", 72157)]
-    [InlineData("bool Value(int32 x, int32 y, int32 z) { return !(z < -5); }", 43367)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return z + 5; }",40157)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return (-5) + z; }",41557)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return ~(z + 5); }",44157)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return -(~(z + 5)); }",72157)]
+    [TestCase("bool Value(int32 x, int32 y, int32 z) { return !(z < -5); }",43367)]
     public async Task ScalarFrontendThirdParameterRejectsForgedProjectionAsync(
         string text, int operation)
     {
@@ -3610,16 +3427,15 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
         var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
         var result = ScalarFrontendHost.ReadResult(source, bytes);
-        Assert.Equal(3, result.ParameterCount);
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            result.WhenTrue.Operation);
-        Assert.Equal("z", text.Substring(result.ThirdName.Start, result.ThirdName.Length));
+        Assert.That(result.ParameterCount, Is.EqualTo(3));
+        Assert.That(result.WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
+        Assert.That(text.Substring(result.ThirdName.Start, result.ThirdName.Length), Is.EqualTo("z"));
         foreach (var word in new[] { 0, 6, expressionWords.Operation, 34, 35, 36 })
         {
             var offset = word * sizeof(int);
@@ -3645,12 +3461,10 @@ public sealed partial class ManagedScannerComponentTests
         Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(new string(changed)), bytes));
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 x, int32 y, int32 x) { return x; }", 4)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 y) { return x; }", 4)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return missing; }", 3)]
-    [InlineData("int32 Value(int32 x, int32 y, bool z) { return z; }", 2)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 x) { return x; }",4)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 y) { return x; }",4)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return missing; }",3)]
+    [TestCase("int32 Value(int32 x, int32 y, bool z) { return z; }",2)]
     public async Task ScalarFrontendThirdParameterRejectsInvalidSourceAsync(
         string text, int error)
     {
@@ -3658,22 +3472,20 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var result = ScalarFrontendHost.ReadResult(SourceText.From(text),
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)));
-        Assert.False(result.IsValid);
-        Assert.Equal(error, result.ErrorCode);
+        Assert.That(result.IsValid, Is.False);
+        Assert.That(result.ErrorCode, Is.EqualTo(error));
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return z; }", 1, 2, 42)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return z + 5; }", 1, 2, 37)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return (-5) + z; }", 1, 2, 47)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { return -(~(z + 5)); }", 1, 2, 36)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { if (x < z) { return x + z; } return y; }", 0, 7, 42)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { if (x < z) { return x + z; } return y; }", 43, 42, 42)]
-    [InlineData("int32 Value(int32 x, int32 y, int32 z) { if (x < z) { return x + z; } return y; }", int.MaxValue, 42, int.MaxValue)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return z; }",1,2,42)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return z + 5; }",1,2,37)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return (-5) + z; }",1,2,47)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { return -(~(z + 5)); }",1,2,36)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { if (x < z) { return x + z; } return y; }",0,7,42)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { if (x < z) { return x + z; } return y; }",43,42,42)]
+    [TestCase("int32 Value(int32 x, int32 y, int32 z) { if (x < z) { return x + z; } return y; }",int.MaxValue,42,int.MaxValue)]
     public async Task NativeScalarFrontendThirdParameterExecutesAsync(
         string text, int x, int y, int z)
     {
@@ -3684,7 +3496,7 @@ public sealed partial class ManagedScannerComponentTests
                 "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
                 (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
             var native = NativeJit.ExecuteWithData(stage, policy);
-            Assert.Equal(42, native.ExitCode);
+            Assert.That(native.ExitCode, Is.EqualTo(42));
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int));
             var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
@@ -3697,14 +3509,12 @@ public sealed partial class ManagedScannerComponentTests
                 new BoundBlock([new BoundReturn(call, default)], default), default);
             var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
             SemanticVerifier.Verify(executable);
-            Assert.Equal(42, NativeJit.Execute(executable, policy));
+            Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
             await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return Fill(true, init value); }", 107)]
-    [InlineData("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } if (Fill(true, init var nested)) { value = nested; return true; } return false; }", 108)]
+    [TestCase("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return Fill(true, init value); }",107)]
+    [TestCase("public bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } if (Fill(true, init var nested)) { value = nested; return true; } return false; }",108)]
     public async Task NativeScalarFrontendSingleInitReferenceUsesCurrentProjectionAsync(
         string text, int outputOperation)
     {
@@ -3715,23 +3525,21 @@ public sealed partial class ManagedScannerComponentTests
                 "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
                 (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
             var native = NativeJit.ExecuteWithData(stage, policy);
-            Assert.Equal(42, native.ExitCode);
+            Assert.That(native.ExitCode, Is.EqualTo(42));
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.True(BinaryPrimitives.ReadInt32LittleEndian(bytes) == 87,
-                $"Status {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(int)))}, error {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(2 * sizeof(int)))} at {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(3 * sizeof(int)))}+{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4 * sizeof(int)))}");
-            Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))));
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes) == 87, Is.True, $"Status {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(int)))}, error {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(2 * sizeof(int)))} at {BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(3 * sizeof(int)))}+{BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(4 * sizeof(int)))}");
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))), Is.EqualTo(2));
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
-            Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
-            Assert.Equal(2, result.InitRefParameterMask);
-            Assert.Contains(result.Nodes, node => node.Operation == outputOperation);
+            Assert.That(result.IsValid, Is.True, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+            Assert.That(result.InitRefParameterMask, Is.EqualTo(2));
+            Assert.That(global::System.Linq.Enumerable.Any(result.Nodes,node => node.Operation == outputOperation),Is.True);
 
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
-                NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = compilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
 
             foreach (var version in new[] { 73, 74, 75, 76, 77, 78 })
             {
@@ -3749,7 +3557,7 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task NativeScalarFrontendSingleNonBooleanOutUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Fill(int32 seed, out int32 value) { if (seed == 0) { value = 40; return 2; } return Fill(seed - 1, out value); }";
@@ -3760,24 +3568,23 @@ public sealed partial class ManagedScannerComponentTests
                 "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
                 (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
             var native = NativeJit.ExecuteWithData(stage, policy);
-            Assert.Equal(42, native.ExitCode);
+            Assert.That(native.ExitCode, Is.EqualTo(42));
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-            Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(16 * sizeof(int))));
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(16 * sizeof(int))), Is.EqualTo(2));
 
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
-            Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
-            Assert.Equal(2, result.OutParameterMask);
-            Assert.Contains(result.Nodes, static node => node.Operation == 102);
-            Assert.Contains(result.Nodes, static node => node.Operation == 103);
+            Assert.That(result.IsValid, Is.True, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+            Assert.That(result.OutParameterMask, Is.EqualTo(2));
+            Assert.That(global::System.Linq.Enumerable.Any(result.Nodes,static node => node.Operation == 102),Is.True);
+            Assert.That(global::System.Linq.Enumerable.Any(result.Nodes,static node => node.Operation == 103),Is.True);
 
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
-                NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = compilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))();
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
 
             foreach (var version in new[] { 73, 82 })
             {
@@ -3788,7 +3595,7 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task NativeScalarFrontendSingleNonBooleanInitRefUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Fill(int32 seed, init ref<int32> value) { if (seed == 0) { value = 40; return 0; } return Fill(seed - 1, init value); }";
@@ -3799,24 +3606,23 @@ public sealed partial class ManagedScannerComponentTests
                 "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
                 (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
             var native = NativeJit.ExecuteWithData(stage, policy);
-            Assert.Equal(42, native.ExitCode);
+            Assert.That(native.ExitCode, Is.EqualTo(42));
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-            Assert.Equal(2, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))));
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(17 * sizeof(int))), Is.EqualTo(2));
 
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
-            Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
-            Assert.Equal(2, result.InitRefParameterMask);
-            Assert.Contains(result.Nodes, static node => node.Operation == 102);
-            Assert.Contains(result.Nodes, static node => node.Operation == 107);
+            Assert.That(result.IsValid, Is.True, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+            Assert.That(result.InitRefParameterMask, Is.EqualTo(2));
+            Assert.That(global::System.Linq.Enumerable.Any(result.Nodes,static node => node.Operation == 102),Is.True);
+            Assert.That(global::System.Linq.Enumerable.Any(result.Nodes,static node => node.Operation == 107),Is.True);
 
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
-                NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))();
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
 
             foreach (var version in new[] { 73, 79, 80, 82 })
             {
@@ -3827,7 +3633,7 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task NativeScalarFrontendSingleNonBooleanOutVarUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Fill(int32 seed, out int32 value) { if (seed == 0) { value = 40; return 2; } int32 status = Fill(seed - 1, out var nested); value = nested; return status; }";
@@ -3838,29 +3644,26 @@ public sealed partial class ManagedScannerComponentTests
                 "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
                 (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
             var native = NativeJit.ExecuteWithData(stage, policy);
-            Assert.Equal(42, native.ExitCode);
+            Assert.That(native.ExitCode, Is.EqualTo(42));
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
             var result = ScalarFrontendHost.ReadResult(source, bytes, (BoundRuntimePolicy)policy);
-            Assert.True(result.IsValid, $"Error {result.ErrorCode} at {result.ErrorSpan}");
-            Assert.Contains(result.Nodes, static node => node.Operation == 104);
-            Assert.Contains(result.Nodes, static node => node.Operation == 102);
+            Assert.That(result.IsValid, Is.True, $"Error {result.ErrorCode} at {result.ErrorSpan}");
+            Assert.That(global::System.Linq.Enumerable.Any(result.Nodes,static node => node.Operation == 104),Is.True);
+            Assert.That(global::System.Linq.Enumerable.Any(result.Nodes,static node => node.Operation == 102),Is.True);
 
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy),
-                NativeEmitter.EmitLibrary(actual, ["Fill"], policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = compilation.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))();
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Fill"], policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Fill"], policy)));
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value(bool x, bool y, bool z) { if (z && x) { return 42; } return 0; }", true, false, true)]
-    [InlineData("int32 Value(bool x, bool y, bool z) { if (!z) { return 42; } return 0; }", false, true, false)]
-    [InlineData("int32 Value(bool x, bool y, bool z) { if (z || x) { return 42; } return 0; }", true, false, false)]
-    [InlineData("int32 Value(bool x, bool y, bool z) { if (z && false) { return 0; } return 42; }", true, true, true)]
+    [TestCase("int32 Value(bool x, bool y, bool z) { if (z && x) { return 42; } return 0; }",true,false,true)]
+    [TestCase("int32 Value(bool x, bool y, bool z) { if (!z) { return 42; } return 0; }",false,true,false)]
+    [TestCase("int32 Value(bool x, bool y, bool z) { if (z || x) { return 42; } return 0; }",true,false,false)]
+    [TestCase("int32 Value(bool x, bool y, bool z) { if (z && false) { return 0; } return 42; }",true,true,true)]
     public async Task NativeScalarFrontendThirdBooleanParameterExecutesAsync(
         string text, bool x, bool y, bool z)
     {
@@ -3871,7 +3674,7 @@ public sealed partial class ManagedScannerComponentTests
                 "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
                 (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
             var native = NativeJit.ExecuteWithData(stage, policy);
-            Assert.Equal(42, native.ExitCode);
+            Assert.That(native.ExitCode, Is.EqualTo(42));
             var library = ScalarFrontendHost.BindLibrary(source,
                 native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                     ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
@@ -3884,16 +3687,14 @@ public sealed partial class ManagedScannerComponentTests
                 new BoundBlock([new BoundReturn(call, default)], default), default);
             var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
             SemanticVerifier.Verify(executable);
-            Assert.Equal(42, NativeJit.Execute(executable, policy));
+            Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
             await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Value(int32 x) { return x; return x; }")]
-    [InlineData("int32 Value(int32 x) { return x + x; }")]
-    [InlineData("int32 Value(int32 x) { if (true) { return x; } }")]
-    [InlineData("int32 Value(int32 x) { return x; } int32 Other() { return 1; }")]
+    [TestCase("int32 Value(int32 x) { return x; return x; }")]
+    [TestCase("int32 Value(int32 x) { return x + x; }")]
+    [TestCase("int32 Value(int32 x) { if (true) { return x; } }")]
+    [TestCase("int32 Value(int32 x) { return x; } int32 Other() { return 1; }")]
     public void ScalarFrontendProjectionRejectsForgedBodyShape(string text)
     {
         var words = new int[ScalarFrontendHost.WordCount];
@@ -3915,15 +3716,13 @@ public sealed partial class ManagedScannerComponentTests
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(at * sizeof(int)), words[at]);
         }
-        Assert.True(ScalarFrontendHost.ReadResult(
-            SourceText.From("int32 Value(int32 x) { return x; }"), bytes).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(
+            SourceText.From("int32 Value(int32 x) { return x; }"), bytes).IsValid, Is.True);
         Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
     }
-
-    [Theory]
-    [InlineData("int32 Value() { return 42; }")]
-    [InlineData("uint64 Value() { return 18446744073709551615; }")]
+    [TestCase("int32 Value() { return 42; }")]
+    [TestCase("uint64 Value() { return 18446744073709551615; }")]
     public async Task ScalarFrontendProjectionRejectsForgedIntegerBitsAsync(string text)
     {
         var source = SourceText.From(text);
@@ -3931,11 +3730,11 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(program, NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         var original = ScalarFrontendHost.ReadResult(source, bytes);
-        Assert.Equal(3, original.WhenTrue.Operation);
+        Assert.That(original.WhenTrue.Operation, Is.EqualTo(3));
         foreach (var word in new[] { 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -3945,10 +3744,8 @@ public sealed partial class ManagedScannerComponentTests
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
         }
     }
-
-    [Theory]
-    [InlineData("int64 Value(int64 x, int64 y) { return y + 0xFFFFFFFFFFFFFFFF; }", 257)]
-    [InlineData("int64 Value(int64 x, int64 y) { return 0xFFFFFFFFFFFFFFFF + y; }", 457)]
+    [TestCase("int64 Value(int64 x, int64 y) { return y + 0xFFFFFFFFFFFFFFFF; }",257)]
+    [TestCase("int64 Value(int64 x, int64 y) { return 0xFFFFFFFFFFFFFFFF + y; }",457)]
     public async Task ScalarFrontendProjectionRejectsForgedParameterLiteralWordsAsync(
         string text, int expectedOperation)
     {
@@ -3957,10 +3754,10 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(expectedOperation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(expectedOperation));
         foreach (var (word, replacement) in new[] { (0, 2), (23, 158), (24, 0), (25, 0) })
         {
             var offset = word * sizeof(int);
@@ -3970,10 +3767,8 @@ public sealed partial class ManagedScannerComponentTests
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendProjectionDoesNotPublishLexicalFailuresAsync(
         NativeRuntimePolicy policy)
     {
@@ -3982,19 +3777,17 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { if (TryPublishScalarFrontend()) { return 1; } return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(program, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source),
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int))));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, 20, 22, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, 50, 8, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 20, 22, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 50, 8, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, 20, 22, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,20,22,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,50,8,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,20,22,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,50,8,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,20,22,true)]
     public async Task NativeScalarFrontendFactsBindAndExecuteWithoutHostedParsingAsync(
         NativeRuntimePolicy policy, int first, int second, bool comments)
     {
@@ -4006,9 +3799,9 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(
-            native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex])));
+        Assert.That(native.ExitCode, Is.EqualTo(42));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex])), Is.EqualTo(87));
         if (comments)
         {
             var projected = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
@@ -4028,9 +3821,9 @@ public sealed partial class ManagedScannerComponentTests
         var library = ScalarFrontendHost.BindLibrary(source,
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
-        Assert.Single(library.Functions);
-        Assert.True(library.Functions[0].IsInternal);
-        Assert.Empty(library.Buffers);
+        Assert.That(library.Functions, Has.Exactly(1).Items);
+        Assert.That(library.Functions[0].IsInternal, Is.True);
+        Assert.That(library.Buffers, Is.Empty);
         Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(library, ["Value"], policy));
 
         var result = new BoundCall(0, [
@@ -4041,13 +3834,11 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([new BoundReturn(result, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NativeScalarFrontendIntegerFactsExecuteWithoutHostedBindingAsync(
         NativeRuntimePolicy policy)
     {
@@ -4057,7 +3848,7 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var library = ScalarFrontendHost.BindLibrary(source,
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
@@ -4066,36 +3857,34 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([new BoundReturn(result, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return y + 5; }", 0, 37)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return y + 5; }", 0, 37)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return 47 - x; }", 5, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 47 - x; }", 5, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x * 7; }", 6, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return x * 7; }", 6, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return y / 2; }", 0, 84)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return y / 2; }", 0, 84)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return 42 % x; }", 43, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 42 % x; }", 43, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x & 63; }", 42, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return x & 63; }", 42, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return y | 42; }", 0, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return y | 42; }", 0, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return 42 ^ x; }", 0, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 42 ^ x; }", 0, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ((x)) + ((5)); }", 37, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return ((47)) - (x); }", 5, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x + -5; }", 47, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return (-5) + x; }", 47, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ((x)) + ((-5)); }", 47, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return x - (-5); }", 37, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x + +5; }", 37, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return (+5) + x; }", 37, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x - (+5); }", 47, 0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return y + 5; }",0,37)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return y + 5; }",0,37)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return 47 - x; }",5,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return 47 - x; }",5,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return x * 7; }",6,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return x * 7; }",6,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return y / 2; }",0,84)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return y / 2; }",0,84)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return 42 % x; }",43,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return 42 % x; }",43,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return x & 63; }",42,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return x & 63; }",42,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return y | 42; }",0,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return y | 42; }",0,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return 42 ^ x; }",0,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return 42 ^ x; }",0,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return ((x)) + ((5)); }",37,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return ((47)) - (x); }",5,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return x + -5; }",47,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return (-5) + x; }",47,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return ((x)) + ((-5)); }",47,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return x - (-5); }",37,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return x + +5; }",37,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return (+5) + x; }",37,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return x - (+5); }",47,0)]
     public async Task NativeScalarFrontendParameterLiteralFactsExecuteAsync(
         NativeRuntimePolicy policy, string text, int first, int second)
     {
@@ -4104,7 +3893,7 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var library = ScalarFrontendHost.BindLibrary(source,
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
@@ -4116,18 +3905,16 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([new BoundReturn(call, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "!x", 3, 62, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "!x", 3, 62, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "!((x))", 3, 62, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "!((x))", 3, 62, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, "!(!x)", 15, 16062, 1)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "!((!x))", 15, 16062, 1)]
-    [InlineData(NativeRuntimePolicy.FailFast, "!(!true)", 15, 16062, 0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"!x",3,62,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"!x",3,62,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"!((x))",3,62,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"!((x))",3,62,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,"!(!x)",15,16062,1)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"!((!x))",15,16062,1)]
+    [TestCase(NativeRuntimePolicy.FailFast,"!(!true)",15,16062,0)]
     public async Task NativeScalarFrontendBooleanNegationExecutesAsync(
         NativeRuntimePolicy policy, string expression, int version, int operation,
         int argument)
@@ -4138,12 +3925,11 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         foreach (var word in new[] { 0, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4165,55 +3951,30 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([branch], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x >= 42; }",
-        PrimitiveType.Int32, 42L, 170)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return x >= 42; }",
-        PrimitiveType.Int32, 42L, 170)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return 42 < x; }",
-        PrimitiveType.Int32, 43L, 367)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return 42 < x; }",
-        PrimitiveType.Int32, 43L, 367)]
-    [InlineData(NativeRuntimePolicy.FailFast,
-        "bool Value(uint64 x) { return x == 18446744073709551615; }",
-        PrimitiveType.UInt64, -1L, 165)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions,
-        "bool Value(uint64 x) { return x == 18446744073709551615; }",
-        PrimitiveType.UInt64, -1L, 165)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(char16 x) { return x != 0xFFFF; }",
-        PrimitiveType.Char16, 1L, 166)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(char16 x) { return x != 0xFFFF; }",
-        PrimitiveType.Char16, 1L, 166)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(char16 x) { return 0xFFFF != x; }",
-        PrimitiveType.Char16, 1L, 366)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(char16 x) { return 0xFFFF != x; }",
-        PrimitiveType.Char16, 1L, 366)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return ((x)) >= (42); }",
-        PrimitiveType.Int32, 42L, 70)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (42) < ((x)); }",
-        PrimitiveType.Int32, 43L, 67)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x < -5; }",
-        PrimitiveType.Int32, -6L, 1367)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (-5) < x; }",
-        PrimitiveType.Int32, 42L, 67)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return x == -2147483648; }",
-        PrimitiveType.Int32, int.MinValue, 1365)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x == -0xFFFFFFFF; }",
-        PrimitiveType.Int32, 1L, 1365)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x < +42; }",
-        PrimitiveType.Int32, 41L, 1767)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (+42) < x; }",
-        PrimitiveType.Int32, 43L, 67)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(uint64 x) { return x == +42; }",
-        PrimitiveType.UInt64, 42L, 1765)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int64 x) { return x != -9223372036854775808; }",
-        PrimitiveType.Int64, 0L, 1366)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int64 x) { return -9223372036854775808 == x; }",
-        PrimitiveType.Int64, long.MinValue, 1565)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x >= 42; }",        PrimitiveType.Int32,42L,170)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return x >= 42; }",        PrimitiveType.Int32,42L,170)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return 42 < x; }",        PrimitiveType.Int32,43L,367)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return 42 < x; }",        PrimitiveType.Int32,43L,367)]
+    [TestCase(NativeRuntimePolicy.FailFast,        "bool Value(uint64 x) { return x == 18446744073709551615; }",        PrimitiveType.UInt64,-1L,165)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,        "bool Value(uint64 x) { return x == 18446744073709551615; }",        PrimitiveType.UInt64,-1L,165)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(char16 x) { return x != 0xFFFF; }",        PrimitiveType.Char16,1L,166)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(char16 x) { return x != 0xFFFF; }",        PrimitiveType.Char16,1L,166)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(char16 x) { return 0xFFFF != x; }",        PrimitiveType.Char16,1L,366)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(char16 x) { return 0xFFFF != x; }",        PrimitiveType.Char16,1L,366)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return ((x)) >= (42); }",        PrimitiveType.Int32,42L,70)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return (42) < ((x)); }",        PrimitiveType.Int32,43L,67)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x < -5; }",        PrimitiveType.Int32,-6L,1367)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return (-5) < x; }",        PrimitiveType.Int32,42L,67)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return x == -2147483648; }",        PrimitiveType.Int32,int.MinValue,1365)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x == -0xFFFFFFFF; }",        PrimitiveType.Int32,1L,1365)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return x < +42; }",        PrimitiveType.Int32,41L,1767)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return (+42) < x; }",        PrimitiveType.Int32,43L,67)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(uint64 x) { return x == +42; }",        PrimitiveType.UInt64,42L,1765)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int64 x) { return x != -9223372036854775808; }",        PrimitiveType.Int64,0L,1366)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int64 x) { return -9223372036854775808 == x; }",        PrimitiveType.Int64,long.MinValue,1565)]
     public async Task NativeScalarFrontendLiteralComparisonExecutesAsync(
         NativeRuntimePolicy policy, string text, PrimitiveType parameterType, long argument,
         int operation)
@@ -4223,11 +3984,10 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         if (operation >= 1200)
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
@@ -4258,33 +4018,20 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([branch], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~x; }",
-        -43L, 63)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x) { return ~x; }",
-        -43L, 63)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return ~0xFFFFFFD5; }",
-        0L, 163)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~0xFFFFFFD5; }",
-        0L, 163)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return +42; }",
-        0L, 657)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return +42; }",
-        0L, 657)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~((x)); }",
-        -43L, 63)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(0xFFFFFFD5); }",
-        0L, 163)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return +((42)); }",
-        0L, 657)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return -(0xFFFFFFD6); }",
-        0L, 658)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return -(0xFFFFFFD6); }",
-        0L, 658)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x) { return ~x; }",        -43L,63)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x) { return ~x; }",        -43L,63)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return ~0xFFFFFFD5; }",        0L,163)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~0xFFFFFFD5; }",        0L,163)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return +42; }",        0L,657)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return +42; }",        0L,657)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x) { return ~((x)); }",        -43L,63)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(0xFFFFFFD5); }",        0L,163)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return +((42)); }",        0L,657)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return -(0xFFFFFFD6); }",        0L,658)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return -(0xFFFFFFD6); }",        0L,658)]
     public async Task NativeScalarFrontendIntegerUnaryExecutesAsync(
         NativeRuntimePolicy policy, string text, long argument, int operation)
     {
@@ -4293,18 +4040,17 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         if (operation == 658)
         {
-            Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 6);
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
         }
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4321,51 +4067,49 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([new BoundReturn(call, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ~(x + y); }", 11, 4057, "int32", 10L, 32L, 2, -43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return ~((x) & (y)); }", 11, 4071, "int32", 7L, 3L, 2, -4L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~(5 | x); }", 11, 4373, "int32", 2L, 0L, 1, -8L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(0xF ^ 0xA); }", 11, 4575, "int32", 0L, 0L, 0, -6L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "uint64 Value(uint64 x) { return ~(x & 0xFFFFFFFFFFFFFFFF); }", 11, 4171, "uint64", 15L, 0L, 1, -16L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return +(x + y); }", 12, 6057, "int32", 10L, 32L, 2, 42L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return -((x) + (y)); }", 12, 8057, "int32", 10L, 32L, 2, -42L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int64 Value(int64 x, int64 y) { return -(x & y); }", 12, 8071, "int64", 7L, 3L, 2, -3L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "uint32 Value(uint32 x) { return +(x | 5); }", 12, 6173, "uint32", 2L, 0L, 1, 7L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x) { return -(5 ^ x); }", 12, 8375, "int32", 2L, 0L, 1, -7L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return +(42 + 1); }", 12, 6557, "int32", 0L, 0L, 0, 43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return -(0xF ^ 0xA); }", 12, 8575, "int32", 0L, 0L, 0, -5L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~(-x); }", 13, 10058, "int32", 42L, 0L, 1, 41L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "uint32 Value(uint32 x) { return ~(+((x))); }", 13, 10057, "uint32", 0L, 0L, 1, -1L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int64 Value(int64 x) { return ~(-(x)); }", 13, 10058, "int64", -1L, 0L, 1, -2L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(-2147483648); }", 13, 10003, "int32", 0L, 0L, 0, 2147483647L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int64 Value() { return ~(-9223372036854775808); }", 13, 10003, "int64", 0L, 0L, 0, 9223372036854775807L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(-0xFFFFFFFF); }", 13, 10003, "int32", 0L, 0L, 0, -2L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return ~(-(42)); }", 13, 10658, "int32", 0L, 0L, 0, 41L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(+((42))); }", 13, 10657, "int32", 0L, 0L, 0, -43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x) { return -(~x); }", 14, 14063, "int32", 42L, 0L, 1, 43L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return +((~x)); }", 14, 12063, "int32", 42L, 0L, 1, -43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "uint64 Value(uint64 x) { return +(~(x)); }", 14, 12063, "uint64", 0L, 0L, 1, -1L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return -(~42); }", 14, 14163, "int32", 0L, 0L, 0, 43L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return +((~42)); }", 14, 12163, "int32", 0L, 0L, 0, -43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "uint32 Value() { return +(~0xFFFFFFFF); }", 14, 12163, "uint32", 0L, 0L, 0, 0L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ~(+(x + y)); }", 16, 22057, "int32", 10L, 32L, 2, -43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int64 Value(int64 x, int64 y) { return ~(-(x & y)); }", 16, 24071, "int64", 7L, 3L, 2, 2L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "uint32 Value(uint32 x) { return ~(+(x | 5)); }", 16, 22173, "uint32", 2L, 0L, 1, -8L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x) { return ~(-(5 ^ x)); }", 16, 24375, "int32", 2L, 0L, 1, 6L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return ~(+(42 + 1)); }", 16, 22557, "int32", 0L, 0L, 0, -44L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return +(~(x + y)); }", 17, 30057, "int32", 10L, 32L, 2, -43L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return -(~(x + y)); }", 17, 32057, "int32", 10L, 32L, 2, 43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "uint32 Value(uint32 x) { return +(~(5 | x)); }", 17, 30373, "uint32", 2L, 0L, 1, -8L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int64 Value(int64 x, int64 y) { return -(~(x & y)); }", 17, 32071, "int64", 7L, 3L, 2, 4L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return +(~(0xF ^ 0xA)); }", 17, 30575, "int32", 0L, 0L, 0, -6L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ~(~(x + y)); }", 18, 38057, "int32", 10L, 32L, 2, 42L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int64 Value(int64 x, int64 y) { return ~(~((x) & (y))); }", 18, 38071, "int64", 7L, 3L, 2, 3L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "uint64 Value(uint64 x) { return ~(~(x & 0xFFFFFFFFFFFFFFFF)); }", 18, 38171, "uint64", 15L, 0L, 1, 15L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(~(0xF ^ 0xA)); }", 18, 38575, "int32", 0L, 0L, 0, 5L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return ~(x + y); }",11,4057,"int32",10L,32L,2,-43L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return ~((x) & (y)); }",11,4071,"int32",7L,3L,2,-4L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x) { return ~(5 | x); }",11,4373,"int32",2L,0L,1,-8L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(0xF ^ 0xA); }",11,4575,"int32",0L,0L,0,-6L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"uint64 Value(uint64 x) { return ~(x & 0xFFFFFFFFFFFFFFFF); }",11,4171,"uint64",15L,0L,1,-16L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return +(x + y); }",12,6057,"int32",10L,32L,2,42L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return -((x) + (y)); }",12,8057,"int32",10L,32L,2,-42L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int64 Value(int64 x, int64 y) { return -(x & y); }",12,8071,"int64",7L,3L,2,-3L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"uint32 Value(uint32 x) { return +(x | 5); }",12,6173,"uint32",2L,0L,1,7L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x) { return -(5 ^ x); }",12,8375,"int32",2L,0L,1,-7L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return +(42 + 1); }",12,6557,"int32",0L,0L,0,43L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return -(0xF ^ 0xA); }",12,8575,"int32",0L,0L,0,-5L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x) { return ~(-x); }",13,10058,"int32",42L,0L,1,41L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"uint32 Value(uint32 x) { return ~(+((x))); }",13,10057,"uint32",0L,0L,1,-1L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int64 Value(int64 x) { return ~(-(x)); }",13,10058,"int64",-1L,0L,1,-2L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(-2147483648); }",13,10003,"int32",0L,0L,0,2147483647L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int64 Value() { return ~(-9223372036854775808); }",13,10003,"int64",0L,0L,0,9223372036854775807L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(-0xFFFFFFFF); }",13,10003,"int32",0L,0L,0,-2L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return ~(-(42)); }",13,10658,"int32",0L,0L,0,41L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(+((42))); }",13,10657,"int32",0L,0L,0,-43L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x) { return -(~x); }",14,14063,"int32",42L,0L,1,43L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x) { return +((~x)); }",14,12063,"int32",42L,0L,1,-43L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"uint64 Value(uint64 x) { return +(~(x)); }",14,12063,"uint64",0L,0L,1,-1L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return -(~42); }",14,14163,"int32",0L,0L,0,43L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return +((~42)); }",14,12163,"int32",0L,0L,0,-43L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"uint32 Value() { return +(~0xFFFFFFFF); }",14,12163,"uint32",0L,0L,0,0L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return ~(+(x + y)); }",16,22057,"int32",10L,32L,2,-43L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int64 Value(int64 x, int64 y) { return ~(-(x & y)); }",16,24071,"int64",7L,3L,2,2L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"uint32 Value(uint32 x) { return ~(+(x | 5)); }",16,22173,"uint32",2L,0L,1,-8L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x) { return ~(-(5 ^ x)); }",16,24375,"int32",2L,0L,1,6L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return ~(+(42 + 1)); }",16,22557,"int32",0L,0L,0,-44L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value(int32 x, int32 y) { return +(~(x + y)); }",17,30057,"int32",10L,32L,2,-43L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return -(~(x + y)); }",17,32057,"int32",10L,32L,2,43L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"uint32 Value(uint32 x) { return +(~(5 | x)); }",17,30373,"uint32",2L,0L,1,-8L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int64 Value(int64 x, int64 y) { return -(~(x & y)); }",17,32071,"int64",7L,3L,2,4L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return +(~(0xF ^ 0xA)); }",17,30575,"int32",0L,0L,0,-6L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value(int32 x, int32 y) { return ~(~(x + y)); }",18,38057,"int32",10L,32L,2,42L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int64 Value(int64 x, int64 y) { return ~(~((x) & (y))); }",18,38071,"int64",7L,3L,2,3L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"uint64 Value(uint64 x) { return ~(~(x & 0xFFFFFFFFFFFFFFFF)); }",18,38171,"uint64",15L,0L,1,15L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return ~(~(0xF ^ 0xA)); }",18,38575,"int32",0L,0L,0,5L)]
     public async Task NativeScalarFrontendGroupedIntegerUnaryExecutesAsync(
         NativeRuntimePolicy policy, string text, int version, int operation, string typeName,
         long first, long second, int parameterCount, long expected)
@@ -4375,12 +4119,11 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
@@ -4410,15 +4153,13 @@ public sealed partial class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("~", "-", StringComparison.Ordinal)), bytes));
         }
-        var type = typeName switch
-        {
+        var type = typeName switch {
             "int64" => PrimitiveType.Int64,
             "uint32" => PrimitiveType.UInt32,
             "uint64" => PrimitiveType.UInt64,
             _ => PrimitiveType.Int32,
         };
-        ImmutableArray<BoundExpression> arguments = parameterCount switch
-        {
+        ImmutableArray<BoundExpression> arguments = parameterCount switch {
             0 => [],
             1 => [new BoundConstant(first, type, default)],
             _ => [new BoundConstant(first, type, default),
@@ -4436,13 +4177,11 @@ public sealed partial class ManagedScannerComponentTests
                     default), default)], default), default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NativeScalarFrontendGroupedInt64MinusExecutesAsync(NativeRuntimePolicy policy)
     {
         const string text = "int64 Value() { return -(0xFFFFFFFFFFFFFFD6); }";
@@ -4451,12 +4190,11 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, 658),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, 658)));
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var call = new BoundCall(0, [], PrimitiveType.Int64, default);
         var matches = new BoundBinary(TokenKind.EqualsEquals, call,
@@ -4469,15 +4207,13 @@ public sealed partial class ManagedScannerComponentTests
                     default), default)], default), default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x, int32 y) { return !(x < y); }", 8, 2067, 2, 1)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x, int32 y) { return !(x < y); }", 8, 2067, 2, 1)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x, int32 y) { return !(!(x < y)); }", 15, 18067, 1, 2)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x, int32 y) { return !(!(x < y)); }", 15, 18067, 1, 2)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x, int32 y) { return !(x < y); }",8,2067,2,1)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x, int32 y) { return !(x < y); }",8,2067,2,1)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x, int32 y) { return !(!(x < y)); }",15,18067,1,2)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x, int32 y) { return !(!(x < y)); }",15,18067,1,2)]
     public async Task NativeScalarFrontendNegatedComparisonExecutesAsync(
         NativeRuntimePolicy policy, string text, int version, int operation,
         int first, int second)
@@ -4487,14 +4223,13 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
         var expressionWords = ScalarFrontendExpressionWordOffsets(bytes);
         var actualOperation = ExpectedScalarFrontendOperation(source, bytes, operation);
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
@@ -4525,15 +4260,13 @@ public sealed partial class ManagedScannerComponentTests
                     default), default)], default), default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(bool x) { return !(x && true); }", 2772, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(bool x) { return !((x) && (true)); }", 2772, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(bool x) { return !(false || x); }", 2974, true)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value() { return !(true == false); }", 3165, false)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(bool x) { return !(x && true); }",2772,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(bool x) { return !((x) && (true)); }",2772,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(bool x) { return !(false || x); }",2974,true)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value() { return !(true == false); }",3165,false)]
     public async Task NativeScalarFrontendNegatedBooleanLiteralExecutesAsync(
         NativeRuntimePolicy policy, string text, int operation, bool hasParameter)
     {
@@ -4542,12 +4275,11 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 8);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
@@ -4577,17 +4309,15 @@ public sealed partial class ManagedScannerComponentTests
                     default), default)], default), default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return !(x < 42); }", 2167, "int32", 42L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return !(42 >= x); }", 2370, "int32", 43L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return !(x >= -1); }", 3370, "int32", -2L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return !(-42 < x); }", 3567, "int32", -43L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return !(+42 <= x); }", 3968, "int32", 41L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(uint64 x) { return !(x != 0xFFFFFFFFFFFFFFFF); }", 2166, "uint64", -1L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return !(x < 42); }",2167,"int32",42L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return !(42 >= x); }",2370,"int32",43L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return !(x >= -1); }",3370,"int32",-2L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(int32 x) { return !(-42 < x); }",3567,"int32",-43L)]
+    [TestCase(NativeRuntimePolicy.FailFast,"bool Value(int32 x) { return !(+42 <= x); }",3968,"int32",41L)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"bool Value(uint64 x) { return !(x != 0xFFFFFFFFFFFFFFFF); }",2166,"uint64",-1L)]
     public async Task NativeScalarFrontendNegatedNumericLiteralExecutesAsync(
         NativeRuntimePolicy policy, string text, int operation, string typeName, long value)
     {
@@ -4596,12 +4326,11 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 9);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 87);
@@ -4622,23 +4351,21 @@ public sealed partial class ManagedScannerComponentTests
                     default), default)], default), default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "&&", true, true, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "&&", true, false, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, "||", false, true, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "||", false, false, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, "&", true, false, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "&", true, false, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, "|", false, true, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "|", false, true, true)]
-    [InlineData(NativeRuntimePolicy.FailFast, "^", true, false, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "^", true, true, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, "==", true, true, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "!=", true, false, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,"&&",true,true,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"&&",true,false,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,"||",false,true,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"||",false,false,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,"&",true,false,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"&",true,false,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,"|",false,true,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"|",false,true,true)]
+    [TestCase(NativeRuntimePolicy.FailFast,"^",true,false,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"^",true,true,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,"==",true,true,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"!=",true,false,true)]
     public async Task NativeScalarFrontendBooleanPairExecutesAsync(
         NativeRuntimePolicy policy, string op, bool first, bool second, bool expected)
     {
@@ -4648,11 +4375,11 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         var result = ScalarFrontendHost.ReadResult(source, bytes);
-        Assert.Equal(5, result.WhenTrue.Type);
+        Assert.That(result.WhenTrue.Type, Is.EqualTo(5));
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4675,23 +4402,21 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([branch], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "x && true", true, true, 772)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "false && x", true, false, 972)]
-    [InlineData(NativeRuntimePolicy.FailFast, "x || false", false, false, 774)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "true || x", false, true, 974)]
-    [InlineData(NativeRuntimePolicy.FailFast, "x & false", true, false, 771)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "true | x", false, true, 973)]
-    [InlineData(NativeRuntimePolicy.FailFast, "x ^ true", true, false, 775)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "false ^ x", true, true, 975)]
-    [InlineData(NativeRuntimePolicy.FailFast, "x == true", true, true, 765)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "false != x", true, true, 966)]
-    [InlineData(NativeRuntimePolicy.FailFast, "(x) && ((true))", true, true, 772)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "((false)) != (x)", true, true, 966)]
+    [TestCase(NativeRuntimePolicy.FailFast,"x && true",true,true,772)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"false && x",true,false,972)]
+    [TestCase(NativeRuntimePolicy.FailFast,"x || false",false,false,774)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"true || x",false,true,974)]
+    [TestCase(NativeRuntimePolicy.FailFast,"x & false",true,false,771)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"true | x",false,true,973)]
+    [TestCase(NativeRuntimePolicy.FailFast,"x ^ true",true,false,775)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"false ^ x",true,true,975)]
+    [TestCase(NativeRuntimePolicy.FailFast,"x == true",true,true,765)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"false != x",true,true,966)]
+    [TestCase(NativeRuntimePolicy.FailFast,"(x) && ((true))",true,true,772)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"((false)) != (x)",true,true,966)]
     public async Task NativeScalarFrontendBooleanLiteralPairExecutesAsync(
         NativeRuntimePolicy policy, string expression, bool input, bool expected, int operation)
     {
@@ -4701,11 +4426,10 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         foreach (var (word, value) in new[] { (0, 2), (24, 2), (25, 22) })
         {
             var offset = word * sizeof(int);
@@ -4729,14 +4453,12 @@ public sealed partial class ManagedScannerComponentTests
                     default), default)], default), default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("true && false", 1172)]
-    [InlineData("true == false", 1165)]
-    [InlineData("(true) == ((false))", 1165)]
+    [TestCase("true && false",1172)]
+    [TestCase("true == false",1165)]
+    [TestCase("(true) == ((false))",1165)]
     public async Task ScalarFrontendBooleanLiteralPairRejectsForgedWordsAsync(
         string expression, int operation)
     {
@@ -4746,11 +4468,10 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         foreach (var (word, value) in new[] { (0, 2), (23, operation == 1172 ? 1174 : 1166),
             (24, 22), (25, 22) })
         {
@@ -4762,14 +4483,12 @@ public sealed partial class ManagedScannerComponentTests
         }
         await ExecuteAotAsync(stage, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "-x", -42, 58)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "-x", -42, 58)]
-    [InlineData(NativeRuntimePolicy.FailFast, "+x", 42, 57)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "+x", 42, 57)]
-    [InlineData(NativeRuntimePolicy.FailFast, "-(x)", -42, 58)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "+((x))", 42, 57)]
+    [TestCase(NativeRuntimePolicy.FailFast,"-x",-42,58)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"-x",-42,58)]
+    [TestCase(NativeRuntimePolicy.FailFast,"+x",42,57)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"+x",42,57)]
+    [TestCase(NativeRuntimePolicy.FailFast,"-(x)",-42,58)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"+((x))",42,57)]
     public async Task NativeScalarFrontendNamedUnaryIntegerExecutesAsync(
         NativeRuntimePolicy policy, string expression, int input, int operation)
     {
@@ -4779,11 +4498,10 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4799,17 +4517,15 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([new BoundReturn(call, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return 20 + 22; }", 557)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return 20 + 22; }", 557)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return 0x2A & 0x3F; }", 571)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return 0x2A & 0x3F; }", 571)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return (20) + ((22)); }", 557)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return (20) + ((22)); }", 557)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return 20 + 22; }",557)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return 20 + 22; }",557)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return 0x2A & 0x3F; }",571)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return 0x2A & 0x3F; }",571)]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { return (20) + ((22)); }",557)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { return (20) + ((22)); }",557)]
     public async Task NativeScalarFrontendIntegerLiteralPairExecutesAsync(
         NativeRuntimePolicy policy, string text, int operation)
     {
@@ -4818,11 +4534,10 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(ExpectedScalarFrontendOperation(source, bytes, operation),
-            ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation, Is.EqualTo(ExpectedScalarFrontendOperation(source, bytes, operation)));
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);
@@ -4837,15 +4552,13 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([new BoundReturn(call, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
     public async Task NativeScalarFrontendTrailingReturnExecutesAsync(
         NativeRuntimePolicy policy, bool input)
     {
@@ -4855,13 +4568,13 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         var result = ScalarFrontendHost.ReadResult(source, bytes);
-        Assert.True(result.HasCondition);
-        Assert.True(result.HasFallthrough);
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.That(result.HasCondition, Is.True);
+        Assert.That(result.HasFallthrough, Is.True);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
         foreach (var (word, value) in new[] { (0, 3), (15, 0), (15, 1) })
         {
             var offset = word * sizeof(int);
@@ -4890,13 +4603,11 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([branch], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NativeScalarStandaloneBlocksPublishAndExecuteAsync(NativeRuntimePolicy policy)
     {
         const string text = "int32 Value() { { mut int32 x = 1; x++; } { int32 x = 42; return x; } }";
@@ -4905,15 +4616,15 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(87, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(bytes), Is.EqualTo(87));
         var result = ScalarFrontendHost.ReadResult(source, bytes);
-        Assert.Equal(2, result.Locals.Length);
-        Assert.Equal(6, result.Statements.Length);
-        Assert.Equal(14, result.Statements[0].Kind);
-        Assert.Equal(14, result.Statements[3].Kind);
+        Assert.That(result.Locals.Length, Is.EqualTo(2));
+        Assert.That(result.Statements.Length, Is.EqualTo(6));
+        Assert.That(result.Statements[0].Kind, Is.EqualTo(14));
+        Assert.That(result.Statements[3].Kind, Is.EqualTo(14));
         await ExecuteAotAsync(stage, policy).ConfigureAwait(true);
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var call = new BoundCall(0, [], PrimitiveType.Int32, default);
@@ -4921,17 +4632,15 @@ public sealed partial class ManagedScannerComponentTests
             new BoundBlock([new BoundReturn(call, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
-        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        Assert.That(NativeJit.Execute(executable, policy), Is.EqualTo(42));
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { { int32 x = 1; } return x; }", 3, "x;")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { { int32 x = 1; } return x; }", 3, "x;")]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { int32 x = 1; { int32 x = 2; } return x; }", 4, "x = 2")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { int32 x = 1; { int32 x = 2; } return x; }", 4, "x = 2")]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { { var x = x; } return 42; }", 3, "x;")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { { var x = x; } return 42; }", 3, "x;")]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { { int32 x = 1; } return x; }",3,"x;")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { { int32 x = 1; } return x; }",3,"x;")]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { int32 x = 1; { int32 x = 2; } return x; }",4,"x = 2")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { int32 x = 1; { int32 x = 2; } return x; }",4,"x = 2")]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32 Value() { { var x = x; } return 42; }",3,"x;")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32 Value() { { var x = x; } return 42; }",3,"x;")]
     public async Task NativeScalarStandaloneBlocksRejectInvalidNamesAtTheirRawSpanAsync(
         NativeRuntimePolicy policy, string text, int code, string marker)
     {
@@ -4939,14 +4648,14 @@ public sealed partial class ManagedScannerComponentTests
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
-        Assert.Equal(42, native.ExitCode);
+        Assert.That(native.ExitCode, Is.EqualTo(42));
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         var result = ScalarFrontendHost.ReadResult(SourceText.From(text), bytes);
-        Assert.False(result.IsValid);
-        Assert.Equal(code, result.ErrorCode);
-        Assert.Equal(new TextSpan(text.IndexOf(marker, StringComparison.Ordinal), 1), result.ErrorSpan);
-        Assert.All(bytes.AsSpan(37 * sizeof(int)).ToArray(), value => Assert.Equal(0, value));
+        Assert.That(result.IsValid, Is.False);
+        Assert.That(result.ErrorCode, Is.EqualTo(code));
+        Assert.That(result.ErrorSpan, Is.EqualTo(new TextSpan(text.IndexOf(marker, StringComparison.Ordinal), 1)));
+        {var __nunitItems0 = bytes.AsSpan(37 * sizeof(int)).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem28 in __nunitItems0) { Assert.That(__nunitItem28, Is.EqualTo(0)); } });}
         await ExecuteAotAsync(stage, policy).ConfigureAwait(true);
     }
 
@@ -5128,8 +4837,8 @@ public sealed partial class ManagedScannerComponentTests
             ? ScalarFrontendHost.CreateBuffers(SourceText.From(text))
             : ScannerHost.CreateBuffers(SourceText.From(text));
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual29 = compilation.Program; Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual29!; }))();
     }
 
     private static async Task ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
@@ -5145,12 +4854,25 @@ public sealed partial class ManagedScannerComponentTests
                 UseShellExecute = false,
                 CreateNoWindow = true,
             }) ?? throw new InvalidOperationException("Could not start compiled managed scanner.");
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(true);
-            Assert.Equal(42, process.ExitCode);
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw;
+            }
+            Assert.That(process.ExitCode, Is.EqualTo(42));
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

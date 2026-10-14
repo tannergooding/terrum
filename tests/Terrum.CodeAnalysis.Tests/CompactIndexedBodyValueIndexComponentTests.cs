@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -144,10 +144,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var cases = new List<ValueIndexCase>();
@@ -208,10 +206,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
 
         await ExecuteCasesAsync(cases, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexRejectsValueUsesNotDominatedByTheirOwner(
         BoundRuntimePolicy policy)
     {
@@ -228,20 +224,16 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
 
         await ExecuteCasesAsync([bypassedOwner], policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexRejectsExternalUsesMissingLiveInDeclarations(
         BoundRuntimePolicy policy)
     {
         await ExecuteCasesAsync(
             [DominatedCrossBlockValueUse(declareLiveIn: false)], policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexRejectsSelfSupportingDeadLoopTransit(
         BoundRuntimePolicy policy)
     {
@@ -260,10 +252,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
 
         await ExecuteCasesAsync(cases, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexRejectsUnavailableOrUnsortedLiveInsAndLiveOuts(
         BoundRuntimePolicy policy)
     {
@@ -345,10 +335,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
                 missingTransitLiveIn, unusedLiveIn],
             policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexReusesValidatedBodyIndexForBatch(
         BoundRuntimePolicy policy)
     {
@@ -375,10 +363,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         await ExecuteAsync(sources,
             CreateBuffers(section, expected, facts, fixture), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexRejectsHostedValueRuleViolations(
         BoundRuntimePolicy policy)
     {
@@ -440,10 +426,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
 
         await ExecuteCasesAsync(cases, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexChecksAcceptedRegionBoundaries(
         BoundRuntimePolicy policy)
     {
@@ -503,15 +487,13 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
 
         await ExecuteCasesAsync(cases, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexRequiresExactBuffersAndValidArguments(
         BoundRuntimePolicy policy)
     {
         var testCase = DivRemBlocks(4);
-        Assert.Equal((2, 6), InspectHosted(testCase));
+        Assert.That(InspectHosted(testCase), Is.EqualTo((2, 6)));
         var facts = DecodeFacts(testCase.Section);
         var exact = CreateBuffers(testCase.Section, [], facts, testCase);
         var sources = await LoadComponentsAsync().ConfigureAwait(true);
@@ -577,10 +559,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
             """, "indexed-value-argument-rejection.terrum");
         await ExecuteAsync([.. sources, invalidArguments], exact, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexChecksSelectedOperationTypeRelationsButNotGeneralSemantics(
         BoundRuntimePolicy policy)
     {
@@ -607,7 +587,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
             TrRmBodyExampleTests.IndexedScalarOperation([0x17, 2, 1], [2], 2),
             1, [2], ResultTypeSpec: 2, ExpectedValid: false, SecondTypeCode: 0x0D);
         Assert.Throws<InvalidDataException>(() => InspectHosted(bitNotBoolean));
-        Assert.Equal((1, 2), InspectHosted(validBooleanNot));
+        Assert.That(InspectHosted(validBooleanNot), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectHosted(boolNotInteger));
         Assert.Throws<InvalidDataException>(() => InspectHosted(checkedNegateUnsigned));
 
@@ -650,12 +630,12 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         var validComparison = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([5, 3, 4, 1, 2], [2, 2], 1),
             2, [2, 2], ResultTypeSpec: 1);
-        Assert.Equal((1, 3), InspectHosted(validComparison));
+        Assert.That(InspectHosted(validComparison), Is.EqualTo((1, 3)));
 
         var validCheckedShift = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([0x15, 3, 6, 1, 2], [2, 3], 2),
             2, [2, 3], ResultTypeSpec: 2, TypeSpecCount: 3, ThirdTypeCode: 0x0D);
-        Assert.Equal((1, 3), InspectHosted(validCheckedShift));
+        Assert.That(InspectHosted(validCheckedShift), Is.EqualTo((1, 3)));
 
         var comparisonResultMismatch = new ValueIndexCase(
             TrRmBodyExampleTests.IndexedScalarOperation([5, 3, 4, 1, 2], [2, 2], 2),
@@ -719,15 +699,15 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         Assert.Throws<InvalidDataException>(() => InspectHosted(invalidBooleanConstant));
         Assert.Throws<InvalidDataException>(() => InspectHosted(invalidSignedBooleanConstant));
         Assert.Throws<InvalidDataException>(() => InspectHosted(invalidUnsignedNegativeConstant));
-        Assert.Equal((1, 1), InspectHosted(validUnsignedSignedConstant));
-        Assert.Equal((1, 1), InspectHosted(wideInt32Minimum));
+        Assert.That(InspectHosted(validUnsignedSignedConstant), Is.EqualTo((1, 1)));
+        Assert.That(InspectHosted(wideInt32Minimum), Is.EqualTo((1, 1)));
         Assert.Throws<InvalidDataException>(() => InspectHosted(wideInt32AboveMaximum));
         Assert.Throws<InvalidDataException>(() => InspectHosted(wideInt32BelowMinimum));
-        Assert.Equal((1, 1), InspectHosted(wideUnsignedMaximum));
+        Assert.That(InspectHosted(wideUnsignedMaximum), Is.EqualTo((1, 1)));
         Assert.Throws<InvalidDataException>(() => InspectHosted(wideUnsignedAboveMaximum));
-        Assert.Equal((1, 1), InspectHosted(float32Bits));
+        Assert.That(InspectHosted(float32Bits), Is.EqualTo((1, 1)));
         Assert.Throws<InvalidDataException>(() => InspectHosted(float32HighBits));
-        Assert.Equal((1, 1), InspectHosted(float64Bits));
+        Assert.That(InspectHosted(float64Bits), Is.EqualTo((1, 1)));
         Assert.Throws<InvalidDataException>(() => InspectHosted(selectConditionMismatch));
         Assert.Throws<InvalidDataException>(() => InspectHosted(checkedShiftCountMismatch));
 
@@ -762,7 +742,9 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         Assert.Throws<InvalidDataException>(() => InspectHosted(divRemQuotientMismatch));
         Assert.Throws<InvalidDataException>(() => InspectHosted(divRemRemainderMismatch));
         var divRemBooleanOperand = validDivRem with {
-            FirstTypeCode = 8, SecondTypeCode = 1, ExpectedValid = false,
+            FirstTypeCode = 8,
+            SecondTypeCode = 1,
+            ExpectedValid = false,
         };
         Assert.Throws<InvalidDataException>(() => InspectHosted(divRemBooleanOperand));
 
@@ -799,10 +781,8 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
                 ghostLiveness, targetMismatch],
             policy, validateHosted: false).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedValueIndexChecksConversionsAndOptionalScalarTypes(
         BoundRuntimePolicy policy)
     {
@@ -894,8 +874,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
                 {
                     if (fixture.ExpectedValid)
                     {
-                        Assert.Equal((facts.Starts.Length - 1, facts.Definitions.Length),
-                            InspectHosted(fixture));
+                        Assert.That(InspectHosted(fixture), Is.EqualTo((facts.Starts.Length - 1, facts.Definitions.Length)));
                     }
                     else
                     {
@@ -1352,7 +1331,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var source = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(source.HasErrors, string.Join(Environment.NewLine, source.Diagnostics));
+            Assert.That(source.HasErrors, Is.False, string.Join(Environment.NewLine, source.Diagnostics));
             sources.Add(source);
         }
         return sources;
@@ -1362,19 +1341,20 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         HostBuffer[] buffers, BoundRuntimePolicy policy)
     {
         var compilation = Compilation.Create(sources, [.. buffers], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
         var path = Path.Combine(Path.GetTempPath(), $"indexed-value-index-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, (NativeRuntimePolicy)policy))
                 .ConfigureAwait(true);
             using var process = Process.Start(new ProcessStartInfo(path) {
-                UseShellExecute = false, CreateNoWindow = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
             }) ?? throw new InvalidOperationException("Failed to start native executable.");
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(true);
-            Assert.Equal(0, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(0));
         }
         finally
         {

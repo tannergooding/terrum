@@ -5,7 +5,7 @@ using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -40,36 +40,39 @@ public sealed class ExpressionBodyTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void EverySupportedCallableSurfaceRetainsSyntaxAndBinds()
     {
         var tree = SyntaxTree.Parse(Source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(Source, tree.Root.ToFullString());
-        Assert.Equal(10, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ExpressionBody));
-        Assert.All(tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ExpressionBody), body => {
-            Assert.Equal(TokenKind.Arrow, Assert.IsType<SyntaxTokenElement>(body.Children[0]).Token.Kind);
-            Assert.Equal(TokenKind.Semicolon, body.DescendantTokens().Last().Kind);
-        });
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        Assert.That(tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ExpressionBody), Is.EqualTo(10));
+        {var __nunitItems0 = tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ExpressionBody);        Assert.Multiple(() => {
+            foreach (var __nunitItem1 in __nunitItems0)
+            {
+                {
+                    Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual0 = __nunitItem1.Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual0!; }))().Token.Kind, Is.EqualTo(TokenKind.Arrow));
+                    Assert.That(__nunitItem1.DescendantTokens().Last().Kind, Is.EqualTo(TokenKind.Semicolon));
+                }
+            }
+        });}
         var compilation = Compilation.Create(tree);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.True(Assert.Single(program.Functions, function => function.Name == "Meter.#get:Y").IsNoThrow);
-        Assert.Equal(42, Native.NativeJit.Execute(program, Native.NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Meter.#get:Y").IsNoThrow, Is.True);
+        Assert.That(Native.NativeJit.Execute(program, Native.NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("int32 Main() => _ = 42;", "TRM3010")]
-    [InlineData("int32 Main() => require true;", "TRM3010")]
-    [InlineData("void Main() => 42;", "TRM3009")]
-    [InlineData("struct S { int32 Value; public S(int32 value) => value; } int32 Main() => 0;", "TRM3009")]
-    [InlineData("struct S { int32 Value; public int32 Result => _ = Value; } int32 Main() => 0;", "TRM3010")]
-    [InlineData("[NoThrow] int32 Unsafe(int32 x) => x / 0; int32 Main() => 0;", "TRM3017")]
-    [InlineData("struct S { public int32 Value; public S(int32 x) => Value = x; [NoThrow] public int32 Result => Value / 0; } int32 Main() => 0;", "TRM3001")]
+    [TestCase("int32 Main() => _ = 42;","TRM3010")]
+    [TestCase("int32 Main() => require true;","TRM3010")]
+    [TestCase("void Main() => 42;","TRM3009")]
+    [TestCase("struct S { int32 Value; public S(int32 value) => value; } int32 Main() => 0;","TRM3009")]
+    [TestCase("struct S { int32 Value; public int32 Result => _ = Value; } int32 Main() => 0;","TRM3010")]
+    [TestCase("[NoThrow] int32 Unsafe(int32 x) => x / 0; int32 Main() => 0;","TRM3017")]
+    [TestCase("struct S { public int32 Value; public S(int32 x) => Value = x; [NoThrow] public int32 Result => Value / 0; } int32 Main() => 0;","TRM3001")]
     public void InvalidExpressionBodyStatementDiagnoses(string source, string code)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 }

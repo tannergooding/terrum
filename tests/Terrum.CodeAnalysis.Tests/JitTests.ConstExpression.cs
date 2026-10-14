@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ExpressionRequirementPreservesRuntimeCallsAndConditionalOrderAsync(bool checkedFailures)
     {
         const string Source = """
@@ -29,10 +28,8 @@ public sealed partial class JitTests
             ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ParenthesizedRequirementAndNestedCallsExecuteAsync(bool checkedFailures)
     {
         const string Source = """

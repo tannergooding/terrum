@@ -2,7 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -107,15 +107,15 @@ public sealed partial class CliTests
             16_777_215, 16_777_216, 16_777_217, int.MaxValue,
         })
         {
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), int32ToFloat32(value));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), int32ToFloat64(value));
+            Assert.That(int32ToFloat32(value), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)value)));
+            Assert.That(int32ToFloat64(value), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)value)));
         }
         foreach (var value in new uint[] {
             0, 1, 16_777_215, 16_777_216, 16_777_217, 0x8000_0000, uint.MaxValue,
         })
         {
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), uint32ToFloat32(value));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), uint32ToFloat64(value));
+            Assert.That(uint32ToFloat32(value), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)value)));
+            Assert.That(uint32ToFloat64(value), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)value)));
         }
         foreach (var value in new long[] {
             long.MinValue, long.MinValue + 1, -9_007_199_254_740_995, -9_007_199_254_740_993,
@@ -123,8 +123,8 @@ public sealed partial class CliTests
             9_007_199_254_740_993, 9_007_199_254_740_995, long.MaxValue,
         })
         {
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), int64ToFloat32(value));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), int64ToFloat64(value));
+            Assert.That(int64ToFloat32(value), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)value)));
+            Assert.That(int64ToFloat64(value), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)value)));
         }
         var twoTo63 = 1UL << 63;
         var float32HalfUlpAtTwoTo63 = 1UL << 39;
@@ -145,15 +145,15 @@ public sealed partial class CliTests
             twoTo63 + float64UlpAtTwoTo63 + float64HalfUlpAtTwoTo63,
         })
         {
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), uint64ToFloat32(value));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), uint64ToFloat64(value));
+            Assert.That(uint64ToFloat32(value), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)value)));
+            Assert.That(uint64ToFloat64(value), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)value)));
         }
         for (var codeUnit = 0; codeUnit <= char.MaxValue; codeUnit++)
         {
             var value = (char)codeUnit;
             var carrier = (ushort)codeUnit;
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), char16ToFloat32(carrier));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), char16ToFloat64(carrier));
+            Assert.That(char16ToFloat32(carrier), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)value)));
+            Assert.That(char16ToFloat64(carrier), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)value)));
         }
 
         var random = new Random(0xF10A7);
@@ -163,14 +163,14 @@ public sealed partial class CliTests
             var unsigned32 = (uint)random.NextInt64(0, 1L << 32);
             var signed64 = unchecked((long)NextUInt64ForAbi(random));
             var unsigned64 = NextUInt64ForAbi(random);
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)signed32), int32ToFloat32(signed32));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)signed32), int32ToFloat64(signed32));
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)unsigned32), uint32ToFloat32(unsigned32));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)unsigned32), uint32ToFloat64(unsigned32));
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)signed64), int64ToFloat32(signed64));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)signed64), int64ToFloat64(signed64));
-            Assert.Equal(BitConverter.SingleToUInt32Bits((float)unsigned64), uint64ToFloat32(unsigned64));
-            Assert.Equal(BitConverter.DoubleToUInt64Bits((double)unsigned64), uint64ToFloat64(unsigned64));
+            Assert.That(int32ToFloat32(signed32), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)signed32)));
+            Assert.That(int32ToFloat64(signed32), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)signed32)));
+            Assert.That(uint32ToFloat32(unsigned32), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)unsigned32)));
+            Assert.That(uint32ToFloat64(unsigned32), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)unsigned32)));
+            Assert.That(int64ToFloat32(signed64), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)signed64)));
+            Assert.That(int64ToFloat64(signed64), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)signed64)));
+            Assert.That(uint64ToFloat32(unsigned64), Is.EqualTo(BitConverter.SingleToUInt32Bits((float)unsigned64)));
+            Assert.That(uint64ToFloat64(unsigned64), Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)unsigned64)));
         }
     }
 
@@ -269,15 +269,15 @@ public sealed partial class CliTests
         };
         foreach (var nan in nanValues)
         {
-            Assert.True(float.IsNaN(InvokeFloat32(abs, nan)));
-            Assert.True(float.IsNaN(InvokeFloat32(min, nan, 1.0f)));
-            Assert.True(float.IsNaN(InvokeFloat32(min, 1.0f, nan)));
-            Assert.True(float.IsNaN(InvokeFloat32(max, nan, 1.0f)));
-            Assert.True(float.IsNaN(InvokeFloat32(max, 1.0f, nan)));
-            Assert.True(float.IsNaN(InvokeFloat32(clamp, nan, -1.0f, 1.0f)));
+            Assert.That(float.IsNaN(InvokeFloat32(abs, nan)), Is.True);
+            Assert.That(float.IsNaN(InvokeFloat32(min, nan, 1.0f)), Is.True);
+            Assert.That(float.IsNaN(InvokeFloat32(min, 1.0f, nan)), Is.True);
+            Assert.That(float.IsNaN(InvokeFloat32(max, nan, 1.0f)), Is.True);
+            Assert.That(float.IsNaN(InvokeFloat32(max, 1.0f, nan)), Is.True);
+            Assert.That(float.IsNaN(InvokeFloat32(clamp, nan, -1.0f, 1.0f)), Is.True);
         }
-        Assert.True(float.IsNaN(InvokeFloat32(min, nanValues[0], nanValues[1])));
-        Assert.True(float.IsNaN(InvokeFloat32(max, nanValues[0], nanValues[1])));
+        Assert.That(float.IsNaN(InvokeFloat32(min, nanValues[0], nanValues[1])), Is.True);
+        Assert.That(float.IsNaN(InvokeFloat32(max, nanValues[0], nanValues[1])), Is.True);
     }
 
     private static void AssertFloat64Selection(
@@ -368,15 +368,15 @@ public sealed partial class CliTests
         };
         foreach (var nan in nanValues)
         {
-            Assert.True(double.IsNaN(InvokeFloat64(abs, nan)));
-            Assert.True(double.IsNaN(InvokeFloat64(min, nan, 1.0)));
-            Assert.True(double.IsNaN(InvokeFloat64(min, 1.0, nan)));
-            Assert.True(double.IsNaN(InvokeFloat64(max, nan, 1.0)));
-            Assert.True(double.IsNaN(InvokeFloat64(max, 1.0, nan)));
-            Assert.True(double.IsNaN(InvokeFloat64(clamp, nan, -1.0, 1.0)));
+            Assert.That(double.IsNaN(InvokeFloat64(abs, nan)), Is.True);
+            Assert.That(double.IsNaN(InvokeFloat64(min, nan, 1.0)), Is.True);
+            Assert.That(double.IsNaN(InvokeFloat64(min, 1.0, nan)), Is.True);
+            Assert.That(double.IsNaN(InvokeFloat64(max, nan, 1.0)), Is.True);
+            Assert.That(double.IsNaN(InvokeFloat64(max, 1.0, nan)), Is.True);
+            Assert.That(double.IsNaN(InvokeFloat64(clamp, nan, -1.0, 1.0)), Is.True);
         }
-        Assert.True(double.IsNaN(InvokeFloat64(min, nanValues[0], nanValues[1])));
-        Assert.True(double.IsNaN(InvokeFloat64(max, nanValues[0], nanValues[1])));
+        Assert.That(double.IsNaN(InvokeFloat64(min, nanValues[0], nanValues[1])), Is.True);
+        Assert.That(double.IsNaN(InvokeFloat64(max, nanValues[0], nanValues[1])), Is.True);
     }
 
     private static float InvokeFloat32(Float32UnarySelectionExport export, float value)
@@ -429,11 +429,11 @@ public sealed partial class CliTests
 
     private static void AssertFloat32Bits(float expected, float actual)
     {
-        Assert.Equal(BitConverter.SingleToInt32Bits(expected), BitConverter.SingleToInt32Bits(actual));
+        Assert.That(BitConverter.SingleToInt32Bits(actual), Is.EqualTo(BitConverter.SingleToInt32Bits(expected)));
     }
 
     private static void AssertFloat64Bits(double expected, double actual)
     {
-        Assert.Equal(BitConverter.DoubleToInt64Bits(expected), BitConverter.DoubleToInt64Bits(actual));
+        Assert.That(BitConverter.DoubleToInt64Bits(actual), Is.EqualTo(BitConverter.DoubleToInt64Bits(expected)));
     }
 }

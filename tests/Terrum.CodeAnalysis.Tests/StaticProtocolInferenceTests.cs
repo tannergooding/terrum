@@ -3,7 +3,7 @@
 using System;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -20,13 +20,11 @@ public sealed class StaticProtocolInferenceTests
         }
         T Identity<T>(T value) where T : [Copy] { return value; }
         """;
-
-    [Theory]
-    [InlineData("var result = Identity(42);", "TRM3011")]
-    [InlineData("Value result = Identity(42);", "TRM3014")]
-    [InlineData("Value result = Identity(new Other(42));", "TRM3007")]
-    [InlineData("var result = Both(new Value(1), new Other(2));", "TRM3007")]
-    [InlineData("var result = Identity(new Owner(42));", "TRM3007")]
+    [TestCase("var result = Identity(42);","TRM3011")]
+    [TestCase("Value result = Identity(42);","TRM3014")]
+    [TestCase("Value result = Identity(new Other(42));","TRM3007")]
+    [TestCase("var result = Both(new Value(1), new Other(2));","TRM3007")]
+    [TestCase("var result = Identity(new Owner(42));","TRM3007")]
     public void InferenceDoesNotGuessOrRetargetTypedArguments(string body, string diagnostic)
     {
         var source = Values + """
@@ -38,11 +36,11 @@ public sealed class StaticProtocolInferenceTests
             int32 Main() {
             """ + body + "return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, error => error.Code == diagnostic);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,error => error.Code == diagnostic),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ExistingTypedOutLocalInfersTypeWithoutPublishingItDuringInference()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
@@ -53,12 +51,11 @@ public sealed class StaticProtocolInferenceTests
                 return 42;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name == "None<Value>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions,function => function.Name == "None<Value>"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void OutVarAloneDoesNotEstablishTheGenericType()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
@@ -68,30 +65,28 @@ public sealed class StaticProtocolInferenceTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void KnownScalarReturnCannotBypassMissingStructInference()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
             int32 Read<T>(T value, int32 count) where T : [Copy] { return count; }
             int32 Main() { return Read(42, 1) + Read(new Value(41), 1); }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("bool", "true")]
-    [InlineData("char16", "char16(65)")]
-    [InlineData("int32", "int32(42)")]
-    [InlineData("uint32", "uint32(42)")]
-    [InlineData("int64", "int64(42)")]
-    [InlineData("uint64", "uint64(42)")]
-    [InlineData("float32", "float32(42)")]
-    [InlineData("float64", "float64(42)")]
+    [TestCase("bool","true")]
+    [TestCase("char16","char16(65)")]
+    [TestCase("int32","int32(42)")]
+    [TestCase("uint32","uint32(42)")]
+    [TestCase("int64","int64(42)")]
+    [TestCase("uint64","uint64(42)")]
+    [TestCase("float32","float32(42)")]
+    [TestCase("float64","float64(42)")]
     public void CopyScalarSpecializationAcceptsExplicitAndInferredArguments(string type, string value)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + $$"""
@@ -101,12 +96,11 @@ public sealed class StaticProtocolInferenceTests
                 return 42;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name == $"Identity<{type}>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().Functions,function => function.Name == $"Identity<{type}>"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ExpectedScalarResultSuppliesTypeOnlyAfterTypedArguments()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
@@ -118,15 +112,13 @@ public sealed class StaticProtocolInferenceTests
                 return int32(fromContext + typed);
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var functions = Assert.IsType<BoundProgram>(compilation.Program).Functions;
-        Assert.Contains(functions, function => function.Name == "Identity<float32>");
-        Assert.Contains(functions, function => function.Name == "Identity<float64>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var functions = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))().Functions;
+        Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Identity<float32>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Identity<float64>"),Is.True);
     }
-
-    [Theory]
-    [InlineData("float32")]
-    [InlineData("float64")]
+    [TestCase("float32")]
+    [TestCase("float64")]
     public void ConcreteFloatingGenericArgumentsDoNotWidenGetterResults(string type)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
@@ -138,22 +130,20 @@ public sealed class StaticProtocolInferenceTests
                 return int32(value.Number);
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int64 result = Identity(int32(42));")]
-    [InlineData("int32 result = Identity<int32>(int64(42));")]
+    [TestCase("int64 result = Identity(int32(42));")]
+    [TestCase("int32 result = Identity<int32>(int64(42));")]
     public void TypedScalarArgumentCannotBeRetargetedByResultOrExplicitType(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values
             + "int32 Main() { " + body + " return 0; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void FailedScalarOutputLeavesTargetUnavailableUntilRepublished()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
@@ -167,39 +157,35 @@ public sealed class StaticProtocolInferenceTests
                 return target;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void OwnedBufferIsNotACopyGenericArgument()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values
             + "int32 Main() { require OwnedInt32Buffer.TryCreate(1, out var raw);"
             + " mut OwnedInt32Buffer buffer = move raw; var result = Identity(buffer); return 0; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("return value + value;")]
-    [InlineData("return new T();")]
-    [InlineData("return int32(value);")]
-    [InlineData("return value.Number;")]
+    [TestCase("return value + value;")]
+    [TestCase("return new T();")]
+    [TestCase("return int32(value);")]
+    [TestCase("return value.Number;")]
     public void CopyOnlyDefinitionDoesNotBorrowScalarCapabilities(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values
             + "int32 Inspect<T>(T value) where T : [Copy] { " + body + " }"
             + "int32 Main() { return Inspect(int32(42)); }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("Add<int32>(int32(1))")]
-    [InlineData("Add(int32(1))")]
-    [InlineData("Add<float32>(float32(1))")]
-    [InlineData("Add<float64>(float64(1))")]
+    [TestCase("Add<int32>(int32(1))")]
+    [TestCase("Add(int32(1))")]
+    [TestCase("Add<float32>(float32(1))")]
+    [TestCase("Add<float64>(float64(1))")]
     public void PrimitiveDoesNotAcquireOperatorWitnessAfterStructSpecialization(string call)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -216,11 +202,11 @@ public sealed class StaticProtocolInferenceTests
                 var valid = Add(new Value(1));
                 return
             """ + " " + call + "; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void FailedInferredOutputLeavesExistingTargetUnavailableUntilRepublished()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
@@ -231,13 +217,11 @@ public sealed class StaticProtocolInferenceTests
                 return target.Number;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void InferredHelperUsesDeclaredNoThrowEffect(bool helperNoThrow)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
@@ -250,15 +234,15 @@ public sealed class StaticProtocolInferenceTests
             """));
         if (helperNoThrow)
         {
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         }
         else
         {
-            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
         }
     }
 
-    [Fact]
+    [Test]
     public void InferredHelperCannotBorrowCallersStrongerProtocolWitnesses()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -278,11 +262,11 @@ public sealed class StaticProtocolInferenceTests
                 return Weak(valid).Number;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void VariableAndAmbiguousImportedTemplatesNeverSelectAnInferredCall()
     {
         var shadowed = Compilation.Create(SyntaxTree.Parse(Values + """
@@ -292,7 +276,7 @@ public sealed class StaticProtocolInferenceTests
                 return 0;
             }
             """));
-        Assert.Contains(shadowed.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.That(global::System.Linq.Enumerable.Any(shadowed.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
 
         var ambiguous = Compilation.Create([
             SyntaxTree.Parse("namespace One;" + Values),
@@ -307,6 +291,6 @@ public sealed class StaticProtocolInferenceTests
                 }
                 """),
         ]);
-        Assert.Contains(ambiguous.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.That(global::System.Linq.Enumerable.Any(ambiguous.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
     }
 }

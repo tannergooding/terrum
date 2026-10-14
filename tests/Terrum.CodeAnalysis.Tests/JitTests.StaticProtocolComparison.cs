@@ -2,15 +2,14 @@
 
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ComparisonProtocolSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -24,14 +23,12 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("==", false)]
-    [InlineData("!=", true)]
-    [InlineData("<", true)]
-    [InlineData("<=", true)]
-    [InlineData(">", false)]
-    [InlineData(">=", false)]
+    [TestCase("==",false)]
+    [TestCase("!=",true)]
+    [TestCase("<",true)]
+    [TestCase("<=",true)]
+    [TestCase(">",false)]
+    [TestCase(">=",false)]
     public async Task EveryComparisonRunsConcreteAndGenericBoolCallsAsync(string op, bool expected)
     {
         var value = expected ? "true" : "false";
@@ -57,7 +54,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task EqualityAndInequalityDoNotImplyComplementaryResultsAsync()
     {
         const string Source = """
@@ -84,7 +81,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public Task ComparisonWitnessPreservesCheckedFailureAsync()
     {
         const string Source = """
@@ -110,10 +107,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task IndirectCopyComparisonReturnsBoolAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """

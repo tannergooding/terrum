@@ -9,25 +9,23 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class IntegerMathModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task IntegerMathCandidatesPersistAndMatchBoundaryOraclesAsync(
         BoundRuntimePolicy policy)
     {
         var path = Path.Combine(RepositoryRoot(), "self-host", "IntegerMath.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
 
         var producerCompilation = Compilation.CreateLibrary(tree, policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var exports = new[] {
             "AbsInt32",
             "TryAbsInt32",
@@ -45,7 +43,7 @@ public sealed class IntegerMathModuleTests
             "ClampInt64",
             "GreatestCommonDivisorInt64",
         };
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             Array.ConvertAll(exports, static name => "Terrum.CodeAnalysis.Numerics64." + name));
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerSource = new StringBuilder("using Terrum.CodeAnalysis.Numerics64;\nint32 Main() {\n");
@@ -182,20 +180,18 @@ public sealed class IntegerMathModuleTests
             }
         }
 
-        Assert.Equal(858, checks.Count);
+        Assert.That(checks.Count, Is.EqualTo(858));
         consumerSource.AppendLine("return 0;");
         consumerSource.AppendLine("}");
         consumerSource.Append(helpers);
         var consumerTree = SyntaxTree.Parse(consumerSource.ToString(), "integer-math-consumer.terrum");
-        Assert.False(consumerTree.HasErrors, string.Join(Environment.NewLine, consumerTree.Diagnostics));
+        Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
         var consumerCompilation = Compilation.Create(consumerTree, reference, policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var actual = NativeJit.Execute(ModuleCompiler.Link(consumer, producer), (NativeRuntimePolicy)policy);
-        Assert.True(actual == 0,
-            actual > 0 && actual <= checks.Count
+        Assert.That(actual == 0, Is.True, actual > 0 && actual <= checks.Count
                 ? $"IntegerMath boundary {actual} failed: {checks[actual - 1]}."
                 : $"Expected all IntegerMath checks to pass, got consumer result {actual}.");
 
@@ -212,9 +208,8 @@ public sealed class IntegerMathModuleTests
                 + "}",
                 "integer-math-unpublished-" + function + ".terrum");
             var invalidCompilation = Compilation.Create(invalidConsumer, reference, policy);
-            Assert.Contains(invalidCompilation.Diagnostics,
-                static diagnostic => diagnostic.Code == "TRM3016");
-            Assert.Null(invalidCompilation.Program);
+            Assert.That(global::System.Linq.Enumerable.Any(invalidCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+            Assert.That(invalidCompilation.Program, Is.Null);
         }
     }
 

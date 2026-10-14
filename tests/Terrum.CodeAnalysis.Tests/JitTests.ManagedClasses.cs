@@ -2,15 +2,14 @@
 
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task WritableOptionalFieldProjectionAndReadonlyReceiverArgumentAgreeAcrossAotAndJitAsync(
         bool checkedFailures)
     {
@@ -41,10 +40,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ManagedClassSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -58,10 +55,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ManagedClassReturnStaysRootedAcrossFollowingArgumentAsync(bool checkedFailures)
     {
         const string Source = """
@@ -79,10 +74,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ExplicitlyWritableLeafFieldCanBeWrittenThroughReadonlyManagedHandleChainAsync(bool checkedFailures)
     {
         const string Source = """
@@ -110,10 +103,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task RetiredClassHandlesDoNotTurnScalarsIntoRootsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -134,10 +125,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ExhaustedClassCapacityFailsWithoutPublishingAndReusesCollectedSlotsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -158,10 +147,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task RepeatedClassAndNodeCollectionsReuseUnrootedObjectsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -190,10 +177,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task SixteenManagedEdgesKeepLastFieldAliveAcrossCollectionAsync(bool checkedFailures)
     {
         const string Source = """
@@ -247,7 +232,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedConstructorFailureReleasesProvisionalObjectsForReuseAsync()
     {
         const string Source = """
@@ -274,7 +259,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedConstructorFailureReleasesNestedReferenceBeforeOuterRecoveryAsync()
     {
         const string Source = """

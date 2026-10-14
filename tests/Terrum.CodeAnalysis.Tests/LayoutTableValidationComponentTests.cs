@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -36,10 +36,8 @@ public sealed class LayoutTableValidationComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task LayoutValidationMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var strings = TrRmStringTableWriter.EncodeTextRows([
@@ -84,7 +82,9 @@ public sealed class LayoutTableValidationComponentTests
             invalidByteWords, 1, 1, 5, 0, 1, 0, 0, -1, 0, 0, 1, 0,
             false, false, 2, 1, 2, []));
         cases.Add(Valid(strings, modules, typeDefs, layouts) with {
-            LayoutOwnerCount = 1, ExpectedValid = false, HasHostedOracle = false,
+            LayoutOwnerCount = 1,
+            ExpectedValid = false,
+            HasHostedOracle = false,
         });
         cases.Add(Valid(strings, modules, typeDefs, layouts) with {
             TypeDefs = [.. typeDefs[..^1].Select(static value => (int)value)],
@@ -105,7 +105,7 @@ public sealed class LayoutTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(VerificationSource, "layout-table-validation.terrum"));
@@ -115,8 +115,7 @@ public sealed class LayoutTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                Assert.True(testCase.ExpectedValid == ValidateHosted(testCase),
-                    $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
+                Assert.That(testCase.ExpectedValid == ValidateHosted(testCase), Is.True, $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
             }
 
             var compilation = Compilation.Create(components,
@@ -150,12 +149,10 @@ public sealed class LayoutTableValidationComponentTests
                     .. testCase.ExpectedLayoutOwners,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.True(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0,
-                $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
-            Assert.True(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0,
-                $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
         }
     }
 
@@ -181,7 +178,8 @@ public sealed class LayoutTableValidationComponentTests
         => Valid(strings, modules, typeDefs, layouts, recordCount: recordCount,
             moduleCount: moduleCount, stringCount: stringCount,
             typeDefCount: typeDefCount, layoutCount: layoutCount) with {
-            ExpectedValid = false, HasHostedOracle = hasHostedOracle,
+            ExpectedValid = false,
+            HasHostedOracle = hasHostedOracle,
         };
 
     private static bool ValidateHosted(TableCase testCase)
@@ -277,7 +275,7 @@ public sealed class LayoutTableValidationComponentTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

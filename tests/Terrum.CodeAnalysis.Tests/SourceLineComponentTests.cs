@@ -11,34 +11,33 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class SourceLineComponentTests
 {
-    [Theory]
-    [InlineData("")]
-    [InlineData("plain")]
-    [InlineData("\r")]
-    [InlineData("\n")]
-    [InlineData("\r\n")]
-    [InlineData("\r\r\n\n\r")]
-    [InlineData("a\r\nb\rc\nd\u0085e\u2028f\u2029")]
-    [InlineData("\uD800\r\n\uDC00\0\uD800\uDC00")]
-    [InlineData("\u000B\u000C\u001C\u001D\u001E\u001F\u00A0")]
+    [TestCase("")]
+    [TestCase("plain")]
+    [TestCase("\r")]
+    [TestCase("\n")]
+    [TestCase("\r\n")]
+    [TestCase("\r\r\n\n\r")]
+    [TestCase("a\r\nb\rc\nd\u0085e\u2028f\u2029")]
+    [TestCase("\uD800\r\n\uDC00\0\uD800\uDC00")]
+    [TestCase("\u000B\u000C\u001C\u001D\u001E\u001F\u00A0")]
     public async Task CompiledLinesAndEveryPositionAgreeWithSourceSnapshotAsync(string text)
     {
         await CheckAsync(text).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task AlternatingBreaksAndSurrogatesPreserveAllOffsetsAsync()
     {
         await CheckAsync(string.Concat(Enumerable.Repeat("a\r\n\uD800\u2028\uDC00\n", 64))).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task SourceFacadeModulesBindFreshSnapshotsAndRejectInvalidGrantsAsync()
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -107,28 +106,26 @@ public sealed partial class SourceLineComponentTests
                 [new HostBuffer("Source", PrimitiveType.Char16, [0x1357, 0x2468, 0x369A], false) {
                     IsInvocationScoped = true,
                 }], policy);
-            Assert.False(producerCompilation.HasErrors,
-                string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-            var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+            Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+            var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
                 ["Terrum.CodeAnalysis.GetSourceTextLength", "Terrum.CodeAnalysis.TryReadSourceCodeUnit",
                     "Terrum.CodeAnalysis.TryGetSourceRange", "Terrum.CodeAnalysis.TryReadSourceLine",
                     "Terrum.CodeAnalysis.TryGetSourcePosition", "Terrum.CodeAnalysis.TryGetSourceOffset",
                     "Terrum.CodeAnalysis.TryGetSourceLineExtent",
                     "Terrum.CodeAnalysis.GetLastSourceCodeUnitOrMinusOne",
                     "Terrum.CodeAnalysis.GetFirstSourceCodeUnitOrMinusOne"]);
-            Assert.Equal(-1, producer.AsSpan().IndexOf(new byte[] { 0x57, 0x13, 0x68, 0x24, 0x9A, 0x36 }));
-            Assert.True(ModuleCompiler.CreateReference(producer).RequiresSourceGrant);
+            Assert.That(producer.AsSpan().IndexOf(new byte[] { 0x57, 0x13, 0x68, 0x24, 0x9A, 0x36 }), Is.EqualTo(-1));
+            Assert.That(ModuleCompiler.CreateReference(producer).RequiresSourceGrant, Is.True);
 
             var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-            var consumerProgram = Assert.IsType<BoundProgram>(consumerCompilation.Program);
-            Assert.True(consumerProgram.RequiresSourceGrant);
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+            Assert.That(consumerProgram.RequiresSourceGrant, Is.True);
             Assert.Throws<NotSupportedException>(() =>
                 NativeEmitter.EmitWithImports(consumerProgram, [], (NativeRuntimePolicy)policy));
             var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
             var linked = ModuleCompiler.Link(consumer, producer);
-            Assert.True(linked.RequiresSourceGrant);
+            Assert.That(linked.RequiresSourceGrant, Is.True);
             Assert.Throws<ArgumentException>(() => NativeJit.Execute(linked, (NativeRuntimePolicy)policy));
             Assert.Throws<NotSupportedException>(() => NativeEmitter.Emit(linked, (NativeRuntimePolicy)policy));
 
@@ -137,9 +134,8 @@ public sealed partial class SourceLineComponentTests
                 public int32 Different() { return 0; }
                 int32 Main() { return 0; }
                 """, "source-grant-neutral-producer.terrum"), policy);
-            Assert.False(neutralCompilation.HasErrors,
-                string.Join(Environment.NewLine, neutralCompilation.Diagnostics));
-            var neutralProducer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(neutralCompilation.Program),
+            Assert.That(neutralCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, neutralCompilation.Diagnostics));
+            var neutralProducer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = neutralCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
                 ["Terrum.CodeAnalysis.Different"]);
             Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, neutralProducer));
             Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateReferenceSet([producer, neutralProducer]));
@@ -147,10 +143,9 @@ public sealed partial class SourceLineComponentTests
                 namespace Terrum.CodeAnalysis;
                 public int32 GetSourceTextLength() { return 0; }
                 """, "source-grant-neutral-length.terrum"), policy);
-            Assert.False(neutralLengthCompilation.HasErrors,
-                string.Join(Environment.NewLine, neutralLengthCompilation.Diagnostics));
+            Assert.That(neutralLengthCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, neutralLengthCompilation.Diagnostics));
             var neutralLengthProducer = ModuleCompiler.CreateProducer(
-                Assert.IsType<BoundProgram>(neutralLengthCompilation.Program),
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = neutralLengthCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
                 ["Terrum.CodeAnalysis.GetSourceTextLength"]);
             Assert.Throws<ModuleContractException>(() =>
                 ModuleCompiler.CreateConsumer(consumerProgram, neutralLengthProducer));
@@ -160,7 +155,7 @@ public sealed partial class SourceLineComponentTests
                 var expected = ComputeSourceFacadeChecksum(SourceText.From(text));
                 var actual = NativeJit.ExecuteWithSourceGrant(linked, [CreateSourceGrant(text)],
                     (NativeRuntimePolicy)policy);
-                Assert.True(expected == actual, $"Source snapshot '{text}': expected {expected}, got {actual}.");
+                Assert.That(expected == actual, Is.True, $"Source snapshot '{text}': expected {expected}, got {actual}.");
             }
 
             var vacantOutputCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -170,20 +165,19 @@ public sealed partial class SourceLineComponentTests
                     return int32(codeUnit);
                 }
                 """, "source-grant-vacant-output.terrum"), ModuleCompiler.CreateReference(producer), policy);
-            Assert.True(vacantOutputCompilation.HasErrors);
-            Assert.Contains(vacantOutputCompilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
+            Assert.That(vacantOutputCompilation.HasErrors, Is.True);
+            Assert.That(global::System.Linq.Enumerable.Any(vacantOutputCompilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
 
             var lengthConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
                 namespace Terrum.CodeAnalysis;
                 int32 Main() { return GetSourceTextLength(); }
                 """, "source-grant-length-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(lengthConsumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, lengthConsumerCompilation.Diagnostics));
+            Assert.That(lengthConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, lengthConsumerCompilation.Diagnostics));
             var lengthConsumer = ModuleCompiler.CreateConsumer(
-                Assert.IsType<BoundProgram>(lengthConsumerCompilation.Program), producer);
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = lengthConsumerCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
             var lengthLinked = ModuleCompiler.Link(lengthConsumer, producer);
-            Assert.Equal(16_384, NativeJit.ExecuteWithSourceGrant(lengthLinked,
-                [CreateSourceGrant(new string('x', 16_384))], (NativeRuntimePolicy)policy));
+            Assert.That(NativeJit.ExecuteWithSourceGrant(lengthLinked,
+                [CreateSourceGrant(new string('x', 16_384))], (NativeRuntimePolicy)policy), Is.EqualTo(16_384));
 
             var valid = CreateSourceGrant("");
             Assert.Throws<ArgumentException>(() => NativeJit.ExecuteWithSourceGrant(linked, [], (NativeRuntimePolicy)policy));
@@ -209,7 +203,7 @@ public sealed partial class SourceLineComponentTests
         }
     }
 
-    [Fact]
+    [Test]
     public void PersistedSourceReadsUseInvocationLengthAndResolveCallsInIndexes()
     {
         var sourceTree = SyntaxTree.Parse("""
@@ -229,18 +223,16 @@ public sealed partial class SourceLineComponentTests
             [new HostBuffer("Source", PrimitiveType.Char16, [65, 66, 67], false) {
                 IsInvocationScoped = true,
             }]);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = producerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(),
             ["Terrum.CodeAnalysis.GetLastSourceCodeUnitOrMinusOne",
                 "Terrum.CodeAnalysis.GetFirstSourceCodeUnitOrMinusOne"]);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return GetLastSourceCodeUnitOrMinusOne(); }
             """, "source-grant-index-consumer.terrum"), ModuleCompiler.CreateReference(producer));
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program),
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = consumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(),
             producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
@@ -248,47 +240,44 @@ public sealed partial class SourceLineComponentTests
         {
             var source = SourceText.From(text);
             var last = source.Length == 0 ? -1 : source[source.Length - 1];
-            Assert.Equal(last, NativeJit.ExecuteWithSourceGrant(linked, [CreateSourceGrant(text)],
-                NativeRuntimePolicy.FailFast));
+            Assert.That(NativeJit.ExecuteWithSourceGrant(linked, [CreateSourceGrant(text)],
+                NativeRuntimePolicy.FailFast), Is.EqualTo(last));
         }
     }
-
-    [Theory]
-    [InlineData("bool ok = TryReadSourceLine(-1, init var content, init var including); return content.Start;")]
-    [InlineData("bool ok = TryReadSourceLine(-1, init var content, init var including); return including.Length;")]
-    [InlineData("bool ok = TryGetSourcePosition(-1, init var line, init var character); return line;")]
-    [InlineData("bool ok = TryGetSourcePosition(-1, init var line, init var character); return character;")]
-    [InlineData("bool ok = TryGetSourceOffset(-1, 0, init var offset); return offset;")]
-    [InlineData("bool ok = TryGetSourceOffset(0, 2, init var offset); return offset;")]
-    [InlineData("bool ok = TryGetSourceLineExtent(-1, init var extent); return extent.Start;")]
-    [InlineData("bool ok = TryGetSourceLineExtent(1, init var extent); return extent.Length;")]
-    [InlineData("bool ok = TryReadSourceCodeUnit(-1, init var codeUnit); return int32(codeUnit);")]
-    [InlineData("bool ok = TryGetSourceRange(-1, 0, init var range); return range.Start;")]
+    [TestCase("bool ok = TryReadSourceLine(-1, init var content, init var including); return content.Start;")]
+    [TestCase("bool ok = TryReadSourceLine(-1, init var content, init var including); return including.Length;")]
+    [TestCase("bool ok = TryGetSourcePosition(-1, init var line, init var character); return line;")]
+    [TestCase("bool ok = TryGetSourcePosition(-1, init var line, init var character); return character;")]
+    [TestCase("bool ok = TryGetSourceOffset(-1, 0, init var offset); return offset;")]
+    [TestCase("bool ok = TryGetSourceOffset(0, 2, init var offset); return offset;")]
+    [TestCase("bool ok = TryGetSourceLineExtent(-1, init var extent); return extent.Start;")]
+    [TestCase("bool ok = TryGetSourceLineExtent(1, init var extent); return extent.Length;")]
+    [TestCase("bool ok = TryReadSourceCodeUnit(-1, init var codeUnit); return int32(codeUnit);")]
+    [TestCase("bool ok = TryGetSourceRange(-1, 0, init var range); return range.Start;")]
     public async Task FailedQueriesCannotPublishReadableOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var entry = SyntaxTree.Parse($"namespace Terrum.CodeAnalysis; int32 Main() {{ {body} }}", "entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Contains(compilation.SourceDiagnostics,
-            diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void MultipleSnapshotsPreserveHostGrantRestrictionsAndDiagnosticOwnership()
     {
         var entry = SyntaxTree.Parse("int32 Main() { Write(); return 0; }", "entry.terrum");
         var write = SyntaxTree.Parse("void Write() { Host.Source[0] = char16(66); }", "write.terrum");
         var compilation = Compilation.Create([entry, write],
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(entry, tree), tree => Assert.Same(write, tree));
-        Assert.NotEmpty(compilation.SourceDiagnostics);
-        Assert.All(compilation.SourceDiagnostics, diagnostic => Assert.Same(write, diagnostic.SyntaxTree));
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        { var __nunitItems7 = global::System.Linq.Enumerable.ToArray(compilation.SyntaxTrees); Assert.That(__nunitItems7, Has.Length.EqualTo(2)); Assert.That(__nunitItems7[0], Is.SameAs(entry)); Assert.That(__nunitItems7[1], Is.SameAs(write)); }
+        Assert.That(compilation.SourceDiagnostics, Is.Not.Empty);
+        {var __nunitItems0 = compilation.SourceDiagnostics;        Assert.Multiple(() => { foreach (var __nunitItem8 in __nunitItems0) { Assert.That(__nunitItem8.SyntaxTree, Is.SameAs(write)); } });}
     }
 
     private static async Task CheckAsync(string text)
@@ -327,9 +316,9 @@ public sealed partial class SourceLineComponentTests
                 new HostBuffer("ExpectedLines", PrimitiveType.Int32, lines.ToImmutable(), false),
                 new HostBuffer("ExpectedPositions", PrimitiveType.Int32, positions.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
     }
@@ -355,11 +344,11 @@ public sealed partial class SourceLineComponentTests
                 }
                 throw;
             }
-            Assert.Equal(expectedExit, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(expectedExit));
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 
@@ -375,8 +364,8 @@ public sealed partial class SourceLineComponentTests
             var path = Path.Combine(RepositoryRoot(), "self-host", name);
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             var tree = SyntaxTree.Parse(text, path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-            Assert.Equal(text, tree.Root.ToFullString());
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
             trees.Add(tree);
         }
         return trees.ToImmutable();

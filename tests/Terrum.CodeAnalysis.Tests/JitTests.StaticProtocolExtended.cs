@@ -5,15 +5,14 @@ using System.IO;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ExtendedStaticProtocolSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -27,14 +26,12 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("-", 38, "op_Subtraction")]
-    [InlineData("/", 20, "op_Division")]
-    [InlineData("%", 0, "op_Modulus")]
-    [InlineData("&", 0, "op_BitwiseAnd")]
-    [InlineData("|", 42, "op_BitwiseOr")]
-    [InlineData("^", 42, "op_ExclusiveOr")]
+    [TestCase("-",38,"op_Subtraction")]
+    [TestCase("/",20,"op_Division")]
+    [TestCase("%",0,"op_Modulus")]
+    [TestCase("&",0,"op_BitwiseAnd")]
+    [TestCase("|",42,"op_BitwiseOr")]
+    [TestCase("^",42,"op_ExclusiveOr")]
     public async Task ExtendedStaticOperatorsSpecializeCopyStructsAsync(string op, int result, string operatorName)
     {
         var source = $$"""
@@ -52,23 +49,20 @@ public sealed partial class JitTests
             int32 Main() { return Apply(new Value(40), new Value(2)).Number; }
             """;
         var tree = SyntaxTree.Parse(source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var compilation = Compilation.Create(tree);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var functions = Assert.IsType<BoundProgram>(compilation.Program).Functions;
-        Assert.Contains(functions, function => function.Name == "Value." + operatorName);
-        Assert.Contains(functions,
-            function => function.Name == "Apply<Value>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var functions = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions;
+        Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Value." + operatorName),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.Name == "Apply<Value>"),Is.True);
         await AssertFailFastExecutionAsync(source, result).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, result).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("/", "0")]
-    [InlineData("%", "0")]
-    [InlineData("/", "-1")]
-    [InlineData("%", "-1")]
-    [InlineData("-", "1")]
+    [TestCase("/","0")]
+    [TestCase("%","0")]
+    [TestCase("/","-1")]
+    [TestCase("%","-1")]
+    [TestCase("-","1")]
     public Task ExtendedArithmeticWitnessPropagatesCheckedFailureAsync(string op, string divisor)
     {
         var dividend = divisor == "-1" || op == "-" ? "-2147483648" : "40";
@@ -93,10 +87,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(source, op == "%" && divisor == "-1" ? 0 : 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task DeclaredNoThrowBitwiseWitnessProvesNoThrowGenericAsync(bool checkedFailures)
     {
         const string Source = """

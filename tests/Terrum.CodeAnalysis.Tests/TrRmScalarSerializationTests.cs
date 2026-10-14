@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -55,9 +55,7 @@ public sealed class TrRmScalarSerializationTests
             }
         }
     }
-
-    [Theory]
-    [MemberData(nameof(Scalars))]
+    [TestCaseSource(nameof(Scalars))]
     public void CanonicalScalarBytesRoundTripThroughLinearAndIndexedGraphs(
         string type, string literal, string hex, int typeId, bool indexed)
     {
@@ -88,51 +86,55 @@ public sealed class TrRmScalarSerializationTests
             expected.AddRange([1, 1, (byte)typeId]);
             expected.AddRange(payload);
             expected.AddRange([0x83, 1]);
-            Assert.Equal(expected.ToArray(), body);
+            Assert.That(body, Is.EqualTo(expected.ToArray()));
         }
         else
         {
             AssertIndexedConstants(body, payload, typeId);
         }
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
-        Assert.Equal(42, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
         var checkedSource = Compile(source, BoundRuntimePolicy.CheckedExceptions);
-        Assert.Equal(42, NativeJit.Execute(checkedSource, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(checkedSource, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
         // The persisted scalar contract remains fail-fast; serialization does not add a policy.
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedSource, "checked"));
     }
-
-    [Theory]
-    [InlineData(1, "EF")]
-    [InlineData(2, "EFCD")]
-    [InlineData(4, "EFCDAB89")]
-    [InlineData(8, "EFCDAB8967452301")]
+    [TestCase(1,"EF")]
+    [TestCase(2,"EFCD")]
+    [TestCase(4,"EFCDAB89")]
+    [TestCase(8,"EFCDAB8967452301")]
     public void InternalValidatedWidthSelectsLowOctetsWithoutUnsignedRangeValidation(int width, string hex)
     {
-        var write = Assert.IsAssignableFrom<MethodInfo>(typeof(TrRmExecutableCompiler).GetMethod("Write",
-            BindingFlags.NonPublic | BindingFlags.Static));
+        var write = ((global::System.Func<MethodInfo>)(() => {
+            var __nunitActual0 = typeof(TrRmExecutableCompiler).GetMethod("Write",
+            BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(__nunitActual0, Is.InstanceOf<MethodInfo>());
+            return (MethodInfo)__nunitActual0!;
+        }))();
         var bytes = new List<byte>();
         write.Invoke(null, [bytes, 0x0123456789ABCDEFUL, width]);
-        Assert.Equal(Convert.FromHexString(hex), bytes.ToArray());
+        Assert.That(bytes.ToArray(), Is.EqualTo(Convert.FromHexString(hex)));
         bytes.Clear();
         write.Invoke(null, [bytes, ulong.MaxValue, width]);
-        Assert.Equal(Enumerable.Repeat(byte.MaxValue, width), bytes);
+        Assert.That(bytes, Is.EqualTo(Enumerable.Repeat(byte.MaxValue, width)));
     }
-
-    [Theory]
-    [InlineData(-1L, 1, "FF")]
-    [InlineData(-128L, 1, "80")]
-    [InlineData(-129L, 2, "7FFF")]
-    [InlineData(-32768L, 2, "0080")]
-    [InlineData(-32769L, 4, "FF7FFFFF")]
-    [InlineData(-2147483648L, 4, "00000080")]
-    [InlineData(long.MinValue, 8, "0000000000000080")]
+    [TestCase(-1L,1,"FF")]
+    [TestCase(-128L,1,"80")]
+    [TestCase(-129L,2,"7FFF")]
+    [TestCase(-32768L,2,"0080")]
+    [TestCase(-32769L,4,"FF7FFFFF")]
+    [TestCase(-2147483648L,4,"00000080")]
+    [TestCase(long.MinValue,8,"0000000000000080")]
     public void SignedNarrowFieldsRetainCanonicalTwosComplement(long value, int width, string hex)
     {
-        var write = Assert.IsAssignableFrom<MethodInfo>(typeof(TrRmExecutableCompiler).GetMethod("Write",
-            BindingFlags.NonPublic | BindingFlags.Static));
+        var write = ((global::System.Func<MethodInfo>)(() => {
+            var __nunitActual1 = typeof(TrRmExecutableCompiler).GetMethod("Write",
+            BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(__nunitActual1, Is.InstanceOf<MethodInfo>());
+            return (MethodInfo)__nunitActual1!;
+        }))();
         var bytes = new List<byte> { 4, 1, (byte)(width == 8 ? 5 : 1), 0, 0, 0, 1 };
         if (width != 1)
         {
@@ -141,27 +143,25 @@ public sealed class TrRmScalarSerializationTests
         bytes.AddRange([2, 1, 1]);
         var start = bytes.Count;
         write.Invoke(null, [bytes, unchecked((ulong)value), width]);
-        Assert.Equal(Convert.FromHexString(hex), bytes.Skip(start).ToArray());
+        Assert.That(bytes.Skip(start).ToArray(), Is.EqualTo(Convert.FromHexString(hex)));
         bytes.AddRange([0x83, 1]);
         var artifact = TrRmExecutionAuditTests.Artifact(bytes.ToArray(),
             resultRow: width == 8 ? 5 : 1, entry: width != 8, exported: width == 8);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        var local = Assert.IsType<BoundLocal>(loaded.Functions[0].Body.Statements[0]);
-        Assert.Equal(value, Assert.IsType<BoundConstant>(local.Initializer).Value);
+        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = loaded.Functions[0].Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual3 = local.Initializer; Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual3!; }))().Value, Is.EqualTo(value));
         if (width != 8)
         {
-            Assert.Equal((int)value, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+            Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo((int)value));
         }
         else
         {
-            Assert.NotEmpty(NativeEmitter.EmitLibrary(loaded, ["Main"], NativeRuntimePolicy.FailFast));
+            Assert.That(NativeEmitter.EmitLibrary(loaded, ["Main"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
         }
     }
-
-    [Theory]
-    [InlineData(127, true)]
-    [InlineData(128, false)]
+    [TestCase(127,true)]
+    [TestCase(128,false)]
     public void IndexedValue256WidensReferencesWithoutChangingTheResourceBoundary(int updates, bool supported)
     {
         var source = "int32 Main() { mut int32 x = 0; "
@@ -174,26 +174,24 @@ public sealed class TrRmScalarSerializationTests
         }
         var artifact = TrRmExecutableCompiler.Emit(original, "limit");
         var body = Body(artifact, 1);
-        Assert.Equal(9, body[0]);
-        Assert.Equal(256, BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(3)));
-        Assert.Equal(new byte[] { 0xF0, 1, 0x83, 0, 1 }, body[^5..]);
+        Assert.That(body[0], Is.EqualTo(9));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(3)), Is.EqualTo(256));
+        Assert.That(body[^5..], Is.EqualTo(new byte[] { 0xF0, 1, 0x83, 0, 1 }));
         TrRmStructuralMetadataValidator.ValidateCompact(artifact);
-        Assert.Equal(updates, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast));
-        Assert.Equal(updates, NativeJit.Execute(Compile(source, BoundRuntimePolicy.CheckedExceptions),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast), Is.EqualTo(updates));
+        Assert.That(NativeJit.Execute(Compile(source, BoundRuntimePolicy.CheckedExceptions),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(updates));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task PersistedFullWidthScalarLibraryServicesNativeExportsAsync(bool indexed)
     {
         var source = indexed
             ? "public uint64 Value(uint64 x) { if (x == 0) { return 18446744073709551615; } else { return x ^ 18446744073709551615; } }"
             : "public uint64 Value(uint64 x) { return x ^ 18446744073709551615; }";
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(program, "scalar-service"));
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var path = Path.Combine(root, "artifacts", $"trrm-scalar-{Guid.NewGuid():N}.dll");
@@ -209,8 +207,8 @@ public sealed class TrRmScalarSerializationTests
                 else
                 {
                     var peer = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-                    Assert.False(peer.HasErrors, string.Join(Environment.NewLine, peer.Diagnostics));
-                    executable = Assert.IsType<BoundProgram>(peer.Program);
+                    Assert.That(peer.HasErrors, Is.False, string.Join(Environment.NewLine, peer.Diagnostics));
+                    executable = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = peer.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
                     Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(executable, "checked"));
                 }
                 await File.WriteAllBytesAsync(path, NativeEmitter.EmitLibrary(executable, ["Value"], policy));
@@ -218,9 +216,9 @@ public sealed class TrRmScalarSerializationTests
                 try
                 {
                     var invoke = Marshal.GetDelegateForFunctionPointer<ScalarUInt64>(NativeLibrary.GetExport(handle, "Value"));
-                    Assert.Equal(ulong.MaxValue, invoke(0));
-                    Assert.Equal(0UL, invoke(ulong.MaxValue));
-                    Assert.Equal(0xFEDCBA9876543210UL, invoke(0x0123456789ABCDEF));
+                    Assert.That(invoke(0), Is.EqualTo(ulong.MaxValue));
+                    Assert.That(invoke(ulong.MaxValue), Is.EqualTo(0UL));
+                    Assert.That(invoke(0x0123456789ABCDEF), Is.EqualTo(0xFEDCBA9876543210UL));
                 }
                 finally
                 {
@@ -233,13 +231,11 @@ public sealed class TrRmScalarSerializationTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x30, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0x83, 1 })]
-    [InlineData(new byte[] { 4, 1, 2, 0, 0, 0, 1, 1, 1, 1, 2, 0x83, 1 })]
-    [InlineData(new byte[] { 4, 1, 3, 0, 0, 0, 1, 0xF0, 0x20, 1, 1, 1, 0, 0, 1, 0, 0x83, 1 })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x20, 1, 1, 1, 0xFF, 0xFF })]
-    [InlineData(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 1, 1, 1, 42, 0, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x30, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 2, 0, 0, 0, 1, 1, 1, 1, 2, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 3, 0, 0, 0, 1, 0xF0, 0x20, 1, 1, 1, 0, 0, 1, 0, 0x83, 1 })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x20, 1, 1, 1, 0xFF, 0xFF })]
+    [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 1, 1, 1, 42, 0, 0x83, 1 })]
     public void FullWidthWriteDoesNotRelaxPublicMagnitudeTruncationOrCanonicalWidthAudits(byte[] body)
     {
         var resultRow = body[2];
@@ -249,33 +245,36 @@ public sealed class TrRmScalarSerializationTests
     }
 
     private static byte Layout(int width) => width switch {
-        2 => 0x10, 4 => 0x20, 8 => 0x30, _ => throw new InvalidOperationException(),
+        2 => 0x10,
+        4 => 0x20,
+        8 => 0x30,
+        _ => throw new InvalidOperationException(),
     };
 
     private static BoundProgram Compile(string source, BoundRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
     }
 
     private static byte[] Body(byte[] artifact, int method)
     {
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x20, out var bytes, out var count));
+        Assert.That(index.TryGetSection(0x20, out var bytes, out var count), Is.True);
         return new TrRmBodyTableReader(bytes, count).GetRow(method).ToArray();
     }
 
     private static void AssertIndexedConstants(byte[] body, byte[] payload, int typeId)
     {
-        Assert.Equal(8, body[0] & 0xFC);
+        Assert.That(body[0] & 0xFC, Is.EqualTo(8));
         var width = 1 << (body[0] & 3);
         var at = 1;
         var blocks = Read();
         var values = Read();
         var regions = Read();
         var types = Read();
-        Assert.Equal(0, regions);
+        Assert.That(regions, Is.EqualTo(0));
         at += types * 4 + values * 2 * width + (blocks + 1 + values) * width;
         var offsets = new int[blocks + 1];
         for (var block = 0; block <= blocks; block++)
@@ -289,7 +288,8 @@ public sealed class TrRmScalarSerializationTests
         {
             at = start + offsets[block];
             var presence = body[at++];
-            if ((presence & 1) != 0) { _ = Read(); }
+            if ((presence & 1) != 0)
+            { _ = Read(); }
             foreach (var bit in new[] { 2, 4, 8, 16 })
             {
                 if ((presence & bit) != 0)
@@ -299,25 +299,27 @@ public sealed class TrRmScalarSerializationTests
                 }
             }
             var operations = Read();
-            if (operations == 0) { continue; }
-            Assert.Equal(1, operations);
+            if (operations == 0)
+            { continue; }
+            Assert.That(operations, Is.EqualTo(1));
             if (payload.Length != 1)
             {
-                Assert.Equal(0xF0, body[at++]);
-                Assert.Equal(Layout(payload.Length), body[at++]);
+                Assert.That(body[at++], Is.EqualTo(0xF0));
+                Assert.That(body[at++], Is.EqualTo(Layout(payload.Length)));
             }
-            Assert.Equal(1, body[at++]);
-            Assert.InRange(body[at++], 2, 3);
-            Assert.Equal(typeId, body[at++]);
-            Assert.Equal(payload, body.AsSpan(at, payload.Length).ToArray());
+            Assert.That(body[at++], Is.EqualTo(1));
+            Assert.That(body[at++], Is.InRange(2, 3));
+            Assert.That(body[at++], Is.EqualTo(typeId));
+            Assert.That(body.AsSpan(at, payload.Length).ToArray(), Is.EqualTo(payload));
             constants++;
         }
-        Assert.Equal(2, constants);
+        Assert.That(constants, Is.EqualTo(2));
 
         int Read()
         {
             var value = width switch {
-                1 => body[at], 2 => BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(at)),
+                1 => body[at],
+                2 => BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(at)),
                 4 => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(at))),
                 _ => throw new InvalidOperationException(),
             };

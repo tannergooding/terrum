@@ -14,15 +14,14 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class StringLiteralComponentTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompiledLiteralValidationAndScalarReadsMatchSharedFixturesAsync(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder(" ");
@@ -54,7 +53,7 @@ public sealed class StringLiteralComponentTests
             var isSingleValidLiteral = lexed.Diagnostics.IsEmpty && lexed.Tokens.Length == 2
                 && lexed.Tokens[0].Kind == TokenKind.StringLiteral
                 && lexed.Tokens[0].Span == new TextSpan(0, fixture.Text.Length);
-            Assert.Equal(fixture.Scalars is not null, isSingleValidLiteral);
+            Assert.That(isSingleValidLiteral, Is.EqualTo(fixture.Scalars is not null));
             literals.Add(source.Length);
             literals.Add(fixture.Text.Length);
             literals.Add(fixture.Scalars?.Length ?? -1);
@@ -146,15 +145,13 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedUtf32BeRecords", PrimitiveType.Int32, utf32BeRecords.ToImmutable(), false),
             new HostBuffer("ExpectedUtf32BeBytes", PrimitiveType.Int32, utf32BeBytes.ToImmutable(), false),
         ], policy == NativeRuntimePolicy.FailFast ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
-        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task LongAsciiLiteralReadsEveryScalarAsync(NativeRuntimePolicy policy)
     {
         const int ScalarCount = 8192;
@@ -179,20 +176,18 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData("TryGetUtf8Length", "EncodeUtf8", "\"\u00E9\"", new[] { 195, 169 })]
-    [InlineData("TryGetUtf16Length", "EncodeUtf16", "\"\uD83D\uDE00\"", new[] { 0xD83D, 0xDE00 })]
-    [InlineData("TryGetUtf16ByteLength", "EncodeUtf16LeBytes", "\"\uD83D\uDE00\"", new[] { 0x3D, 0xD8, 0, 0xDE })]
-    [InlineData("TryGetUtf16ByteLength", "EncodeUtf16BeBytes", "\"\uD83D\uDE00\"", new[] { 0xD8, 0x3D, 0xDE, 0 })]
-    [InlineData("TryGetUtf32ByteLength", "EncodeUtf32LeBytes", "\"\u00E9\"", new[] { 233, 0, 0, 0 })]
-    [InlineData("TryGetUtf32ByteLength", "EncodeUtf32BeBytes", "\"\uD83D\uDE00\"", new[] { 0, 1, 246, 0 })]
-    [InlineData("TryGetLatin1Length", "EncodeLatin1", "\"\u00E9\"", new[] { 233 })]
+    [TestCase("TryGetUtf8Length","EncodeUtf8","\"\u00E9\"",new[] { 195, 169 })]
+    [TestCase("TryGetUtf16Length","EncodeUtf16","\"\uD83D\uDE00\"",new[] { 0xD83D, 0xDE00 })]
+    [TestCase("TryGetUtf16ByteLength","EncodeUtf16LeBytes","\"\uD83D\uDE00\"",new[] { 0x3D, 0xD8, 0, 0xDE })]
+    [TestCase("TryGetUtf16ByteLength","EncodeUtf16BeBytes","\"\uD83D\uDE00\"",new[] { 0xD8, 0x3D, 0xDE, 0 })]
+    [TestCase("TryGetUtf32ByteLength","EncodeUtf32LeBytes","\"\u00E9\"",new[] { 233, 0, 0, 0 })]
+    [TestCase("TryGetUtf32ByteLength","EncodeUtf32BeBytes","\"\uD83D\uDE00\"",new[] { 0, 1, 246, 0 })]
+    [TestCase("TryGetLatin1Length","EncodeLatin1","\"\u00E9\"",new[] { 233 })]
     public async Task LiteralEncodingRejectsUndersizedStorageAndReleasesItOnCheckedFailureAsync(
         string measure, string encode, string spelling, int[] expected)
     {
@@ -224,16 +219,14 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData("TryGetAsciiLength", "EncodeAscii", 233)]
-    [InlineData("TryGetLatin1Length", "EncodeLatin1", 256)]
-    [InlineData("TryGetLatin1Length", "EncodeLatin1", 0x1F600)]
+    [TestCase("TryGetAsciiLength","EncodeAscii",233)]
+    [TestCase("TryGetLatin1Length","EncodeLatin1",256)]
+    [TestCase("TryGetLatin1Length","EncodeLatin1",0x1F600)]
     public async Task SingleByteEncodingRejectsUnrepresentableScalarWithoutPublishingPartialOutputAsync(
         string measure, string encode, int scalar)
     {
@@ -262,23 +255,21 @@ public sealed class StringLiteralComponentTests
             [new HostBuffer("Source", PrimitiveType.Char16,
                 [34, 65, .. char.ConvertFromUtf32(scalar).Select(unit => (int)unit), 34], false)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, 0, "\"A\"", new[] { 0, 1, 0, 0, 65, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0, "\"A\"", new[] { 0, 1, 0, 0, 65, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.FailFast, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.FailFast, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 61, 216, 0, 222, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 61, 216, 0, 222, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.FailFast, 3, "\"\uD83D\uDE00\"", new[] { 3, 1, 0, 0, 0, 246, 1, 0, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3, "\"\uD83D\uDE00\"", new[] { 3, 1, 0, 0, 0, 246, 1, 0, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.FailFast, 0, "\"\"", new[] { 0, 0, 0, 0, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\"\\0\"", new[] { 2, 1, 0, 0, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,0,"\"A\"",new[] { 0, 1, 0, 0, 65, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,0,"\"A\"",new[] { 0, 1, 0, 0, 65, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,1,"\"\u00E9\"",new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,1,"\"\u00E9\"",new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,2,"\"\uD83D\uDE00\"",new[] { 2, 2, 0, 0, 61, 216, 0, 222, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,2,"\"\uD83D\uDE00\"",new[] { 2, 2, 0, 0, 61, 216, 0, 222, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,3,"\"\uD83D\uDE00\"",new[] { 3, 1, 0, 0, 0, 246, 1, 0, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,3,"\"\uD83D\uDE00\"",new[] { 3, 1, 0, 0, 0, 246, 1, 0, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,0,"\"\"",new[] { 0, 0, 0, 0, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,2,"\"\\0\"",new[] { 2, 1, 0, 0, 0, 0, 0, 0 })]
     public async Task EncodedStringRowsHaveExactCountTerminationAndPaddingAsync(
         NativeRuntimePolicy policy, int flags, string spelling, int[] expected)
     {
@@ -304,21 +295,19 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, 0, "Name", "\"\\u004Eame\"")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0, "", "\"\"")]
-    [InlineData(NativeRuntimePolicy.FailFast, 1, "\u00E9\U0001F600", "\"\\u00E9\\U0001F600\"")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1, "A\u0301", "\"A\u0301\"")]
-    [InlineData(NativeRuntimePolicy.FailFast, 2, "\U0001F600", "\"\\U0001F600\"")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\u00E9", "\"\u00E9\"")]
-    [InlineData(NativeRuntimePolicy.FailFast, 3, "\u00E9\U0001F600", "\"\u00E9\U0001F600\"")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3, "", "\"\"")]
+    [TestCase(NativeRuntimePolicy.FailFast,0,"Name","\"\\u004Eame\"")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,0,"","\"\"")]
+    [TestCase(NativeRuntimePolicy.FailFast,1,"\u00E9\U0001F600","\"\\u00E9\\U0001F600\"")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,1,"A\u0301","\"A\u0301\"")]
+    [TestCase(NativeRuntimePolicy.FailFast,2,"\U0001F600","\"\\U0001F600\"")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,2,"\u00E9","\"\u00E9\"")]
+    [TestCase(NativeRuntimePolicy.FailFast,3,"\u00E9\U0001F600","\"\u00E9\U0001F600\"")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,3,"","\"\"")]
     public async Task CompiledStringRowsMatchHostWireEncodingAsync(
         NativeRuntimePolicy policy, int encoding, string text, string spelling)
     {
@@ -343,21 +332,19 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, 0, "\"Name\"", new[] { 0, 4, 0, 0, 78, 97, 109, 101, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0, "\"Name\"", new[] { 0, 4, 0, 0, 78, 97, 109, 101, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.FailFast, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.FailFast, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 0x3D, 0xD8, 0, 0xDE, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 0x3D, 0xD8, 0, 0xDE, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.FailFast, 3, "\"\u00E9\"", new[] { 3, 1, 0, 0, 233, 0, 0, 0, 0, 0, 0, 0 })]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3, "\"\u00E9\"", new[] { 3, 1, 0, 0, 233, 0, 0, 0, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,0,"\"Name\"",new[] { 0, 4, 0, 0, 78, 97, 109, 101, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,0,"\"Name\"",new[] { 0, 4, 0, 0, 78, 97, 109, 101, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,1,"\"\u00E9\"",new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,1,"\"\u00E9\"",new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,2,"\"\uD83D\uDE00\"",new[] { 2, 2, 0, 0, 0x3D, 0xD8, 0, 0xDE, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,2,"\"\uD83D\uDE00\"",new[] { 2, 2, 0, 0, 0x3D, 0xD8, 0, 0xDE, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.FailFast,3,"\"\u00E9\"",new[] { 3, 1, 0, 0, 233, 0, 0, 0, 0, 0, 0, 0 })]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,3,"\"\u00E9\"",new[] { 3, 1, 0, 0, 233, 0, 0, 0, 0, 0, 0, 0 })]
     public async Task MetadataNameRowsRequireNonemptyScalarTextAndPreserveEncodingAsync(
         NativeRuntimePolicy policy, int flags, string spelling, int[] expected)
     {
@@ -381,17 +368,15 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true)]
     public async Task Utf8StringRowBuildersPublishOnlyCompleteRowsAsync(
         NativeRuntimePolicy policy, bool namespaceRow)
     {
@@ -445,18 +430,16 @@ public sealed class StringLiteralComponentTests
             var compilation = Compilation.Create(trees.Add(entry),
                 [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
                 (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, policy));
-            Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+            Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true)]
     public async Task Utf8StringRowBuildersHandleMaximumExactCapacityAsync(
         NativeRuntimePolicy policy, bool namespaceRow)
     {
@@ -468,8 +451,8 @@ public sealed class StringLiteralComponentTests
             ? TrRmStringTableWriter.EncodeTextRows([(text, 1)])
             : TrRmStringTableWriter.EncodeNames([(text, 1)]);
         var expectedRow = new TrRmVariableTableIndex(expectedSection, 1, 8, 4).GetRow(1).ToArray();
-        Assert.Equal(maximumSourceLength, spelling.Length);
-        Assert.Equal(expectedRowLength, expectedRow.Length);
+        Assert.That(spelling.Length, Is.EqualTo(maximumSourceLength));
+        Assert.That(expectedRow.Length, Is.EqualTo(expectedRowLength));
 
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
         var builder = namespaceRow ? "TryBuildStringNamespaceRowUtf8" : "TryBuildStringNameRowUtf8";
@@ -494,16 +477,14 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expectedRow.Select(static value => (int)value)], false),
         ], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData("\"\"")]
-    [InlineData("\"\\0\"")]
-    [InlineData("\"A\\0B\"")]
+    [TestCase("\"\"")]
+    [TestCase("\"\\0\"")]
+    [TestCase("\"A\\0B\"")]
     public async Task MetadataNameRowsRejectEmptyAndEmbeddedZeroScalarsAsync(string spelling)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -522,21 +503,19 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, 0)]
-    [InlineData(NativeRuntimePolicy.FailFast, 1)]
-    [InlineData(NativeRuntimePolicy.FailFast, 2)]
-    [InlineData(NativeRuntimePolicy.FailFast, 3)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3)]
+    [TestCase(NativeRuntimePolicy.FailFast,0)]
+    [TestCase(NativeRuntimePolicy.FailFast,1)]
+    [TestCase(NativeRuntimePolicy.FailFast,2)]
+    [TestCase(NativeRuntimePolicy.FailFast,3)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,1)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,2)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,3)]
     public async Task EmptyNamespaceRowRetainsEncodingAndZeroUnitsAsync(
         NativeRuntimePolicy policy, int flags)
     {
@@ -563,13 +542,13 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. "\"\"".Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public async Task NamespaceRowRejectsEmbeddedZeroScalarAsync()
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -588,25 +567,23 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. "\"A\\0B\"".Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData("\"A\"", "\"\\u0041\"", true)]
-    [InlineData("\"\u00E9\"", "\"\\u00E9\"", true)]
-    [InlineData("\"\uD83D\uDE00\"", "\"\\U0001F600\"", true)]
-    [InlineData("\"A\"", "\"a\"", false)]
-    [InlineData("\"A\"", "\"AB\"", false)]
-    [InlineData("\"AB\"", "\"A\"", false)]
-    [InlineData("\"A\"", "\"B\\0\"", null)]
-    [InlineData("\"A\\0\"", "\"B\"", null)]
-    [InlineData("\"A\u0301\"", "\"\u00C1\"", false)]
-    [InlineData("\"\"", "\"A\"", null)]
-    [InlineData("\"A\"", "\"\\0\"", null)]
-    [InlineData("\"A\\u0000\"", "\"A\\u0000\"", null)]
+    [TestCase("\"A\"","\"\\u0041\"",true)]
+    [TestCase("\"\u00E9\"","\"\\u00E9\"",true)]
+    [TestCase("\"\uD83D\uDE00\"","\"\\U0001F600\"",true)]
+    [TestCase("\"A\"","\"a\"",false)]
+    [TestCase("\"A\"","\"AB\"",false)]
+    [TestCase("\"AB\"","\"A\"",false)]
+    [TestCase("\"A\"","\"B\\0\"",null)]
+    [TestCase("\"A\\0\"","\"B\"",null)]
+    [TestCase("\"A\u0301\"","\"\u00C1\"",false)]
+    [TestCase("\"\"","\"A\"",null)]
+    [TestCase("\"A\"","\"\\0\"",null)]
+    [TestCase("\"A\\u0000\"","\"A\\u0000\"",null)]
     public async Task MetadataNameEqualityComparesDecodedScalarsWithoutNormalizationAsync(
         string left, string right, bool? expected)
     {
@@ -628,23 +605,21 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. (left + right).Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "\"\"", "\"\"", true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"\"", "\"\"", true)]
-    [InlineData(NativeRuntimePolicy.FailFast, "\"\"", "\"A\"", false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"A\"", "\"\"", false)]
-    [InlineData(NativeRuntimePolicy.FailFast, "\"\u00E9\"", "\"\\u00E9\"", true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"\uD83D\uDE00\"", "\"\\U0001F600\"", true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"A\u0301\"", "\"\u00C1\"", false)]
-    [InlineData(NativeRuntimePolicy.FailFast, "\"A\"", "\"B\\0\"", null)]
-    [InlineData(NativeRuntimePolicy.FailFast, "\"\"", "\"\\0\"", null)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "\"A\"", "\"A\\u0000\"", null)]
+    [TestCase(NativeRuntimePolicy.FailFast,"\"\"","\"\"",true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"\"\"","\"\"",true)]
+    [TestCase(NativeRuntimePolicy.FailFast,"\"\"","\"A\"",false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"\"A\"","\"\"",false)]
+    [TestCase(NativeRuntimePolicy.FailFast,"\"\u00E9\"","\"\\u00E9\"",true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"\"\uD83D\uDE00\"","\"\\U0001F600\"",true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"\"A\u0301\"","\"\u00C1\"",false)]
+    [TestCase(NativeRuntimePolicy.FailFast,"\"A\"","\"B\\0\"",null)]
+    [TestCase(NativeRuntimePolicy.FailFast,"\"\"","\"\\0\"",null)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"\"A\"","\"A\\u0000\"",null)]
     public async Task MetadataNamespaceEqualityAllowsEmptyWithoutNormalizingAsync(
         NativeRuntimePolicy policy, string left, string right, bool? expected)
     {
@@ -666,16 +641,14 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. (left + right).Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData("\"\"")]
-    [InlineData("\"\\0\"")]
-    [InlineData("\"A\\0B\"")]
+    [TestCase("\"\"")]
+    [TestCase("\"\\0\"")]
+    [TestCase("\"A\\0B\"")]
     public async Task InvalidMetadataNameEmissionReleasesWorkspaceOnCheckedFailureAsync(string invalid)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -705,15 +678,13 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. (invalid + "\"Ok\"").Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, 257, 1, 1, 0)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 65536, 0, 0, 1)]
+    [TestCase(NativeRuntimePolicy.FailFast,257,1,1,0)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,65536,0,0,1)]
     public async Task StringRowUnitCountUsesThreeLittleEndianBytesAsync(
         NativeRuntimePolicy policy, int unitCount, int low, int middle, int high)
     {
@@ -752,13 +723,13 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, source.ToImmutable(), false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, policy).ConfigureAwait(true), Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public async Task StringRowsRejectReservedFlagsAndUndersizedWorkspaceAsync()
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -789,10 +760,10 @@ public sealed class StringLiteralComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [34, 233, 34], false)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
@@ -823,13 +794,11 @@ public sealed class StringLiteralComponentTests
             await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("bool success = StringLiteral.TryCreate(range, init var literal); return literal.ScalarCount;")]
-    [InlineData("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return scalar;")]
-    [InlineData("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return next;")]
-    [InlineData("require StringLiteral.TryCreate(range, init var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryRead(init var scalar, init var next); return next.Position;")]
-    [InlineData("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryGetAsciiLength(init var length); return length;")]
+    [TestCase("bool success = StringLiteral.TryCreate(range, init var literal); return literal.ScalarCount;")]
+    [TestCase("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return scalar;")]
+    [TestCase("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryReadScalar(0, init var scalar, init var next); return next;")]
+    [TestCase("require StringLiteral.TryCreate(range, init var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryRead(init var scalar, init var next); return next.Position;")]
+    [TestCase("require StringLiteral.TryCreate(range, init var literal); bool success = literal.TryGetAsciiLength(init var length); return length;")]
     public async Task FailedValidationAndReadsDoNotPublishOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -842,10 +811,9 @@ public sealed class StringLiteralComponentTests
             """, "entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [34, 34], false)]);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.SourceDiagnostics,
-            diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016"),Is.True);
     }
 
     private static IEnumerable<LiteralFixture> Fixtures()
@@ -908,8 +876,8 @@ public sealed class StringLiteralComponentTests
             var path = Path.Combine(RepositoryRoot(), "self-host", name);
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             var tree = SyntaxTree.Parse(text, path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-            Assert.Equal(text, tree.Root.ToFullString());
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
             trees.Add(tree);
         }
         return trees.ToImmutable();

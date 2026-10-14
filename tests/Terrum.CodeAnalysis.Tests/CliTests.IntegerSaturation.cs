@@ -4,7 +4,7 @@ using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -206,7 +206,7 @@ public sealed partial class CliTests
                     ? destinationMaximum
                     : source;
             var actual = resultValue(invoke(input));
-            Assert.True(actual == expected, $"{name} returned {actual} for input {input}; expected {expected}.");
+            Assert.That(actual == expected, Is.True, $"{name} returned {actual} for input {input}; expected {expected}.");
         }
     }
 

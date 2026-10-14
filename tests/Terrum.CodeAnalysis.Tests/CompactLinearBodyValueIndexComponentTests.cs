@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -93,10 +93,8 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactLinearValueIndexMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var cases = new List<ValueIndexCase>
@@ -221,7 +219,7 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             if (testCase.HostedValid)
             {
                 var index = InspectHosted(testCase);
-                Assert.Equal(3, index.ValueCount);
+                Assert.That(index.ValueCount, Is.EqualTo(3));
                 expected.AddRange(index.Definitions);
                 expected.AddRange(index.LastUses);
                 expected.AddRange(index.UseBlocks);
@@ -250,16 +248,14 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             new HostBuffer("BodyValueLastUses", PrimitiveType.Int32, [0, 0, 0], true),
             new HostBuffer("BodyValueUseBlocks", PrimitiveType.Int32, [0, 0, 0], true),
         ], policy).ConfigureAwait(true);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactLinearValueIndexReusesValidatedBodyIndexForBatch(
         BoundRuntimePolicy policy)
     {
@@ -295,16 +291,14 @@ public sealed class CompactLinearBodyValueIndexComponentTests
                 [.. Enumerable.Repeat(0, hosted.ValueCount)], true));
         var compilation = await CreateCompilationAsync(
             buffers, policy, ValidatedBatchVerificationSource).ConfigureAwait(true);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactLinearVoidCallDoesNotDefineAValue(BoundRuntimePolicy policy)
     {
         byte[] row = [0x04, 0, 1, 0x12, 0, 2, 0, 0x83, 0];
@@ -312,8 +306,8 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             ExpectedCandidateValid: true, HostedValid: true,
             TypeSpecCount: 0, TypeCode: 0, SecondMethod: true);
         var hosted = InspectHosted(testCase);
-        Assert.Equal(1, hosted.Operations);
-        Assert.Empty(hosted.Definitions);
+        Assert.That(hosted.Operations, Is.EqualTo(1));
+        Assert.That(hosted.Definitions, Is.Empty);
 
         var bodyRows = TrRmVariableTableWriter.EncodeBodies([
             new ReadOnlyMemory<byte>(row),
@@ -329,16 +323,14 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             new HostBuffer("BodyValueLastUses", PrimitiveType.Int32, [], true),
             new HostBuffer("BodyValueUseBlocks", PrimitiveType.Int32, [], true),
         ], policy).ConfigureAwait(true);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactLinearMultipleDivRemResultsRemainSequential(
         BoundRuntimePolicy policy)
     {
@@ -351,7 +343,7 @@ public sealed class CompactLinearBodyValueIndexComponentTests
         ];
         var hosted = InspectHosted(new ValueIndexCase(row, ParameterCount: 2,
             ExpectedCandidateValid: true, HostedValid: true));
-        Assert.Equal(6, hosted.ValueCount);
+        Assert.That(hosted.ValueCount, Is.EqualTo(6));
 
         var bodyRows = TrRmVariableTableWriter.EncodeBodies([
             new ReadOnlyMemory<byte>(row),
@@ -374,11 +366,11 @@ public sealed class CompactLinearBodyValueIndexComponentTests
             new HostBuffer("BodyValueUseBlocks", PrimitiveType.Int32,
                 [0, 0, 0, 0, 0, 0], true),
         ], policy).ConfigureAwait(true);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static (int Operations, int ValueCount, int[] Definitions, int[] LastUses,
@@ -455,8 +447,7 @@ public sealed class CompactLinearBodyValueIndexComponentTests
     }
 
     private static int WidthCode(int width)
-        => width switch
-        {
+        => width switch {
             1 => 0,
             2 => 1,
             4 => 2,
@@ -478,7 +469,7 @@ public sealed class CompactLinearBodyValueIndexComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(verificationSource,

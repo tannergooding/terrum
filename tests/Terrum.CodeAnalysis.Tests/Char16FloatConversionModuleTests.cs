@@ -5,15 +5,14 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class Char16FloatConversionModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task Char16FloatConversionMatchesUnsignedCodeUnitBitsAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -29,7 +28,7 @@ public sealed class Char16FloatConversionModuleTests
         {
             var path = Path.Combine(root, "self-host", dependencyNames[index] + ".terrum");
             trees[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         var entry = SyntaxTree.Parse("""
@@ -41,12 +40,12 @@ public sealed class Char16FloatConversionModuleTests
                 return 0;
             }
             """);
-        Assert.False(entry.HasErrors, string.Join(Environment.NewLine, entry.Diagnostics));
+        Assert.That(entry.HasErrors, Is.False, string.Join(Environment.NewLine, entry.Diagnostics));
         var compilation = Compilation.Create([.. trees, entry], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
     private static string RepositoryRoot()

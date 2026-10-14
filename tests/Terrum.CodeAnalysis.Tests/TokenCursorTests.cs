@@ -13,7 +13,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -40,34 +40,41 @@ public sealed class TokenCursorTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void SpanMetadataInspectionPreservesFunctionShortCircuitOrder()
     {
         var malformed = new BoundFunction("Malformed", PrimitiveType.Int32, [], 0,
             new BoundBlock(default, default), default);
         var captured = new BoundFunction("Captured", PrimitiveType.Int32, [], 0,
             new BoundBlock(default, default), default) { CapturedParameters = [0] };
-        Assert.True(InspectSpanMetadata(new BoundProgram([malformed, captured], -1)));
+        Assert.That(InspectSpanMetadata(new BoundProgram([malformed, captured], -1)), Is.True);
 
         var spanBody = new BoundBlock([
             new BoundReturn(new BoundSnapshotSpan(0, 0, default), default),
         ], default);
         var spanFunction = new BoundFunction("SpanNode", PrimitiveType.Int32, [], 0, spanBody, default);
         var error = Assert.Throws<TargetInvocationException>(
-            () => InspectSpanMetadata(new BoundProgram([malformed, spanFunction], -1)));
-        Assert.Equal("A span-inspected block requires initialized statements.",
-            Assert.IsType<ArgumentException>(error.InnerException).Message);
+            () => InspectSpanMetadata(new BoundProgram([malformed, spanFunction], -1)))!;
+        Assert.That(((global::System.Func<ArgumentException>)(() => { var __nunitActual0 = error.InnerException; Assert.That(__nunitActual0, Is.TypeOf<ArgumentException>()); return (ArgumentException)__nunitActual0!; }))().Message, Is.EqualTo("A span-inspected block requires initialized statements."));
 
-        Assert.True(InspectSpanMetadata(new BoundProgram([spanFunction], -1)));
+        Assert.That(InspectSpanMetadata(new BoundProgram([spanFunction], -1)), Is.True);
     }
 
     private static bool InspectSpanMetadata(BoundProgram program)
     {
-        var contractType = Assert.IsAssignableFrom<Type>(typeof(SemanticVerifier).Assembly.GetType(
-            "Terrum.CodeAnalysis.Semantics.TokenSpanContract", throwOnError: true));
-        var method = Assert.IsAssignableFrom<MethodInfo>(contractType.GetMethod("HasMetadata",
-            BindingFlags.NonPublic | BindingFlags.Static));
-        return Assert.IsType<bool>(method.Invoke(null, [program]));
+        var contractType = ((global::System.Func<Type>)(() => {
+            var __nunitActual1 = typeof(SemanticVerifier).Assembly.GetType(
+            "Terrum.CodeAnalysis.Semantics.TokenSpanContract", throwOnError: true);
+            Assert.That(__nunitActual1, Is.InstanceOf<Type>());
+            return (Type)__nunitActual1!;
+        }))();
+        var method = ((global::System.Func<MethodInfo>)(() => {
+            var __nunitActual2 = contractType.GetMethod("HasMetadata",
+            BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(__nunitActual2, Is.InstanceOf<MethodInfo>());
+            return (MethodInfo)__nunitActual2!;
+        }))();
+        return ((global::System.Func<bool>)(() => { var __nunitActual3 = method.Invoke(null, [program]); Assert.That(__nunitActual3, Is.TypeOf<bool>()); return (bool)__nunitActual3!; }))();
     }
 
     private const string EntryPrefix = """
@@ -85,12 +92,10 @@ public sealed class TokenCursorTests
             require TokenSnapshot.TryScan(init var scanned);
             mut TokenSnapshot owner = move scanned;
         """;
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("alpha 42")]
-    [InlineData(".. ..^ ?.")]
-    [InlineData("@await")]
+    [TestCase("")]
+    [TestCase("alpha 42")]
+    [TestCase(".. ..^ ?.")]
+    [TestCase("@await")]
     public async Task CursorReadsTheSnapshotAndRetainsOnlyItsDescriptorAsync(string text)
     {
         const string Entry = EntryPrefix + """
@@ -117,20 +122,17 @@ public sealed class TokenCursorTests
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var program = Program(await CompileAsync(text, Entry, policy));
-            var cursor = Assert.Single(program.Structures, static structure => structure.Name == "Terrum.CodeAnalysis.TokenCursor");
-            Assert.Equal(16, cursor.Size);
-            Assert.Equal(16, Assert.Single(cursor.Fields).Size);
-            Assert.Equal(PrimitiveType.TokenSpan, Assert.Single(cursor.Fields).Type);
-            var constructor = Assert.Single(program.Functions,
-                static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.#ctor");
-            Assert.Equal(1, Assert.Single(constructor.CapturedParameters));
+            var cursor = global::System.Linq.Enumerable.Single(program.Structures, static structure => structure.Name == "Terrum.CodeAnalysis.TokenCursor");
+            Assert.That(cursor.Size, Is.EqualTo(16));
+            Assert.That(global::System.Linq.Enumerable.Single(cursor.Fields).Size, Is.EqualTo(16));
+            Assert.That(global::System.Linq.Enumerable.Single(cursor.Fields).Type, Is.EqualTo(PrimitiveType.TokenSpan));
+            var constructor = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.#ctor");
+            Assert.That(global::System.Linq.Enumerable.Single(constructor.CapturedParameters), Is.EqualTo(1));
             await ExecuteAsync(program, policy);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task TerrumComponentRunnerExecutesCursorCoverageWithoutPersistingSpanMetadataAsync(
         BoundRuntimePolicy policy)
     {
@@ -139,19 +141,17 @@ public sealed class TokenCursorTests
         var runner = await File.ReadAllTextAsync(runnerPath).ConfigureAwait(true);
         var compilation = await CompileAsync("alpha 42", runner, policy, includeTokenCursorTests: true)
             .ConfigureAwait(true);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteAsync(Program(compilation), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CursorTraversesMaximumScannerTokenSnapshotAsync(BoundRuntimePolicy policy)
     {
         var identifierCount = ScannerHost.MaximumSourceLength / 2;
         var expectedTokenCount = identifierCount + 1;
         var input = string.Concat(Enumerable.Repeat("a ", identifierCount));
-        Assert.Equal(ScannerHost.MaximumSourceLength, input.Length);
+        Assert.That(input.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {
@@ -181,10 +181,8 @@ public sealed class TokenCursorTests
         var compilation = await CompileAsync(input, entry, policy).ConfigureAwait(true);
         await ExecuteAsync(Program(compilation), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ForwardedSpanResultsRetainDeclaredBackingThroughTransitiveCallsAsync(BoundRuntimePolicy policy)
     {
         var entry = ForwardingDeclarations + """
@@ -205,14 +203,12 @@ public sealed class TokenCursorTests
             """;
         var program = Program(await CompileAsync("alpha 42", entry, policy).ConfigureAwait(true));
         await ExecuteAsync(program, policy).ConfigureAwait(true);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Main"], (NativeRuntimePolicy)policy));
-        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "forwarded-span"));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Main"]))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Main"], (NativeRuntimePolicy)policy))!;
+        _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "forwarded-span"))!;
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task DirectCursorConstructorArgumentsRetainForwardedBackingAsync(bool throughForwarder)
     {
         var view = throughForwarder ? "Identity(owner.AsSpan())" : "owner.AsSpan()";
@@ -232,7 +228,7 @@ public sealed class TokenCursorTests
         await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task ForwardedSpanResultRetainsEveryDeclaredSourceUntilRetiredAsync()
     {
         var entry = ForwardingDeclarations + """
@@ -249,12 +245,12 @@ public sealed class TokenCursorTests
             }
             """;
         var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task ForwardedSpanCannotOutliveASourceOwnersLexicalScopeAsync()
     {
         var entry = ForwardingDeclarations + """
@@ -273,12 +269,12 @@ public sealed class TokenCursorTests
             }
             """;
         var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task ForwardedSpanOwnershipFailureKeepsItsDeclaringSourceContextAsync()
     {
         var entry = ForwardingDeclarations + """
@@ -287,13 +283,12 @@ public sealed class TokenCursorTests
             int32 Main() { return 42; }
             """;
         var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
-        var diagnostic = Assert.Single(compilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3023");
-        Assert.InRange(diagnostic.Span.End, 1, entry.Length);
-        Assert.Null(compilation.Program);
+        var diagnostic = global::System.Linq.Enumerable.Single(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(diagnostic.Span.End, Is.InRange(1, entry.Length));
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task MandatoryVerifierRejectsForgedForwardedSpanMetadataAndMalformedCallsAsync()
     {
         var entry = ForwardingDeclarations + """
@@ -307,12 +302,12 @@ public sealed class TokenCursorTests
             }
             """;
         var program = Program(await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
-        var identity = Assert.Single(program.Functions, static function => function.Name == "Identity");
+        var identity = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Identity");
         var identityIndex = program.Functions.IndexOf(identity);
-        var forward = Assert.Single(program.Functions, static function => function.Name == "Forward");
+        var forward = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Forward");
         var forwardIndex = program.Functions.IndexOf(forward);
         var mainIndex = program.EntryPoint;
-        var identityReturn = Assert.IsType<BoundReturn>(Assert.Single(identity.Body.Statements));
+        var identityReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(identity.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
         var malformedConditional = new BoundConditional(
             new BoundConstant(1, PrimitiveType.Bool, identity.Span),
             new BoundRead(0, PrimitiveType.TokenSpan, identity.Span), null!,
@@ -324,8 +319,7 @@ public sealed class TokenCursorTests
                 },
             }),
         });
-        var cursorConstructor = Assert.Single(program.Functions,
-            static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.#ctor");
+        var cursorConstructor = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.#ctor");
         var cursorConstructorIndex = program.Functions.IndexOf(cursorConstructor);
         Reject(program with {
             Functions = program.Functions.SetItem(identityIndex, identity with {
@@ -383,7 +377,7 @@ public sealed class TokenCursorTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ForwardedSpanArgumentIsStagedBeforeLaterArgumentEvaluationAsync()
     {
         var entry = ForwardingDeclarations + """
@@ -400,11 +394,11 @@ public sealed class TokenCursorTests
             }
             """;
         var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedCleanupFailureDoesNotPublishAForwardedSpanResultAsync()
     {
         var entry = ForwardingDeclarations + """
@@ -429,35 +423,33 @@ public sealed class TokenCursorTests
             BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
         await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         internal Span<Token> MissingSources(Span<Token> tokens) { return tokens; }
         """)]
-    [InlineData("""
+    [TestCase("""
         [return: DependsOn(nameof(left))]
         internal Span<Token> UndeclaredSource(Span<Token> left, Span<Token> right, bool selectRight) {
             return selectRight ? right : left;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         [return: DependsOn(nameof(tokens), nameof(tokens))]
         internal Span<Token> DuplicateSource(Span<Token> tokens) { return tokens; }
         """)]
-    [InlineData("""
+    [TestCase("""
         [return: DependsOn(nameof(tokens))]
         [return: DependsOn(nameof(tokens))]
         internal Span<Token> DuplicateDependencies(Span<Token> tokens) { return tokens; }
         """)]
-    [InlineData("""
+    [TestCase("""
         [return: DependsOn(nameof(tokens))]
         public Span<Token> NonInternal(Span<Token> tokens) { return tokens; }
         """)]
-    [InlineData("""
+    [TestCase("""
         [DependsOn(nameof(tokens))]
         internal Span<Token> WrongDependencyTarget(Span<Token> tokens) { return tokens; }
         """)]
-    [InlineData("""
+    [TestCase("""
         [return: DependsOn(nameof(select))]
         internal Span<Token> NonSpanSource(bool select, Span<Token> tokens) { return tokens; }
         """)]
@@ -465,11 +457,11 @@ public sealed class TokenCursorTests
     {
         var entry = "using Terrum.CodeAnalysis; " + declaration + " int32 Main() { return 42; }";
         var compilation = await CompileAsync("", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task ForwardedSpanCannotEscapeALocalOwnerAsync()
     {
         var entry = """
@@ -484,13 +476,11 @@ public sealed class TokenCursorTests
             int32 Main() { return 42; }
             """;
         var compilation = await CompileAsync("alpha 42", entry, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task SnapshotConstructionPathsBothProduceAValidatedViewAsync(bool lossless)
     {
         var build = lossless ? "require TryScanLossless(init var scanned, init var trivia);"
@@ -521,10 +511,8 @@ public sealed class TokenCursorTests
             await ExecuteAsync(Program(await CompileAsync("alpha 42", entry, policy)), policy);
         }
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("alpha 42")]
+    [TestCase("")]
+    [TestCase("alpha 42")]
     public async Task IndexedReadsAreRepeatableAndDoNotAdvanceAsync(string text)
     {
         const string Entry = """
@@ -564,10 +552,8 @@ public sealed class TokenCursorTests
             await ExecuteAsync(Program(await CompileAsync(text, Entry, policy)), policy);
         }
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("alpha 42")]
+    [TestCase("")]
+    [TestCase("alpha 42")]
     public async Task ManagedReaderCanUseBorrowedSpanAsAMethodParameterAsync(string text)
     {
         const string Entry = """
@@ -610,42 +596,38 @@ public sealed class TokenCursorTests
             await ExecuteAsync(Program(await CompileAsync(text, Entry, policy)), policy);
         }
     }
-
-    [Theory]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); owner = _; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); TokenSnapshot moved = move owner; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); require Replace(out owner); return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); require TokenSnapshot.TryScan(init var fresh); owner = move fresh; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); owner = _; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); mut TokenCursor moved = move cursor; owner = _; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } owner = _; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } owner = _; return 42;")]
-    [InlineData("return Observe(owner.AsSpan(), Replace(out owner));")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return Consume(move cursor, Replace(out owner));")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return Consume(cursor: move cursor, ignored: Replace(out owner));")]
-    [InlineData("Token token = owner.AsSpan()[OwnerReplaceIndex(Replace(out owner))]; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); unsafe { try { require false; } finally { owner = _; } } return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); owner = _; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); TokenSnapshot moved = move owner; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); require Replace(out owner); return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); require TokenSnapshot.TryScan(init var fresh); owner = move fresh; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); owner = _; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); mut TokenCursor moved = move cursor; owner = _; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } owner = _; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } owner = _; return 42;")]
+    [TestCase("return Observe(owner.AsSpan(), Replace(out owner));")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return Consume(move cursor, Replace(out owner));")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return Consume(cursor: move cursor, ignored: Replace(out owner));")]
+    [TestCase("Token token = owner.AsSpan()[OwnerReplaceIndex(Replace(out owner))]; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); unsafe { try { require false; } finally { owner = _; } } return 42;")]
     public async Task LiveAndStagedDependenciesPreventOwnerInvalidationAsync(string body)
     {
         var compilation = await CompileAsync("", EntryPrefix + body + "}", BoundRuntimePolicy.CheckedExceptions);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
-
-    [Theory]
-    [InlineData("{ Span<Token> tokens = owner.AsSpan(); require tokens.Length == 1; } owner = _; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); Span<Token> copied = tokens; tokens = _; require copied.Length == 1; copied = _; owner = _; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } else { cursor = _; } owner = _; return 42;")]
-    [InlineData("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } cursor = _; owner = _; return 42;")]
-    [InlineData("unsafe { try { Span<Token> tokens = owner.AsSpan(); Token token = tokens[uint64.MaxValue]; } catch { owner = _; } } return 42;")]
+    [TestCase("{ Span<Token> tokens = owner.AsSpan(); require tokens.Length == 1; } owner = _; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); Span<Token> copied = tokens; tokens = _; require copied.Length == 1; copied = _; owner = _; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); if (Pick()) { cursor = _; } else { cursor = _; } owner = _; return 42;")]
+    [TestCase("mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); while (cursor.TryRead(init var token)) { } cursor = _; owner = _; return 42;")]
+    [TestCase("unsafe { try { Span<Token> tokens = owner.AsSpan(); Token token = tokens[uint64.MaxValue]; } catch { owner = _; } } return 42;")]
     public async Task DependenciesRetireAtTheirOwnEndsJoinsAndUnwindScopesAsync(string body)
     {
         var program = Program(await CompileAsync("", EntryPrefix + body + "}", BoundRuntimePolicy.CheckedExceptions));
         await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions);
     }
 
-    [Fact]
+    [Test]
     public async Task LiveSpanRejectsAConflictingMutableOwnerReceiverAsync()
     {
         var compilation = await CompileAsync("", EntryPrefix
@@ -654,12 +636,12 @@ public sealed class TokenCursorTests
                 public mut void Touch() { }
                 public int32 GetCount()
                 """, StringComparison.Ordinal) : source);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public async Task AJoinPreservesBothPossibleBackingOwnersAsync()
     {
         var compilation = await CompileAsync("", EntryPrefix + """
@@ -670,17 +652,15 @@ public sealed class TokenCursorTests
             return 42;
         }
         """, BoundRuntimePolicy.FailFast);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
-
-    [Theory]
-    [InlineData("4294967296")]
-    [InlineData("9223372036854775808")]
-    [InlineData("0x1_0000_0000")]
-    [InlineData("0x8000_0000_0000_0000")]
-    [InlineData("uint64.MaxValue")]
+    [TestCase("4294967296")]
+    [TestCase("9223372036854775808")]
+    [TestCase("0x1_0000_0000")]
+    [TestCase("0x8000_0000_0000_0000")]
+    [TestCase("uint64.MaxValue")]
     public async Task BoundsChecksDoNotNarrowUnsignedNativeWidthIndexesAsync(string index)
     {
         var entry = EntryPrefix + $$"""
@@ -695,10 +675,8 @@ public sealed class TokenCursorTests
         await ExecuteAsync(Program(await CompileAsync("", entry, BoundRuntimePolicy.CheckedExceptions)),
             BoundRuntimePolicy.CheckedExceptions);
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("alpha 42")]
+    [TestCase("")]
+    [TestCase("alpha 42")]
     public async Task FirstLastAndExhaustedReadsUseTheFullDescriptorAsync(string text)
     {
         const string Entry = EntryPrefix + """
@@ -721,11 +699,9 @@ public sealed class TokenCursorTests
             await ExecuteAsync(Program(await CompileAsync(text, Entry, policy)), policy);
         }
     }
-
-    [Theory]
-    [InlineData("0x1_0000_0000")]
-    [InlineData("0x8000_0000_0000_0000")]
-    [InlineData("uint64.MaxValue")]
+    [TestCase("0x1_0000_0000")]
+    [TestCase("0x8000_0000_0000_0000")]
+    [TestCase("uint64.MaxValue")]
     public async Task SuccessfulAndFailedIndexesAreEvaluatedOnceAsync(string oversized)
     {
         var entry = EntryPrefix + $$"""
@@ -745,26 +721,22 @@ public sealed class TokenCursorTests
         await ExecuteAsync(Program(await CompileAsync("alpha 42", entry, BoundRuntimePolicy.CheckedExceptions,
             trace: true)), BoundRuntimePolicy.CheckedExceptions);
     }
-
-    [Theory]
-    [InlineData("-1")]
-    [InlineData("-18446744073709551616")]
-    [InlineData("18446744073709551616")]
-    [InlineData("0x1_0000_0000_0000_0000")]
+    [TestCase("-1")]
+    [TestCase("-18446744073709551616")]
+    [TestCase("18446744073709551616")]
+    [TestCase("0x1_0000_0000_0000_0000")]
     public async Task NegativeAndOversizedIndexLiteralsAreRejectedAsync(string literal)
     {
         var compilation = await CompileAsync("", EntryPrefix
             + $"Span<Token> tokens = owner.AsSpan(); Token bad = tokens[{literal}]; return 42;}}",
             BoundRuntimePolicy.FailFast);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32", "-1")]
-    [InlineData("int32", "-2147483648")]
-    [InlineData("int64", "-1")]
-    [InlineData("int64", "-9223372036854775808")]
+    [TestCase("int32","-1")]
+    [TestCase("int32","-2147483648")]
+    [TestCase("int64","-1")]
+    [TestCase("int64","-9223372036854775808")]
     public async Task SignedConversionsAreCheckedBeforeElementAccessAsync(string type, string value)
     {
         var entry = EntryPrefix + $$"""
@@ -781,7 +753,7 @@ public sealed class TokenCursorTests
             BoundRuntimePolicy.CheckedExceptions);
     }
 
-    [Fact]
+    [Test]
     public async Task NonnegativeSignedIndexesRequireAnExplicitCheckedCarrierConversionAsync()
     {
         var entry = EntryPrefix + """
@@ -799,7 +771,7 @@ public sealed class TokenCursorTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task BoundsChecksPrecedeScalingAndAddressFormationAsync()
     {
         var entry = EntryPrefix + """
@@ -811,20 +783,19 @@ public sealed class TokenCursorTests
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         var body = SourceFunctionCode(code, program, "Read");
         var comparison = body.IndexOf(new byte[] { 0x48, 0x39, 0xC1, 0x0F, 0x82, 0x05, 0x00, 0x00, 0x00 });
-        Assert.True(comparison >= 0);
-        Assert.Equal(0xE8, body[comparison + 9]);
-        var start = code.SourceFunctionOffsets[program.Functions.IndexOf(Assert.Single(program.Functions,
-            static function => function.Name == "Read"))];
+        Assert.That(comparison >= 0, Is.True);
+        Assert.That(body[comparison + 9], Is.EqualTo(0xE8));
+        var start = code.SourceFunctionOffsets[program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Read"))];
         var boundsTarget = start + comparison + 14
             + BinaryPrimitives.ReadInt32LittleEndian(body.Slice(comparison + 10, 4));
-        Assert.Equal(code.Functions[4].Start, boundsTarget);
-        Assert.True(body.Slice(comparison + 14).StartsWith(new byte[] {
+        Assert.That(boundsTarget, Is.EqualTo(code.Functions[4].Start));
+        Assert.That(body.Slice(comparison + 14).StartsWith(new byte[] {
             0x48, 0x89, 0xC8, 0xB9, 0x0C, 0x00, 0x00, 0x00, 0x48, 0xF7, 0xE1,
-        }));
-        Assert.True(body.IndexOf(new byte[] { 0x48, 0x01, 0xD0 }) > comparison + 22);
+        }), Is.True);
+        Assert.That(body.IndexOf(new byte[] { 0x48, 0x01, 0xD0 }) > comparison + 22, Is.True);
     }
 
-    [Fact]
+    [Test]
     public async Task ProjectionAndAdvanceInitializeBothFullDescriptorWordsAsync()
     {
         var entry = EntryPrefix + """
@@ -840,86 +811,80 @@ public sealed class TokenCursorTests
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         var body = SourceFunctionCode(code, program, "Measure");
         var countMultiply = body.IndexOf(new byte[] { 0x48, 0x6B, 0xC0, 0x03 });
-        Assert.True(countMultiply >= 14);
+        Assert.That(countMultiply >= 14, Is.True);
         var countLoad = body.IndexOf(new byte[] { 0x8B, 0x80, 0x08, 0x00, 0x00, 0x00 });
-        Assert.True(countLoad >= 0 && countLoad < countMultiply - 14);
-        Assert.True(body.Slice(countMultiply - 14, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0x85 }));
-        Assert.True(body.Slice(countMultiply - 7, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0x85 }));
+        Assert.That(countLoad >= 0 && countLoad < countMultiply - 14, Is.True);
+        Assert.That(body.Slice(countMultiply - 14, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0x85 }), Is.True);
+        Assert.That(body.Slice(countMultiply - 7, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0x85 }), Is.True);
         var countSlot = BinaryPrimitives.ReadInt32LittleEndian(body.Slice(countMultiply - 11, 4));
         var dataStore = new byte[] { 0x48, 0x89, 0x85, 0, 0, 0, 0 };
         BinaryPrimitives.WriteInt32LittleEndian(dataStore.AsSpan(3), countSlot - 8);
-        Assert.True(body.IndexOf(dataStore) >= 0);
-        Assert.True(body.IndexOf(new byte[] { 0x48, 0x8B, 0x80, 0x08, 0x00, 0x00, 0x00 }) >= 0);
+        Assert.That(body.IndexOf(dataStore) >= 0, Is.True);
+        Assert.That(body.IndexOf(new byte[] { 0x48, 0x8B, 0x80, 0x08, 0x00, 0x00, 0x00 }) >= 0, Is.True);
 
         var advance = SourceFunctionCode(code, program, "Terrum.CodeAnalysis.TokenCursor.TryRead");
         var decrement = advance.IndexOf(new byte[] { 0x48, 0x83, 0xE8, 0x01 });
-        Assert.True(decrement >= 0);
-        Assert.True(advance.Slice(decrement + 4, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0x85 }));
+        Assert.That(decrement >= 0, Is.True);
+        Assert.That(advance.Slice(decrement + 4, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0x85 }), Is.True);
         var advanceCountSlot = BinaryPrimitives.ReadInt32LittleEndian(advance.Slice(decrement + 7, 4));
         BinaryPrimitives.WriteInt32LittleEndian(dataStore.AsSpan(3), advanceCountSlot - 8);
-        Assert.True(advance.IndexOf(dataStore) >= 0);
+        Assert.That(advance.IndexOf(dataStore) >= 0, Is.True);
 
         var image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
         var pe = BinaryPrimitives.ReadInt32LittleEndian(image.AsSpan(0x3C, 4));
-        Assert.Equal(0x8664, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(pe + 4, 2)));
-        Assert.Equal(0x20B, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(pe + 24, 2)));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(pe + 4, 2)), Is.EqualTo(0x8664));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(pe + 24, 2)), Is.EqualTo(0x20B));
         await ExecuteAsync(program, BoundRuntimePolicy.FailFast);
     }
-
-    [Theory]
-    [InlineData("[Captures(tokens)]")]
-    [InlineData("[Captures(nameof(missing))]")]
-    [InlineData("[Captures(other(tokens))]")]
-    [InlineData("[Captures(nameof(tokens))] [Captures(nameof(tokens))]")]
-    [InlineData("")]
+    [TestCase("[Captures(tokens)]")]
+    [TestCase("[Captures(nameof(missing))]")]
+    [TestCase("[Captures(other(tokens))]")]
+    [TestCase("[Captures(nameof(tokens))] [Captures(nameof(tokens))]")]
+    [TestCase("")]
     public async Task CapturesSelectorsAreCheckedAndRequiredAsync(string attribute)
     {
         var compilation = await CompileAsync("", EntryPrefix + "return 42;}", BoundRuntimePolicy.FailFast,
             (name, source) => name == "TokenCursor"
                 ? source.Replace("[Captures(nameof(tokens))]", attribute, StringComparison.Ordinal) : source);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("Span<int32> tokens = owner.AsSpan(); return 42;")]
-    [InlineData("write Span<Token> tokens = owner.AsSpan(); return 42;")]
-    [InlineData("Span<Token>? tokens = owner.AsSpan(); return 42;")]
-    [InlineData("Span<Token>?? tokens = owner.AsSpan(); return 42;")]
-    [InlineData("mut Span<Token> tokens = owner.AsSpan(); return 42;")]
-    [InlineData("nuint index = 0; return 42;")]
-    [InlineData("nint index = 0; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); Token token = tokens[nuint(0)]; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); Token token = tokens[nint(0)]; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); tokens[0] = tokens[0]; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); Span<Token> tail = tokens.AdvanceOne(); return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); Span<Token> tail = tokens[..]; return 42;")]
-    [InlineData("Span<Token> tokens = new Span<Token>(); return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); int32 index = 0; Token token = tokens[index]; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); int64 index = 0; Token token = tokens[index]; return 42;")]
-    [InlineData("Span<Token> tokens = owner.AsSpan(); uint32 index = 0; Token token = tokens[index]; return 42;")]
+    [TestCase("Span<int32> tokens = owner.AsSpan(); return 42;")]
+    [TestCase("write Span<Token> tokens = owner.AsSpan(); return 42;")]
+    [TestCase("Span<Token>? tokens = owner.AsSpan(); return 42;")]
+    [TestCase("Span<Token>?? tokens = owner.AsSpan(); return 42;")]
+    [TestCase("mut Span<Token> tokens = owner.AsSpan(); return 42;")]
+    [TestCase("nuint index = 0; return 42;")]
+    [TestCase("nint index = 0; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); Token token = tokens[nuint(0)]; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); Token token = tokens[nint(0)]; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); tokens[0] = tokens[0]; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); Span<Token> tail = tokens.AdvanceOne(); return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); Span<Token> tail = tokens[..]; return 42;")]
+    [TestCase("Span<Token> tokens = new Span<Token>(); return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); int32 index = 0; Token token = tokens[index]; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); int64 index = 0; Token token = tokens[index]; return 42;")]
+    [TestCase("Span<Token> tokens = owner.AsSpan(); uint32 index = 0; Token token = tokens[index]; return 42;")]
     public async Task BroaderSpanAndNativeIntegerSurfacesRemainUnsupportedAsync(string body)
     {
         var compilation = await CompileAsync("", EntryPrefix + body + "}", BoundRuntimePolicy.FailFast);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("unique struct Stored { private Span<Token> Value; public Stored(Span<Token> value) { Value = value; } }")]
-    [InlineData("class Stored { private Span<Token> Value; public Stored(Span<Token> value) { Value = value; } }")]
-    [InlineData("Span<Token> Escape(Span<Token> value) { return value; }")]
-    [InlineData("TokenCursor Escape(TokenCursor value) { return move value; }")]
-    [InlineData("[Captures(nameof(value))] void Capture(Span<Token> value) { }")]
+    [TestCase("unique struct Stored { private Span<Token> Value; public Stored(Span<Token> value) { Value = value; } }")]
+    [TestCase("class Stored { private Span<Token> Value; public Stored(Span<Token> value) { Value = value; } }")]
+    [TestCase("Span<Token> Escape(Span<Token> value) { return value; }")]
+    [TestCase("TokenCursor Escape(TokenCursor value) { return move value; }")]
+    [TestCase("[Captures(nameof(value))] void Capture(Span<Token> value) { }")]
     public async Task StorageEscapesAndMisplacedCapturesRemainUnsupportedAsync(string declaration)
     {
         var compilation = await CompileAsync("", "using Terrum.CodeAnalysis; " + declaration
             + " int32 Main() { return 42; }", BoundRuntimePolicy.FailFast);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task NestedAttributeArgumentsRemainSpecificToCapturesAsync()
     {
         var compilation = await CompileAsync("", """
@@ -927,17 +892,16 @@ public sealed class TokenCursorTests
             [NoThrow(nameof(tokens))] void Observe(Span<Token> tokens) { }
             int32 Main() { return 42; }
             """, BoundRuntimePolicy.FailFast);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task MandatoryVerifierRejectsRemovedCapturesAndForgedTokenLayoutAsync()
     {
         var program = Program(await CompileAsync("", EntryPrefix
             + "mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return 42;}", BoundRuntimePolicy.FailFast));
-        var constructor = program.Functions.IndexOf(Assert.Single(program.Functions,
-            static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.#ctor"));
+        var constructor = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.#ctor"));
         Reject(program with {
             Functions = program.Functions.SetItem(constructor, program.Functions[constructor] with { CapturedParameters = [] }),
         });
@@ -945,8 +909,7 @@ public sealed class TokenCursorTests
             Functions = program.Functions.SetItem(constructor,
                 program.Functions[constructor] with { CapturedParameters = [0] }),
         });
-        var token = program.Structures.IndexOf(Assert.Single(program.Structures,
-            static structure => structure.Name == "Terrum.CodeAnalysis.Token"));
+        var token = program.Structures.IndexOf(global::System.Linq.Enumerable.Single(program.Structures, static structure => structure.Name == "Terrum.CodeAnalysis.Token"));
         var layout = program.Structures[token];
         Reject(program with {
             Structures = program.Structures.SetItem(token, layout with {
@@ -955,7 +918,7 @@ public sealed class TokenCursorTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task MandatoryVerifierRejectsForgedProjectionProvenanceAsync()
     {
         var program = Program(await CompileAsync("", EntryPrefix
@@ -974,7 +937,7 @@ public sealed class TokenCursorTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task MandatoryVerifierRejectsForgedReleaseAndIndexWidthAsync()
     {
         var program = Program(await CompileAsync("", EntryPrefix + """
@@ -1015,10 +978,8 @@ public sealed class TokenCursorTests
                 entry with { Body = (BoundBlock)Rewrite(entry.Body, true, PrimitiveType.UInt64) }),
         });
     }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestCase(true)]
+    [TestCase(false)]
     public async Task MandatoryVerifierRejectsForgedProjectionAndLengthResultTypesAsync(bool projection)
     {
         var program = Program(await CompileAsync("", EntryPrefix
@@ -1030,7 +991,7 @@ public sealed class TokenCursorTests
         {
             if (statement is BoundLocal { Initializer: BoundSpanLength { View: BoundSnapshotSpan snapshot } length } local)
             {
-                Assert.Equal(-1, variable);
+                Assert.That(variable, Is.EqualTo(-1));
                 variable = local.Variable;
                 BoundExpression initializer = projection
                     ? snapshot with { Type = forgedType } : length with { Type = forgedType };
@@ -1043,7 +1004,7 @@ public sealed class TokenCursorTests
             };
         }
         var body = (BoundBlock)Rewrite(entry.Body);
-        Assert.InRange(variable, entry.ParameterCount, entry.Variables.Length - 1);
+        Assert.That(variable, Is.InRange(entry.ParameterCount, entry.Variables.Length - 1));
         Reject(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, entry with {
                 Body = body,
@@ -1051,19 +1012,17 @@ public sealed class TokenCursorTests
             }),
         });
     }
-
-    [Theory]
-    [InlineData(false, BoundRuntimePolicy.FailFast)]
-    [InlineData(true, BoundRuntimePolicy.FailFast)]
-    [InlineData(false, BoundRuntimePolicy.CheckedExceptions)]
-    [InlineData(true, BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(false,BoundRuntimePolicy.FailFast)]
+    [TestCase(true,BoundRuntimePolicy.FailFast)]
+    [TestCase(false,BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(true,BoundRuntimePolicy.CheckedExceptions)]
     public async Task MandatoryVerifierRejectsOwnerCleanupBeforeItsCapturedCursorAsync(bool lifetimeEnd, BoundRuntimePolicy policy)
     {
         var program = Program(await CompileAsync("", EntryPrefix
             + "TokenCursor cursor = new TokenCursor(owner.AsSpan()); return 42;}", policy));
         var entry = program.Functions[program.EntryPoint];
-        var owner = entry.Variables.IndexOf(Assert.Single(entry.Variables, static variable => variable.Name == "owner"));
-        var cursor = entry.Variables.IndexOf(Assert.Single(entry.Variables, static variable => variable.Name == "cursor"));
+        var owner = entry.Variables.IndexOf(global::System.Linq.Enumerable.Single(entry.Variables, static variable => variable.Name == "owner"));
+        var cursor = entry.Variables.IndexOf(global::System.Linq.Enumerable.Single(entry.Variables, static variable => variable.Name == "cursor"));
         BoundDrop? ownerCleanup = null;
         var replacements = 0;
         BoundStatement Rewrite(BoundStatement statement)
@@ -1072,13 +1031,13 @@ public sealed class TokenCursorTests
             {
                 if (region.Finally.Statements is [BoundDrop ownerDrop] && ownerDrop.Variable == owner)
                 {
-                    Assert.Null(ownerCleanup);
+                    Assert.That(ownerCleanup, Is.Null);
                     ownerCleanup = ownerDrop;
                 }
                 var body = (BoundBlock)Rewrite(region.Body);
                 if (region.Finally.Statements is [BoundDrop cursorDrop] && cursorDrop.Variable == cursor)
                 {
-                    var backingCleanup = Assert.IsType<BoundDrop>(ownerCleanup);
+                    var backingCleanup = ((global::System.Func<BoundDrop>)(() => { var __nunitActual5 = ownerCleanup; Assert.That(__nunitActual5, Is.TypeOf<BoundDrop>()); return (BoundDrop)__nunitActual5!; }))();
                     BoundStatement invalidation = lifetimeEnd
                         ? new BoundLifetimeEnd(owner, backingCleanup.CleanupFunction, cursorDrop.Span)
                         : backingCleanup with { Span = cursorDrop.Span };
@@ -1096,19 +1055,18 @@ public sealed class TokenCursorTests
             };
         }
         var forgedBody = (BoundBlock)Rewrite(entry.Body);
-        Assert.Equal(1, replacements);
+        Assert.That(replacements, Is.EqualTo(1));
         Reject(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, entry with { Body = forgedBody }),
         });
     }
 
-    [Fact]
+    [Test]
     public async Task MandatoryVerifierRejectsForgedAdvanceResultTypeAsync()
     {
         var program = Program(await CompileAsync("", EntryPrefix
             + "mut TokenCursor cursor = new TokenCursor(owner.AsSpan()); return 42;}", BoundRuntimePolicy.FailFast));
-        var method = Assert.Single(program.Functions,
-            static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.TryRead");
+        var method = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Terrum.CodeAnalysis.TokenCursor.TryRead");
         var function = program.Functions.IndexOf(method);
         var variable = method.Variables.Length;
         var replacements = 0;
@@ -1130,7 +1088,7 @@ public sealed class TokenCursorTests
             };
         }
         var body = (BoundBlock)Rewrite(method.Body);
-        Assert.Equal(1, replacements);
+        Assert.That(replacements, Is.EqualTo(1));
         Reject(program with {
             Functions = program.Functions.SetItem(function, method with {
                 Body = body,
@@ -1138,17 +1096,15 @@ public sealed class TokenCursorTests
             }),
         });
     }
-
-    [Theory]
-    [InlineData(nameof(BoundSnapshotSpan))]
-    [InlineData(nameof(BoundSpanAdvance))]
+    [TestCase(nameof(BoundSnapshotSpan))]
+    [TestCase(nameof(BoundSpanAdvance))]
     public void SpanNodeKindsCannotHidePersistenceMetadataBehindForgedResultTypes(string kind)
     {
         var program = Program(Compilation.CreateLibrary([SyntaxTree.Parse("public uint64 Probe() { return 1; }")]));
-        Assert.Empty(program.Structures);
-        var function = Assert.Single(program.Functions);
-        Assert.Empty(function.Variables);
-        Assert.True(function.CapturedParameters.IsDefaultOrEmpty);
+        Assert.That(program.Structures, Is.Empty);
+        var function = global::System.Linq.Enumerable.Single(program.Functions);
+        Assert.That(function.Variables, Is.Empty);
+        Assert.That(function.CapturedParameters.IsDefaultOrEmpty, Is.True);
         var span = function.Body.Span;
         BoundExpression expression = kind switch {
             nameof(BoundSnapshotSpan) => new BoundSnapshotSpan(0, 0, span) with { Type = PrimitiveType.UInt64 },
@@ -1161,11 +1117,11 @@ public sealed class TokenCursorTests
                 Body = new BoundBlock([new BoundReturn(expression, span)], span),
             }),
         };
-        var error = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Probe"]));
-        Assert.Equal("Compilation-local span and capture metadata cannot be persisted.", error.Message);
+        var error = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Probe"]))!;
+        Assert.That(error.Message, Is.EqualTo("Compilation-local span and capture metadata cannot be persisted."));
     }
 
-    [Fact]
+    [Test]
     public async Task MandatoryVerifierRejectsAStagedOwnerMoveAfterTheCursorMovesAsync()
     {
         var program = Program(await CompileAsync("", EntryPrefix + """
@@ -1174,15 +1130,17 @@ public sealed class TokenCursorTests
         }
         """, BoundRuntimePolicy.FailFast));
         var entry = program.Functions[program.EntryPoint];
-        var owner = entry.Variables.IndexOf(Assert.Single(entry.Variables, static variable => variable.Name == "owner"));
-        var replace = program.Functions.IndexOf(Assert.Single(program.Functions, static function => function.Name == "Replace"));
+        var owner = entry.Variables.IndexOf(global::System.Linq.Enumerable.Single(entry.Variables, static variable => variable.Name == "owner"));
+        var replace = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Replace"));
         BoundStatement Rewrite(BoundStatement statement) => statement switch {
             BoundBlock block => block with { Statements = [.. block.Statements.Select(Rewrite)] },
             BoundTryFinally region => region with { Body = (BoundBlock)Rewrite(region.Body) },
             BoundReturn { Value: BoundCall call } result => result with {
-                Value = call with { Arguments = call.Arguments.SetItem(1,
+                Value = call with {
+                    Arguments = call.Arguments.SetItem(1,
                     new BoundCall(replace, [new BoundOutArgument(owner, false, entry.Variables[owner].Type, call.Span)],
-                        PrimitiveType.Bool, call.Span)) },
+                        PrimitiveType.Bool, call.Span))
+                },
             },
             _ => statement,
         };
@@ -1191,7 +1149,7 @@ public sealed class TokenCursorTests
         });
     }
 
-    [Fact]
+    [Test]
     public async Task ConstructionFailureAndArgumentUnwindDoNotTransferOwnerCleanupAsync()
     {
         const string Entry = EntryPrefix + """
@@ -1234,13 +1192,11 @@ public sealed class TokenCursorTests
                 """, StringComparison.Ordinal) : source, trace: true));
         await ExecuteAsync(staged, BoundRuntimePolicy.CheckedExceptions);
     }
-
-    [Theory]
-    [InlineData(0, "")]
-    [InlineData(2, "require records.TryAppend(0); require records.TryAppend(0); require records.TryAppend(0);")]
-    [InlineData(1, "require records.TryAppend(0); require records.TryAppend(1); require records.TryAppend(0);")]
-    [InlineData(1, "require records.TryAppend(107); require records.TryAppend(0); require records.TryAppend(0);")]
-    [InlineData(2147483647, "")]
+    [TestCase(0,"")]
+    [TestCase(2,"require records.TryAppend(0); require records.TryAppend(0); require records.TryAppend(0);")]
+    [TestCase(1,"require records.TryAppend(0); require records.TryAppend(1); require records.TryAppend(0);")]
+    [TestCase(1,"require records.TryAppend(107); require records.TryAppend(0); require records.TryAppend(0);")]
+    [TestCase(2147483647,"")]
     public async Task SnapshotFactoryValidatesBeforePublishingAsync(int count, string append)
     {
         var entry = $$"""
@@ -1261,16 +1217,14 @@ public sealed class TokenCursorTests
         await ExecuteAsync(Program(await CompileAsync("", entry, BoundRuntimePolicy.CheckedExceptions)),
             BoundRuntimePolicy.CheckedExceptions);
     }
-
-    [Theory]
-    [InlineData(0, "")]
-    [InlineData(1, "")]
-    [InlineData(2, "0,0,0")]
-    [InlineData(1, "0,0,0")]
-    [InlineData(2, "107,0,1,0,1,0")]
-    [InlineData(2, "2,0,2,0,1,0")]
-    [InlineData(2, "2,0,1,0,0,0")]
-    [InlineData(2, "2,0,0,0,1,0")]
+    [TestCase(0,"")]
+    [TestCase(1,"")]
+    [TestCase(2,"0,0,0")]
+    [TestCase(1,"0,0,0")]
+    [TestCase(2,"107,0,1,0,1,0")]
+    [TestCase(2,"2,0,2,0,1,0")]
+    [TestCase(2,"2,0,1,0,0,0")]
+    [TestCase(2,"2,0,0,0,1,0")]
     public async Task ProjectionIndependentlyChecksRecordsBeforeCursorPublicationAsync(int count, string words)
     {
         var append = string.Join(Environment.NewLine, words.Split(',', StringSplitOptions.RemoveEmptyEntries)
@@ -1304,7 +1258,7 @@ public sealed class TokenCursorTests
                 }
                 var start = source.IndexOf("    internal static bool TryCreateValidated(", StringComparison.Ordinal);
                 var end = source.IndexOf("    public int32 GetCount()", start, StringComparison.Ordinal);
-                Assert.True(start >= 0 && end > start);
+                Assert.That(start >= 0 && end > start, Is.True);
                 var uncheckedFactory = """
                     internal static bool TryCreateValidated(OwnedInt32Buffer records, int32 count,
                         init ref<TokenSnapshot> result)
@@ -1320,12 +1274,12 @@ public sealed class TokenCursorTests
         await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions);
     }
 
-    [Fact]
+    [Test]
     public async Task SpanAndCaptureMetadataCannotCrossPersistenceOrExportBoundariesAsync()
     {
         var program = Program(await CompileAsync("", EntryPrefix
             + "Span<Token> tokens = owner.AsSpan(); return 42;}", BoundRuntimePolicy.FailFast));
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Observe"]));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Observe"]))!;
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var trees = new List<SyntaxTree>();
         foreach (var name in new[] { "SourceRange", "Token", "TokenCursor" })
@@ -1338,28 +1292,28 @@ public sealed class TokenCursorTests
             public int32 Observe(Span<Token> tokens) { return 42; }
             """));
         var library = Program(Compilation.CreateLibrary(trees));
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(library, ["Observe"]));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(library, ["Observe"], NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(library, ["Observe"]))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(library, ["Observe"], NativeRuntimePolicy.FailFast))!;
     }
 
     private static BoundProgram Program(Compilation compilation)
     {
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
     }
 
     private static ReadOnlySpan<byte> SourceFunctionCode(NativeCode code, BoundProgram program, string name)
     {
-        var index = program.Functions.IndexOf(Assert.Single(program.Functions, function => function.Name == name));
+        var index = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == name));
         var start = code.SourceFunctionOffsets[index];
-        var range = Assert.Single(code.Functions, function => function.Start == start);
+        var range = global::System.Linq.Enumerable.Single(code.Functions, function => function.Start == start);
         return code.Code.AsSpan(range.Start, range.End - range.Start);
     }
 
     private static void Reject(BoundProgram program)
     {
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast))!;
     }
 
     private static async Task<Compilation> CompileAsync(string text, string entry, BoundRuntimePolicy policy,
@@ -1393,7 +1347,7 @@ public sealed class TokenCursorTests
     private static async Task ExecuteAsync(BoundProgram program, BoundRuntimePolicy policy)
     {
         var nativePolicy = (NativeRuntimePolicy)policy;
-        Assert.Equal(42, NativeJit.Execute(program, nativePolicy));
+        Assert.That(NativeJit.Execute(program, nativePolicy), Is.EqualTo(42));
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var directory = Path.Combine(root, "artifacts", "scanner-tests");
         _ = Directory.CreateDirectory(directory);
@@ -1405,12 +1359,25 @@ public sealed class TokenCursorTests
                 UseShellExecute = false,
                 CreateNoWindow = true,
             }) ?? throw new InvalidOperationException("Could not start compiled token cursor.");
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(true);
-            Assert.Equal(42, process.ExitCode);
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw;
+            }
+            Assert.That(process.ExitCode, Is.EqualTo(42));
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

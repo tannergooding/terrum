@@ -16,7 +16,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -72,11 +72,10 @@ public sealed class NativeSourceGrantLibraryTests
         "\u000B\u000C\u001C\u001D\u001E\u001F\u00A0",
     ];
 
-    [Fact]
+    [Test]
     public void SourceDependencyTracksPrivateCalleeBodyChanges()
     {
-        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)
-        {
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         };
         var sourceFree = Compilation.CreateLibrary(
@@ -86,12 +85,11 @@ public sealed class NativeSourceGrantLibraryTests
                 public int32 GetValue(int32 at) { return ReadValue(at); }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        var sourceFreeProgram = Assert.IsType<BoundProgram>(sourceFree.Program);
+        var sourceFreeProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = sourceFree.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var sourceFreeArtifact = NativeEmitter.EmitLibraryWithSourceGrant(sourceFreeProgram,
             ["Terrum.CodeAnalysis.GetValue"], NativeRuntimePolicy.FailFast);
-        Assert.False(Assert.Single(sourceFreeArtifact.Exports).SourceDependent);
-        Assert.Equal([PrimitiveType.Int32],
-            Assert.Single(sourceFreeArtifact.Exports).ParameterTypes.ToArray());
+        Assert.That(global::System.Linq.Enumerable.Single(sourceFreeArtifact.Exports).SourceDependent, Is.False);
+        Assert.That(global::System.Linq.Enumerable.Single(sourceFreeArtifact.Exports).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
 
         var sourceDependent = Compilation.CreateLibrary(
             [SyntaxTree.Parse("""
@@ -100,17 +98,16 @@ public sealed class NativeSourceGrantLibraryTests
                 public int32 GetValue(int32 at) { return ReadValue(at); }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        var sourceDependentProgram = Assert.IsType<BoundProgram>(sourceDependent.Program);
+        var sourceDependentProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = sourceDependent.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         var sourceDependentArtifact = NativeEmitter.EmitLibraryWithSourceGrant(sourceDependentProgram,
             ["Terrum.CodeAnalysis.GetValue"], NativeRuntimePolicy.FailFast);
-        Assert.True(Assert.Single(sourceDependentArtifact.Exports).SourceDependent);
+        Assert.That(global::System.Linq.Enumerable.Single(sourceDependentArtifact.Exports).SourceDependent, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void SourceDependencyTracksCallerUnsafeExpressionCallees()
     {
-        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)
-        {
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         };
         var compilation = Compilation.CreateLibrary(
@@ -120,18 +117,17 @@ public sealed class NativeSourceGrantLibraryTests
                 public int32 GetValue(int32 at) { return unsafe(ReadValue(at)); }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             ["Terrum.CodeAnalysis.GetValue"], NativeRuntimePolicy.FailFast);
-        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnsupportedSourceGrantCallAndExportShapes()
     {
-        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)
-        {
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         };
 
@@ -139,7 +135,7 @@ public sealed class NativeSourceGrantLibraryTests
         var rangeCompilation = Compilation.CreateLibrary(
             [SyntaxTree.Parse(File.ReadAllText(sourceRangePath), sourceRangePath)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        var rangeProgram = Assert.IsType<BoundProgram>(rangeCompilation.Program);
+        var rangeProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = rangeCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(rangeProgram,
             ["Terrum.CodeAnalysis.SourceRange.TryCreate"], NativeRuntimePolicy.FailFast));
 
@@ -163,9 +159,8 @@ public sealed class NativeSourceGrantLibraryTests
                 }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        Assert.False(outputParameters.HasErrors,
-            string.Join(Environment.NewLine, outputParameters.Diagnostics));
-        var outputParameterProgram = Assert.IsType<BoundProgram>(outputParameters.Program);
+        Assert.That(outputParameters.HasErrors, Is.False, string.Join(Environment.NewLine, outputParameters.Diagnostics));
+        var outputParameterProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = outputParameters.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             outputParameterProgram, ["Terrum.CodeAnalysis.TryReadSource"], NativeRuntimePolicy.FailFast));
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
@@ -181,8 +176,8 @@ public sealed class NativeSourceGrantLibraryTests
                 }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        Assert.False(ownedExport.HasErrors, string.Join(Environment.NewLine, ownedExport.Diagnostics));
-        var ownedExportProgram = Assert.IsType<BoundProgram>(ownedExport.Program);
+        Assert.That(ownedExport.HasErrors, Is.False, string.Join(Environment.NewLine, ownedExport.Diagnostics));
+        var ownedExportProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = ownedExport.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             ownedExportProgram, ["Terrum.CodeAnalysis.CreateOwnedSourceResult"], NativeRuntimePolicy.FailFast));
 
@@ -195,8 +190,8 @@ public sealed class NativeSourceGrantLibraryTests
                 }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        Assert.False(managedCall.HasErrors, string.Join(Environment.NewLine, managedCall.Diagnostics));
-        var managedProgram = Assert.IsType<BoundProgram>(managedCall.Program);
+        Assert.That(managedCall.HasErrors, Is.False, string.Join(Environment.NewLine, managedCall.Diagnostics));
+        var managedProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = managedCall.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(managedProgram,
             ["Terrum.CodeAnalysis.ReadSourceAndCollect"], NativeRuntimePolicy.FailFast));
 
@@ -215,21 +210,17 @@ public sealed class NativeSourceGrantLibraryTests
                 }
                 """)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
-        Assert.False(unsupportedCallee.HasErrors,
-            string.Join(Environment.NewLine, unsupportedCallee.Diagnostics));
-        var unsupportedCalleeProgram = Assert.IsType<BoundProgram>(unsupportedCallee.Program);
+        Assert.That(unsupportedCallee.HasErrors, Is.False, string.Join(Environment.NewLine, unsupportedCallee.Diagnostics));
+        var unsupportedCalleeProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = unsupportedCallee.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithSourceGrant(
             unsupportedCalleeProgram, ["Terrum.CodeAnalysis.ReadSourceAndCount"], NativeRuntimePolicy.FailFast));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void EndRelativeSourceReadsUseTheInvocationLength(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)
-        {
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         };
         var compilation = Compilation.CreateLibrary(
@@ -238,11 +229,11 @@ public sealed class NativeSourceGrantLibraryTests
                 public int32 ReadFromSourceEnd(int32 offset) { return int32(Host.Source[^offset]); }
                 """)],
             [sourceBuffer], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             ["Terrum.CodeAnalysis.ReadFromSourceEnd"], (NativeRuntimePolicy)policy);
-        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-index-from-end-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -255,13 +246,13 @@ public sealed class NativeSourceGrantLibraryTests
                     [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
                         export.ReturnType, export.ParameterTypes))]);
                 var maximumSource = new string('x', 16_383) + "Z";
-                Assert.Equal((int)'A', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A'], 1));
-                Assert.Equal((int)'C', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A', 'B', 'C'], 1));
-                Assert.Equal((int)'A', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A', 'B', 'C'], 3));
-                Assert.Equal((int)'Z', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd",
-                    maximumSource.ToCharArray(), 1));
-                Assert.Equal((int)'x', bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd",
-                    maximumSource.ToCharArray(), 16_384));
+                Assert.That(bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A'], 1), Is.EqualTo((int)'A'));
+                Assert.That(bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A', 'B', 'C'], 1), Is.EqualTo((int)'C'));
+                Assert.That(bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd", ['A', 'B', 'C'], 3), Is.EqualTo((int)'A'));
+                Assert.That(bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd",
+                    maximumSource.ToCharArray(), 1), Is.EqualTo((int)'Z'));
+                Assert.That(bindings.Invoke<int>("Terrum.CodeAnalysis.ReadFromSourceEnd",
+                    maximumSource.ToCharArray(), 16_384), Is.EqualTo((int)'x'));
                 if (policy == BoundRuntimePolicy.CheckedExceptions)
                 {
                     Assert.Throws<TargetInvocationException>(() =>
@@ -282,13 +273,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceLineCountMatchesHostedTextLines(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var characterFactsPath = Path.Combine(RepositoryRoot(), "self-host", "CharacterFacts.terrum");
         var lineCountPath = Path.Combine(RepositoryRoot(), "self-host", "SourceLineCount.terrum");
         var compilation = Compilation.CreateLibrary([
@@ -297,10 +286,10 @@ public sealed class NativeSourceGrantLibraryTests
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program), [LineCountExport], (NativeRuntimePolicy)policy);
-        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), [LineCountExport], (NativeRuntimePolicy)policy);
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-line-count-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -314,13 +303,11 @@ public sealed class NativeSourceGrantLibraryTests
                         export.ReturnType, export.ParameterTypes))]);
                 foreach (var sample in LineCountSamples)
                 {
-                    Assert.Equal(SourceText.From(sample).Lines.Length,
-                        binding.Invoke<int>(LineCountExport, sample.ToCharArray()));
+                    Assert.That(binding.Invoke<int>(LineCountExport, sample.ToCharArray()), Is.EqualTo(SourceText.From(sample).Lines.Length));
                 }
 
                 var maximumSource = new string('\n', 16_384);
-                Assert.Equal(SourceText.From(maximumSource).Lines.Length,
-                    binding.Invoke<int>(LineCountExport, maximumSource.ToCharArray()));
+                Assert.That(binding.Invoke<int>(LineCountExport, maximumSource.ToCharArray()), Is.EqualTo(SourceText.From(maximumSource).Lines.Length));
             }
             finally
             {
@@ -332,13 +319,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceTextLengthMatchesHostedTextLength(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var characterFactsPath = Path.Combine(RepositoryRoot(), "self-host", "CharacterFacts.terrum");
         var sourceLengthPath = Path.Combine(RepositoryRoot(), "self-host", "SourceTextLength.terrum");
         var compilation = Compilation.CreateLibrary([
@@ -346,10 +331,10 @@ public sealed class NativeSourceGrantLibraryTests
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program), [SourceLengthExport], (NativeRuntimePolicy)policy);
-        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), [SourceLengthExport], (NativeRuntimePolicy)policy);
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-length-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -363,13 +348,11 @@ public sealed class NativeSourceGrantLibraryTests
                         export.ReturnType, export.ParameterTypes))]);
                 foreach (var sample in LineCountSamples)
                 {
-                    Assert.Equal(SourceText.From(sample).Length,
-                        binding.Invoke<int>(SourceLengthExport, sample.ToCharArray()));
+                    Assert.That(binding.Invoke<int>(SourceLengthExport, sample.ToCharArray()), Is.EqualTo(SourceText.From(sample).Length));
                 }
 
                 var maximumSource = new string('\0', 16_384);
-                Assert.Equal(SourceText.From(maximumSource).Length,
-                    binding.Invoke<int>(SourceLengthExport, maximumSource.ToCharArray()));
+                Assert.That(binding.Invoke<int>(SourceLengthExport, maximumSource.ToCharArray()), Is.EqualTo(SourceText.From(maximumSource).Length));
             }
             finally
             {
@@ -381,13 +364,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceCodeUnitPreservesAllUtf16UnitsAndSentinelBounds(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var sourceCodeUnitPath = Path.Combine(sourceDirectory, "SourceCodeUnit.terrum");
         var compilation = Compilation.CreateLibrary([
@@ -395,10 +376,10 @@ public sealed class NativeSourceGrantLibraryTests
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program), [SourceCodeUnitExport], (NativeRuntimePolicy)policy);
-        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), [SourceCodeUnitExport], (NativeRuntimePolicy)policy);
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-code-unit-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -414,8 +395,7 @@ public sealed class NativeSourceGrantLibraryTests
                 for (var codeUnit = 0; codeUnit <= char.MaxValue; codeUnit++)
                 {
                     singleCodeUnit[0] = (char)codeUnit;
-                    Assert.Equal((int)singleCodeUnit[0],
-                        binding.Invoke<int>(SourceCodeUnitExport, singleCodeUnit, 0));
+                    Assert.That(binding.Invoke<int>(SourceCodeUnitExport, singleCodeUnit, 0), Is.EqualTo((int)singleCodeUnit[0]));
                 }
 
                 foreach (var sample in LineCountSamples)
@@ -424,28 +404,25 @@ public sealed class NativeSourceGrantLibraryTests
                     var hosted = SourceText.From(sample);
                     for (var position = 0; position < hosted.Length; position++)
                     {
-                        Assert.Equal((int)hosted[position],
-                            binding.Invoke<int>(SourceCodeUnitExport, source, position));
+                        Assert.That(binding.Invoke<int>(SourceCodeUnitExport, source, position), Is.EqualTo((int)hosted[position]));
                     }
 
-                    Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, source, int.MinValue));
-                    Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, source, -1));
-                    Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, source, source.Length));
-                    Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, source, int.MaxValue));
+                    Assert.That(binding.Invoke<int>(SourceCodeUnitExport, source, int.MinValue), Is.EqualTo(-1));
+                    Assert.That(binding.Invoke<int>(SourceCodeUnitExport, source, -1), Is.EqualTo(-1));
+                    Assert.That(binding.Invoke<int>(SourceCodeUnitExport, source, source.Length), Is.EqualTo(-1));
+                    Assert.That(binding.Invoke<int>(SourceCodeUnitExport, source, int.MaxValue), Is.EqualTo(-1));
                 }
 
                 var maximumSource = new char[16_384];
                 maximumSource[0] = '\uD800';
                 maximumSource[^1] = char.MaxValue;
                 var maximumHosted = SourceText.From(new string(maximumSource));
-                Assert.Equal((int)maximumHosted[0],
-                    binding.Invoke<int>(SourceCodeUnitExport, maximumSource, 0));
-                Assert.Equal((int)maximumHosted[^1],
-                    binding.Invoke<int>(SourceCodeUnitExport, maximumSource, maximumSource.Length - 1));
-                Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, maximumSource, int.MinValue));
-                Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, maximumSource, -1));
-                Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, maximumSource, maximumSource.Length));
-                Assert.Equal(-1, binding.Invoke<int>(SourceCodeUnitExport, maximumSource, int.MaxValue));
+                Assert.That(binding.Invoke<int>(SourceCodeUnitExport, maximumSource, 0), Is.EqualTo((int)maximumHosted[0]));
+                Assert.That(binding.Invoke<int>(SourceCodeUnitExport, maximumSource, maximumSource.Length - 1), Is.EqualTo((int)maximumHosted[^1]));
+                Assert.That(binding.Invoke<int>(SourceCodeUnitExport, maximumSource, int.MinValue), Is.EqualTo(-1));
+                Assert.That(binding.Invoke<int>(SourceCodeUnitExport, maximumSource, -1), Is.EqualTo(-1));
+                Assert.That(binding.Invoke<int>(SourceCodeUnitExport, maximumSource, maximumSource.Length), Is.EqualTo(-1));
+                Assert.That(binding.Invoke<int>(SourceCodeUnitExport, maximumSource, int.MaxValue), Is.EqualTo(-1));
             }
             finally
             {
@@ -457,27 +434,25 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceRangeValidityMatchesHostedGetSubText(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceRangeValidationPath = Path.Combine(RepositoryRoot(), "self-host", "SourceRangeValidation.terrum");
         var compilation = Compilation.CreateLibrary([
             SyntaxTree.Parse(File.ReadAllText(sourceRangeValidationPath), sourceRangeValidationPath),
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program), [CanGetSourceRangeExport],
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), [CanGetSourceRangeExport],
             (NativeRuntimePolicy)policy);
-        var export = Assert.Single(artifact.Exports);
-        Assert.True(export.SourceDependent);
-        Assert.Equal(PrimitiveType.Bool, export.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], export.ParameterTypes.ToArray());
+        var export = global::System.Linq.Enumerable.Single(artifact.Exports);
+        Assert.That(export.SourceDependent, Is.True);
+        Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.Bool));
+        Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-range-validity-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -506,13 +481,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void PackedStringEscapeMatchesHostedEscapeContract(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
@@ -527,14 +500,14 @@ public sealed class NativeSourceGrantLibraryTests
                 IsInvocationScoped = true,
             }],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(),
             [AnalyzeStringEscapePackedExport], (NativeRuntimePolicy)policy);
-        var export = Assert.Single(artifact.Exports);
-        Assert.True(export.SourceDependent);
-        Assert.Equal(PrimitiveType.UInt32, export.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], export.ParameterTypes.ToArray());
+        var export = global::System.Linq.Enumerable.Single(artifact.Exports);
+        Assert.That(export.SourceDependent, Is.True);
+        Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-escape-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -583,20 +556,18 @@ public sealed class NativeSourceGrantLibraryTests
                     var expected = canAnalyze
                         ? PackStringEscapeResult(item.Scalar, item.Consumed, item.HasError)
                         : 0u;
-                    Assert.Equal(expected, bindings.Invoke<uint>(AnalyzeStringEscapePackedExport,
-                        item.Source.ToCharArray(), item.Start, item.Length));
+                    Assert.That(bindings.Invoke<uint>(AnalyzeStringEscapePackedExport,
+                        item.Source.ToCharArray(), item.Start, item.Length), Is.EqualTo(expected));
                 }
 
                 var maximumSource = new string('x', 16_382) + "\\n";
                 var maximum = maximumSource.ToCharArray();
-                Assert.Equal(PackStringEscapeResult(10, 2, false),
-                    bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, maximum, 16_382, 2));
+                Assert.That(bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, maximum, 16_382, 2), Is.EqualTo(PackStringEscapeResult(10, 2, false)));
                 var maximumTrailingEscape = new string('x', 16_383) + "\\";
-                Assert.Equal(PackStringEscapeResult(0, 1, true),
-                    bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, maximumTrailingEscape.ToCharArray(),
-                        16_383, 1));
+                Assert.That(bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, maximumTrailingEscape.ToCharArray(),
+                        16_383, 1), Is.EqualTo(PackStringEscapeResult(0, 1, true)));
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, new char[16_385], 0, 1));
+                    bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, new char[16_385], 0, 1))!;
             }
             finally
             {
@@ -608,13 +579,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void CharacterLiteralSourceGrantQueriesMatchHostedLiteralContract(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var componentNames = new[] {
             "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteralPacked", "CharacterLiteralScalar",
@@ -629,21 +598,19 @@ public sealed class NativeSourceGrantLibraryTests
                 IsInvocationScoped = true,
             }],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(),
             [AnalyzeCharacterLiteralPackedExport, CharacterLiteralScalarExport], (NativeRuntimePolicy)policy);
-        Assert.Equal(2, artifact.Exports.Length);
-        var packedExport = Assert.Single(artifact.Exports,
-            static item => item.Name == AnalyzeCharacterLiteralPackedExport);
-        Assert.True(packedExport.SourceDependent);
-        Assert.Equal(PrimitiveType.UInt32, packedExport.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], packedExport.ParameterTypes.ToArray());
-        var scalarExport = Assert.Single(artifact.Exports,
-            static item => item.Name == CharacterLiteralScalarExport);
-        Assert.True(scalarExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, scalarExport.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], scalarExport.ParameterTypes.ToArray());
+        Assert.That(artifact.Exports.Length, Is.EqualTo(2));
+        var packedExport = global::System.Linq.Enumerable.Single(artifact.Exports, static item => item.Name == AnalyzeCharacterLiteralPackedExport);
+        Assert.That(packedExport.SourceDependent, Is.True);
+        Assert.That(packedExport.ReturnType, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(packedExport.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var scalarExport = global::System.Linq.Enumerable.Single(artifact.Exports, static item => item.Name == CharacterLiteralScalarExport);
+        Assert.That(scalarExport.SourceDependent, Is.True);
+        Assert.That(scalarExport.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(scalarExport.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-character-literal-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -682,36 +649,29 @@ public sealed class NativeSourceGrantLibraryTests
                 ];
                 foreach (var item in cases)
                 {
-                    Assert.Equal(item.Expected,
-                        bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, item.Source.ToCharArray(),
-                            item.Start, item.Length));
+                    Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, item.Source.ToCharArray(),
+                            item.Start, item.Length), Is.EqualTo(item.Expected));
                     int expectedScalar = (item.Expected & 3) == 1 ? (int)(item.Expected >> 2) : -1;
-                    Assert.Equal(expectedScalar,
-                        bindings.Invoke<int>(CharacterLiteralScalarExport, item.Source.ToCharArray(),
-                            item.Start, item.Length));
+                    Assert.That(bindings.Invoke<int>(CharacterLiteralScalarExport, item.Source.ToCharArray(),
+                            item.Start, item.Length), Is.EqualTo(expectedScalar));
                 }
 
-                Assert.Equal(PackCharacterLiteralError(1, 0, 0),
-                    bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, [], 0, 0));
-                Assert.Equal(-1, bindings.Invoke<int>(CharacterLiteralScalarExport, [], 0, 0));
+                Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, [], 0, 0), Is.EqualTo(PackCharacterLiteralError(1, 0, 0)));
+                Assert.That(bindings.Invoke<int>(CharacterLiteralScalarExport, [], 0, 0), Is.EqualTo(-1));
                 var maximumInvalidSource = new string('x', 16_384);
-                Assert.Equal(0x8000_0002u,
-                    bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, maximumInvalidSource.ToCharArray(),
-                        0, maximumInvalidSource.Length));
-                Assert.Equal(-1,
-                    bindings.Invoke<int>(CharacterLiteralScalarExport, maximumInvalidSource.ToCharArray(),
-                        0, maximumInvalidSource.Length));
+                Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, maximumInvalidSource.ToCharArray(),
+                        0, maximumInvalidSource.Length), Is.EqualTo(0x8000_0002u));
+                Assert.That(bindings.Invoke<int>(CharacterLiteralScalarExport, maximumInvalidSource.ToCharArray(),
+                        0, maximumInvalidSource.Length), Is.EqualTo(-1));
                 var maximumValidSource = new string('x', 16_381) + "'A'";
-                Assert.Equal(PackCharacterLiteralSuccess(65),
-                    bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, maximumValidSource.ToCharArray(),
-                        16_381, 3));
-                Assert.Equal(65,
-                    bindings.Invoke<int>(CharacterLiteralScalarExport, maximumValidSource.ToCharArray(),
-                        16_381, 3));
+                Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, maximumValidSource.ToCharArray(),
+                        16_381, 3), Is.EqualTo(PackCharacterLiteralSuccess(65)));
+                Assert.That(bindings.Invoke<int>(CharacterLiteralScalarExport, maximumValidSource.ToCharArray(),
+                        16_381, 3), Is.EqualTo(65));
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, new char[16_385], 0, 3));
+                    bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, new char[16_385], 0, 3))!;
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<int>(CharacterLiteralScalarExport, new char[16_385], 0, 3));
+                    bindings.Invoke<int>(CharacterLiteralScalarExport, new char[16_385], 0, 3))!;
             }
             finally
             {
@@ -723,13 +683,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void StringLiteralScalarCountMatchesHostedTryCreate(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
@@ -745,14 +703,14 @@ public sealed class NativeSourceGrantLibraryTests
                 IsInvocationScoped = true,
             }],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(),
             [StringLiteralScalarCountExport], (NativeRuntimePolicy)policy);
-        var export = Assert.Single(artifact.Exports);
-        Assert.True(export.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, export.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], export.ParameterTypes.ToArray());
+        var export = global::System.Linq.Enumerable.Single(artifact.Exports);
+        Assert.That(export.SourceDependent, Is.True);
+        Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-count-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -797,33 +755,30 @@ public sealed class NativeSourceGrantLibraryTests
                 ];
                 foreach (var item in cases)
                 {
-                    Assert.Equal(item.Expected,
-                        bindings.Invoke<int>(StringLiteralScalarCountExport, item.Source.ToCharArray(),
-                            item.Start, item.Length));
+                    Assert.That(bindings.Invoke<int>(StringLiteralScalarCountExport, item.Source.ToCharArray(),
+                            item.Start, item.Length), Is.EqualTo(item.Expected));
                     if (item.Start == 0 && item.Length == item.Source.Length && item.Length >= 2)
                     {
                         var lexed = Lexer.Lex(SourceText.From(item.Source));
                         if (item.Expected >= 0)
                         {
-                            Assert.Empty(lexed.Diagnostics);
+                            Assert.That(lexed.Diagnostics, Is.Empty);
                         }
                         else
                         {
-                            Assert.NotEmpty(lexed.Diagnostics);
+                            Assert.That(lexed.Diagnostics, Is.Not.Empty);
                         }
                     }
                 }
 
                 var maximumValidSource = "\"" + new string('a', 16_382) + "\"";
-                Assert.Equal(16_382,
-                    bindings.Invoke<int>(StringLiteralScalarCountExport, maximumValidSource.ToCharArray(),
-                        0, maximumValidSource.Length));
+                Assert.That(bindings.Invoke<int>(StringLiteralScalarCountExport, maximumValidSource.ToCharArray(),
+                        0, maximumValidSource.Length), Is.EqualTo(16_382));
                 var maximumEscapedSource = "\"" + new string('a', 16_380) + "\\n\"";
-                Assert.Equal(16_381,
-                    bindings.Invoke<int>(StringLiteralScalarCountExport, maximumEscapedSource.ToCharArray(),
-                        0, maximumEscapedSource.Length));
+                Assert.That(bindings.Invoke<int>(StringLiteralScalarCountExport, maximumEscapedSource.ToCharArray(),
+                        0, maximumEscapedSource.Length), Is.EqualTo(16_381));
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<int>(StringLiteralScalarCountExport, new char[16_385], 0, 2));
+                    bindings.Invoke<int>(StringLiteralScalarCountExport, new char[16_385], 0, 2))!;
             }
             finally
             {
@@ -835,13 +790,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void StringLiteralScalarAtMatchesHostedTryCreate(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
@@ -857,15 +810,14 @@ public sealed class NativeSourceGrantLibraryTests
                 IsInvocationScoped = true,
             }],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(),
             [StringLiteralScalarAtExport], (NativeRuntimePolicy)policy);
-        var export = Assert.Single(artifact.Exports);
-        Assert.True(export.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, export.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
-            export.ParameterTypes.ToArray());
+        var export = global::System.Linq.Enumerable.Single(artifact.Exports);
+        Assert.That(export.SourceDependent, Is.True);
+        Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-scalar-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -905,9 +857,8 @@ public sealed class NativeSourceGrantLibraryTests
                 ];
                 foreach (var item in cases)
                 {
-                    Assert.Equal(item.ExpectedScalar,
-                        bindings.Invoke<int>(StringLiteralScalarAtExport, item.Source.ToCharArray(),
-                            item.Start, item.Length, item.Index));
+                    Assert.That(bindings.Invoke<int>(StringLiteralScalarAtExport, item.Source.ToCharArray(),
+                            item.Start, item.Length, item.Index), Is.EqualTo(item.ExpectedScalar));
                     if (item.Start >= 0 && item.Length >= 0 && item.Start <= item.Source.Length
                         && item.Length <= item.Source.Length - item.Start)
                     {
@@ -917,23 +868,20 @@ public sealed class NativeSourceGrantLibraryTests
                             && lexed.Tokens[0].Kind == TokenKind.StringLiteral
                             && lexed.Tokens[0].Span == new TextSpan(0, spelling.Length)
                             && lexed.Tokens[1].Kind == TokenKind.EndOfFile;
-                        Assert.Equal(item.ExpectedValid, isSingleValidLiteral);
+                        Assert.That(isSingleValidLiteral, Is.EqualTo(item.ExpectedValid));
                     }
                 }
 
                 var maximumValidSource = "\"" + new string('a', 16_382) + "\"";
-                Assert.Equal((int)'a',
-                    bindings.Invoke<int>(StringLiteralScalarAtExport, maximumValidSource.ToCharArray(),
-                        0, maximumValidSource.Length, 16_381));
-                Assert.Equal(-1,
-                    bindings.Invoke<int>(StringLiteralScalarAtExport, maximumValidSource.ToCharArray(),
-                        0, maximumValidSource.Length, 16_382));
+                Assert.That(bindings.Invoke<int>(StringLiteralScalarAtExport, maximumValidSource.ToCharArray(),
+                        0, maximumValidSource.Length, 16_381), Is.EqualTo((int)'a'));
+                Assert.That(bindings.Invoke<int>(StringLiteralScalarAtExport, maximumValidSource.ToCharArray(),
+                        0, maximumValidSource.Length, 16_382), Is.EqualTo(-1));
                 var maximumEscapedSource = "\"" + new string('a', 16_380) + "\\n\"";
-                Assert.Equal(10,
-                    bindings.Invoke<int>(StringLiteralScalarAtExport, maximumEscapedSource.ToCharArray(),
-                        0, maximumEscapedSource.Length, 16_380));
+                Assert.That(bindings.Invoke<int>(StringLiteralScalarAtExport, maximumEscapedSource.ToCharArray(),
+                        0, maximumEscapedSource.Length, 16_380), Is.EqualTo(10));
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<int>(StringLiteralScalarAtExport, new char[16_385], 0, 2, 0));
+                    bindings.Invoke<int>(StringLiteralScalarAtExport, new char[16_385], 0, 2, 0))!;
             }
             finally
             {
@@ -945,13 +893,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void StringLiteralLengthsMatchHostEncodersAndRows(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
@@ -967,27 +913,23 @@ public sealed class NativeSourceGrantLibraryTests
                 IsInvocationScoped = true,
             }],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(),
             [StringLiteralEncodedLengthExport, StringNameRowByteLengthExport,
                 StringNamespaceRowByteLengthExport], (NativeRuntimePolicy)policy);
-        var export = Assert.Single(artifact.Exports,
-            static item => item.Name == StringLiteralEncodedLengthExport);
-        Assert.True(export.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, export.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
-            export.ParameterTypes.ToArray());
-        var nameRowLengthExport = Assert.Single(artifact.Exports,
-            static item => item.Name == StringNameRowByteLengthExport);
-        Assert.True(nameRowLengthExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, nameRowLengthExport.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], nameRowLengthExport.ParameterTypes.ToArray());
-        var namespaceRowLengthExport = Assert.Single(artifact.Exports,
-            static item => item.Name == StringNamespaceRowByteLengthExport);
-        Assert.True(namespaceRowLengthExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, namespaceRowLengthExport.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], namespaceRowLengthExport.ParameterTypes.ToArray());
+        var export = global::System.Linq.Enumerable.Single(artifact.Exports, static item => item.Name == StringLiteralEncodedLengthExport);
+        Assert.That(export.SourceDependent, Is.True);
+        Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32]));
+        var nameRowLengthExport = global::System.Linq.Enumerable.Single(artifact.Exports, static item => item.Name == StringNameRowByteLengthExport);
+        Assert.That(nameRowLengthExport.SourceDependent, Is.True);
+        Assert.That(nameRowLengthExport.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(nameRowLengthExport.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var namespaceRowLengthExport = global::System.Linq.Enumerable.Single(artifact.Exports, static item => item.Name == StringNamespaceRowByteLengthExport);
+        Assert.That(namespaceRowLengthExport.SourceDependent, Is.True);
+        Assert.That(namespaceRowLengthExport.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(namespaceRowLengthExport.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-length-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -1056,7 +998,7 @@ public sealed class NativeSourceGrantLibraryTests
                         && lexed.Tokens[0].Kind == TokenKind.StringLiteral
                         && lexed.Tokens[0].Span == new TextSpan(0, spelling.Length)
                         && lexed.Tokens[1].Kind == TokenKind.EndOfFile;
-                    Assert.Equal(fixture.IsValid, isSingleValidLiteral);
+                    Assert.That(isSingleValidLiteral, Is.EqualTo(fixture.IsValid));
                     int?[] expectedLengths = [
                         TryGetByteCount(strictAscii, fixture.Text),
                         TryGetByteCount(strictLatin1, fixture.Text),
@@ -1068,65 +1010,55 @@ public sealed class NativeSourceGrantLibraryTests
                     for (var encoding = 0; encoding < expectedLengths.Length; encoding++)
                     {
                         var expected = fixture.IsValid ? expectedLengths[encoding] ?? -1 : -1;
-                        Assert.Equal(expected,
-                            bindings.Invoke<int>(StringLiteralEncodedLengthExport, fixture.Source.ToCharArray(),
-                                fixture.Start, fixture.Length, encoding));
+                        Assert.That(bindings.Invoke<int>(StringLiteralEncodedLengthExport, fixture.Source.ToCharArray(),
+                                fixture.Start, fixture.Length, encoding), Is.EqualTo(expected));
                     }
                     var expectedNameRowLength = fixture.IsValid
                         ? TryGetStringRowLength(fixture.Text, true) ?? -1
                         : -1;
-                    Assert.Equal(expectedNameRowLength,
-                        bindings.Invoke<int>(StringNameRowByteLengthExport, fixture.Source.ToCharArray(),
-                            fixture.Start, fixture.Length));
+                    Assert.That(bindings.Invoke<int>(StringNameRowByteLengthExport, fixture.Source.ToCharArray(),
+                            fixture.Start, fixture.Length), Is.EqualTo(expectedNameRowLength));
                     var expectedNamespaceRowLength = fixture.IsValid
                         ? TryGetStringRowLength(fixture.Text, false) ?? -1
                         : -1;
-                    Assert.Equal(expectedNamespaceRowLength,
-                        bindings.Invoke<int>(StringNamespaceRowByteLengthExport, fixture.Source.ToCharArray(),
-                            fixture.Start, fixture.Length));
+                    Assert.That(bindings.Invoke<int>(StringNamespaceRowByteLengthExport, fixture.Source.ToCharArray(),
+                            fixture.Start, fixture.Length), Is.EqualTo(expectedNamespaceRowLength));
                 }
 
                 foreach (var invalidEncoding in new[] { -1, 6, int.MaxValue })
                 {
-                    Assert.Equal(-1,
-                        bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"A\"".ToCharArray(),
-                            0, 3, invalidEncoding));
+                    Assert.That(bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"A\"".ToCharArray(),
+                            0, 3, invalidEncoding), Is.EqualTo(-1));
                 }
                 foreach (var (start, length) in new[] {
                     (-1, 3), (0, int.MaxValue), (int.MaxValue, 3), (0, 1),
                 })
                 {
-                    Assert.Equal(-1,
-                        bindings.Invoke<int>(StringNameRowByteLengthExport, "\"A\"".ToCharArray(),
-                            start, length));
-                    Assert.Equal(-1,
-                        bindings.Invoke<int>(StringNamespaceRowByteLengthExport, "\"A\"".ToCharArray(),
-                            start, length));
+                    Assert.That(bindings.Invoke<int>(StringNameRowByteLengthExport, "\"A\"".ToCharArray(),
+                            start, length), Is.EqualTo(-1));
+                    Assert.That(bindings.Invoke<int>(StringNamespaceRowByteLengthExport, "\"A\"".ToCharArray(),
+                            start, length), Is.EqualTo(-1));
                 }
 
                 foreach (var (start, length) in new[] {
                     (-1, 3), (0, int.MaxValue), (int.MaxValue, 3), (0, 1),
                 })
                 {
-                    Assert.Equal(-1,
-                        bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"A\"".ToCharArray(),
-                            start, length, 2));
+                    Assert.That(bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"A\"".ToCharArray(),
+                            start, length, 2), Is.EqualTo(-1));
                 }
 
                 var maximumAsciiSource = "\"" + new string('a', 16_382) + "\"";
                 int[] maximumLengths = [16_382, 16_382, 16_382, 16_382, 32_764, 65_528];
                 for (var encoding = 0; encoding < maximumLengths.Length; encoding++)
                 {
-                    Assert.Equal(maximumLengths[encoding],
-                        bindings.Invoke<int>(StringLiteralEncodedLengthExport,
-                            maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length, encoding));
+                    Assert.That(bindings.Invoke<int>(StringLiteralEncodedLengthExport,
+                            maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length, encoding), Is.EqualTo(maximumLengths[encoding]));
                 }
-                Assert.Equal(16_388,
-                    bindings.Invoke<int>(StringNameRowByteLengthExport,
-                        maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length));
-                Assert.Equal(16_388,
-                    bindings.Invoke<int>(StringNamespaceRowByteLengthExport,
-                        maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length));
+                Assert.That(bindings.Invoke<int>(StringNameRowByteLengthExport,
+                        maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length), Is.EqualTo(16_388));
+                Assert.That(bindings.Invoke<int>(StringNamespaceRowByteLengthExport,
+                        maximumAsciiSource.ToCharArray(), 0, maximumAsciiSource.Length), Is.EqualTo(16_388));
 
                 var maximumUtf8Text = new string('\u0800', 16_382);
                 var maximumUtf8Source = "\"" + maximumUtf8Text + "\"";
@@ -1138,19 +1070,16 @@ public sealed class NativeSourceGrantLibraryTests
                     TryGetByteCount(strictUtf16, maximumUtf8Text),
                     TryGetByteCount(strictUtf32, maximumUtf8Text),
                 ];
-                Assert.Equal<int?>([null, null, 49_146, 16_382, 32_764, 65_528], maximumUtf8Lengths);
+                Assert.That(maximumUtf8Lengths, Is.EqualTo(new int?[] { null, null, 49_146, 16_382, 32_764, 65_528 }));
                 for (var encoding = 0; encoding < maximumUtf8Lengths.Length; encoding++)
                 {
-                    Assert.Equal(maximumUtf8Lengths[encoding] ?? -1,
-                        bindings.Invoke<int>(StringLiteralEncodedLengthExport,
-                            maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length, encoding));
+                    Assert.That(bindings.Invoke<int>(StringLiteralEncodedLengthExport,
+                            maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length, encoding), Is.EqualTo(maximumUtf8Lengths[encoding] ?? -1));
                 }
-                Assert.Equal(49_152,
-                    bindings.Invoke<int>(StringNameRowByteLengthExport,
-                        maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length));
-                Assert.Equal(49_152,
-                    bindings.Invoke<int>(StringNamespaceRowByteLengthExport,
-                        maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length));
+                Assert.That(bindings.Invoke<int>(StringNameRowByteLengthExport,
+                        maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length), Is.EqualTo(49_152));
+                Assert.That(bindings.Invoke<int>(StringNamespaceRowByteLengthExport,
+                        maximumUtf8Source.ToCharArray(), 0, maximumUtf8Source.Length), Is.EqualTo(49_152));
 
                 var maximumLatin1Text = new string('\u00FF', 16_382);
                 var maximumLatin1Source = "\"" + maximumLatin1Text + "\"";
@@ -1162,16 +1091,15 @@ public sealed class NativeSourceGrantLibraryTests
                     TryGetByteCount(strictUtf16, maximumLatin1Text),
                     TryGetByteCount(strictUtf32, maximumLatin1Text),
                 ];
-                Assert.Equal<int?>([null, 16_382, 32_764, 16_382, 32_764, 65_528], maximumLatin1Lengths);
+                Assert.That(maximumLatin1Lengths, Is.EqualTo(new int?[] { null, 16_382, 32_764, 16_382, 32_764, 65_528 }));
                 for (var encoding = 0; encoding < maximumLatin1Lengths.Length; encoding++)
                 {
-                    Assert.Equal(maximumLatin1Lengths[encoding] ?? -1,
-                        bindings.Invoke<int>(StringLiteralEncodedLengthExport,
-                            maximumLatin1Source.ToCharArray(), 0, maximumLatin1Source.Length, encoding));
+                    Assert.That(bindings.Invoke<int>(StringLiteralEncodedLengthExport,
+                            maximumLatin1Source.ToCharArray(), 0, maximumLatin1Source.Length, encoding), Is.EqualTo(maximumLatin1Lengths[encoding] ?? -1));
                 }
 
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<int>(StringLiteralEncodedLengthExport, new char[16_385], 0, 2, 2));
+                    bindings.Invoke<int>(StringLiteralEncodedLengthExport, new char[16_385], 0, 2, 2))!;
             }
             finally
             {
@@ -1183,13 +1111,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceOffsetMatchesHostedTryGetOffset(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
         var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
@@ -1199,10 +1125,10 @@ public sealed class NativeSourceGrantLibraryTests
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program), [SourceOffsetExport], (NativeRuntimePolicy)policy);
-        Assert.True(Assert.Single(artifact.Exports).SourceDependent);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), [SourceOffsetExport], (NativeRuntimePolicy)policy);
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-offset-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -1221,7 +1147,7 @@ public sealed class NativeSourceGrantLibraryTests
 
                 AssertMaximumSourceOffsetCases(binding);
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    binding.Invoke<int>(SourceOffsetExport, new char[16_385], 0, 0));
+                    binding.Invoke<int>(SourceOffsetExport, new char[16_385], 0, 0))!;
             }
             finally
             {
@@ -1233,13 +1159,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourcePositionComponentsMatchHostedGetLinePosition(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
         var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
@@ -1251,23 +1175,24 @@ public sealed class NativeSourceGrantLibraryTests
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(),
             [SourceLineNumberExport, SourceCharacterPositionExport, SourceOffsetExport],
             (NativeRuntimePolicy)policy);
-        Assert.Equal(3, artifact.Exports.Length);
-        Assert.All(artifact.Exports, static export =>
-        {
-            Assert.True(export.SourceDependent);
-            Assert.Equal(PrimitiveType.Int32, export.ReturnType);
-        });
-        Assert.Equal([PrimitiveType.Int32], Assert.Single(artifact.Exports,
-            static export => export.Name == SourceLineNumberExport).ParameterTypes.ToArray());
-        Assert.Equal([PrimitiveType.Int32], Assert.Single(artifact.Exports,
-            static export => export.Name == SourceCharacterPositionExport).ParameterTypes.ToArray());
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], Assert.Single(artifact.Exports,
-            static export => export.Name == SourceOffsetExport).ParameterTypes.ToArray());
+        Assert.That(artifact.Exports.Length, Is.EqualTo(3));
+        {var __nunitItems0 = artifact.Exports;        Assert.Multiple(() => {
+            foreach (var __nunitItem20 in __nunitItems0)
+            {
+                {
+                    Assert.That(__nunitItem20.SourceDependent, Is.True);
+                    Assert.That(__nunitItem20.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+                }
+            }
+        });}
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceLineNumberExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceCharacterPositionExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
+        Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceOffsetExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-position-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -1286,9 +1211,9 @@ public sealed class NativeSourceGrantLibraryTests
 
                 AssertMaximumSourcePositionCases(binding);
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    binding.Invoke<int>(SourceLineNumberExport, new char[16_385], 0));
+                    binding.Invoke<int>(SourceLineNumberExport, new char[16_385], 0))!;
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    binding.Invoke<int>(SourceCharacterPositionExport, new char[16_385], 0));
+                    binding.Invoke<int>(SourceCharacterPositionExport, new char[16_385], 0))!;
             }
             finally
             {
@@ -1300,13 +1225,11 @@ public sealed class NativeSourceGrantLibraryTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void SourceLineExtentsMatchHostedContentAndIncludingBreakExtents(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
         var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
@@ -1318,21 +1241,19 @@ public sealed class NativeSourceGrantLibraryTests
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         }], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = compilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(),
             [SourceOffsetExport, SourceLineContentEndExport, SourceLineEndExport],
             (NativeRuntimePolicy)policy);
-        var contentEnd = Assert.Single(artifact.Exports,
-            static export => export.Name == SourceLineContentEndExport);
-        Assert.True(contentEnd.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, contentEnd.ReturnType);
-        Assert.Equal([PrimitiveType.Int32], contentEnd.ParameterTypes.ToArray());
-        var lineEnd = Assert.Single(artifact.Exports,
-            static export => export.Name == SourceLineEndExport);
-        Assert.True(lineEnd.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, lineEnd.ReturnType);
-        Assert.Equal([PrimitiveType.Int32], lineEnd.ParameterTypes.ToArray());
+        var contentEnd = global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceLineContentEndExport);
+        Assert.That(contentEnd.SourceDependent, Is.True);
+        Assert.That(contentEnd.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(contentEnd.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
+        var lineEnd = global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceLineEndExport);
+        Assert.That(lineEnd.SourceDependent, Is.True);
+        Assert.That(lineEnd.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(lineEnd.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-line-end-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -1370,10 +1291,8 @@ public sealed class NativeSourceGrantLibraryTests
                 {
                     sourceAfterCr[1] = (char)codeUnit;
                     var hosted = SourceText.From(new string(sourceAfterCr));
-                    Assert.Equal(hosted.Lines[0].Span.End,
-                        bindings.Invoke<int>(SourceLineContentEndExport, sourceAfterCr, 0));
-                    Assert.Equal(hosted.Lines[0].SpanIncludingLineBreak.End,
-                        bindings.Invoke<int>(SourceLineEndExport, sourceAfterCr, 0));
+                    Assert.That(bindings.Invoke<int>(SourceLineContentEndExport, sourceAfterCr, 0), Is.EqualTo(hosted.Lines[0].Span.End));
+                    Assert.That(bindings.Invoke<int>(SourceLineEndExport, sourceAfterCr, 0), Is.EqualTo(hosted.Lines[0].SpanIncludingLineBreak.End));
                 }
 
                 AssertSourceLineEndCases(bindings, new string('x', 16_384), 0, 1);
@@ -1384,9 +1303,9 @@ public sealed class NativeSourceGrantLibraryTests
                 AssertSourceLineEndCases(bindings, new string('x', 16_383) + '\r', 0, 1, 2);
                 AssertSourceLineEndCases(bindings, new string('x', 16_382) + "\r\n", 0, 1, 2);
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<int>(SourceLineEndExport, new char[16_385], 0));
+                    bindings.Invoke<int>(SourceLineEndExport, new char[16_385], 0))!;
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<int>(SourceLineContentEndExport, new char[16_385], 0));
+                    bindings.Invoke<int>(SourceLineContentEndExport, new char[16_385], 0))!;
             }
             finally
             {
@@ -1399,24 +1318,24 @@ public sealed class NativeSourceGrantLibraryTests
         }
     }
 
-    [Fact]
+    [Test]
     public void MaintainedCompilerPrimitivesCompanionUsesItsGeneratedManifest()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
             ?? throw new InvalidOperationException("Missing configuration directory.");
         var artifactDirectory = Path.Combine(RepositoryRoot(), "artifacts", "bin", "self-host", configuration);
         var imagePath = Path.Combine(artifactDirectory, "terrum-compiler-primitives-source-grant.dll");
         var manifestPath = Path.Combine(artifactDirectory, "terrum-compiler-primitives-source-grant.abi.json");
-        Assert.True(File.Exists(imagePath), $"Source-grant compiler-primitives companion was not built: {imagePath}");
-        Assert.True(File.Exists(manifestPath), $"Source-grant compiler-primitives manifest was not built: {manifestPath}");
+        Assert.That(File.Exists(imagePath), Is.True, $"Source-grant compiler-primitives companion was not built: {imagePath}");
+        Assert.That(File.Exists(manifestPath), Is.True, $"Source-grant compiler-primitives manifest was not built: {manifestPath}");
 
         var image = File.ReadAllBytes(imagePath);
         using var manifest = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
         var root = manifest.RootElement;
-        Assert.Equal(1, root.GetProperty("sourceGrantAbiVersion").GetInt32());
-        Assert.Equal(16_384, root.GetProperty("maximumSourceCodeUnits").GetInt32());
-        Assert.Equal(Convert.ToHexString(SHA256.HashData(image)), root.GetProperty("imageSha256").GetString());
+        Assert.That(root.GetProperty("sourceGrantAbiVersion").GetInt32(), Is.EqualTo(1));
+        Assert.That(root.GetProperty("maximumSourceCodeUnits").GetInt32(), Is.EqualTo(16_384));
+        Assert.That(root.GetProperty("imageSha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(image))));
         var exports = root.GetProperty("exports").EnumerateArray()
             .Select(static export => (
                 Name: export.GetProperty("name").GetString()
@@ -1429,7 +1348,8 @@ public sealed class NativeSourceGrantLibraryTests
                         ?? throw new InvalidDataException("Missing parameter type.")))
                     .ToImmutableArray()))
             .ToImmutableArray();
-        Assert.Equal([AnalyzeCharacterLiteralPackedExport, AnalyzeStringEscapePackedExport,
+        string[] actualExportNames = [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)];
+        string[] expectedExportNames = [AnalyzeCharacterLiteralPackedExport, AnalyzeStringEscapePackedExport,
             CanGetSourceRangeExport, DecodeScalarExport,
             BasedIntegerFloat32BitsExport, BasedIntegerFloat64BitsExport,
             CharacterLiteralScalarExport,
@@ -1444,133 +1364,106 @@ public sealed class NativeSourceGrantLibraryTests
             CanParseChar16Export,
             CanParseInt32Export, CanParseInt64Export, CanParseUInt32Export, CanParseUInt64Export,
             ParseChar16Export, ParseInt32Export, ParseInt64Export, ParseUInt32Export, ParseUInt64Export,
-            ReadScalarExport],
-            [.. exports.Select(static export => export.Name).OrderBy(static name => name, StringComparer.Ordinal)]);
-        var packedEscape = Assert.Single(exports,
-            static export => export.Name == AnalyzeStringEscapePackedExport);
-        Assert.True(packedEscape.SourceDependent);
-        Assert.Equal(PrimitiveType.UInt32, packedEscape.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], packedEscape.ParameterTypes.ToArray());
-        var packedCharacterLiteral = Assert.Single(exports,
-            static export => export.Name == AnalyzeCharacterLiteralPackedExport);
-        Assert.True(packedCharacterLiteral.SourceDependent);
-        Assert.Equal(PrimitiveType.UInt32, packedCharacterLiteral.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], packedCharacterLiteral.ParameterTypes.ToArray());
-        var characterLiteralScalar = Assert.Single(exports,
-            static export => export.Name == CharacterLiteralScalarExport);
-        Assert.True(characterLiteralScalar.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, characterLiteralScalar.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32],
-            characterLiteralScalar.ParameterTypes.ToArray());
-        var scalarCount = Assert.Single(exports,
-            static export => export.Name == StringLiteralScalarCountExport);
-        Assert.True(scalarCount.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, scalarCount.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], scalarCount.ParameterTypes.ToArray());
-        var scalarAt = Assert.Single(exports,
-            static export => export.Name == StringLiteralScalarAtExport);
-        Assert.True(scalarAt.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, scalarAt.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
-            scalarAt.ParameterTypes.ToArray());
-        var encodedLength = Assert.Single(exports,
-            static export => export.Name == StringLiteralEncodedLengthExport);
-        Assert.True(encodedLength.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, encodedLength.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32],
-            encodedLength.ParameterTypes.ToArray());
-        var nameRowLength = Assert.Single(exports,
-            static export => export.Name == StringNameRowByteLengthExport);
-        Assert.True(nameRowLength.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, nameRowLength.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], nameRowLength.ParameterTypes.ToArray());
-        var namespaceRowLength = Assert.Single(exports,
-            static export => export.Name == StringNamespaceRowByteLengthExport);
-        Assert.True(namespaceRowLength.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, namespaceRowLength.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], namespaceRowLength.ParameterTypes.ToArray());
+            ReadScalarExport];
+        Assert.That(actualExportNames, Is.EqualTo(expectedExportNames));
+        var packedEscape = global::System.Linq.Enumerable.Single(exports, static export => export.Name == AnalyzeStringEscapePackedExport);
+        Assert.That(packedEscape.SourceDependent, Is.True);
+        Assert.That(packedEscape.ReturnType, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(packedEscape.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var packedCharacterLiteral = global::System.Linq.Enumerable.Single(exports, static export => export.Name == AnalyzeCharacterLiteralPackedExport);
+        Assert.That(packedCharacterLiteral.SourceDependent, Is.True);
+        Assert.That(packedCharacterLiteral.ReturnType, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(packedCharacterLiteral.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var characterLiteralScalar = global::System.Linq.Enumerable.Single(exports, static export => export.Name == CharacterLiteralScalarExport);
+        Assert.That(characterLiteralScalar.SourceDependent, Is.True);
+        Assert.That(characterLiteralScalar.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(characterLiteralScalar.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var scalarCount = global::System.Linq.Enumerable.Single(exports, static export => export.Name == StringLiteralScalarCountExport);
+        Assert.That(scalarCount.SourceDependent, Is.True);
+        Assert.That(scalarCount.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(scalarCount.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var scalarAt = global::System.Linq.Enumerable.Single(exports, static export => export.Name == StringLiteralScalarAtExport);
+        Assert.That(scalarAt.SourceDependent, Is.True);
+        Assert.That(scalarAt.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(scalarAt.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32]));
+        var encodedLength = global::System.Linq.Enumerable.Single(exports, static export => export.Name == StringLiteralEncodedLengthExport);
+        Assert.That(encodedLength.SourceDependent, Is.True);
+        Assert.That(encodedLength.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(encodedLength.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32]));
+        var nameRowLength = global::System.Linq.Enumerable.Single(exports, static export => export.Name == StringNameRowByteLengthExport);
+        Assert.That(nameRowLength.SourceDependent, Is.True);
+        Assert.That(nameRowLength.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(nameRowLength.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var namespaceRowLength = global::System.Linq.Enumerable.Single(exports, static export => export.Name == StringNamespaceRowByteLengthExport);
+        Assert.That(namespaceRowLength.SourceDependent, Is.True);
+        Assert.That(namespaceRowLength.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(namespaceRowLength.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
         foreach (var exportName in new[] { HexFloat32BitsExport, HexFloat64BitsExport })
         {
-            var hexFloatBits = Assert.Single(exports, export => export.Name == exportName);
-            Assert.True(hexFloatBits.SourceDependent);
-            Assert.Equal(PrimitiveType.Int64, hexFloatBits.ReturnType);
-            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32],
-                hexFloatBits.ParameterTypes.ToArray());
+            var hexFloatBits = global::System.Linq.Enumerable.Single(exports, export => export.Name == exportName);
+            Assert.That(hexFloatBits.SourceDependent, Is.True);
+            Assert.That(hexFloatBits.ReturnType, Is.EqualTo(PrimitiveType.Int64));
+            Assert.That(hexFloatBits.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
         }
         foreach (var exportName in new[] { BasedIntegerFloat32BitsExport, BasedIntegerFloat64BitsExport })
         {
-            var basedIntegerFloatBits = Assert.Single(exports, export => export.Name == exportName);
-            Assert.True(basedIntegerFloatBits.SourceDependent);
-            Assert.Equal(PrimitiveType.Int64, basedIntegerFloatBits.ReturnType);
-            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32],
-                basedIntegerFloatBits.ParameterTypes.ToArray());
+            var basedIntegerFloatBits = global::System.Linq.Enumerable.Single(exports, export => export.Name == exportName);
+            Assert.That(basedIntegerFloatBits.SourceDependent, Is.True);
+            Assert.That(basedIntegerFloatBits.ReturnType, Is.EqualTo(PrimitiveType.Int64));
+            Assert.That(basedIntegerFloatBits.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
         }
         foreach (var exportName in new[] { DecimalFloat32BitsExport, DecimalFloat64BitsExport })
         {
-            var decimalFloatBits = Assert.Single(exports, export => export.Name == exportName);
-            Assert.True(decimalFloatBits.SourceDependent);
-            Assert.Equal(PrimitiveType.Int64, decimalFloatBits.ReturnType);
-            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32],
-                decimalFloatBits.ParameterTypes.ToArray());
+            var decimalFloatBits = global::System.Linq.Enumerable.Single(exports, export => export.Name == exportName);
+            Assert.That(decimalFloatBits.SourceDependent, Is.True);
+            Assert.That(decimalFloatBits.ReturnType, Is.EqualTo(PrimitiveType.Int64));
+            Assert.That(decimalFloatBits.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
         }
 
         var module = NativeLibrary.Load(imagePath);
         try
         {
             var bindings = new NativeSourceGrantTestBindings(module, exports);
-            Assert.Equal(PackStringEscapeResult(10, 2, false),
-                bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, "\\n".ToCharArray(), 0, 2));
-            Assert.Equal(PackStringEscapeResult(-1, 2, true),
-                bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, "\\\uD800A".ToCharArray(), 0, 3));
-            Assert.Equal(PackCharacterLiteralSuccess(0x1F600),
-                bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, "'\uD83D\uDE00'".ToCharArray(), 0, 4));
-            Assert.Equal(0x1F600,
-                bindings.Invoke<int>(CharacterLiteralScalarExport, "'\uD83D\uDE00'".ToCharArray(), 0, 4));
-            Assert.Equal(2,
-                bindings.Invoke<int>(StringLiteralScalarCountExport, "\"a\\n\"".ToCharArray(), 0, 5));
-            Assert.Equal(10,
-                bindings.Invoke<int>(StringLiteralScalarAtExport, "\"a\\n\"".ToCharArray(), 0, 5, 1));
-            Assert.Equal(2,
-                bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"a\\n\"".ToCharArray(), 0, 5, 2));
-            Assert.Equal(8,
-                bindings.Invoke<int>(StringNameRowByteLengthExport, "\"a\\n\"".ToCharArray(), 0, 5));
-            Assert.Equal(8,
-                bindings.Invoke<int>(StringNamespaceRowByteLengthExport, "\"a\\n\"".ToCharArray(), 0, 5));
+            Assert.That(bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, "\\n".ToCharArray(), 0, 2), Is.EqualTo(PackStringEscapeResult(10, 2, false)));
+            Assert.That(bindings.Invoke<uint>(AnalyzeStringEscapePackedExport, "\\\uD800A".ToCharArray(), 0, 3), Is.EqualTo(PackStringEscapeResult(-1, 2, true)));
+            Assert.That(bindings.Invoke<uint>(AnalyzeCharacterLiteralPackedExport, "'\uD83D\uDE00'".ToCharArray(), 0, 4), Is.EqualTo(PackCharacterLiteralSuccess(0x1F600)));
+            Assert.That(bindings.Invoke<int>(CharacterLiteralScalarExport, "'\uD83D\uDE00'".ToCharArray(), 0, 4), Is.EqualTo(0x1F600));
+            Assert.That(bindings.Invoke<int>(StringLiteralScalarCountExport, "\"a\\n\"".ToCharArray(), 0, 5), Is.EqualTo(2));
+            Assert.That(bindings.Invoke<int>(StringLiteralScalarAtExport, "\"a\\n\"".ToCharArray(), 0, 5, 1), Is.EqualTo(10));
+            Assert.That(bindings.Invoke<int>(StringLiteralEncodedLengthExport, "\"a\\n\"".ToCharArray(), 0, 5, 2), Is.EqualTo(2));
+            Assert.That(bindings.Invoke<int>(StringNameRowByteLengthExport, "\"a\\n\"".ToCharArray(), 0, 5), Is.EqualTo(8));
+            Assert.That(bindings.Invoke<int>(StringNamespaceRowByteLengthExport, "\"a\\n\"".ToCharArray(), 0, 5), Is.EqualTo(8));
             var parserSource = "!1__2?".ToCharArray();
-            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseUInt64Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal(12UL, bindings.Invoke<ulong>(ParseUInt64Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseInt64Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal(12L, bindings.Invoke<long>(ParseInt64Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseUInt32Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal(12U, bindings.Invoke<uint>(ParseUInt32Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseInt32Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal(12, bindings.Invoke<int>(ParseInt32Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal(0x3DCCCCCDL,
-                bindings.Invoke<long>(DecimalFloat32BitsExport, "0.1".ToCharArray(), 0, 3));
-            Assert.Equal(0x3FB999999999999AL,
-                bindings.Invoke<long>(DecimalFloat64BitsExport, "0.1".ToCharArray(), 0, 3));
-            Assert.Equal((byte)1, bindings.Invoke<byte>(CanParseChar16Export, parserSource, 1, 4, (uint)10));
-            Assert.Equal((ushort)12, bindings.Invoke<ushort>(ParseChar16Export, parserSource, 1, 4, (uint)10));
+            Assert.That(bindings.Invoke<byte>(CanParseUInt64Export, parserSource, 1, 4, (uint)10), Is.EqualTo((byte)1));
+            Assert.That(bindings.Invoke<ulong>(ParseUInt64Export, parserSource, 1, 4, (uint)10), Is.EqualTo(12UL));
+            Assert.That(bindings.Invoke<byte>(CanParseInt64Export, parserSource, 1, 4, (uint)10), Is.EqualTo((byte)1));
+            Assert.That(bindings.Invoke<long>(ParseInt64Export, parserSource, 1, 4, (uint)10), Is.EqualTo(12L));
+            Assert.That(bindings.Invoke<byte>(CanParseUInt32Export, parserSource, 1, 4, (uint)10), Is.EqualTo((byte)1));
+            Assert.That(bindings.Invoke<uint>(ParseUInt32Export, parserSource, 1, 4, (uint)10), Is.EqualTo(12U));
+            Assert.That(bindings.Invoke<byte>(CanParseInt32Export, parserSource, 1, 4, (uint)10), Is.EqualTo((byte)1));
+            Assert.That(bindings.Invoke<int>(ParseInt32Export, parserSource, 1, 4, (uint)10), Is.EqualTo(12));
+            Assert.That(bindings.Invoke<long>(DecimalFloat32BitsExport, "0.1".ToCharArray(), 0, 3), Is.EqualTo(0x3DCCCCCDL));
+            Assert.That(bindings.Invoke<long>(DecimalFloat64BitsExport, "0.1".ToCharArray(), 0, 3), Is.EqualTo(0x3FB999999999999AL));
+            Assert.That(bindings.Invoke<byte>(CanParseChar16Export, parserSource, 1, 4, (uint)10), Is.EqualTo((byte)1));
+            Assert.That(bindings.Invoke<ushort>(ParseChar16Export, parserSource, 1, 4, (uint)10), Is.EqualTo((ushort)12));
             var negativeParserSource = "!-12?".ToCharArray();
-            Assert.Equal(-12L, bindings.Invoke<long>(ParseInt64Export,
-                negativeParserSource, 1, 3, (uint)10));
-            Assert.Equal(-12, bindings.Invoke<int>(ParseInt32Export,
-                negativeParserSource, 1, 3, (uint)10));
-            Assert.Equal((byte)0, bindings.Invoke<byte>(CanParseUInt64Export, ['?'], 0, 1, (uint)10));
-            Assert.Equal((int)'A', bindings.Invoke<int>(ReadScalarExport, ['A'], 0, 1));
-            Assert.Equal(0x1F600, bindings.Invoke<int>(ReadScalarExport, ['\uD83D', '\uDE00'], 0, 2));
-            Assert.Equal(-1, bindings.Invoke<int>(ReadScalarExport, ['\uD800', 'A'], 0, 1));
-            Assert.Equal(-1, bindings.Invoke<int>(ReadScalarExport, ['\uD800', '\uDC00'], 0, 1));
-            Assert.Equal((int)'Z', bindings.Invoke<int>(ReadScalarExport,
-                [.. new string('x', 16_383).ToCharArray(), 'Z'], 16_383, 16_384));
+            Assert.That(bindings.Invoke<long>(ParseInt64Export,
+                negativeParserSource, 1, 3, (uint)10), Is.EqualTo(-12L));
+            Assert.That(bindings.Invoke<int>(ParseInt32Export,
+                negativeParserSource, 1, 3, (uint)10), Is.EqualTo(-12));
+            Assert.That(bindings.Invoke<byte>(CanParseUInt64Export, ['?'], 0, 1, (uint)10), Is.EqualTo((byte)0));
+            Assert.That(bindings.Invoke<int>(ReadScalarExport, ['A'], 0, 1), Is.EqualTo((int)'A'));
+            Assert.That(bindings.Invoke<int>(ReadScalarExport, ['\uD83D', '\uDE00'], 0, 2), Is.EqualTo(0x1F600));
+            Assert.That(bindings.Invoke<int>(ReadScalarExport, ['\uD800', 'A'], 0, 1), Is.EqualTo(-1));
+            Assert.That(bindings.Invoke<int>(ReadScalarExport, ['\uD800', '\uDC00'], 0, 1), Is.EqualTo(-1));
+            Assert.That(bindings.Invoke<int>(ReadScalarExport,
+                [.. new string('x', 16_383).ToCharArray(), 'Z'], 16_383, 16_384), Is.EqualTo((int)'Z'));
             foreach (var sample in LineCountSamples)
             {
-                Assert.Equal(SourceText.From(sample).Lines.Length,
-                    bindings.Invoke<int>(LineCountExport, sample.ToCharArray()));
+                Assert.That(bindings.Invoke<int>(LineCountExport, sample.ToCharArray()), Is.EqualTo(SourceText.From(sample).Lines.Length));
             }
             var maximumLineCountSource = new string('\n', 16_384);
-            Assert.Equal(SourceText.From(maximumLineCountSource).Lines.Length,
-                bindings.Invoke<int>(LineCountExport, maximumLineCountSource.ToCharArray()));
+            Assert.That(bindings.Invoke<int>(LineCountExport, maximumLineCountSource.ToCharArray()), Is.EqualTo(SourceText.From(maximumLineCountSource).Lines.Length));
             foreach (var sample in LineCountSamples)
             {
                 var source = sample.ToCharArray();
@@ -1582,35 +1475,30 @@ public sealed class NativeSourceGrantLibraryTests
                     AssertSourceLineEndMatches(bindings, source, hosted, line, true);
                 }
                 AssertSourceRangeValidityMatches(bindings, source, hosted);
-                Assert.Equal(SourceText.From(sample).Length,
-                    bindings.Invoke<int>(SourceLengthExport, source));
+                Assert.That(bindings.Invoke<int>(SourceLengthExport, source), Is.EqualTo(SourceText.From(sample).Length));
                 for (var position = 0; position < hosted.Length; position++)
                 {
-                    Assert.Equal((int)hosted[position],
-                        bindings.Invoke<int>(SourceCodeUnitExport, source, position));
+                    Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, source, position), Is.EqualTo((int)hosted[position]));
                 }
 
-                Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, source, int.MinValue));
-                Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, source, -1));
-                Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, source, source.Length));
-                Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, source, int.MaxValue));
+                Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, source, int.MinValue), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, source, -1), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, source, source.Length), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, source, int.MaxValue), Is.EqualTo(-1));
             }
             var maximumSourceLength = new string('\0', 16_384);
-            Assert.Equal(SourceText.From(maximumSourceLength).Length,
-                bindings.Invoke<int>(SourceLengthExport, maximumSourceLength.ToCharArray()));
+            Assert.That(bindings.Invoke<int>(SourceLengthExport, maximumSourceLength.ToCharArray()), Is.EqualTo(SourceText.From(maximumSourceLength).Length));
             var maximumCodeUnitSource = new char[16_384];
             maximumCodeUnitSource[0] = '\uD800';
             maximumCodeUnitSource[^1] = char.MaxValue;
             var maximumCodeUnitText = SourceText.From(new string(maximumCodeUnitSource));
-            Assert.Equal((int)maximumCodeUnitText[0],
-                bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, 0));
-            Assert.Equal((int)maximumCodeUnitText[^1],
-                bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, maximumCodeUnitSource.Length - 1));
-            Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, int.MinValue));
-            Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, -1));
-            Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource,
-                maximumCodeUnitSource.Length));
-            Assert.Equal(-1, bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, int.MaxValue));
+            Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, 0), Is.EqualTo((int)maximumCodeUnitText[0]));
+            Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, maximumCodeUnitSource.Length - 1), Is.EqualTo((int)maximumCodeUnitText[^1]));
+            Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, int.MinValue), Is.EqualTo(-1));
+            Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, -1), Is.EqualTo(-1));
+            Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource,
+                maximumCodeUnitSource.Length), Is.EqualTo(-1));
+            Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, maximumCodeUnitSource, int.MaxValue), Is.EqualTo(-1));
             AssertMaximumSourceOffsetCases(bindings);
             AssertMaximumSourcePositionCases(bindings);
             AssertSourceLineEndCases(bindings, new string('\n', 16_384),
@@ -1618,20 +1506,20 @@ public sealed class NativeSourceGrantLibraryTests
             var maximumSource = new string('x', 16_384);
             AssertSourceRangeValidityMatches(bindings, maximumSource.ToCharArray(), SourceText.From(maximumSource));
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
+                bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1))!;
             var singleCodeUnit = new char[1];
             for (var codeUnit = 0; codeUnit <= char.MaxValue; codeUnit++)
             {
                 singleCodeUnit[0] = (char)codeUnit;
                 var expected = char.IsSurrogate(singleCodeUnit[0]) ? -1 : codeUnit;
-                Assert.Equal(expected, bindings.Invoke<int>(ReadScalarExport, singleCodeUnit, 0, 1));
-                Assert.Equal(codeUnit, bindings.Invoke<int>(SourceCodeUnitExport, singleCodeUnit, 0));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport, singleCodeUnit, 0, 1), Is.EqualTo(expected));
+                Assert.That(bindings.Invoke<int>(SourceCodeUnitExport, singleCodeUnit, 0), Is.EqualTo(codeUnit));
             }
-            Assert.Equal(0x1F600, bindings.Invoke<int>(DecodeScalarExport, null,
-                (ushort)'\uD83D', (ushort)'\uDE00'));
+            Assert.That(bindings.Invoke<int>(DecodeScalarExport, null,
+                (ushort)'\uD83D', (ushort)'\uDE00'), Is.EqualTo(0x1F600));
             _ = Parallel.For(0, 32, index => {
                 var value = (char)('a' + index);
-                Assert.Equal((int)value, bindings.Invoke<int>(ReadScalarExport, [value], 0, 1));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport, [value], 0, 1), Is.EqualTo((int)value));
             });
         }
         finally
@@ -1639,37 +1527,32 @@ public sealed class NativeSourceGrantLibraryTests
             NativeLibrary.Free(module);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void EmitsTransitiveScalarSourceGrantWithSourceFreeExports(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var trees = new[] { "Utf16CodeUnits.terrum", "Utf16Scalar.terrum" }
             .Select(file => SyntaxTree.Parse(File.ReadAllText(Path.Combine(sourceDirectory, file)), file))
             .ToImmutableArray();
-        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false)
-        {
+        var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         };
         var compilation = Compilation.CreateLibrary(trees, [sourceBuffer], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = compilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))();
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             [DecodeScalarExport, ReadScalarExport], (NativeRuntimePolicy)policy);
 
-        var readDescriptor = Assert.Single(artifact.Exports,
-            static export => export.Name == ReadScalarExport);
-        Assert.True(readDescriptor.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, readDescriptor.ReturnType);
-        Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], readDescriptor.ParameterTypes.ToArray());
-        var decodeDescriptor = Assert.Single(artifact.Exports,
-            static export => export.Name == DecodeScalarExport);
-        Assert.False(decodeDescriptor.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, decodeDescriptor.ReturnType);
-        Assert.Equal([PrimitiveType.Char16, PrimitiveType.Char16], decodeDescriptor.ParameterTypes.ToArray());
+        var readDescriptor = global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == ReadScalarExport);
+        Assert.That(readDescriptor.SourceDependent, Is.True);
+        Assert.That(readDescriptor.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(readDescriptor.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
+        var decodeDescriptor = global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == DecodeScalarExport);
+        Assert.That(decodeDescriptor.SourceDependent, Is.False);
+        Assert.That(decodeDescriptor.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(decodeDescriptor.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Char16, PrimitiveType.Char16]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-library-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
@@ -1681,28 +1564,27 @@ public sealed class NativeSourceGrantLibraryTests
                 var bindings = new NativeSourceGrantTestBindings(module,
                     [.. artifact.Exports.Select(static export => (export.Name, export.SourceDependent,
                         export.ReturnType, export.ParameterTypes))]);
-                Assert.Equal((int)'A', bindings.Invoke<int>(ReadScalarExport, ['A'], 0, 1));
-                Assert.Equal(0x1F600, bindings.Invoke<int>(ReadScalarExport, ['\uD83D', '\uDE00'], 0, 2));
-                Assert.Equal(-1, bindings.Invoke<int>(ReadScalarExport, ['\uD800', 'A'], 0, 1));
-                Assert.Equal(-1, bindings.Invoke<int>(ReadScalarExport, ['\uD800', '\uDC00'], 0, 1));
-                Assert.Equal((int)'D', bindings.Invoke<int>(ReadScalarExport, ['D'], 0, 1));
-                Assert.Equal((int)'Z', bindings.Invoke<int>(ReadScalarExport,
-                    [.. new string('x', 16_383).ToCharArray(), 'Z'], 16_383, 16_384));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport, ['A'], 0, 1), Is.EqualTo((int)'A'));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport, ['\uD83D', '\uDE00'], 0, 2), Is.EqualTo(0x1F600));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport, ['\uD800', 'A'], 0, 1), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport, ['\uD800', '\uDC00'], 0, 1), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport, ['D'], 0, 1), Is.EqualTo((int)'D'));
+                Assert.That(bindings.Invoke<int>(ReadScalarExport,
+                    [.. new string('x', 16_383).ToCharArray(), 'Z'], 16_383, 16_384), Is.EqualTo((int)'Z'));
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1));
-                Assert.Equal(0x1F600, bindings.Invoke<int>(DecodeScalarExport, null,
-                    (ushort)'\uD83D', (ushort)'\uDE00'));
+                    bindings.Invoke<int>(ReadScalarExport, new char[16_385], 0, 1))!;
+                Assert.That(bindings.Invoke<int>(DecodeScalarExport, null,
+                    (ushort)'\uD83D', (ushort)'\uDE00'), Is.EqualTo(0x1F600));
                 if (policy == BoundRuntimePolicy.CheckedExceptions)
                 {
                     var exception = Assert.Throws<TargetInvocationException>(() =>
-                        bindings.Invoke<int>(ReadScalarExport, null, 0, 0));
-                    _ = Assert.IsType<SEHException>(exception.InnerException);
+                        bindings.Invoke<int>(ReadScalarExport, null, 0, 0))!;
+                    _ = ((global::System.Func<SEHException>)(() => { var __nunitActual23 = exception.InnerException; Assert.That(__nunitActual23, Is.TypeOf<SEHException>()); return (SEHException)__nunitActual23!; }))();
                 }
 
                 _ = Parallel.For(0, 32, index => {
                     var value = (char)('A' + index);
-                    Assert.Equal((int)value,
-                        bindings.Invoke<int>(ReadScalarExport, [value], 0, 1));
+                    Assert.That(bindings.Invoke<int>(ReadScalarExport, [value], 0, 1), Is.EqualTo((int)value));
                 });
             }
             finally
@@ -1781,7 +1663,7 @@ public sealed class NativeSourceGrantLibraryTests
         AssertSourceOffsetMatches(bindings, maximumTrailingCr, maximumTrailingCrText, 0, 16_384);
         AssertSourceOffsetMatches(bindings, maximumTrailingCr, maximumTrailingCrText, 1, 0);
         _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-            bindings.Invoke<int>(SourceOffsetExport, new char[16_385], 0, 0));
+            bindings.Invoke<int>(SourceOffsetExport, new char[16_385], 0, 0))!;
     }
 
     private static void AssertSourcePositionParity(NativeSourceGrantTestBindings bindings, string text)
@@ -1846,12 +1728,11 @@ public sealed class NativeSourceGrantLibraryTests
 
         var actualLine = bindings.Invoke<int>(SourceLineNumberExport, source, position);
         var actualCharacter = bindings.Invoke<int>(SourceCharacterPositionExport, source, position);
-        Assert.Equal(expectedLine, actualLine);
-        Assert.Equal(expectedCharacter, actualCharacter);
+        Assert.That(actualLine, Is.EqualTo(expectedLine));
+        Assert.That(actualCharacter, Is.EqualTo(expectedCharacter));
         if (expectedLine >= 0 && expectedCharacter >= 0)
         {
-            Assert.Equal(position,
-                bindings.Invoke<int>(SourceOffsetExport, source, actualLine, actualCharacter));
+            Assert.That(bindings.Invoke<int>(SourceOffsetExport, source, actualLine, actualCharacter), Is.EqualTo(position));
         }
     }
 
@@ -1886,7 +1767,7 @@ public sealed class NativeSourceGrantLibraryTests
             {
                 var expected = IsHostedSourceRangeValid(hosted, start, length);
                 var actual = bindings.Invoke<byte>(CanGetSourceRangeExport, source, start, length);
-                Assert.Equal(expected ? (byte)1 : (byte)0, actual);
+                Assert.That(actual, Is.EqualTo(expected ? (byte)1 : (byte)0));
             }
         }
     }
@@ -1909,8 +1790,8 @@ public sealed class NativeSourceGrantLibraryTests
     {
         if (line < 0 || line >= hosted.Lines.Length)
         {
-            Assert.Equal(-1, bindings.Invoke<int>(SourceLineContentEndExport, source, line));
-            Assert.Equal(-1, bindings.Invoke<int>(SourceLineEndExport, source, line));
+            Assert.That(bindings.Invoke<int>(SourceLineContentEndExport, source, line), Is.EqualTo(-1));
+            Assert.That(bindings.Invoke<int>(SourceLineEndExport, source, line), Is.EqualTo(-1));
             return;
         }
 
@@ -1919,20 +1800,18 @@ public sealed class NativeSourceGrantLibraryTests
         var start = bindings.Invoke<int>(SourceOffsetExport, source, line, 0);
         var contentEnd = bindings.Invoke<int>(SourceLineContentEndExport, source, line);
         var includingBreakEnd = bindings.Invoke<int>(SourceLineEndExport, source, line);
-        Assert.Equal(expectedContent.Start, start);
-        Assert.Equal(expectedContent.End, contentEnd);
-        Assert.Equal(expectedIncludingBreak.Start, start);
-        Assert.Equal(expectedIncludingBreak.End, includingBreakEnd);
-        Assert.Equal(expectedContent, new TextSpan(start, contentEnd - start));
-        Assert.Equal(expectedIncludingBreak, new TextSpan(start, includingBreakEnd - start));
+        Assert.That(start, Is.EqualTo(expectedContent.Start));
+        Assert.That(contentEnd, Is.EqualTo(expectedContent.End));
+        Assert.That(start, Is.EqualTo(expectedIncludingBreak.Start));
+        Assert.That(includingBreakEnd, Is.EqualTo(expectedIncludingBreak.End));
+        Assert.That(new TextSpan(start, contentEnd - start), Is.EqualTo(expectedContent));
+        Assert.That(new TextSpan(start, includingBreakEnd - start), Is.EqualTo(expectedIncludingBreak));
         if (verifyOffsetBoundaries)
         {
-            Assert.Equal(contentEnd,
-                bindings.Invoke<int>(SourceOffsetExport, source, line, contentEnd - start));
+            Assert.That(bindings.Invoke<int>(SourceOffsetExport, source, line, contentEnd - start), Is.EqualTo(contentEnd));
             var includingBreakCharacter = includingBreakEnd - start;
             var expectedIncludingBreakOffset = line + 1 < hosted.Lines.Length ? -1 : includingBreakEnd;
-            Assert.Equal(expectedIncludingBreakOffset,
-                bindings.Invoke<int>(SourceOffsetExport, source, line, includingBreakCharacter));
+            Assert.That(bindings.Invoke<int>(SourceOffsetExport, source, line, includingBreakCharacter), Is.EqualTo(expectedIncludingBreakOffset));
         }
     }
 
@@ -1940,7 +1819,7 @@ public sealed class NativeSourceGrantLibraryTests
         SourceText hosted, int line, int character)
     {
         var expected = hosted.TryGetOffset(line, character, out var offset) ? offset : -1;
-        Assert.Equal(expected, bindings.Invoke<int>(SourceOffsetExport, source, line, character));
+        Assert.That(bindings.Invoke<int>(SourceOffsetExport, source, line, character), Is.EqualTo(expected));
     }
 
     private static uint PackStringEscapeResult(int scalar, int consumedLength, bool hasError) =>

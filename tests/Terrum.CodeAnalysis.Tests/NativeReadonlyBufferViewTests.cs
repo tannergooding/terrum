@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -40,27 +40,26 @@ public sealed class NativeReadonlyBufferViewTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void ForeignViewIndexCannotReplaceOriginalReadonlyReceiver()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ForeignViewIndex));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void PublicIrRejectsOriginalReceiverReplacementInsideForeignViewIndex()
     {
         var safeSource = ForeignViewIndex.Replace("Observe(Replace(out ownerA))", "Observe(true)",
             StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(safeSource));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var entry = program.Functions[program.EntryPoint];
-        var owner = Assert.Single(entry.Variables, static variable => variable.Name == "ownerA");
+        var owner = global::System.Linq.Enumerable.Single(entry.Variables, static variable => variable.Name == "ownerA");
         var ownerSlot = entry.Variables.IndexOf(owner);
-        var replacement = program.Functions.IndexOf(Assert.Single(program.Functions,
-            static function => function.Name == "Replace"));
+        var replacement = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Replace"));
         var changed = false;
 
         BoundStatement Rewrite(BoundStatement statement)
@@ -76,8 +75,8 @@ public sealed class NativeReadonlyBufferViewTests
 
         BoundStatement ReplaceIndex(BoundReturn result, BoundCall call)
         {
-            var view = Assert.IsType<BoundViewRead>(call.Arguments[1]);
-            var observe = Assert.IsType<BoundCall>(view.Index);
+            var view = ((global::System.Func<BoundViewRead>)(() => { var __nunitActual1 = call.Arguments[1]; Assert.That(__nunitActual1, Is.TypeOf<BoundViewRead>()); return (BoundViewRead)__nunitActual1!; }))();
+            var observe = ((global::System.Func<BoundCall>)(() => { var __nunitActual2 = view.Index; Assert.That(__nunitActual2, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual2!; }))();
             var output = new BoundOutArgument(ownerSlot, false, PrimitiveType.OwnedInt32Buffer, observe.Span);
             var invalidating = new BoundCall(replacement, [output], PrimitiveType.Bool, observe.Span);
             changed = true;
@@ -93,15 +92,13 @@ public sealed class NativeReadonlyBufferViewTests
             Functions = program.Functions.SetItem(program.EntryPoint,
                 entry with { Body = (BoundBlock)Rewrite(entry.Body) }),
         };
-        Assert.True(changed);
-        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        Assert.Equal("Ownership", error.Data["Terrum.InvalidEffect"]);
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        Assert.That(changed, Is.True);
+        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        Assert.That(error.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task RangeViewSurvivesSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -110,8 +107,8 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Read(0);
             }
             """), policy);
-        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Read"]);
+        Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = provider.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(2, out var raw);
@@ -121,14 +118,12 @@ public sealed class NativeReadonlyBufferViewTests
                 return Read(move value);
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
-        Assert.Equal(22, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = client.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
+        Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(22));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DynamicRangeEndpointsSurviveSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -137,8 +132,8 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Read(0);
             }
             """), policy);
-        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Read"]);
+        Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = provider.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(2, out var raw);
@@ -148,14 +143,12 @@ public sealed class NativeReadonlyBufferViewTests
                 return Read(move value, 1, 2);
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
-        Assert.Equal(22, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = client.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
+        Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(22));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DynamicEndRelativeEndpointsSurviveSemanticModuleRoundTripAsync(BoundRuntimePolicy policy)
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -164,8 +157,8 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Read(0);
             }
             """), policy);
-        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Read"]);
+        Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = provider.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), ["Read"]);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(5, out var raw);
@@ -178,14 +171,12 @@ public sealed class NativeReadonlyBufferViewTests
                 return Read(move value, 3, 1);
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
-        Assert.Equal(30, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = client.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), producer);
+        Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(30));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DynamicRangeBoundsEvaluateOnceInSourceOrderAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -203,13 +194,11 @@ public sealed class NativeReadonlyBufferViewTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(24, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), policy).ConfigureAwait(true), Is.EqualTo(24));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DynamicLowerWithOmittedUpperUsesInitializedCountAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -224,13 +213,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(23, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), policy).ConfigureAwait(true), Is.EqualTo(23));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DynamicEndRelativeBoundsEvaluateOnceInSourceOrderAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -250,14 +237,12 @@ public sealed class NativeReadonlyBufferViewTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(34, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), policy).ConfigureAwait(true), Is.EqualTo(34));
     }
-
-    [Theory]
-    [InlineData(-1, 0)]
-    [InlineData(1, 0)]
-    [InlineData(0, 2)]
+    [TestCase(-1,0)]
+    [TestCase(1,0)]
+    [TestCase(0,2)]
     public async Task DynamicRangeBoundsRejectInvalidRangesAsync(int start, int end)
     {
         var source = $$"""
@@ -271,15 +256,12 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Length;
             }
             """;
-        Assert.Equal(unchecked((int)0xE0540003),
-            await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
-
-    [Theory]
-    [InlineData(-1, 0)]
-    [InlineData(0, -1)]
-    [InlineData(0, 2)]
-    [InlineData(0, 6)]
+    [TestCase(-1,0)]
+    [TestCase(0,-1)]
+    [TestCase(0,2)]
+    [TestCase(0,6)]
     public async Task DynamicEndRelativeBoundsRejectInvalidOffsetsAndOrderingAsync(int startOffset, int endOffset)
     {
         var source = $$"""
@@ -297,13 +279,10 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Length;
             }
             """;
-        Assert.Equal(unchecked((int)0xE0540003),
-            await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NestedReadonlySlicesRetainRangeThroughBranchAndLoopAsync(BoundRuntimePolicy policy)
     {
         const string Source = Buffer + """
@@ -323,12 +302,10 @@ public sealed class NativeReadonlyBufferViewTests
             return 0;
         }
         """;
-        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task RangeSlicesCreateReadonlyViewsForSupportedBoundsAsync(BoundRuntimePolicy policy)
     {
         const string Source = Buffer + """
@@ -351,12 +328,10 @@ public sealed class NativeReadonlyBufferViewTests
             return 0;
         }
         """;
-        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task RangePrefixEvaluatesDynamicUpperBoundOnceAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -371,13 +346,11 @@ public sealed class NativeReadonlyBufferViewTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(-1)]
-    [InlineData(4)]
+    [TestCase(-1)]
+    [TestCase(4)]
     public async Task RangePrefixRejectsDynamicUpperOutsideInitializedPrefixAsync(int end)
     {
         var source = $$"""
@@ -388,15 +361,12 @@ public sealed class NativeReadonlyBufferViewTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(unchecked((int)0xE0540003),
-            await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), BoundRuntimePolicy.FailFast)
-                .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), BoundRuntimePolicy.FailFast)
+                .ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SliceBoundsEvaluateOnceInSourceOrderAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -412,13 +382,11 @@ public sealed class NativeReadonlyBufferViewTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ViewAllowsMutationOfDistinctOwnerAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -434,12 +402,10 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Read(0) + other.Read(0);
             }
             """;
-        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task OwningFieldViewAndEndedScopePreserveOwnerIdentityAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -461,7 +427,7 @@ public sealed class NativeReadonlyBufferViewTests
                 return index.Find();
             }
             """;
-        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
 
         const string Ended = Buffer + """
             {
@@ -472,10 +438,10 @@ public sealed class NativeReadonlyBufferViewTests
             return transferred.Read(2);
         }
         """;
-        Assert.Equal(42, await RunAsync(Ended, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Ended, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void ReadonlyReceiverFieldViewRetainsPlaceAndRejectsForgedRootReplacement()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -490,15 +456,14 @@ public sealed class NativeReadonlyBufferViewTests
             }
             int32 Main() { return 42; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var function = Assert.Single(program.Functions,
-            static item => item.Name.EndsWith(".Find", StringComparison.Ordinal));
-        var scope = Assert.IsType<BoundViewScope>(Assert.Single(function.Body.Statements));
-        var loan = Assert.IsType<BoundFieldLoan>(scope.Owner);
-        var field = Assert.IsType<BoundFieldRead>(loan.Place);
-        Assert.Equal(0, field.Field);
-        Assert.Equal(0, Assert.IsType<BoundRead>(field.Receiver).Variable);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
+        var function = global::System.Linq.Enumerable.Single(program.Functions, static item => item.Name.EndsWith(".Find", StringComparison.Ordinal));
+        var scope = ((global::System.Func<BoundViewScope>)(() => { var __nunitActual16 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual16, Is.TypeOf<BoundViewScope>()); return (BoundViewScope)__nunitActual16!; }))();
+        var loan = ((global::System.Func<BoundFieldLoan>)(() => { var __nunitActual17 = scope.Owner; Assert.That(__nunitActual17, Is.TypeOf<BoundFieldLoan>()); return (BoundFieldLoan)__nunitActual17!; }))();
+        var field = ((global::System.Func<BoundFieldRead>)(() => { var __nunitActual18 = loan.Place; Assert.That(__nunitActual18, Is.TypeOf<BoundFieldRead>()); return (BoundFieldRead)__nunitActual18!; }))();
+        Assert.That(field.Field, Is.EqualTo(0));
+        Assert.That(((global::System.Func<BoundRead>)(() => { var __nunitActual19 = field.Receiver; Assert.That(__nunitActual19, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual19!; }))().Variable, Is.EqualTo(0));
         var replacement = new BoundAssignment(0,
             new BoundRead(0, function.Variables[0].Type, scope.Span), scope.Span);
         var forgedScope = scope with {
@@ -508,11 +473,11 @@ public sealed class NativeReadonlyBufferViewTests
             Functions = program.Functions.SetItem(program.Functions.IndexOf(function),
                 function with { Body = function.Body with { Statements = [forgedScope] } }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void NestedOwningFieldViewRejectsWholeOwnerMove()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -528,21 +493,19 @@ public sealed class NativeReadonlyBufferViewTests
             }
             int32 Main() { return 42; }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("buffer.Slice(-1, 0)")]
-    [InlineData("buffer.Slice(0, -1)")]
-    [InlineData("buffer.Slice(3, 1)")]
-    [InlineData("buffer.Slice(2, 2)")]
-    [InlineData("buffer.Slice(2147483647, 2147483647)")]
-    [InlineData("buffer[4..]")]
-    [InlineData("buffer[-1..]")]
-    [InlineData("buffer[2..1]")]
-    [InlineData("buffer[..^4]")]
-    [InlineData("buffer[^4..]")]
+    [TestCase("buffer.Slice(-1, 0)")]
+    [TestCase("buffer.Slice(0, -1)")]
+    [TestCase("buffer.Slice(3, 1)")]
+    [TestCase("buffer.Slice(2, 2)")]
+    [TestCase("buffer.Slice(2147483647, 2147483647)")]
+    [TestCase("buffer[4..]")]
+    [TestCase("buffer[-1..]")]
+    [TestCase("buffer[2..1]")]
+    [TestCase("buffer[..^4]")]
+    [TestCase("buffer[^4..]")]
     public async Task SliceRejectsOutOfPrefixOrOverflowingRangeAsync(string range)
     {
         var source = $$"""
@@ -554,10 +517,10 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Length;
             }
             """;
-        Assert.Equal(unchecked((int)0xE0540003), await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
 
-    [Fact]
+    [Test]
     public void RangeViewsRejectMutableLocals()
     {
         var mutableView = Compilation.Create(SyntaxTree.Parse("""
@@ -568,8 +531,8 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Length;
             }
             """));
-        Assert.Contains(mutableView.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(mutableView.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(mutableView.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(mutableView.Program, Is.Null);
 
         var mutation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -580,11 +543,11 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Length;
             }
             """));
-        Assert.Contains(mutation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(mutation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(mutation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(mutation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task EmptyEndSliceHasMetadataButNoReadableElementAsync()
     {
         const string Valid = Buffer + """
@@ -593,16 +556,16 @@ public sealed class NativeReadonlyBufferViewTests
             return 0;
         }
         """;
-        Assert.Equal(42, await RunAsync(Valid, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunAsync(Valid, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
         const string Invalid = Buffer + """
             ReadonlyInt32BufferView empty = buffer.Slice(buffer.Count, 0);
             return empty.Read(0);
         }
         """;
-        Assert.Equal(unchecked((int)0xE0540003), await RunAsync(Invalid, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunAsync(Invalid, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedViewReadRecoveryLeavesOriginalOwnerLiveAsync()
     {
         const string Source = """
@@ -618,10 +581,10 @@ public sealed class NativeReadonlyBufferViewTests
                 }
             }
             """;
-        Assert.Equal(42, await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedRangeViewFailureRecoveryLeavesOriginalOwnerLiveAsync()
     {
         const string Source = """
@@ -637,70 +600,64 @@ public sealed class NativeReadonlyBufferViewTests
                 }
             }
             """;
-        Assert.Equal(42, await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("OwnedInt32Buffer consumed = move buffer;")]
-    [InlineData("OwnedInt32Buffer.TryCreate(1, out buffer);")]
-    [InlineData("buffer.Set(0, 42);")]
-    [InlineData("buffer.TryAppend(42);")]
-    [InlineData("if (false) { buffer.Set(0, 42); }")]
-    [InlineData("while (false) { buffer.Set(0, 42); }")]
+    [TestCase("OwnedInt32Buffer consumed = move buffer;")]
+    [TestCase("OwnedInt32Buffer.TryCreate(1, out buffer);")]
+    [TestCase("buffer.Set(0, 42);")]
+    [TestCase("buffer.TryAppend(42);")]
+    [TestCase("if (false) { buffer.Set(0, 42); }")]
+    [TestCase("while (false) { buffer.Set(0, 42); }")]
     public void ViewRejectsRootReplacementOrMutationOnEveryLexicalPath(string body)
     {
         var source = Buffer + " ReadonlyInt32BufferView view = buffer.Slice(0, 1); "
             + body + " return view.Read(0); }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("ReadonlyInt32BufferView copy = view;")]
-    [InlineData("mut ReadonlyInt32BufferView copy = buffer.Slice(0, 1);")]
-    [InlineData("return buffer.Slice(0, 1).Read(0);")]
+    [TestCase("ReadonlyInt32BufferView copy = view;")]
+    [TestCase("mut ReadonlyInt32BufferView copy = buffer.Slice(0, 1);")]
+    [TestCase("return buffer.Slice(0, 1).Read(0);")]
     public void ViewsCannotBeCopiedOrUsedAsTemporaryValues(string expression)
     {
         var source = Buffer + " ReadonlyInt32BufferView view = buffer.Slice(0, 1); "
             + expression + " return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("struct Container { public ReadonlyInt32BufferView View; }")]
-    [InlineData("ReadonlyInt32BufferView ReturnView(OwnedInt32Buffer value) { return value.Slice(0, 1); }")]
-    [InlineData("int32 Use(ReadonlyInt32BufferView value) { return 0; }")]
+    [TestCase("struct Container { public ReadonlyInt32BufferView View; }")]
+    [TestCase("ReadonlyInt32BufferView ReturnView(OwnedInt32Buffer value) { return value.Slice(0, 1); }")]
+    [TestCase("int32 Use(ReadonlyInt32BufferView value) { return 0; }")]
     public void ViewFieldsReturnsAndParametersAreRejected(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(declaration + " int32 Main() { return 42; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void VerifierRejectsForgedViewField()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             struct Label { public int32 Value; }
             int32 Main() { return 42; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var structure = Assert.Single(program.Structures);
-        var field = Assert.Single(structure.Fields);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = compilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))();
+        var structure = global::System.Linq.Enumerable.Single(program.Structures);
+        var field = global::System.Linq.Enumerable.Single(structure.Fields);
         var forged = program with {
             Structures = [structure with {
                 Fields = [field with { Type = PrimitiveType.ReadonlyInt32BufferView, Size = 16 }],
                 Size = 16,
             }],
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void SliceBoundsAndReadsCannotForgeNoThrow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -710,11 +667,11 @@ public sealed class NativeReadonlyBufferViewTests
             }
             int32 Main() { return 42; }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void PublicIrRejectsEscapedViewAndForgedOwnerMutation()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -729,14 +686,14 @@ public sealed class NativeReadonlyBufferViewTests
                 return Read(move value);
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var function = Assert.Single(program.Functions, static item => item.Name == "Read");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = compilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))();
+        var function = global::System.Linq.Enumerable.Single(program.Functions, static item => item.Name == "Read");
         var index = program.Functions.IndexOf(function);
-        var owner = Assert.IsType<BoundTryFinally>(Assert.Single(function.Body.Statements));
-        var view = Assert.IsType<BoundViewScope>(Assert.Single(owner.Body.Statements));
-        var result = Assert.IsType<BoundReturn>(Assert.Single(view.Body.Statements));
-        var read = Assert.IsType<BoundViewRead>(result.Value);
+        var owner = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual22 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual22, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual22!; }))();
+        var view = ((global::System.Func<BoundViewScope>)(() => { var __nunitActual23 = global::System.Linq.Enumerable.Single(owner.Body.Statements); Assert.That(__nunitActual23, Is.TypeOf<BoundViewScope>()); return (BoundViewScope)__nunitActual23!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual24 = global::System.Linq.Enumerable.Single(view.Body.Statements); Assert.That(__nunitActual24, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual24!; }))();
+        var read = ((global::System.Func<BoundViewRead>)(() => { var __nunitActual25 = result.Value; Assert.That(__nunitActual25, Is.TypeOf<BoundViewRead>()); return (BoundViewRead)__nunitActual25!; }))();
 
         Reject(view with { Start = new BoundMove(0, PrimitiveType.OwnedInt32Buffer, view.Span) });
         Reject(view with {
@@ -765,7 +722,7 @@ public sealed class NativeReadonlyBufferViewTests
         var escapedOwner = owner with { Body = owner.Body with { Statements = [endedView, result] } };
         var escapedFunction = function with { Body = function.Body with { Statements = [escapedOwner] } };
         var escaped = program with { Functions = program.Functions.SetItem(index, escapedFunction) };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(escaped));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(escaped))!;
 
         void Reject(BoundViewScope invalid)
         {
@@ -778,14 +735,12 @@ public sealed class NativeReadonlyBufferViewTests
                     },
                 }),
             };
-            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-            _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+            _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SemanticModuleRetainsViewScopeAndNativeProfileAsync(BoundRuntimePolicy policy)
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -794,9 +749,9 @@ public sealed class NativeReadonlyBufferViewTests
                 return view.Read(0);
             }
             """), policy);
-        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Read"]);
-        Assert.Equal("native-16", ModuleCompiler.GetNativeProfileVersion(producer, false));
+        Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = provider.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(), ["Read"]);
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-16"));
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(1, out var raw);
@@ -809,22 +764,22 @@ public sealed class NativeReadonlyBufferViewTests
                 return Read(move value);
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
-        Assert.Equal("native-16", ModuleCompiler.GetNativeProfileVersion(consumer, true));
-        Assert.Equal(42, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = client.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))(), producer);
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(consumer, true), Is.EqualTo("native-16"));
+        Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     private static async Task<int> RunAsync(string source, BoundRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = compilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))(), policy).ConfigureAwait(true);
     }
 
     private static async Task<int> RunAsync(BoundProgram program, BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var image = NativeEmitter.Emit(program, nativePolicy);
@@ -853,7 +808,7 @@ public sealed class NativeReadonlyBufferViewTests
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

@@ -1,22 +1,19 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task StandaloneVacantScalarPublishesOnlyOnTrueAsync(bool checkedFailures) =>
         checkedFailures ? AssertCheckedExecutionAsync(VacantLocalTests.ScalarSource, 42)
             : AssertFailFastExecutionAsync(VacantLocalTests.ScalarSource, 42);
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task GenericCopyInfersStandaloneVacantOutputAsync(bool checkedFailures)
     {
         const string Source = """
@@ -39,10 +36,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task StandaloneVacantManagedRootStartsInactiveAndPublishesOnSuccessAsync(bool checkedFailures)
     {
         const string Source = """
@@ -64,10 +59,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ExplicitManagedVacancyRetainsTheWritableHandleAsync(bool checkedFailures)
     {
         const string Source = """
@@ -86,10 +79,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ExplicitVacantOwnerIsMovedAndCleanedAtScopeExitAsync(bool checkedFailures)
     {
         const string Source = """
@@ -111,10 +102,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task GenericTemplatesPreserveTypedAndInferredVacantSlotsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -135,7 +124,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedFailureCannotPublishStandaloneVacantStorageAsync() =>
         AssertCheckedExecutionAsync("""
             bool Fail(init ref<int32> value) {

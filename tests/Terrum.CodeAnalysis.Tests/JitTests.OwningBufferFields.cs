@@ -2,15 +2,14 @@
 
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task MutableFieldViewThroughUniqueOwnerUsesOriginalAllocationAsync(bool checkedFailures)
     {
         const string Source = """
@@ -53,7 +52,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedFieldViewFailureReleasesLoanAndRetainsBufferAsync()
     {
         const string Source = """
@@ -81,13 +80,11 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData("-1", "0")]
-    [InlineData("0", "-1")]
-    [InlineData("2", "0")]
-    [InlineData("1", "1")]
-    [InlineData("2147483647", "2147483647")]
+    [TestCase("-1","0")]
+    [TestCase("0","-1")]
+    [TestCase("2","0")]
+    [TestCase("1","1")]
+    [TestCase("2147483647","2147483647")]
     public Task CheckedFieldViewRejectsInvalidInitializedPrefixAsync(string start, string length)
     {
         var source = $$"""
@@ -113,10 +110,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task OwningBufferFieldSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -130,10 +125,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task OwningBufferFieldMutationsPreserveOwnerAndForwardedThisAsync(bool checkedFailures)
     {
         const string Source = """
@@ -167,7 +160,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedBufferFieldIndexFailurePreservesPreviouslyPublishedWritesAsync()
     {
         const string Source = """
@@ -196,7 +189,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedNestedBufferWritesDoNotPublishFailedArgumentsAsync()
     {
         const string Source = """

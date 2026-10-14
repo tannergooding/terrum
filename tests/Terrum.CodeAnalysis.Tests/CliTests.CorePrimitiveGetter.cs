@@ -3,15 +3,14 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task CorePrimitiveGetterSurvivesPersistedModuleAndNativeReplacementAsync(string policy)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, $"core-getter-{Guid.NewGuid():N}");
@@ -38,27 +37,27 @@ public sealed partial class CliTests
                 "compile-module", "producer", source, "int32.Identity",
                 "--export", "int32.#get:Value", "-o", provider,
                 "--runtime", policy, "--corelib", "--json");
-            Assert.True(produced == 0, output + error);
+            Assert.That(produced == 0, Is.True, output + error);
             var (consumed, consumerOutput, consumerError) = await RunAsync([],
                 "compile-module", "consumer", caller, provider, "-o", consumer,
                 "--runtime", policy, "--json");
-            Assert.True(consumed == 0, consumerOutput + consumerError);
+            Assert.That(consumed == 0, Is.True, consumerOutput + consumerError);
             var (executed, _, _) = await RunAsync([],
                 "run-module", consumer, provider, "--runtime", policy);
-            Assert.Equal(7, executed);
+            Assert.That(executed, Is.EqualTo(7));
 
             var (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
                 "compile-native", "producer", source, "CoreGetter",
                 "--export", "int32.Identity", "--export", "int32.#get:Value",
                 "-o", nativeProvider, "--runtime", policy, "--corelib", "--json");
-            Assert.True(nativeProduced == 0, nativeOutput + nativeError);
+            Assert.That(nativeProduced == 0, Is.True, nativeOutput + nativeError);
             var (nativeConsumed, nativeConsumerOutput, nativeConsumerError) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
                 "--runtime", policy, "--json");
-            Assert.True(nativeConsumed == 0, nativeConsumerOutput + nativeConsumerError);
+            Assert.That(nativeConsumed == 0, Is.True, nativeConsumerOutput + nativeConsumerError);
             var (nativeExecuted, _, _) = await RunAsync([],
                 "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
-            Assert.Equal(7, nativeExecuted);
+            Assert.That(nativeExecuted, Is.EqualTo(7));
 
             await File.WriteAllTextAsync(source,
                 Original.Replace("get { return value; }", "get { return 8; }",
@@ -67,19 +66,19 @@ public sealed partial class CliTests
                 "compile-module", "producer", source, "int32.Identity",
                 "--export", "int32.#get:Value", "-o", provider,
                 "--runtime", policy, "--corelib", "--json");
-            Assert.True(produced == 0, output + error);
+            Assert.That(produced == 0, Is.True, output + error);
             (executed, _, _) = await RunAsync([],
                 "run-module", consumer, provider, "--runtime", policy);
-            Assert.Equal(8, executed);
+            Assert.That(executed, Is.EqualTo(8));
 
             (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
                 "compile-native", "producer", source, "CoreGetter",
                 "--export", "int32.Identity", "--export", "int32.#get:Value",
                 "-o", nativeProvider, "--runtime", policy, "--corelib", "--json");
-            Assert.True(nativeProduced == 0, nativeOutput + nativeError);
+            Assert.That(nativeProduced == 0, Is.True, nativeOutput + nativeError);
             (nativeExecuted, _, _) = await RunAsync([],
                 "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
-            Assert.Equal(8, nativeExecuted);
+            Assert.That(nativeExecuted, Is.EqualTo(8));
         }
         finally
         {

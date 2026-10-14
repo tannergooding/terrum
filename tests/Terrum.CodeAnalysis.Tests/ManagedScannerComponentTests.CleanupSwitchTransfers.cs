@@ -7,15 +7,14 @@ using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class ManagedScannerComponentTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendCleanupSwitchTransfersEvaluateSelectorOnceAsync(NativeRuntimePolicy policy)
     {
         const string text = """
@@ -33,13 +32,11 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
         var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes, (BoundRuntimePolicy)policy);
-        var program = Assert.IsType<BoundProgram>(read.Program);
-        Assert.Equal(42, NativeJit.Execute(program with { EntryPoint = 0 }, policy));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = read.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program with { EntryPoint = 0 }, policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendCleanupSwitchTransferMarkerIsNotATerminationCertificateAsync(NativeRuntimePolicy policy)
     {
         const string text = """
@@ -54,20 +51,20 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
         var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes, (BoundRuntimePolicy)policy);
-        var program = Assert.IsType<BoundProgram>(read.Program);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = read.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         var function = program.Functions[0];
-        var cleanup = Assert.IsType<BoundTryFinally>(function.Body.Statements[1]);
-        var selection = Assert.IsType<BoundBlock>(Assert.Single(cleanup.Finally.Statements));
-        var dispatcher = Assert.IsType<BoundWhile>(selection.Statements[2]);
-        var state = Assert.IsType<BoundLocal>(selection.Statements[1]);
-        Assert.Equal(state.Variable, dispatcher.SwitchArmVariable);
-        var arms = Assert.IsType<BoundIf>(dispatcher.Body);
-        var first = Assert.IsType<BoundBlock>(arms.Then);
-        var last = Assert.IsType<BoundBlock>(arms.Else);
-        var assignment = Assert.IsType<BoundAssignment>(first.Statements[0]);
-        var continuation = Assert.IsType<BoundContinue>(first.Statements[1]);
-        var condition = Assert.IsType<BoundBinary>(arms.Condition);
-        var value = Assert.IsType<BoundLocal>(function.Body.Statements[0]).Variable;
+        var cleanup = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual2 = function.Body.Statements[1]; Assert.That(__nunitActual2, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual2!; }))();
+        var selection = ((global::System.Func<BoundBlock>)(() => { var __nunitActual3 = global::System.Linq.Enumerable.Single(cleanup.Finally.Statements); Assert.That(__nunitActual3, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual3!; }))();
+        var dispatcher = ((global::System.Func<BoundWhile>)(() => { var __nunitActual4 = selection.Statements[2]; Assert.That(__nunitActual4, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual4!; }))();
+        var state = ((global::System.Func<BoundLocal>)(() => { var __nunitActual5 = selection.Statements[1]; Assert.That(__nunitActual5, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual5!; }))();
+        Assert.That(dispatcher.SwitchArmVariable, Is.EqualTo(state.Variable));
+        var arms = ((global::System.Func<BoundIf>)(() => { var __nunitActual6 = dispatcher.Body; Assert.That(__nunitActual6, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual6!; }))();
+        var first = ((global::System.Func<BoundBlock>)(() => { var __nunitActual7 = arms.Then; Assert.That(__nunitActual7, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual7!; }))();
+        var last = ((global::System.Func<BoundBlock>)(() => { var __nunitActual8 = arms.Else; Assert.That(__nunitActual8, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual8!; }))();
+        var assignment = ((global::System.Func<BoundAssignment>)(() => { var __nunitActual9 = first.Statements[0]; Assert.That(__nunitActual9, Is.TypeOf<BoundAssignment>()); return (BoundAssignment)__nunitActual9!; }))();
+        var continuation = ((global::System.Func<BoundContinue>)(() => { var __nunitActual10 = first.Statements[1]; Assert.That(__nunitActual10, Is.TypeOf<BoundContinue>()); return (BoundContinue)__nunitActual10!; }))();
+        var condition = ((global::System.Func<BoundBinary>)(() => { var __nunitActual11 = arms.Condition; Assert.That(__nunitActual11, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual11!; }))();
+        var value = ((global::System.Func<BoundLocal>)(() => { var __nunitActual12 = function.Body.Statements[0]; Assert.That(__nunitActual12, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual12!; }))().Variable;
         var span = dispatcher.Span;
         var zero = new BoundConstant(0, PrimitiveType.Int32, span);
         var one = new BoundConstant(1, PrimitiveType.Int32, span);
@@ -137,7 +134,7 @@ public sealed partial class ManagedScannerComponentTests
                     continuation with { TargetDepth = 2 }) },
             } }, function.Variables),
         };
-        Assert.Equal(42, NativeJit.Execute(program with { EntryPoint = 0 }, policy));
+        Assert.That(NativeJit.Execute(program with { EntryPoint = 0 }, policy), Is.EqualTo(42));
         foreach (var mutation in mutations)
         {
             var invalid = program with {
@@ -154,13 +151,13 @@ public sealed partial class ManagedScannerComponentTests
                     },
                 }),
             };
-            var error = Record.Exception(() => SemanticVerifier.VerifyLibrary(invalid));
-            Assert.True(error is ArgumentException, $"{mutation.Name}: {error}");
+            var error = TestExceptionCapture.Capture(() => SemanticVerifier.VerifyLibrary(invalid));
+            Assert.That(error is ArgumentException, Is.True, $"{mutation.Name}: {error}");
             Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(invalid, ["Main"], policy));
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ScalarFrontendCleanupSwitchTransfersComposeNestedDispatcherLoopExitsAsync()
     {
         const string text = """
@@ -181,17 +178,17 @@ public sealed partial class ManagedScannerComponentTests
         {
             var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
             var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes, (BoundRuntimePolicy)policy);
-            var program = Assert.IsType<BoundProgram>(read.Program);
-            var function = Assert.Single(program.Functions);
-            var cleanup = Assert.IsType<BoundTryFinally>(function.Body.Statements[0]);
-            var selection = Assert.IsType<BoundBlock>(Assert.Single(cleanup.Finally.Statements));
-            var outer = Assert.IsType<BoundWhile>(selection.Statements[2]);
-            var outerArms = Assert.IsType<BoundIf>(outer.Body);
-            var outerFirst = Assert.IsType<BoundBlock>(outerArms.Then);
-            var innerSelection = Assert.IsType<BoundBlock>(outerFirst.Statements[0]);
-            var inner = Assert.IsType<BoundWhile>(innerSelection.Statements[2]);
-            var innerArms = Assert.IsType<BoundIf>(inner.Body);
-            var innerLast = Assert.IsType<BoundBlock>(innerArms.Else);
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = read.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+            var function = global::System.Linq.Enumerable.Single(program.Functions);
+            var cleanup = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual14 = function.Body.Statements[0]; Assert.That(__nunitActual14, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual14!; }))();
+            var selection = ((global::System.Func<BoundBlock>)(() => { var __nunitActual15 = global::System.Linq.Enumerable.Single(cleanup.Finally.Statements); Assert.That(__nunitActual15, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual15!; }))();
+            var outer = ((global::System.Func<BoundWhile>)(() => { var __nunitActual16 = selection.Statements[2]; Assert.That(__nunitActual16, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual16!; }))();
+            var outerArms = ((global::System.Func<BoundIf>)(() => { var __nunitActual17 = outer.Body; Assert.That(__nunitActual17, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual17!; }))();
+            var outerFirst = ((global::System.Func<BoundBlock>)(() => { var __nunitActual18 = outerArms.Then; Assert.That(__nunitActual18, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual18!; }))();
+            var innerSelection = ((global::System.Func<BoundBlock>)(() => { var __nunitActual19 = outerFirst.Statements[0]; Assert.That(__nunitActual19, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual19!; }))();
+            var inner = ((global::System.Func<BoundWhile>)(() => { var __nunitActual20 = innerSelection.Statements[2]; Assert.That(__nunitActual20, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual20!; }))();
+            var innerArms = ((global::System.Func<BoundIf>)(() => { var __nunitActual21 = inner.Body; Assert.That(__nunitActual21, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual21!; }))();
+            var innerLast = ((global::System.Func<BoundBlock>)(() => { var __nunitActual22 = innerArms.Else; Assert.That(__nunitActual22, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual22!; }))();
             foreach (var kind in new[] { "break", "post-continue", "backedge", "shared-state", "outer-state-write" })
             {
                 var span = innerLast.Span;
@@ -246,7 +243,7 @@ public sealed partial class ManagedScannerComponentTests
                 if (kind is "break" or "post-continue")
                 {
                     SemanticVerifier.Verify(candidate);
-                    Assert.Equal(42, NativeJit.Execute(candidate, policy));
+                    Assert.That(NativeJit.Execute(candidate, policy), Is.EqualTo(42));
                 }
                 else
                 {
@@ -257,7 +254,7 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ScalarFrontendCleanupSwitchTransfersRunDuringExceptionalUnwindAsync()
     {
         const string text = """
@@ -272,9 +269,9 @@ public sealed partial class ManagedScannerComponentTests
         var policy = NativeRuntimePolicy.CheckedExceptions;
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
         var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes, (BoundRuntimePolicy)policy);
-        var program = Assert.IsType<BoundProgram>(read.Program);
-        var function = Assert.Single(program.Functions);
-        var cleanup = Assert.IsType<BoundTryFinally>(function.Body.Statements[1]);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = read.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))();
+        var function = global::System.Linq.Enumerable.Single(program.Functions);
+        var cleanup = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual24 = function.Body.Statements[1]; Assert.That(__nunitActual24, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual24!; }))();
         var failure = new BoundRequire(new BoundConstant(0, PrimitiveType.Bool, cleanup.Span), cleanup.Span);
         var protectedCleanup = cleanup with { Body = cleanup.Body with { Statements = [failure] } };
         var handler = new BoundTryCatch(new BoundBlock([protectedCleanup], cleanup.Span),
@@ -289,15 +286,13 @@ public sealed partial class ManagedScannerComponentTests
             }),
         };
         SemanticVerifier.Verify(exceptional);
-        Assert.Equal(42, NativeJit.Execute(exceptional, policy));
+        Assert.That(NativeJit.Execute(exceptional, policy), Is.EqualTo(42));
         Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(exceptional with {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
         }, NativeRuntimePolicy.FailFast));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendCleanupSwitchTransfersPreserveCapturedReturnAsync(NativeRuntimePolicy policy)
     {
         const string text = """
@@ -310,7 +305,7 @@ public sealed partial class ManagedScannerComponentTests
             """;
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
         var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes, (BoundRuntimePolicy)policy);
-        var program = Assert.IsType<BoundProgram>(read.Program);
-        Assert.Equal(0, NativeJit.Execute(program with { EntryPoint = 0 }, policy));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = read.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))();
+        Assert.That(NativeJit.Execute(program with { EntryPoint = 0 }, policy), Is.EqualTo(0));
     }
 }

@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -16,10 +16,8 @@ public sealed class FloatingArithmeticModuleTests
 {
     private delegate int Float32Binary(int left, int right);
     private delegate long Float64Binary(long left, long right);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task FloatingBinaryArithmeticMatchesHostedEmitterAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -29,8 +27,8 @@ public sealed class FloatingArithmeticModuleTests
             await File.ReadAllTextAsync(arithmeticPath).ConfigureAwait(true), arithmeticPath);
         var componentTests = SyntaxTree.Parse(
             await File.ReadAllTextAsync(componentTestsPath).ConfigureAwait(true), componentTestsPath);
-        Assert.False(arithmetic.HasErrors, string.Join(Environment.NewLine, arithmetic.Diagnostics));
-        Assert.False(componentTests.HasErrors, string.Join(Environment.NewLine, componentTests.Diagnostics));
+        Assert.That(arithmetic.HasErrors, Is.False, string.Join(Environment.NewLine, arithmetic.Diagnostics));
+        Assert.That(componentTests.HasErrors, Is.False, string.Join(Environment.NewLine, componentTests.Diagnostics));
 
         var oracleSyntaxTree = SyntaxTree.Parse("""
             [NoThrow] public float32 Float32Add(float32 left, float32 right) { return left + right; }
@@ -42,10 +40,10 @@ public sealed class FloatingArithmeticModuleTests
             [NoThrow] public float64 Float64Multiply(float64 left, float64 right) { return left * right; }
             [NoThrow] public float64 Float64Divide(float64 left, float64 right) { return left / right; }
             """, "floating-arithmetic-hosted-oracle.terrum");
-        Assert.False(oracleSyntaxTree.HasErrors, string.Join(Environment.NewLine, oracleSyntaxTree.Diagnostics));
+        Assert.That(oracleSyntaxTree.HasErrors, Is.False, string.Join(Environment.NewLine, oracleSyntaxTree.Diagnostics));
         var oracleCompilation = Compilation.CreateLibrary(oracleSyntaxTree);
-        Assert.False(oracleCompilation.HasErrors, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
-        var oracleProgram = Assert.IsType<BoundProgram>(oracleCompilation.Program);
+        Assert.That(oracleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
+        var oracleProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = oracleCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var oraclePath = Path.Combine(Path.GetTempPath(), $"terrum-floating-arithmetic-{Guid.NewGuid():N}.dll");
         var oracleLibrary = IntPtr.Zero;
         try
@@ -79,8 +77,7 @@ public sealed class FloatingArithmeticModuleTests
                 string verificationSource;
                 if (format == "Float32")
                 {
-                    var oracle = operation switch
-                    {
+                    var oracle = operation switch {
                         "Add" => float32Add,
                         "Subtract" => float32Subtract,
                         "Multiply" => float32Multiply,
@@ -91,8 +88,7 @@ public sealed class FloatingArithmeticModuleTests
                 }
                 else
                 {
-                    var oracle = operation switch
-                    {
+                    var oracle = operation switch {
                         "Add" => float64Add,
                         "Subtract" => float64Subtract,
                         "Multiply" => float64Multiply,
@@ -105,13 +101,13 @@ public sealed class FloatingArithmeticModuleTests
                 var verification = SyntaxTree.Parse(
                     verificationSource,
                     $"floating-{format.ToLowerInvariant()}-{operation.ToLowerInvariant()}-oracle.terrum");
-                Assert.False(verification.HasErrors, string.Join(Environment.NewLine, verification.Diagnostics));
+                Assert.That(verification.HasErrors, Is.False, string.Join(Environment.NewLine, verification.Diagnostics));
                 var compilation = Compilation.Create([arithmetic, componentTests, verification], policy);
-                Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+                Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-                var program = Assert.IsType<BoundProgram>(compilation.Program);
+                var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
                 var result = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
-                Assert.True(result == 0, $"{format} {operation} batch {result} did not match the hosted emitter.");
+                Assert.That(result == 0, Is.True, $"{format} {operation} batch {result} did not match the hosted emitter.");
             }
         }
         finally

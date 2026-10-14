@@ -10,37 +10,34 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class UpdateExpressionTests
 {
-    [Fact]
+    [Test]
     public void ScannerAndParserKeepDistinctUpdateTokensAndPrecedence()
     {
         const string text = "++value; value--; value++ + ++value;";
         var lexed = Lexer.Lex(SourceText.From(text));
-        Assert.Equal(86, (int)TokenKind.PlusPlus);
-        Assert.Equal(87, (int)TokenKind.MinusMinus);
-        Assert.Equal([TokenKind.PlusPlus, TokenKind.Identifier, TokenKind.Semicolon, TokenKind.Identifier,
+        Assert.That((int)TokenKind.PlusPlus, Is.EqualTo(86));
+        Assert.That((int)TokenKind.MinusMinus, Is.EqualTo(87));
+        Assert.That(lexed.Tokens.Select(token => token.Kind), Is.EqualTo([TokenKind.PlusPlus, TokenKind.Identifier, TokenKind.Semicolon, TokenKind.Identifier,
             TokenKind.MinusMinus, TokenKind.Semicolon, TokenKind.Identifier, TokenKind.PlusPlus,
             TokenKind.Plus, TokenKind.PlusPlus, TokenKind.Identifier, TokenKind.Semicolon,
-            TokenKind.EndOfFile], lexed.Tokens.Select(token => token.Kind));
+            TokenKind.EndOfFile]));
         var operators = ScannerHost.CreateBuffers(SourceText.From(text))
             .Single(buffer => buffer.Name == "Operators").Values;
-        Assert.Contains(86, operators);
-        Assert.Contains(87, operators);
+        Assert.That(operators, Does.Contain(86));
+        Assert.That(operators, Does.Contain(87));
         var tree = SyntaxTree.Parse("int32 Main() { mut int32 value = 1; " + text + " return value; }");
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(4, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.UpdateExpression));
-        Assert.Contains(SyntaxTree.Parse("int32 Main() { mut int32 value = 1; value+++value; return 0; }").Diagnostics,
-            diagnostic => diagnostic.Code == "TRM0011");
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.UpdateExpression), Is.EqualTo(4));
+        Assert.That(global::System.Linq.Enumerable.Any(SyntaxTree.Parse("int32 Main() { mut int32 value = 1; value+++value; return 0; }").Diagnostics,diagnostic => diagnostic.Code == "TRM0011"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void PrefixAndPostfixReturnSelectedValuesAndCommitInOrder(NativeRuntimePolicy policy)
     {
         var source = """
@@ -57,15 +54,13 @@ public sealed class UpdateExpressionTests
             }
             """;
         var program = Compile(source, policy);
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("int32", "2147483647", "int32.MinValue", "int32.MaxValue")]
-    [InlineData("uint32", "0xFFFFFFFF", "uint32.MinValue", "uint32.MaxValue")]
-    [InlineData("int64", "0x7FFFFFFFFFFFFFFF", "int64.MinValue", "int64.MaxValue")]
-    [InlineData("uint64", "0xFFFFFFFFFFFFFFFF", "uint64.MinValue", "uint64.MaxValue")]
+    [TestCase("int32","2147483647","int32.MinValue","int32.MaxValue")]
+    [TestCase("uint32","0xFFFFFFFF","uint32.MinValue","uint32.MaxValue")]
+    [TestCase("int64","0x7FFFFFFFFFFFFFFF","int64.MinValue","int64.MaxValue")]
+    [TestCase("uint64","0xFFFFFFFFFFFFFFFF","uint64.MinValue","uint64.MaxValue")]
     public void EveryIntegerWidthRejectsOverflowWithoutCommitting(string type, string max,
         string minExpression, string maxExpression)
     {
@@ -85,13 +80,11 @@ public sealed class UpdateExpressionTests
             }
             """;
         var program = Compile(source, NativeRuntimePolicy.CheckedExceptions);
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void CompactFieldsComputedClassReceiversAndHostBufferPlacesAreWritable(NativeRuntimePolicy policy)
     {
         var source = """
@@ -126,10 +119,10 @@ public sealed class UpdateExpressionTests
                 return 42;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void CheckedFieldOverflowPreservesExistingValueAndPriorReceiverEffects()
     {
         const string source = """
@@ -157,13 +150,11 @@ public sealed class UpdateExpressionTests
                 }
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, NativeRuntimePolicy.CheckedExceptions),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(Compile(source, NativeRuntimePolicy.CheckedExceptions),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void WritableHostBufferIndexesEvaluateOnce(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -186,11 +177,11 @@ public sealed class UpdateExpressionTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [40], true)], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void FailedComputedReceiverUpdateRetiresItsRoot()
     {
         const string source = """
@@ -212,11 +203,11 @@ public sealed class UpdateExpressionTests
                 }
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, NativeRuntimePolicy.CheckedExceptions),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(Compile(source, NativeRuntimePolicy.CheckedExceptions),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void OwningRootScalarUpdateDoesNotLoseTheOwnerOnCheckedFailure()
     {
         const string source = """
@@ -240,24 +231,22 @@ public sealed class UpdateExpressionTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("int32 value = 1; value++;", "TRM3008")]
-    [InlineData("init int32 value; ++value;", "TRM")]
-    [InlineData("int32 value = 1; ++(value + 1);", "TRM3008")]
-    [InlineData("mut char16 value = char16(1); value++;", "TRM3007")]
+    [TestCase("int32 value = 1; value++;","TRM3008")]
+    [TestCase("init int32 value; ++value;","TRM")]
+    [TestCase("int32 value = 1; ++(value + 1);","TRM3008")]
+    [TestCase("mut char16 value = char16(1); value++;","TRM3007")]
     public void UnsupportedPlacesAreDiagnosed(string statements, string code)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { "
             + statements + " return 42; }"));
-        Assert.Contains(compilation.Diagnostics, item => item.Code.StartsWith(code, StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code.StartsWith(code, StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NoThrowCannotPromiseAnUnprovenUpdate()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -267,13 +256,11 @@ public sealed class UpdateExpressionTests
             }
             int32 Main() { return 42; }
             """));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3017");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3017"),Is.True);
     }
-
-    [Theory]
-    [InlineData("holder.Value++;")]
-    [InlineData("holder.Item++;")]
-    [InlineData("holder.Computed++;")]
+    [TestCase("holder.Value++;")]
+    [TestCase("holder.Item++;")]
+    [TestCase("holder.Computed++;")]
     public void ReadonlyClassFieldsAndGettersAreNotPlaces(string statement)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -291,10 +278,10 @@ public sealed class UpdateExpressionTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3008");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3008"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void WritableClassDoesNotOverrideImmutableFieldAuthority()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -308,10 +295,10 @@ public sealed class UpdateExpressionTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3008");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3008"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ConstEvalUpdatesOnlyScalarSlotsAndChecksOverflow()
     {
         var valid = Compile("""
@@ -323,31 +310,33 @@ public sealed class UpdateExpressionTests
             int32 Main() { const int32 result = Calculate(); return result; }
             """, NativeRuntimePolicy.FailFast);
         var entry = valid.Functions[valid.EntryPoint];
-        Assert.Equal(42, Assert.IsType<BoundConstant>(Assert.IsType<BoundLocal>(entry.Body.Statements[0]).Initializer).Value);
+        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual3 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = entry.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))().Initializer; Assert.That(__nunitActual3, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual3!; }))().Value, Is.EqualTo(42));
         var overflow = Compilation.Create(SyntaxTree.Parse("""
             [ConstEval] int32 Calculate() { mut int32 value = int32.MaxValue; return value++; }
             int32 Main() { const int32 result = Calculate(); return result; }
             """));
-        Assert.Contains(overflow.Diagnostics, item => item.Code == "TRM3024");
+        Assert.That(global::System.Linq.Enumerable.Any(overflow.Diagnostics,item => item.Code == "TRM3024"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void InvalidIrAndHistoricalHeaderRejectUpdates()
     {
         var source = "int32 Main() { mut int32 value = 41; return ++value; }";
         var program = Compile(source, NativeRuntimePolicy.FailFast);
         var entry = program.Functions[program.EntryPoint];
-        var result = Assert.IsType<BoundReturn>(entry.Body.Statements[1]);
-        var update = Assert.IsType<BoundUpdate>(result.Value);
+        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = entry.Body.Statements[1]; Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
+        var update = ((global::System.Func<BoundUpdate>)(() => { var __nunitActual5 = result.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundUpdate>()); return (BoundUpdate)__nunitActual5!; }))();
         foreach (var forged in new[] {
             update with { Operator = TokenKind.Plus },
             update with { Place = new BoundConstant(41, PrimitiveType.Int32, update.Span) },
             update with { Type = PrimitiveType.UInt32 },
         })
         {
-            var function = entry with { Body = entry.Body with {
-                Statements = entry.Body.Statements.SetItem(1, result with { Value = forged }),
-            } };
+            var function = entry with {
+                Body = entry.Body with {
+                    Statements = entry.Body.Statements.SetItem(1, result with { Value = forged }),
+                }
+            };
             Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
                 Functions = program.Functions.SetItem(program.EntryPoint, function),
             }));
@@ -358,27 +347,27 @@ public sealed class UpdateExpressionTests
         var forgedRead = new BoundUpdate(TokenKind.PlusPlus,
             new BoundRead(0, PrimitiveType.Int32, immutableEntry.Span), true,
             PrimitiveType.Int32, immutableEntry.Span);
-        var immutableReturn = Assert.IsType<BoundReturn>(immutableEntry.Body.Statements[1]);
-        var forgedFunction = immutableEntry with { Body = immutableEntry.Body with {
-            Statements = immutableEntry.Body.Statements.SetItem(1,
+        var immutableReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual6 = immutableEntry.Body.Statements[1]; Assert.That(__nunitActual6, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual6!; }))();
+        var forgedFunction = immutableEntry with {
+            Body = immutableEntry.Body with {
+                Statements = immutableEntry.Body.Statements.SetItem(1,
                 immutableReturn with { Value = forgedRead }),
-        } };
+            }
+        };
         Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(immutable with {
             Functions = immutable.Functions.SetItem(immutable.EntryPoint, forgedFunction),
         }));
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Next(int32 input) { mut int32 value = input; return value++; }"));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Next"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), ["Next"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 42);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void SemanticConsumerSurvivesCompatibleUpdateBodyReplacement(NativeRuntimePolicy policy)
     {
         const string library = """
@@ -387,17 +376,15 @@ public sealed class UpdateExpressionTests
         var original = ModuleCompiler.CreateProducer(CompileLibrary(library, policy), ["Next"]);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Next(); }"),
             ModuleCompiler.CreateReference(original), (BoundRuntimePolicy)policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), original);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, original), policy));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = client.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), original);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, original), policy), Is.EqualTo(42));
         var replacement = ModuleCompiler.CreateProducer(CompileLibrary(
             library.Replace("= 41;", "= 42;", StringComparison.Ordinal), policy), ["Next"]);
-        Assert.Equal(43, NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy), Is.EqualTo(43));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SourceIndependentConsumersPermitCompatibleUpdateReplacement(NativeRuntimePolicy policy)
     {
         const string library = """
@@ -414,29 +401,29 @@ public sealed class UpdateExpressionTests
             ["Next"], "Updates", policy);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Next(); }"),
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(client.Program), [producer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = client.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), [producer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(CompileLibrary(
             library.Replace("TryCreate(41", "TryCreate(42", StringComparison.Ordinal), policy), ["Next"], "Updates", policy);
         NativeModuleCompiler.ValidateGraph(consumer, [replacement]);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
     }
 
     private static BoundProgram Compile(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
     }
 
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
     }
 }

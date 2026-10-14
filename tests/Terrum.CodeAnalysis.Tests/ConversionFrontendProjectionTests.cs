@@ -5,19 +5,18 @@ using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ConversionFrontendProjectionTests
 {
-    [Theory]
-    [InlineData(7, "0", 0)]
-    [InlineData(7, "55296", 55296)]
-    [InlineData(7, "0xFFFF", 65535)]
-    [InlineData(8, "0", 0)]
-    [InlineData(8, "55296", 55296)]
-    [InlineData(8, "0xFFFF", 65535)]
+    [TestCase(7,"0",0)]
+    [TestCase(7,"55296",55296)]
+    [TestCase(7,"0xFFFF",65535)]
+    [TestCase(8,"0",0)]
+    [TestCase(8,"55296",55296)]
+    [TestCase(8,"0xFFFF",65535)]
     public void ReaderValidatesChar16FloatLiteralSourceAndPayload(
         int type, string literal, int codeUnit)
     {
@@ -50,7 +49,7 @@ public sealed class ConversionFrontendProjectionTests
         words[node + 6] = unchecked((int)(uint)bits);
         words[node + 7] = type == 8 ? unchecked((int)(uint)(bits >> 32)) : 0;
 
-        Assert.True(ScalarFrontendHost.ReadResult(source, Encode(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Encode(words)).IsValid, Is.True);
 
         words[node + 1] = type == 7 ? 8 : 7;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));
@@ -75,14 +74,12 @@ public sealed class ConversionFrontendProjectionTests
         Assert.Throws<ArgumentException>(() =>
             ScalarFrontendHost.ReadResult(changedType, Encode(words)));
     }
-
-    [Theory]
-    [InlineData(7, "0", 0)]
-    [InlineData(7, "55296", 55296)]
-    [InlineData(7, "0xFFFF", 65535)]
-    [InlineData(8, "0", 0)]
-    [InlineData(8, "55296", 55296)]
-    [InlineData(8, "0xFFFF", 65535)]
+    [TestCase(7,"0",0)]
+    [TestCase(7,"55296",55296)]
+    [TestCase(7,"0xFFFF",65535)]
+    [TestCase(8,"0",0)]
+    [TestCase(8,"55296",55296)]
+    [TestCase(8,"0xFFFF",65535)]
     public void CompleteProgramReaderValidatesChar16FloatLiteralSourceAndPayload(
         int type, string literal, int codeUnit)
     {
@@ -135,8 +132,8 @@ public sealed class ConversionFrontendProjectionTests
         program.AsSpan(frame + 4 + ScalarFrontendHost.ProgramBodyWordCount, 64).Fill(-1);
 
         var bytes = Encode(new int[ScalarFrontendHost.WordCount]);
-        Assert.True(ScalarFrontendHost.ReadProgram(source, bytes, Encode(program),
-            BoundRuntimePolicy.FailFast).Projection.IsValid);
+        Assert.That(ScalarFrontendHost.ReadProgram(source, bytes, Encode(program),
+            BoundRuntimePolicy.FailFast).Projection.IsValid, Is.True);
 
         program[frame + 4 + node + 1] = type == 7 ? 8 : 7;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
@@ -179,7 +176,7 @@ public sealed class ConversionFrontendProjectionTests
             bytes, Encode(program), BoundRuntimePolicy.FailFast));
     }
 
-    [Fact]
+    [Test]
     public void ReaderChecksConversionVersionsTypesAndSourceAnchors()
     {
         const string text = "public int32 Main() => int32(uint64(42));";
@@ -203,7 +200,7 @@ public sealed class ConversionFrontendProjectionTests
         Node(1, 83, 4, inner, literal + 3, 0, -1);
         Node(2, 83, 1, outer, literal + 4, 1, -1);
 
-        Assert.Equal(3, ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length, Is.EqualTo(3));
         Reject(0, 20);
         Reject(0, 21);
         Reject(0, 23);
@@ -253,7 +250,7 @@ public sealed class ConversionFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReaderChecksConversionInOrderedLocalStatements()
     {
         const string text = "public int32 Main() { mut uint64 x = uint64(42); x = uint64(x); return int32(x); }";
@@ -290,7 +287,7 @@ public sealed class ConversionFrontendProjectionTests
         Statement(1, 2, 1, 3, assignment, secondCast + 10);
 
         var source = SourceText.From(text);
-        Assert.Equal(2, ScalarFrontendHost.ReadResult(source, Bytes()).Statements.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Statements.Length, Is.EqualTo(2));
         Reject(0, 21);
         Reject(0, 22);
         Reject(301, 0);
@@ -341,7 +338,7 @@ public sealed class ConversionFrontendProjectionTests
 
     }
 
-    [Fact]
+    [Test]
     public void ReaderRejectsTypeCallWhenParameterShadowsItsSpelling()
     {
         const string text = "public int32 Value(int32 int32) => int32(int32);";

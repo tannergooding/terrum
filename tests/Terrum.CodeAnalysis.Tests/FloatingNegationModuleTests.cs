@@ -8,33 +8,32 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class FloatingNegationModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task FloatingNegationFlipsOnlyTheSignBitAsync(BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var path = Path.Combine(root, "self-host", "FloatingNegation.terrum");
         var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var component = SyntaxTree.Parse(text, path);
-        Assert.False(component.HasErrors, string.Join(Environment.NewLine, component.Diagnostics));
+        Assert.That(component.HasErrors, Is.False, string.Join(Environment.NewLine, component.Diagnostics));
 
         var verificationSource = CreateVerificationSource();
         var verification = SyntaxTree.Parse(verificationSource, "floating-negation-module.terrum");
-        Assert.False(verification.HasErrors, string.Join(Environment.NewLine,
+        Assert.That(verification.HasErrors, Is.False, string.Join(Environment.NewLine,
             verification.Diagnostics.Select(diagnostic =>
                 $"{diagnostic} near \"{GetContext(verificationSource, diagnostic.Span.Start)}\"")));
         var compilation = Compilation.Create([component, verification], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
     private static string CreateVerificationSource()

@@ -4,41 +4,40 @@ using System;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("Signed32One() / Signed32Zero() == Signed32Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Signed32One() % Signed32Zero() == Signed32Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Unsigned32One() / Unsigned32Zero() == Unsigned32Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Unsigned32One() % Unsigned32Zero() == Unsigned32Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Signed64One() / Signed64Zero() == Signed64Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Signed64One() % Signed64Zero() == Signed64Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Unsigned64One() / Unsigned64Zero() == Unsigned64Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Unsigned64One() % Unsigned64Zero() == Unsigned64Zero()", unchecked((int)0xE0540002))]
-    [InlineData("Signed32Minimum() / Signed32NegativeOne() == Signed32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed64Minimum() / Signed64NegativeOne() == Signed64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed32Maximum() + Signed32One() == Signed32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned32Maximum() + Unsigned32One() == Unsigned32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed64Maximum() + Signed64One() == Signed64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned64Maximum() + Unsigned64One() == Unsigned64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed32Minimum() - Signed32One() == Signed32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned32Zero() - Unsigned32One() == Unsigned32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed64Minimum() - Signed64One() == Signed64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned64Zero() - Unsigned64One() == Unsigned64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed32One() << Signed32NegativeOne() == Signed32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned32One() << Signed32ThirtyTwo() == Unsigned32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed32One() >> Signed32ThirtyTwo() == Signed32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed64One() >> Signed32SixtyFour() == Signed64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned64One() >>> Signed32SixtyFour() == Unsigned64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned64One() >>> Signed32NegativeOne() == Unsigned64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed32Maximum() * Signed32Two() == Signed32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned32Maximum() * Unsigned32Two() == Unsigned32Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Signed64Maximum() * Signed64Two() == Signed64Zero()", unchecked((int)0xE0540001))]
-    [InlineData("Unsigned64Maximum() * Unsigned64Two() == Unsigned64Zero()", unchecked((int)0xE0540001))]
+    [TestCase("Signed32One() / Signed32Zero() == Signed32Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Signed32One() % Signed32Zero() == Signed32Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Unsigned32One() / Unsigned32Zero() == Unsigned32Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Unsigned32One() % Unsigned32Zero() == Unsigned32Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Signed64One() / Signed64Zero() == Signed64Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Signed64One() % Signed64Zero() == Signed64Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Unsigned64One() / Unsigned64Zero() == Unsigned64Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Unsigned64One() % Unsigned64Zero() == Unsigned64Zero()",unchecked((int)0xE0540002))]
+    [TestCase("Signed32Minimum() / Signed32NegativeOne() == Signed32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed64Minimum() / Signed64NegativeOne() == Signed64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed32Maximum() + Signed32One() == Signed32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned32Maximum() + Unsigned32One() == Unsigned32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed64Maximum() + Signed64One() == Signed64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned64Maximum() + Unsigned64One() == Unsigned64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed32Minimum() - Signed32One() == Signed32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned32Zero() - Unsigned32One() == Unsigned32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed64Minimum() - Signed64One() == Signed64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned64Zero() - Unsigned64One() == Unsigned64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed32One() << Signed32NegativeOne() == Signed32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned32One() << Signed32ThirtyTwo() == Unsigned32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed32One() >> Signed32ThirtyTwo() == Signed32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed64One() >> Signed32SixtyFour() == Signed64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned64One() >>> Signed32SixtyFour() == Unsigned64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned64One() >>> Signed32NegativeOne() == Unsigned64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed32Maximum() * Signed32Two() == Signed32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned32Maximum() * Unsigned32Two() == Unsigned32Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Signed64Maximum() * Signed64Two() == Signed64Zero()",unchecked((int)0xE0540001))]
+    [TestCase("Unsigned64Maximum() * Unsigned64Two() == Unsigned64Zero()",unchecked((int)0xE0540001))]
     public async Task PersistedInitOutputIntegerArithmeticPreservesFailureStatusesAsync(
         string expression, int expected)
     {
@@ -81,14 +80,14 @@ public sealed partial class CliTests
                 Encoding.UTF8.GetBytes(source), "compile-trrm", "-", "--identity",
                 "init-output-arithmetic-failure", "-o", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.True(compiled == 0, $"{compileOutput}{Environment.NewLine}{compileError}");
-            Assert.Empty(compileError);
+            Assert.That(compiled == 0, Is.True, $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.That(compileError, Is.Empty);
 
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.Equal(expected, ran);
-            Assert.Empty(runOutput);
-            Assert.Empty(runError);
+            Assert.That(ran, Is.EqualTo(expected));
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
         }
         finally
         {

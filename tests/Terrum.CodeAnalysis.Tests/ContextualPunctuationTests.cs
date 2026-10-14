@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -85,110 +85,96 @@ public sealed class ContextualPunctuationTests
             }
         }
     }
-
-    [Theory]
-    [MemberData(nameof(Boundaries))]
+    [TestCaseSource(nameof(Boundaries))]
     public void RoleSelectedBeforeBindingUsesExactRawTokenBoundaries(
         string form, string punctuation, string left, string right, string code)
     {
         var source = form.Replace("#", left + punctuation + right, StringComparison.Ordinal);
         var span = new TextSpan(form.IndexOf('#') + left.Length, punctuation.Length);
         var lexed = Lexer.Lex(SourceText.From(source));
-        Assert.Empty(lexed.Diagnostics);
+        Assert.That(lexed.Diagnostics, Is.Empty);
         foreach (var tree in new[] { SyntaxTree.Parse(source), SyntaxTree.Parse(lexed) })
         {
-            Assert.Equal(source, tree.Root.ToFullString());
+            Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
             if (code.Length == 0)
             {
-                Assert.Empty(tree.Diagnostics);
+                Assert.That(tree.Diagnostics, Is.Empty);
             }
             else
             {
                 var codes = code.Split('|');
-                Assert.Equal(codes, tree.Diagnostics.Select(static diagnostic => diagnostic.Code));
-                Assert.All(tree.Diagnostics, diagnostic => Assert.Equal(span, diagnostic.Span));
+                Assert.That(tree.Diagnostics.Select(static diagnostic => diagnostic.Code), Is.EqualTo(codes));
+                {var __nunitItems0 = tree.Diagnostics;                Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0.Span, Is.EqualTo(span)); } });}
             }
         }
     }
-
-    [Theory]
-    [InlineData("Node?? F() { return null; }")]
-    [InlineData("Node? ? F() { return null; }")]
-    [InlineData("Node?/* gap */? F() { return null; }")]
-    [InlineData("Box<Box<Node>>? ? F() { return null; }")]
+    [TestCase("Node?? F() { return null; }")]
+    [TestCase("Node? ? F() { return null; }")]
+    [TestCase("Node?/* gap */? F() { return null; }")]
+    [TestCase("Box<Box<Node>>? ? F() { return null; }")]
     public void RepeatedOptionalModifiersStillRejectWithoutChangingRoles(string source)
     {
         var tree = SyntaxTree.Parse(source);
-        Assert.Contains(tree.Diagnostics, diagnostic => diagnostic.Code == "TRM1005");
-        Assert.Equal(source, tree.Root.ToFullString());
-        Assert.DoesNotContain(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ConditionalExpression);
+        Assert.That(global::System.Linq.Enumerable.Any(tree.Diagnostics,diagnostic => diagnostic.Code == "TRM1005"),Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+        Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantNodes(),node => node.Kind == SyntaxKind.ConditionalExpression),Is.False);
     }
-
-    [Theory]
-    [InlineData("void F() { Get<Box<Node /* gap */ ?>>(); }")]
-    [InlineData("void F() { Get<Box<Box<Node>> /* gap */ ?>(); }")]
+    [TestCase("void F() { Get<Box<Node /* gap */ ?>>(); }")]
+    [TestCase("void F() { Get<Box<Box<Node>> /* gap */ ?>(); }")]
     public void OptionalGenericArgumentsDoNotFallBackAfterAttachmentFailure(string source)
     {
         var tree = SyntaxTree.Parse(source);
-        Assert.Equal("TRM1011", Assert.Single(tree.Diagnostics).Code);
-        Assert.Contains(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.GenericNameExpression);
-        Assert.Equal(source, tree.Root.ToFullString());
+        Assert.That(global::System.Linq.Enumerable.Single(tree.Diagnostics).Code, Is.EqualTo("TRM1011"));
+        Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantNodes(),node => node.Kind == SyntaxKind.GenericNameExpression),Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return flag?")]
-    [InlineData("int32 Main() { return flag ? left:")]
-    [InlineData("struct S:")]
-    [InlineData("T F<T>() where T:")]
-    [InlineData("int32 Main() { F(name :")]
-    [InlineData("Node ?")]
+    [TestCase("int32 Main() { return flag?")]
+    [TestCase("int32 Main() { return flag ? left:")]
+    [TestCase("struct S:")]
+    [TestCase("T F<T>() where T:")]
+    [TestCase("int32 Main() { F(name :")]
+    [TestCase("Node ?")]
     public void IncompletePunctuationRetainsEverySourceUnit(string source)
     {
         var tree = SyntaxTree.Parse(source);
-        Assert.True(tree.HasErrors);
-        Assert.Equal(source, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
-
-    [Theory]
-    [InlineData("interface I : Other { }")]
-    [InlineData("enum E : int32 { A = 1 }")]
-    [InlineData("[param(value): Policy] void F(int32 value) { }")]
-    [InlineData("void F() { var pair = (name: 1, other: 2); }")]
+    [TestCase("interface I : Other { }")]
+    [TestCase("enum E : int32 { A = 1 }")]
+    [TestCase("[param(value): Policy] void F(int32 value) { }")]
+    [TestCase("void F() { var pair = (name: 1, other: 2); }")]
     public void UnsupportedColonRolesDoNotBecomeImplemented(string source) =>
-        Assert.True(SyntaxTree.Parse(source).HasErrors);
+        Assert.That(SyntaxTree.Parse(source).HasErrors, Is.True);
 
-    [Fact]
+    [Test]
     public void StringInteriorsRemainOutsidePunctuationRoles()
     {
         const string source = "void F() { var text = \"flag?left:right:X8\"; }";
         var tree = SyntaxTree.Parse(source);
-        Assert.False(tree.HasErrors);
-        Assert.Equal(source, tree.Root.ToFullString());
-        Assert.Contains(tree.Tokens, token => token.Text == "\"flag?left:right:X8\"");
+        Assert.That(tree.HasErrors, Is.False);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+        Assert.That(global::System.Linq.Enumerable.Any(tree.Tokens,token => token.Text == "\"flag?left:right:X8\""),Is.True);
     }
-
-    [Theory]
-    [InlineData("int32 Take(int32 @await) => @await; int32 Main() { return Take(@await:42); }")]
-    [InlineData("int32 Take(int32 @await) => @await; int32 Main() { return Take(@await:/* gap */42); }")]
-    [InlineData("int32 Take(int32 \U00010400) => \U00010400; int32 Main() { return Take(\U00010400:42); }")]
+    [TestCase("int32 Take(int32 @await) => @await; int32 Main() { return Take(@await:42); }")]
+    [TestCase("int32 Take(int32 @await) => @await; int32 Main() { return Take(@await:/* gap */42); }")]
+    [TestCase("int32 Take(int32 \U00010400) => \U00010400; int32 Main() { return Take(\U00010400:42); }")]
     public void NamedArgumentsBindByNormalizedParameterName(string source)
     {
         var tree = SyntaxTree.Parse(source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(source, tree.Root.ToFullString());
-        var argument = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.Argument);
-        Assert.Equal(TokenKind.Colon, Assert.IsType<SyntaxTokenElement>(argument.Children[1]).Token.Kind);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+        var argument = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.Argument);
+        Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual1 = argument.Children[1]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual1!; }))().Token.Kind, Is.EqualTo(TokenKind.Colon));
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var compilation = Compilation.Create(tree, (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), policy), Is.EqualTo(42));
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NamedCallsEvaluateInSourceOrderAndAllowInPositionContinuation(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -210,13 +196,11 @@ public sealed class ContextualPunctuationTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NamedOutputArgumentsKeepSourceOrderAndFormalModes(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -246,13 +230,11 @@ public sealed class ContextualPunctuationTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NamedInstanceArgumentsKeepTheReceiverInItsFormalSlot(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -267,13 +249,11 @@ public sealed class ContextualPunctuationTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NamedInstanceOutputArgumentsKeepTheReceiverInItsFormalSlot(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -292,39 +272,33 @@ public sealed class ContextualPunctuationTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(unknown: 1, second: 2); }")]
-    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1, first: 2); }")]
-    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(second: 2, 1); }")]
-    [InlineData("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1); }")]
-    [InlineData("bool Fill(out int32 value) { value = 1; return true; } int32 Main() { mut int32 result = 0; Fill(value: init result); return result; }")]
+    [TestCase("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(unknown: 1, second: 2); }")]
+    [TestCase("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1, first: 2); }")]
+    [TestCase("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(second: 2, 1); }")]
+    [TestCase("int32 F(int32 first, int32 second) => first + second; int32 Main() { return F(first: 1); }")]
+    [TestCase("bool Fill(out int32 value) { value = 1; return true; } int32 Main() { mut int32 result = 0; Fill(value: init result); return result; }")]
     public void InvalidNamedArgumentBindingsAreRejected(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
     }
-
-    [Theory]
-    [InlineData("int32 Main() { outer:while (true) { break outer; } return 42; }")]
-    [InlineData("int32 Main() { @for:for (;;) { break @for; } return 42; }")]
-    [InlineData("int32 Main() { \U00010400:do { break \U00010400; } while (true); return 42; }")]
+    [TestCase("int32 Main() { outer:while (true) { break outer; } return 42; }")]
+    [TestCase("int32 Main() { @for:for (;;) { break @for; } return 42; }")]
+    [TestCase("int32 Main() { \U00010400:do { break \U00010400; } while (true); return 42; }")]
     public void AttachedLabelsKeepUnderlyingBindingAndTransfers(string source)
     {
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
             var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), policy), Is.EqualTo(42));
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompiledScannerPreservesAllCurrentPunctuationRolesAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -349,14 +323,13 @@ public sealed class ContextualPunctuationTests
             var buffers = ScannerHost.CreateBuffers(source);
             var compilation = Compilation.Create(SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
                 buffers, (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var native = NativeJit.ExecuteWithData(Assert.IsType<BoundProgram>(compilation.Program), policy);
-            Assert.Equal(Lexer.Lex(source).Tokens.Select(token => new ScannerToken(token.Kind, token.Span)),
-                ScannerHost.ReadTokens(source, native.ExitCode, Buffer(3)));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), policy);
+            Assert.That(ScannerHost.ReadTokens(source, native.ExitCode, Buffer(3)), Is.EqualTo(Lexer.Lex(source).Tokens.Select(token => new ScannerToken(token.Kind, token.Span))));
             var adapted = ScannerHost.ReadLexResult(source, native.ExitCode, Buffer(3), Buffer(5), Buffer(4));
             var current = SyntaxTree.Parse(adapted);
-            Assert.Equal(text, current.Root.ToFullString());
-            Assert.Equal(SyntaxTree.Parse(source).Diagnostics.ToArray(), current.Diagnostics.ToArray());
+            Assert.That(current.Root.ToFullString(), Is.EqualTo(text));
+            Assert.That(current.Diagnostics.ToArray(), Is.EqualTo(SyntaxTree.Parse(source).Diagnostics.ToArray()));
             failures += current.Diagnostics.Count(diagnostic =>
                 diagnostic.Code is "TRM1008" or "TRM1010" or "TRM1011" or "TRM1012");
 
@@ -365,12 +338,10 @@ public sealed class ContextualPunctuationTests
         }
         var expectedFailures = Boundaries.Sum(row =>
             ((string)row[4]).Split('|', StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.Equal(expectedFailures, failures);
+        Assert.That(failures, Is.EqualTo(expectedFailures));
     }
-
-    [Theory]
-    [InlineData(24)]
-    [InlineData(51)]
+    [TestCase(24)]
+    [TestCase(51)]
     public void IndependentConditionalBodyLayoutsRequireCurrentSpacing(int version)
     {
         foreach (var gap in Gaps.Skip(1))
@@ -387,11 +358,20 @@ public sealed class ContextualPunctuationTests
                     ? "public int32 Value(bool b) => " + expression + ";"
                     : "public int32 Value(bool b) { do { return " + expression + "; } while (false); }";
                 var words = new int[ScalarFrontendHost.WordCount];
-                words[0] = 87; words[1] = 1; words[2] = 1; words[5] = 1; words[6] = 1; words[7] = 5;
-                words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
-                words[11] = text.IndexOf("b)", StringComparison.Ordinal); words[12] = 1;
+                words[0] = 87;
+                words[1] = 1;
+                words[2] = 1;
+                words[5] = 1;
+                words[6] = 1;
+                words[7] = 5;
+                words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+                words[10] = 5;
+                words[11] = text.IndexOf("b)", StringComparison.Ordinal);
+                words[12] = 1;
                 words[37] = version == 24 ? 4 : 5;
-                words[38] = -1; words[39] = version == 24 ? 3 : -1; words[40] = -1;
+                words[38] = -1;
+                words[39] = version == 24 ? 3 : -1;
+                words[40] = -1;
                 words[41] = version == 24 ? 1 : 0;
                 var start = text.IndexOf(expression, StringComparison.Ordinal);
                 var one = start + 1 + spaces[0].Length + 1 + spaces[1].Length;
@@ -418,7 +398,7 @@ public sealed class ContextualPunctuationTests
                 }
                 if (missing == -1)
                 {
-                    Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), bytes).IsValid);
+                    Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), bytes).IsValid, Is.True);
                 }
                 else
                 {

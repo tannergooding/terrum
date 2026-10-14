@@ -4,33 +4,31 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmSourceFileTableReaderTests
 {
-    [Fact]
+    [Test]
     public void ReadsPathsAndOwnersWithoutResolvingFiles()
     {
         var names = TrRmStringTableWriter.EncodeNames([("src/A.terrum", 0), ("src/\u00E9.terrum", 1)]);
         var strings = new TrRmStringTableReader(names, 2);
         var modules = new TrRmModuleTableReader(TwoModules(), 2, strings, 0, 0, 0, 2);
         var files = new TrRmSourceFileTableReader(TwoFiles(), 2, strings, modules);
-        Assert.Equal("src/A.terrum", files.GetPath(1));
-        Assert.Equal("src/\u00E9.terrum", files.GetPath(2));
-        Assert.Equal(1, files.GetOwnerModule(1));
-        Assert.Equal(2, files.GetOwnerModule(2));
+        Assert.That(files.GetPath(1), Is.EqualTo("src/A.terrum"));
+        Assert.That(files.GetPath(2), Is.EqualTo("src/\u00E9.terrum"));
+        Assert.That(files.GetOwnerModule(1), Is.EqualTo(1));
+        Assert.That(files.GetOwnerModule(2), Is.EqualTo(2));
         Assert.Throws<InvalidDataException>(() => ReadPath(TwoFiles(), 0));
         Assert.Throws<InvalidDataException>(() => ReadOwner(TwoFiles(), 3));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(3, 1)]
-    [InlineData(4, 1)]
-    [InlineData(8, 3)]
-    [InlineData(12, 1)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(3,(byte)(1))]
+    [TestCase(4,(byte)(1))]
+    [TestCase(8,(byte)(3))]
+    [TestCase(12,(byte)(1))]
     public void RejectsMalformedPathReferencesAndUnassignedDigests(int byteIndex, byte replacement)
     {
         var bytes = TwoFiles();
@@ -38,7 +36,7 @@ public sealed class TrRmSourceFileTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsTruncatedAndMismatchedSections()
     {
         Assert.Throws<InvalidDataException>(() => Create(TwoFiles()[..^1]));

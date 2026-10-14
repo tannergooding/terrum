@@ -13,7 +13,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -34,34 +34,30 @@ public sealed class PublicFixedLayoutStorageTests
         }
         public Packet Make(int32 value) { return new Packet(value); }
         """;
-
-    [Theory]
-    [InlineData("bool", 1)]
-    [InlineData("char16", 2)]
-    [InlineData("int32", 4)]
-    [InlineData("uint32", 4)]
-    [InlineData("int64", 8)]
-    [InlineData("uint64", 8)]
-    [InlineData("float32", 4)]
-    [InlineData("float64", 8)]
+    [TestCase("bool",1)]
+    [TestCase("char16",2)]
+    [TestCase("int32",4)]
+    [TestCase("uint32",4)]
+    [TestCase("int64",8)]
+    [TestCase("uint64",8)]
+    [TestCase("float32",4)]
+    [TestCase("float64",8)]
     public void EveryStorableCorePrimitiveRetainsAnExplicitProductionCommitment(string type, int width)
     {
         var program = Commit(CompileLibrary($"public struct Box {{ public {type} Value; }}"
             + " public int32 Check(Box value) { return 42; }"));
-        Assert.Equal(width, Assert.Single(FixedLayoutStorage.Validate(program.Structures)));
+        Assert.That(global::System.Linq.Enumerable.Single(FixedLayoutStorage.Validate(program.Structures)), Is.EqualTo(width));
         SemanticVerifier.VerifyLibrary(program);
         var producer = ModuleCompiler.CreateProducer(program, ["Check"]);
-        Assert.Equal(78, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
-        var retained = Assert.Single(ModuleCompiler.CreateReference(producer).Structures);
-        Assert.True(retained.IsSequential);
-        Assert.Equal(FixedLayoutStorage.WindowsX64TargetRequirement, retained.BlittableTargetRequirement);
-        Assert.Equal(width, retained.Size);
-        Assert.Equal((0, width), (Assert.Single(retained.Fields).Offset, retained.Fields[0].Size));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
+        var retained = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Structures);
+        Assert.That(retained.IsSequential, Is.True);
+        Assert.That(retained.BlittableTargetRequirement, Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
+        Assert.That(retained.Size, Is.EqualTo(width));
+        Assert.That((global::System.Linq.Enumerable.Single(retained.Fields).Offset, retained.Fields[0].Size), Is.EqualTo((0, width)));
     }
-
-    [Theory]
-    [InlineData("char16 Prefix; int64 Value; char16 Tail;", 24, 8, new[] { 0, 8, 16 })]
-    [InlineData("uint64 A; uint64 B; uint64 C; uint64 D; uint64 E;", 40, 8, new[] { 0, 8, 16, 24, 32 })]
+    [TestCase("char16 Prefix; int64 Value; char16 Tail;",24,8,new[] { 0, 8, 16 })]
+    [TestCase("uint64 A; uint64 B; uint64 C; uint64 D; uint64 E;",40,8,new[] { 0, 8, 16, 24, 32 })]
     public void LargerStorageIsEligibleWithoutWideningExecutableAggregates(
         string fields, int size, int alignment, int[] offsets)
     {
@@ -81,35 +77,34 @@ public sealed class PublicFixedLayoutStorageTests
             boundFields.Add(new BoundStructField(words[1], type, offsets[index], type == PrimitiveType.Char16 ? 2 : 8));
         }
         var large = new BoundStruct("Large", boundFields.MoveToImmutable(), size) {
-            IsSequential = true, BlittableTargetRequirement = 1,
+            IsSequential = true,
+            BlittableTargetRequirement = 1,
         };
-        Assert.Equal(alignment, Assert.Single(FixedLayoutStorage.Validate([large])));
+        Assert.That(global::System.Linq.Enumerable.Single(FixedLayoutStorage.Validate([large])), Is.EqualTo(alignment));
         var program = CompileLibrary("public int32 Check() { return 42; }") with { Structures = [large] };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Check"]));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program))!;
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Check"]))!;
     }
-
-    [Theory]
-    [InlineData("missing-root")]
-    [InlineData("missing-nested")]
-    [InlineData("wrong-target")]
-    [InlineData("missing-sequential")]
-    [InlineData("transparent")]
-    [InlineData("unique")]
-    [InlineData("cleanup")]
-    [InlineData("offset")]
-    [InlineData("width")]
-    [InlineData("size")]
-    [InlineData("cycle")]
-    [InlineData("managed")]
-    [InlineData("owner")]
-    [InlineData("view")]
-    [InlineData("native-handle")]
-    [InlineData("native-carrier")]
-    [InlineData("unknown-type")]
-    [InlineData("negative-type")]
-    [InlineData("duplicate-field")]
-    [InlineData("conflicting-access")]
+    [TestCase("missing-root")]
+    [TestCase("missing-nested")]
+    [TestCase("wrong-target")]
+    [TestCase("missing-sequential")]
+    [TestCase("transparent")]
+    [TestCase("unique")]
+    [TestCase("cleanup")]
+    [TestCase("offset")]
+    [TestCase("width")]
+    [TestCase("size")]
+    [TestCase("cycle")]
+    [TestCase("managed")]
+    [TestCase("owner")]
+    [TestCase("view")]
+    [TestCase("native-handle")]
+    [TestCase("native-carrier")]
+    [TestCase("unknown-type")]
+    [TestCase("negative-type")]
+    [TestCase("duplicate-field")]
+    [TestCase("conflicting-access")]
     public void InvalidCommitmentsFailProductionStorageAndSemanticVerification(string change)
     {
         var program = Commit(CompileLibrary(Library));
@@ -146,26 +141,24 @@ public sealed class PublicFixedLayoutStorageTests
         if (change == "missing-root")
         {
             // No root claim is inferred; public Sequential still fails the legacy executable check.
-            Assert.Equal(new[] { 4, 0 }, FixedLayoutStorage.Validate(program.Structures));
+            Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo(new[] { 4, 0 }));
         }
         else
         {
-            _ = Assert.Throws<ArgumentException>(() => FixedLayoutStorage.Validate(program.Structures));
+            _ = Assert.Throws<ArgumentException>(() => FixedLayoutStorage.Validate(program.Structures))!;
         }
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program))!;
         if (change == "native-handle")
         {
-            _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(program, ["Make"]));
+            _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
         }
         else
         {
-            _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Make"]));
+            _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void CachedNestedLayoutsStillEnforceTheWholePathDepth(bool deepestFirst)
     {
         var structures = ImmutableArray.CreateBuilder<BoundStruct>(129);
@@ -175,10 +168,11 @@ public sealed class PublicFixedLayoutStorageTests
             var terminal = deepestFirst ? index == 0 : index == 128;
             structures.Add(new BoundStruct($"D{index}",
                 [new BoundStructField("Value", terminal ? PrimitiveType.Int32 : (PrimitiveType)(100 + next), 0, 4)], 4) {
-                IsSequential = true, BlittableTargetRequirement = 1,
+                IsSequential = true,
+                BlittableTargetRequirement = 1,
             });
         }
-        _ = Assert.Throws<NotSupportedException>(() => FixedLayoutStorage.Validate(structures.ToImmutable()));
+        _ = Assert.Throws<NotSupportedException>(() => FixedLayoutStorage.Validate(structures.ToImmutable()))!;
         if (deepestFirst)
         {
             structures.RemoveAt(128);
@@ -190,18 +184,16 @@ public sealed class PublicFixedLayoutStorageTests
             };
             structures.RemoveAt(128);
         }
-        Assert.All(FixedLayoutStorage.Validate(structures.ToImmutable()), alignment => Assert.Equal(4, alignment));
+        {var __nunitItems0 = FixedLayoutStorage.Validate(structures.ToImmutable());        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0, Is.EqualTo(4)); } });}
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void IndependentReplacementRetainsNominalStorageAndPublicFieldAccess(BoundRuntimePolicy policy)
     {
         var program = Commit(CompileLibrary(Library, policy));
-        Assert.Equal(new[] { 4, 4 }, FixedLayoutStorage.Validate(program.Structures));
-        Assert.Equal(12, program.Structures[1].Size);
-        Assert.Equal(new[] { 0, 4, 8 }, program.Structures[1].Fields.Select(static field => field.Offset));
+        Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo(new[] { 4, 4 }));
+        Assert.That(program.Structures[1].Size, Is.EqualTo(12));
+        Assert.That(program.Structures[1].Fields.Select(static field => field.Offset), Is.EqualTo(new[] { 0, 4, 8 }));
         var producer = ModuleCompiler.CreateProducer(program, ["Make"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -212,37 +204,35 @@ public sealed class PublicFixedLayoutStorageTests
                 return value.Item.Value + int32(value.Prefix);
             }
             """), reference, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(78, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(78));
         var snapshot = SHA256.HashData(consumer);
         var replacementProgram = Commit(CompileLibrary(
             "public struct Other { public uint64 Value; } " + Library.Replace(
                 "new Packet(value)", "new Packet(value + 1)", StringComparison.Ordinal), policy));
-        Assert.NotEqual(program.Structures[1].Fields[1].Type, replacementProgram.Structures[2].Fields[1].Type);
+        Assert.That(replacementProgram.Structures[2].Fields[1].Type, Is.Not.EqualTo(program.Structures[1].Fields[1].Type));
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Make"]);
         var nativePolicy = (NativeRuntimePolicy)policy;
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), nativePolicy));
-        Assert.Equal(43, NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), nativePolicy));
-        Assert.Equal(snapshot, SHA256.HashData(consumer));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), nativePolicy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), nativePolicy), Is.EqualTo(43));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(snapshot));
     }
-
-    [Theory]
-    [InlineData("commitment")]
-    [InlineData("field-type")]
-    [InlineData("field-name")]
-    [InlineData("field-order")]
-    [InlineData("access")]
-    [InlineData("mutation")]
-    [InlineData("unsafe")]
-    [InlineData("nominal")]
+    [TestCase("commitment")]
+    [TestCase("field-type")]
+    [TestCase("field-name")]
+    [TestCase("field-order")]
+    [TestCase("access")]
+    [TestCase("mutation")]
+    [TestCase("unsafe")]
+    [TestCase("nominal")]
     public void ReplacementRejectsChangedStorageOrFieldContracts(string change)
     {
         var original = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Make(42).Item.Value; }"), ModuleCompiler.CreateReference(original));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), original);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), original);
         var source = change switch {
             "field-type" => Library.Replace("int32 Value", "uint32 Value", StringComparison.Ordinal)
                 .Replace("Value = value", "Value = uint32(value)", StringComparison.Ordinal),
@@ -258,7 +248,7 @@ public sealed class PublicFixedLayoutStorageTests
         var replacementProgram = CompileLibrary(source);
         if (change is not "commitment")
         {
-            Assert.NotEqual(Library, source);
+            Assert.That(source, Is.Not.EqualTo(Library));
         }
         if (change != "commitment")
         {
@@ -266,31 +256,29 @@ public sealed class PublicFixedLayoutStorageTests
         }
         if (change == "access")
         {
-            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(replacementProgram, ["Make"]));
+            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(replacementProgram, ["Make"]))!;
         }
         else
         {
             var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Make"]);
-            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, replacement));
+            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, replacement))!;
         }
     }
-
-    [Theory]
-    [InlineData("target", 0)]
-    [InlineData("target", 2)]
-    [InlineData("sequential", 0)]
-    [InlineData("sequential", 2)]
-    [InlineData("size", 16)]
-    [InlineData("field-type", (int)PrimitiveType.OwnedInt32Buffer)]
-    [InlineData("field-offset", 3)]
-    [InlineData("field-width", 8)]
+    [TestCase("target",0)]
+    [TestCase("target",2)]
+    [TestCase("sequential",0)]
+    [TestCase("sequential",2)]
+    [TestCase("size",16)]
+    [TestCase("field-type",(int)PrimitiveType.OwnedInt32Buffer)]
+    [TestCase("field-offset",3)]
+    [TestCase("field-width",8)]
     public void ForgedProducerAndConsumerStorageMetadataRejectsBeforeExecution(string fact, int value)
     {
         var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Make(42).Item.Value; }"),
             ModuleCompiler.CreateReference(producer));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer);
         foreach (var original in new[] { producer, consumer })
         {
             var forged = (byte[])original.Clone();
@@ -313,19 +301,19 @@ public sealed class PublicFixedLayoutStorageTests
                 BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(position, 4), value);
             }
             var isConsumer = ReferenceEquals(original, consumer);
-            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.GetNativeProfileVersion(forged, isConsumer));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.GetNativeProfileVersion(forged, isConsumer))!;
             if (isConsumer)
             {
-                _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer));
+                _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer))!;
             }
             else
             {
-                _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+                _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged))!;
             }
         }
     }
 
-    [Fact]
+    [Test]
     public void ErasingEveryCommitmentOrReinterpretingAnOldRevisionRejects()
     {
         var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
@@ -334,32 +322,28 @@ public sealed class PublicFixedLayoutStorageTests
         {
             BinaryPrimitives.WriteInt32LittleEndian(erased.AsSpan(positions.Target, 4), 0);
         }
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(erased));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(erased))!;
         foreach (var revision in new[] { 76, 77, 79 })
         {
             var forged = (byte[])producer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), revision);
-            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged))!;
         }
     }
-
-    [Theory]
-    [InlineData("Packet value = Make(42); value.Item.Value = 0; return 0;", "TRM3008")]
-    [InlineData("mut Packet value = Make(42); value.Prefix = char16(0); return 0;", "TRM3008")]
-    [InlineData("Packet value = Make(42); return value.Item;", "TRM3007")]
-    [InlineData("init Packet value; return value.Item.Value;", "TRM3016")]
+    [TestCase("Packet value = Make(42); value.Item.Value = 0; return 0;","TRM3008")]
+    [TestCase("mut Packet value = Make(42); value.Prefix = char16(0); return 0;","TRM3008")]
+    [TestCase("Packet value = Make(42); return value.Item;","TRM3007")]
+    [TestCase("init Packet value; return value.Item.Value;","TRM3016")]
     public void CommittedPublicFieldsKeepOrdinaryMutationTypeAndInitializationRules(string body, string code)
     {
         var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"),
             ModuleCompiler.CreateReference(producer));
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void ImportedFixedFieldsRetainUnsafeCallerAuthority(bool authorized)
     {
         var producer = ModuleCompiler.CreateProducer(Commit(CompileLibrary(UnsafeLibrary())), ["Make"]);
@@ -368,18 +352,18 @@ public sealed class PublicFixedLayoutStorageTests
             ModuleCompiler.CreateReference(producer));
         if (!authorized)
         {
-            Assert.True(compilation.HasErrors);
-            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3028");
+            Assert.That(compilation.HasErrors, Is.True);
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3028"),Is.True);
             return;
         }
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var consumer = ModuleCompiler.CreateConsumer(program, producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         var main = program.Functions[program.EntryPoint];
-        var scope = Assert.IsType<BoundUnsafe>(Assert.Single(main.Body.Statements));
-        var result = Assert.IsType<BoundReturn>(Assert.Single(scope.Body.Statements));
-        var read = Assert.IsType<BoundFieldRead>(result.Value);
+        var scope = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual5 = global::System.Linq.Enumerable.Single(main.Body.Statements); Assert.That(__nunitActual5, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual5!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual6 = global::System.Linq.Enumerable.Single(scope.Body.Statements); Assert.That(__nunitActual6, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual6!; }))();
+        var read = ((global::System.Func<BoundFieldRead>)(() => { var __nunitActual7 = result.Value; Assert.That(__nunitActual7, Is.TypeOf<BoundFieldRead>()); return (BoundFieldRead)__nunitActual7!; }))();
         var forgedMain = main with {
             Body = main.Body with {
                 Statements = [scope with {
@@ -391,10 +375,10 @@ public sealed class PublicFixedLayoutStorageTests
         };
         _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateConsumer(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forgedMain),
-        }, producer));
+        }, producer))!;
     }
 
-    [Fact]
+    [Test]
     public void FixedCommitmentsDoNotBypassPrivateAccessOrBooleanValidity()
     {
         const string Source = """
@@ -406,19 +390,18 @@ public sealed class PublicFixedLayoutStorageTests
             int32 Main() { Box value = new Box(42); return value.Read(); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Commit(Assert.IsType<BoundProgram>(compilation.Program));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Commit(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))());
         SemanticVerifier.Verify(program);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         var privateAccess = Compilation.Create(SyntaxTree.Parse(
             Source.Replace("value.Read()", "value.Secret", StringComparison.Ordinal)));
-        Assert.Contains(privateAccess.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.That(global::System.Linq.Enumerable.Any(privateAccess.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
 
         var booleanProgram = Commit(CompileLibrary(Library));
         var constructor = booleanProgram.Functions.Single(static function => function.DeclaringStruct == "Packet"
             && function.IsConstructor);
-        var assignment = Assert.Single(constructor.Body.Statements.OfType<BoundFieldAssignment>(),
-            static statement => statement.Value.Type == PrimitiveType.Bool);
+        var assignment = global::System.Linq.Enumerable.Single(constructor.Body.Statements.OfType<BoundFieldAssignment>(), static statement => statement.Value.Type == PrimitiveType.Bool);
         var assignmentIndex = constructor.Body.Statements.IndexOf(assignment);
         var forgedConstructor = constructor with {
             Body = constructor.Body with {
@@ -430,51 +413,47 @@ public sealed class PublicFixedLayoutStorageTests
         var forgedBoolean = booleanProgram with {
             Functions = booleanProgram.Functions.SetItem(booleanProgram.Functions.IndexOf(constructor), forgedConstructor),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forgedBoolean));
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forgedBoolean, ["Make"]));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forgedBoolean))!;
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forgedBoolean, ["Make"]))!;
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NativeGraphMetadataRetainsTheSameFixedStorageReplacementContractAsync(BoundRuntimePolicy policy)
     {
         var nativePolicy = (NativeRuntimePolicy)policy;
         var producer = NativeModuleCompiler.CreateProducer(Commit(CompileLibrary(Library, policy)),
             ["Make"], "FixedLeaf", nativePolicy);
         var reference = NativeModuleCompiler.CreateGraphReference([producer]);
-        Assert.All(reference.Structures, structure => Assert.Equal(1, structure.BlittableTargetRequirement));
+        {var __nunitItems1 = reference.Structures;        Assert.Multiple(() => { foreach (var __nunitItem9 in __nunitItems1) { Assert.That(__nunitItem9.BlittableTargetRequirement, Is.EqualTo(1)); } });}
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Make(42).Item.Value; }"),
             reference, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(),
             [producer], nativePolicy);
         var replacement = NativeModuleCompiler.CreateProducer(Commit(CompileLibrary(
             Library.Replace("new Packet(value)", "new Packet(value + 1)", StringComparison.Ordinal), policy)),
             ["Make"], "FixedLeaf", nativePolicy);
         NativeModuleCompiler.ValidateGraph(consumer, [replacement]);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
-            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(43));
         var uncommitted = NativeModuleCompiler.CreateProducer(CompileLibrary(Library, policy),
             ["Make"], "FixedLeaf", nativePolicy);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(consumer, [uncommitted]));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(consumer, [uncommitted]))!;
     }
-
-    [Theory]
-    [InlineData("[Blittable] public struct Box { public int32 Value; }")]
-    [InlineData("[Blittable] [Layout(Sequential)] public struct Box { public int32 Value; }")]
+    [TestCase("[Blittable] public struct Box { public int32 Value; }")]
+    [TestCase("[Blittable] [Layout(Sequential)] public struct Box { public int32 Value; }")]
     public void ProvisionalBoundOptInDoesNotRegisterSourceAttributes(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source + " public int32 Check() { return 42; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3001");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3001"),Is.True);
     }
 
     private static BoundProgram CompileLibrary(string source, BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
     }
 
     private static BoundProgram Commit(BoundProgram program) => program with {
@@ -493,13 +472,13 @@ public sealed class PublicFixedLayoutStorageTests
         using var stream = new MemoryStream(bytes, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
-        Assert.Equal(78, reader.ReadInt32());
+        Assert.That(reader.ReadInt32(), Is.EqualTo(78));
         _ = ReadString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();
         _ = reader.ReadBoolean();
         _ = ReadString(reader);
-        Assert.Equal(0, reader.ReadInt32());
+        Assert.That(reader.ReadInt32(), Is.EqualTo(0));
         _ = reader.ReadInt32();
         var count = reader.ReadInt32();
         var result = new Dictionary<string, StructurePositions>(StringComparer.Ordinal);

@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task UnaryProtocolsExecuteDirectGenericAndBinaryCallsAsync(bool checkedFailures)
     {
         var source = StaticUnaryProtocolTests.Source + """
@@ -30,12 +29,10 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("+")]
-    [InlineData("-")]
-    [InlineData("!")]
-    [InlineData("~")]
+    [TestCase("+")]
+    [TestCase("-")]
+    [TestCase("!")]
+    [TestCase("~")]
     public async Task EveryUnaryOperatorUsesItsOwnNominalWitnessAsync(string operation)
     {
         var source = $$"""
@@ -56,7 +53,7 @@ public sealed partial class JitTests
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public Task UnaryWitnessPreservesCatchableFailureAsync()
     {
         const string Source = """
@@ -79,10 +76,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task UnaryOperandIsEvaluatedExactlyOnceAsync(bool checkedFailures)
     {
         const string Source = """

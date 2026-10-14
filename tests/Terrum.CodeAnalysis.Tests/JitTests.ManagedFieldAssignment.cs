@@ -1,7 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -27,10 +27,8 @@ public sealed partial class JitTests
             return 42;
         }
         """;
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ManagedFieldAssignmentPreservesSelectedReceiverAcrossReplacingRhsAsync(bool checkedExceptions)
     {
         var source = ManagedFieldAssignmentDeclarations + """
@@ -47,10 +45,8 @@ public sealed partial class JitTests
             ? AssertCheckedExecutionAsync(source, 42)
             : AssertFailFastExecutionAsync(source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ManagedFieldAssignmentWritesOriginalReceiverAcrossReplacingRhsAsync(bool checkedExceptions)
     {
         var source = ManagedFieldAssignmentDeclarations + """
@@ -68,7 +64,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedFieldAssignmentRetiresSelectedReceiverAfterRhsThrowsAsync()
     {
         var source = ManagedFieldAssignmentDeclarations + """

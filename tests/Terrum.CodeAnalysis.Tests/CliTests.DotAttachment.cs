@@ -5,15 +5,14 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task DotAttachmentMatchesHostedAndScannerComponentWithAtomicRetentionAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -27,21 +26,21 @@ public sealed partial class CliTests
             {
                 var source = "int32 Main() { return int32" + dot + "MaxValue - 2147483605; }";
                 var (jitExit, jitOutput, jitError) = await RunAsync(Encoding.UTF8.GetBytes(source), "jit", "-", "--runtime", policy, "--json");
-                Assert.Equal(42, jitExit);
-                Assert.Empty(jitOutput);
-                Assert.Empty(jitError);
+                Assert.That(jitExit, Is.EqualTo(42));
+                Assert.That(jitOutput, Is.Empty);
+                Assert.That(jitError, Is.Empty);
                 foreach (var arguments in new[] {
                     new[] { "build", "-", "-o", hosted, "--runtime", policy, "--json" },
                     new[] { "build-component", scanner, "-", "-o", component, "--runtime", policy, "--json" },
                 })
                 {
                     var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
-                    Assert.Equal(0, exit);
-                    Assert.Empty(error);
+                    Assert.That(exit, Is.EqualTo(0));
+                    Assert.That(error, Is.Empty);
                 }
-                Assert.Equal(42, await ExecuteNativeImageAsync(hosted));
-                Assert.Equal(42, await ExecuteNativeImageAsync(component));
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(component));
+                Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(component), Is.EqualTo(42));
+                Assert.That(await File.ReadAllBytesAsync(component), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             }
             var original = await File.ReadAllBytesAsync(component);
             foreach (var invalid in new[] {
@@ -55,21 +54,19 @@ public sealed partial class CliTests
             {
                 var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(invalid), "build-component",
                     scanner, "-", "-o", component, "--runtime", policy, "--json");
-                Assert.Equal(1, exit);
-                Assert.Empty(error);
-                Assert.Equal(original, await File.ReadAllBytesAsync(component));
+                Assert.That(exit, Is.EqualTo(1));
+                Assert.That(error, Is.Empty);
+                Assert.That(await File.ReadAllBytesAsync(component), Is.EqualTo(original));
             }
         }
         finally
         {
-            File.Delete(hosted);
-            File.Delete(component);
+            await TestFileCleanup.DeleteWithRetryAsync(hosted).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(component).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task DotAdoptionPreservesBoundedNativeFrontendExecutionAndLibraryParityAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -83,14 +80,14 @@ public sealed partial class CliTests
             const string Source = "int32 Main(\n) { return int32(\n42\n); }";
             var (runExit, runOutput, runError) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "frontend-run", frontend, "-", "--runtime", policy, "--json");
-            Assert.Equal(42, runExit);
-            Assert.Empty(runOutput);
-            Assert.Empty(runError);
+            Assert.That(runExit, Is.EqualTo(42));
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
             var (buildExit, _, buildError) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "frontend-build", frontend, "-", "-o", executable, "--runtime", policy, "--json");
-            Assert.Equal(0, buildExit);
-            Assert.Empty(buildError);
-            Assert.Equal(42, await ExecuteNativeImageAsync(executable));
+            Assert.That(buildExit, Is.EqualTo(0));
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteNativeImageAsync(executable), Is.EqualTo(42));
             const string Library = "public int32 @await(int32 @const, int32 some) { return @const + @some; }";
             foreach (var arguments in new[] {
                 new[] { "frontend-build-library", frontend, "-", "-o", library, "--runtime", policy, "--json" },
@@ -98,15 +95,15 @@ public sealed partial class CliTests
             })
             {
                 var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(Library), arguments);
-                Assert.Equal(0, exit);
-                Assert.Empty(error);
+                Assert.That(exit, Is.EqualTo(0));
+                Assert.That(error, Is.Empty);
             }
-            Assert.Equal(await File.ReadAllBytesAsync(hostedLibrary), await File.ReadAllBytesAsync(library));
+            Assert.That(await File.ReadAllBytesAsync(library), Is.EqualTo(await File.ReadAllBytesAsync(hostedLibrary)));
             var handle = NativeLibrary.Load(library);
             try
             {
                 var invoke = Marshal.GetDelegateForFunctionPointer<ScalarBinary>(NativeLibrary.GetExport(handle, "await"));
-                Assert.Equal(42, invoke(20, 22));
+                Assert.That(invoke(20, 22), Is.EqualTo(42));
             }
             finally
             {
@@ -121,9 +118,9 @@ public sealed partial class CliTests
             {
                 var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(unsupported),
                     "frontend-build", frontend, "-", "-o", executable, "--runtime", policy, "--json");
-                Assert.Equal(1, exit);
-                Assert.Empty(error);
-                Assert.Equal(original, await File.ReadAllBytesAsync(executable));
+                Assert.That(exit, Is.EqualTo(1));
+                Assert.That(error, Is.Empty);
+                Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(original));
             }
         }
         finally

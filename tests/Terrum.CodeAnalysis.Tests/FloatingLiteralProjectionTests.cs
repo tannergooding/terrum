@@ -4,15 +4,14 @@ using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class FloatingLiteralProjectionTests
 {
-    [Theory]
-    [InlineData(false, 7, unchecked((int)0x3DCCCCCD), 0)]
-    [InlineData(true, 8, unchecked((int)0x9999999A), 0x3FB99999)]
+    [TestCase(false,7,unchecked((int)0x3DCCCCCD),0)]
+    [TestCase(true,8,unchecked((int)0x9999999A),0x3FB99999)]
     public void ReaderRejectsMismatchedFloatingLiteralPayloads(bool tree, int type,
         int low, int high)
     {
@@ -47,7 +46,7 @@ public sealed class FloatingLiteralProjectionTests
             words[27] = 3;
         }
 
-        Assert.True(ScalarFrontendHost.ReadResult(source, Encode(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Encode(words)).IsValid, Is.True);
         var lowIndex = tree ? 48 : 24;
         words[lowIndex] ^= 1;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Encode(words)));

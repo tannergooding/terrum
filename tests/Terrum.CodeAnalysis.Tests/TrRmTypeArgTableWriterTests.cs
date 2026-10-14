@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmTypeArgTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EncodesContiguousArgumentsOfConstructedType()
     {
         var specBytes = Specs();
@@ -17,12 +17,12 @@ public sealed class TrRmTypeArgTableWriterTests
         var rows = new[] { new TrRmTypeArgRow(3, 0, 1) };
         var bytes = TrRmTypeArgTableWriter.Encode(rows, specs);
 
-        Assert.Equal(new byte[] { 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 }, bytes);
+        Assert.That(bytes, Is.EqualTo(new byte[] { 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 }));
         rows[0] = rows[0] with { OwnerTypeSpecRow = 2 };
         _ = new TrRmTypeArgTableReader(bytes, 1, specs);
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidOwnerOrdinalArgumentAndCount()
     {
         var row = new TrRmTypeArgRow(3, 0, 1);

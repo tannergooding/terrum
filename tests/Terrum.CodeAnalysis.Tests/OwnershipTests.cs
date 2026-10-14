@@ -11,15 +11,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class OwnershipTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task LifetimeEndDropsEachValueExactlyOnceAtTheStatementAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -58,13 +57,13 @@ public sealed class OwnershipTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            (NativeRuntimePolicy)policy));
-        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            (NativeRuntimePolicy)policy), Is.EqualTo(42));
+        Assert.That(await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task LifetimeEndCleanupIsNotRepeatedByFinallyOrExceptionalUnwindAsync()
     {
         const string Source = """
@@ -97,15 +96,13 @@ public sealed class OwnershipTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(42, await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions, [0, 0]).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
+        Assert.That(await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions, [0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StandaloneVacantOwnerDropsOnlyItsPublishedValueAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -135,12 +132,10 @@ public sealed class OwnershipTests
                 return 42;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task InitReferencePublishesOneOwnerAndDropsOnlyTheCompletedValueAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -168,12 +163,10 @@ public sealed class OwnershipTests
                 return 42;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DiscardedMoveDropsAtStatementBoundaryExactlyOnceAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -199,12 +192,10 @@ public sealed class OwnershipTests
                 return 42;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task MutatedBufferFieldRetainsOwnerAndDropsExactlyOnceAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -237,10 +228,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, policy, [0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CaughtFailureThroughUniqueChildPreservesWritesAndRecursiveCleanupAsync()
     {
         const string Source = """
@@ -277,13 +268,11 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions,
-            [0, 0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task MutatedUniqueOwnerCleansUpExactlyOnceWithUpdatedValueAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -307,7 +296,7 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     private const string Owner = """
@@ -321,46 +310,40 @@ public sealed class OwnershipTests
             [NoThrow] public int32 Peek() { return Id; }
         }
         """;
-
-    [Theory]
-    [InlineData("Owner copy = value;", "TRM3023")]
-    [InlineData("Owner copy = move value; Owner duplicate = move value;", "TRM3023")]
-    [InlineData("Owner copy = move value; return value.Id;", "TRM3023")]
-    [InlineData("if (flag) { Owner gone = move value; } return value.Id;", "TRM3023")]
-    [InlineData("value.Close();", "TRM3023")]
-    [InlineData("return new Owner(42).Id;", "TRM3023")]
+    [TestCase("Owner copy = value;","TRM3023")]
+    [TestCase("Owner copy = move value; Owner duplicate = move value;","TRM3023")]
+    [TestCase("Owner copy = move value; return value.Id;","TRM3023")]
+    [TestCase("if (flag) { Owner gone = move value; } return value.Id;","TRM3023")]
+    [TestCase("value.Close();","TRM3023")]
+    [TestCase("return new Owner(42).Id;","TRM3023")]
     public void UniqueOwnersCannotBeCopiedReadVacantOrManuallyCleaned(string body, string code)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner
             + " int32 Main() { bool flag = true; Owner value = new Owner(42); " + body + " return 0; }"),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("struct Copy { public int32 Id; public Copy() { Id = 1; } [NoThrow] [Cleanup] public void Close() {} }", "TRM3023")]
-    [InlineData("unique struct U { public int32 Id; public U() { Id = 1; } [Cleanup] public void Close() {} }", "TRM3023")]
-    [InlineData("unique struct U { public int32 Id; public U() { Id = 1; } } struct Copy { public U Value; public Copy() { Value = new U(); } }", "TRM3023")]
-    [InlineData("unique struct U { public int32 Id; public U() { Id = 1; U duplicate = this; } }", "TRM3023")]
+    [TestCase("struct Copy { public int32 Id; public Copy() { Id = 1; } [NoThrow] [Cleanup] public void Close() {} }","TRM3023")]
+    [TestCase("unique struct U { public int32 Id; public U() { Id = 1; } [Cleanup] public void Close() {} }","TRM3023")]
+    [TestCase("unique struct U { public int32 Id; public U() { Id = 1; } } struct Copy { public U Value; public Copy() { Value = new U(); } }","TRM3023")]
+    [TestCase("unique struct U { public int32 Id; public U() { Id = 1; U duplicate = this; } }","TRM3023")]
     public void UnsupportedOwnershipContractsAreDiagnosed(string declarations, string code)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(declarations + " int32 Main() { return 0; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
-
-    [Theory]
-    [InlineData("Owner first = new Owner(1); Owner second = new Owner(2);", 3, 1)]
-    [InlineData("Owner first = new Owner(1); Owner second = move first;", 1, 1)]
-    [InlineData("mut Owner first = new Owner(1); first = new Owner(2);", 3, 2)]
+    [TestCase("Owner first = new Owner(1); Owner second = new Owner(2);",3,1)]
+    [TestCase("Owner first = new Owner(1); Owner second = move first;",1,1)]
+    [TestCase("mut Owner first = new Owner(1); first = new Owner(2);",3,2)]
     public async Task NormalCleanupRunsOnceInReverseLexicalOrderAsync(string body, int mask, int last)
     {
         var source = Owner + " int32 Main() { { " + body
             + " } if (Host.Trace[0] == " + mask + " && Host.Trace[1] == " + last + ") { return 42; } return 0; }";
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task ReturningScalarSnapshotsBeforeDroppingOwnerAsync()
     {
         var source = Owner + """
@@ -376,10 +359,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task ConstructorDropsLocalOwnerBeforeImplicitReturnAsync()
     {
         var source = Owner + """
@@ -396,10 +379,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task IndirectOwnerReturnTransfersCleanupToCallerAsync()
     {
         var source = """
@@ -430,21 +413,19 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestCase(true)]
+    [TestCase(false)]
     public async Task BranchMoveRetainsExactlyOneCleanupObligationAsync(bool move)
     {
         var source = Owner + " int32 Main() { bool choose = " + (move ? "true" : "false") + ";"
             + " { Owner value = new Owner(1); if (choose) { Owner destination = move value; } }"
             + " if (Host.Trace[0] == 1 && Host.Trace[1] == 1) { return 42; } return 0; }";
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task LoopInitializerOwnerDropsAfterLastIterationAsync()
     {
         var source = Owner + """
@@ -456,10 +437,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedUnwindDropsInnerThenOuterBeforeRecoveryAsync()
     {
         var source = Owner + """
@@ -477,10 +458,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedCrossFunctionUnwindDropsOwnersBeforeCallerRecoveryAsync()
     {
         var source = Owner + """
@@ -499,10 +480,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task FailedReplacementLeavesOriginalOwnerForExceptionalCleanupAsync()
     {
         var source = """
@@ -529,10 +510,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task PassedOwnerDropsInCalleeAcrossSixthStackArgumentAsync()
     {
         var source = Owner + """
@@ -546,10 +527,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task LaterFailedArgumentDropsEarlierStagedOwnersAsync()
     {
         var source = Owner + """
@@ -566,10 +547,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task ExceptionalCalleeDropsTransferredParameterAsync()
     {
         var source = Owner + """
@@ -584,10 +565,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CalleeCanReturnMovedParameterWithoutDroppingItAsync()
     {
         var source = Owner + """
@@ -598,10 +579,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void ReceiverLoanCannotBeConsumedByLaterArgument()
     {
         var source = Owner + """
@@ -614,8 +595,8 @@ public sealed class OwnershipTests
             StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(modified),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
     private const string NestedReceiver = """
@@ -642,38 +623,33 @@ public sealed class OwnershipTests
         }
         int32 Observe(bool value) { if (value) { return 0; } return 0; }
         """;
-
-    [Theory]
-    [InlineData("root.Branch.Leaf.Read(Observe(Replace(out root)))")]
-    [InlineData("root.Branch.Leaf.Read(Observe(ReplaceMoved(move root, out root)))")]
+    [TestCase("root.Branch.Leaf.Read(Observe(Replace(out root)))")]
+    [TestCase("root.Branch.Leaf.Read(Observe(ReplaceMoved(move root, out root)))")]
     public void NestedFieldLoanReservesOriginalRootAcrossScalarArguments(string expression)
     {
         var source = NestedReceiver + " int32 Main() { mut Root root = new Root(); return "
             + expression + "; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023"
-            && diagnostic.Span.Start == source.LastIndexOf("Observe(", StringComparison.Ordinal));
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"
+            && diagnostic.Span.Start == source.LastIndexOf("Observe(", StringComparison.Ordinal)),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void PublicIrRejectsNestedFieldLoanRootReplacementDuringScalarArgument(bool moveFirst)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(NestedReceiver
             + " int32 Main() { mut Root root = new Root(); return root.Branch.Leaf.Read(Observe(true)); }"));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var entry = program.Functions[program.EntryPoint];
-        var local = Assert.IsType<BoundLocal>(entry.Body.Statements[0]);
-        var region = Assert.IsType<BoundTryFinally>(entry.Body.Statements[1]);
-        var result = Assert.IsType<BoundReturn>(Assert.Single(region.Body.Statements));
-        var call = Assert.IsType<BoundCall>(result.Value);
-        _ = Assert.IsType<BoundFieldLoan>(call.Arguments[0]);
-        var scalar = Assert.IsType<BoundCall>(call.Arguments[1]);
-        var replacement = program.Functions.IndexOf(Assert.Single(program.Functions,
-            function => function.Name == (moveFirst ? "ReplaceMoved" : "Replace")));
+        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual3 = entry.Body.Statements[0]; Assert.That(__nunitActual3, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual3!; }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual4 = entry.Body.Statements[1]; Assert.That(__nunitActual4, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual4!; }))();
+        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual5 = global::System.Linq.Enumerable.Single(region.Body.Statements); Assert.That(__nunitActual5, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual5!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual6 = result.Value; Assert.That(__nunitActual6, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual6!; }))();
+        _ = ((global::System.Func<BoundFieldLoan>)(() => { var __nunitActual7 = call.Arguments[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundFieldLoan>()); return (BoundFieldLoan)__nunitActual7!; }))();
+        var scalar = ((global::System.Func<BoundCall>)(() => { var __nunitActual8 = call.Arguments[1]; Assert.That(__nunitActual8, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual8!; }))();
+        var replacement = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == (moveFirst ? "ReplaceMoved" : "Replace")));
         ImmutableArray<BoundExpression> arguments = [new BoundOutArgument(
             local.Variable, false, local.Initializer.Type, scalar.Span)];
         if (moveFirst)
@@ -690,15 +666,13 @@ public sealed class OwnershipTests
                 Body = entry.Body with { Statements = entry.Body.Statements.SetItem(1, forgedRegion) },
             }),
         };
-        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        Assert.Equal("Ownership", error.Data["Terrum.InvalidEffect"]);
-        Assert.Equal(scalar.Span, error.Data["Terrum.SourceSpan"]);
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        Assert.That(error.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
+        Assert.That(error.Data["Terrum.SourceSpan"], Is.EqualTo(scalar.Span));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NestedFieldLoanAllowsCompletedReadonlyQueryAsync(BoundRuntimePolicy policy)
     {
         var source = NestedReceiver + """
@@ -707,10 +681,10 @@ public sealed class OwnershipTests
                 return root.Branch.Leaf.Read(root.Branch.Leaf.Read(0) - 42);
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, policy).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task ConditionalOwningOutputDropsFalseAndTransfersTrueAsync()
     {
         var source = Owner + """
@@ -734,10 +708,10 @@ public sealed class OwnershipTests
                 return 42;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task FalseOwningOutputLeavesNoCallerOwnerLiveAsync()
     {
         var source = Owner + """
@@ -752,10 +726,10 @@ public sealed class OwnershipTests
                 return Host.Trace[0];
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task TrueOwningOutputReplacesExistingOwnerAsync()
     {
         var source = Owner + """
@@ -774,10 +748,10 @@ public sealed class OwnershipTests
                 return Host.Trace[0];
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task ExceptionalOwningOutputDropsPartialPublicationAsync()
     {
         var source = Owner + """
@@ -798,10 +772,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task LaterArgumentFailurePreservesExistingOutputUntilScopeUnwindAsync()
     {
         var source = Owner + """
@@ -826,13 +800,11 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
-            [0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("Make(out owner, out owner);")]
-    [InlineData("Take(move owner, move owner);")]
+    [TestCase("Make(out owner, out owner);")]
+    [TestCase("Take(move owner, move owner);")]
     public void OwningArgumentAliasesDoNotDuplicateObligations(string statement)
     {
         var source = Owner + """
@@ -847,11 +819,11 @@ public sealed class OwnershipTests
             """ + statement + " return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task SixthStackOutputPublishesIndirectOwnerAsync()
     {
         var source = """
@@ -881,22 +853,18 @@ public sealed class OwnershipTests
                 return Host.Trace[0];
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("output.Id")]
-    [InlineData("output.Peek()")]
+    [TestCase("output.Id")]
+    [TestCase("output.Peek()")]
     public async Task DirectOwningOutputReadsItsValueInsideCalleeAsync(string read)
     {
         var source = Owner + " bool Fill(out Owner output) { output = new Owner(42); return "
             + read + " == 42; } int32 Main() { require Fill(out var value); return value.Id; }";
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("output.Third")]
-    [InlineData("output.Peek()")]
+    [TestCase("output.Third")]
+    [TestCase("output.Peek()")]
     public async Task IndirectOwningOutputReadsItsValueInsideCalleeAsync(string read)
     {
         var source = """
@@ -918,10 +886,10 @@ public sealed class OwnershipTests
             }
             int32 Main() { require Fill(out var value); return value.Third; }
             """.Replace("OUTPUT_READ", read, StringComparison.Ordinal);
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task MovingOwningOutputIntoLocalAllowsRefillAsync()
     {
         var source = Owner + """
@@ -937,10 +905,10 @@ public sealed class OwnershipTests
                 return value.Id;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task MovingIndirectOutputIntoCallThenReturningFalseDropsBothAsync()
     {
         var source = """
@@ -972,10 +940,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void FailedOwningOutputCannotBeRead()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -990,11 +958,11 @@ public sealed class OwnershipTests
                 return result.Id;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void OwningForConditionOutputRequiresLexicalRegion()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1009,11 +977,11 @@ public sealed class OwnershipTests
                 return 0;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void PublicIrCannotOmitLexicalDropOrForgeOwnershipLoan()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1024,13 +992,13 @@ public sealed class OwnershipTests
             }
             int32 Main() { Owner owner = new Owner(42); return owner.Id; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
         var entry = program.Functions[program.EntryPoint];
         var truncated = entry with { Body = entry.Body with { Statements = entry.Body.Statements.RemoveAt(1) } };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, truncated),
-        }));
+        }))!;
         var earlyDrop = entry with {
             Body = entry.Body with {
                 Statements = entry.Body.Statements.Add(new BoundAssignment(0,
@@ -1040,7 +1008,7 @@ public sealed class OwnershipTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, earlyDrop),
-        }));
+        }))!;
         var forged = entry with {
             Body = entry.Body with {
                 Statements = entry.Body.Statements.SetItem(0, new BoundLocal(0,
@@ -1049,17 +1017,15 @@ public sealed class OwnershipTests
         };
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }, NativeRuntimePolicy.FailFast));
+        }, NativeRuntimePolicy.FailFast))!;
         var unboundCleanup = program with {
             Structures = program.Structures.SetItem(0, program.Structures[0] with { CleanupMethod = "Owner.Missing" }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(unboundCleanup));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(unboundCleanup))!;
     }
-
-    [Theory]
-    [InlineData("then")]
-    [InlineData("else")]
-    [InlineData("while")]
+    [TestCase("then")]
+    [TestCase("else")]
+    [TestCase("while")]
     public void PublicIrRequiresCleanupForBareUniqueDeclarations(string placement)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1070,12 +1036,12 @@ public sealed class OwnershipTests
             }
             int32 Main() { Owner owner = new Owner(42); return owner.Id; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
         var entry = program.Functions[program.EntryPoint];
-        var local = Assert.IsType<BoundLocal>(entry.Body.Statements[0]);
-        var region = Assert.IsType<BoundTryFinally>(entry.Body.Statements[1]);
-        var result = Assert.Single(Assert.IsType<BoundBlock>(region.Body).Statements);
+        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual11 = entry.Body.Statements[0]; Assert.That(__nunitActual11, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual11!; }))();
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual12 = entry.Body.Statements[1]; Assert.That(__nunitActual12, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual12!; }))();
+        var result = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => { var __nunitActual13 = region.Body; Assert.That(__nunitActual13, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual13!; }))().Statements);
         BoundStatement bare = placement switch {
             "then" => new BoundIf(new BoundConstant(1, PrimitiveType.Bool, default), local, null, default),
             "else" => new BoundIf(new BoundConstant(0, PrimitiveType.Bool, default),
@@ -1087,11 +1053,11 @@ public sealed class OwnershipTests
         var forged = program with {
             Functions = program.Functions.SetItem(program.EntryPoint, entry with { Body = body }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void PublicIrCannotUseAnotherStructuresCleanupMethod()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1107,8 +1073,8 @@ public sealed class OwnershipTests
             }
             int32 Main() { return 0; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
         var ownerIndex = -1;
         for (var index = 0; index < program.Structures.Length; index++)
         {
@@ -1118,17 +1084,15 @@ public sealed class OwnershipTests
                 break;
             }
         }
-        Assert.True(ownerIndex >= 0);
+        Assert.That(ownerIndex >= 0, Is.True);
         var malformed = program with {
             Structures = program.Structures.SetItem(ownerIndex,
                 program.Structures[ownerIndex] with { CleanupMethod = "Other.Close" }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void PublicIrRejectsWritableOrOutUniqueReceiver(bool isOut)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1141,8 +1105,8 @@ public sealed class OwnershipTests
             }
             int32 Main() { Owner owner = new Owner(42); return owner.Peek(); }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
         var index = -1;
         for (var i = 0; i < program.Functions.Length; i++)
         {
@@ -1152,7 +1116,7 @@ public sealed class OwnershipTests
                 break;
             }
         }
-        Assert.True(index >= 0);
+        Assert.That(index >= 0, Is.True);
         var function = program.Functions[index];
         var receiver = function.Variables[0] with { IsMutable = !isOut, IsOut = isOut };
         var body = isOut ? function.Body : function.Body with {
@@ -1165,13 +1129,11 @@ public sealed class OwnershipTests
                 Body = body,
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void PublicIrCannotOmitOrUnconditionallyDropOwningParameter(bool output)
     {
         var source = Owner + (output
@@ -1180,8 +1142,8 @@ public sealed class OwnershipTests
             + " int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))();
         var index = -1;
         for (var i = 0; i < program.Functions.Length; i++)
         {
@@ -1191,16 +1153,16 @@ public sealed class OwnershipTests
                 break;
             }
         }
-        Assert.True(index >= 0);
+        Assert.That(index >= 0, Is.True);
         var function = program.Functions[index];
-        var region = Assert.IsType<BoundTryFinally>(Assert.Single(function.Body.Statements));
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual17 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual17, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual17!; }))();
         var unscoped = program with {
             Functions = program.Functions.SetItem(index, function with { Body = region.Body }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(unscoped));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(unscoped, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(unscoped))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(unscoped, NativeRuntimePolicy.FailFast))!;
 
-        var drop = Assert.IsType<BoundDrop>(Assert.Single(region.Finally.Statements));
+        var drop = ((global::System.Func<BoundDrop>)(() => { var __nunitActual18 = global::System.Linq.Enumerable.Single(region.Finally.Statements); Assert.That(__nunitActual18, Is.TypeOf<BoundDrop>()); return (BoundDrop)__nunitActual18!; }))();
         var invalid = region with {
             Finally = region.Finally with {
                 Statements = [drop with { IsOutput = !drop.IsOutput }],
@@ -1211,10 +1173,10 @@ public sealed class OwnershipTests
                 Body = function.Body with { Statements = [invalid] },
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
     }
 
-    [Fact]
+    [Test]
     public async Task UniqueByValueContractSurvivesSeparateNativeModulesAsync()
     {
         var providerSource = """
@@ -1227,29 +1189,29 @@ public sealed class OwnershipTests
             public int32 Take(Token token) { return token.Id; }
             """;
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource));
-        Assert.False(providerCompilation.HasErrors, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(providerCompilation.Program),
+        Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = providerCompilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(),
             ["Make", "Take", "Token.Close"], "owned_param", NativeRuntimePolicy.FailFast);
         var reference = NativeModuleCompiler.CreateReference(provider);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Token token = Make(42); return Take(move token); }"), reference);
-        Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program),
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = consumerCompilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(),
             provider, NativeRuntimePolicy.FailFast);
-        Assert.Equal("native-13", NativeModuleCompiler.Inspect(consumer).NativeProfileVersion);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, provider, TimeSpan.FromSeconds(10),
-            NativeRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(NativeModuleCompiler.Inspect(consumer).NativeProfileVersion, Is.EqualTo("native-13"));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, provider, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
 
         var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource.Replace(
             "return token.Id;", "return token.Id + 1;", StringComparison.Ordinal)));
-        Assert.False(changedCompilation.HasErrors);
-        var replacement = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(changedCompilation.Program),
+        Assert.That(changedCompilation.HasErrors, Is.False);
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = changedCompilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(),
             ["Make", "Take", "Token.Close"], "owned_param", NativeRuntimePolicy.FailFast);
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10),
-            NativeRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(43));
     }
 
-    [Fact]
+    [Test]
     public async Task ConditionalOwningOutputContractSurvivesSeparateModulesAsync()
     {
         const string ProviderSource = """
@@ -1261,51 +1223,48 @@ public sealed class OwnershipTests
             public bool Make(out Token token) { token = new Token(42); return true; }
             """;
         var firstCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource));
-        Assert.False(firstCompilation.HasErrors, string.Join(Environment.NewLine, firstCompilation.Diagnostics));
-        var first = Assert.IsType<BoundProgram>(firstCompilation.Program);
+        Assert.That(firstCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, firstCompilation.Diagnostics));
+        var first = ((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = firstCompilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))();
         var semanticProducer = ModuleCompiler.CreateProducer(first, ["Make", "Token.Close"]);
         var semanticConsumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { require Make(out var ticket); return ticket.Id; }"),
             ModuleCompiler.CreateReference(semanticProducer));
-        Assert.False(semanticConsumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, semanticConsumerCompilation.Diagnostics));
-        var client = Assert.IsType<BoundProgram>(semanticConsumerCompilation.Program);
+        Assert.That(semanticConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, semanticConsumerCompilation.Diagnostics));
+        var client = ((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = semanticConsumerCompilation.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))();
         var semanticConsumer = ModuleCompiler.CreateConsumer(client, semanticProducer);
-        Assert.Equal("native-13", ModuleCompiler.GetNativeProfileVersion(semanticConsumer, true));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(semanticConsumer, true), Is.EqualTo("native-13"));
         var nativeProducer = NativeModuleCompiler.CreateProducer(first,
             ["Make", "Token.Close"], "owned_output", NativeRuntimePolicy.FailFast);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(client, nativeProducer,
             NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
 
         var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             ProviderSource.Replace("new Token(42)", "new Token(43)", StringComparison.Ordinal)));
-        Assert.False(changedCompilation.HasErrors);
-        var changed = Assert.IsType<BoundProgram>(changedCompilation.Program);
+        Assert.That(changedCompilation.HasErrors, Is.False);
+        var changed = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = changedCompilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
         _ = ModuleCompiler.Link(semanticConsumer, ModuleCompiler.CreateProducer(changed,
             ["Make", "Token.Close"]));
         var replacement = NativeModuleCompiler.CreateProducer(changed,
             ["Make", "Token.Close"], "owned_output", NativeRuntimePolicy.FailFast);
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(nativeConsumer, replacement,
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, replacement,
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(43));
 
         var incompatibleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             ProviderSource.Replace("out Token token) { token = new Token(42); return true;",
                 "Token token) { return true;", StringComparison.Ordinal)));
-        Assert.False(incompatibleCompilation.HasErrors);
-        var incompatible = Assert.IsType<BoundProgram>(incompatibleCompilation.Program);
+        Assert.That(incompatibleCompilation.HasErrors, Is.False);
+        var incompatible = ((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = incompatibleCompilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))();
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semanticConsumer,
-            ModuleCompiler.CreateProducer(incompatible, ["Make", "Token.Close"])));
+            ModuleCompiler.CreateProducer(incompatible, ["Make", "Token.Close"])))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(nativeConsumer,
             NativeModuleCompiler.CreateProducer(incompatible, ["Make", "Token.Close"],
-                "owned_output", NativeRuntimePolicy.FailFast)));
+                "owned_output", NativeRuntimePolicy.FailFast)))!;
     }
-
-    [Theory]
-    [InlineData(false, BoundRuntimePolicy.FailFast)]
-    [InlineData(false, BoundRuntimePolicy.CheckedExceptions)]
-    [InlineData(true, BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(false,BoundRuntimePolicy.FailFast)]
+    [TestCase(false,BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(true,BoundRuntimePolicy.CheckedExceptions)]
     public async Task ImportedOwningOutputCleanupCallsProducerAsync(bool exceptional, BoundRuntimePolicy policy)
     {
         var body = exceptional
@@ -1319,7 +1278,7 @@ public sealed class OwnershipTests
             .ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task ImportedStagedOwnerCleanupCallsProducerAfterLaterFailureAsync()
     {
         const string Source = """
@@ -1340,15 +1299,15 @@ public sealed class OwnershipTests
         await AssertExternalCleanupConsumerAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public void OwnershipTransferProfileRejectsUnknownRuntimePolicy()
     {
         _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             Compilation.GetNativeProfileVersion((BoundRuntimePolicy)int.MaxValue,
-                uniqueValues: true, ownershipTransfer: true));
+                uniqueValues: true, ownershipTransfer: true))!;
     }
 
-    [Fact]
+    [Test]
     public void MalformedUnexportedParameterTypeProducesModuleFormatError()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -1359,22 +1318,22 @@ public sealed class OwnershipTests
             int32 Use(Box input) { return input.Id; }
             public int32 Value() { Box box = new Box(42); return Use(box); }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var artifact = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Value"]);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(), ["Value"]);
         var forged = (byte[])artifact.Clone();
         var contractType = forged.AsSpan().IndexOf("in:Box:E"u8);
-        Assert.True(contractType >= 0);
+        Assert.That(contractType >= 0, Is.True);
         "10000"u8.CopyTo(forged.AsSpan(contractType + 3, 5));
         var variableName = forged.AsSpan().LastIndexOf("input"u8);
-        Assert.True(variableName >= 4);
-        Assert.Equal(5, BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(variableName - 4, 4)));
+        Assert.That(variableName >= 4, Is.True);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(variableName - 4, 4)), Is.EqualTo(5));
         var type = variableName + 5;
-        Assert.Equal(100, BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(type, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(type, 4)), Is.EqualTo(100));
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(type, 4), 10000);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged))!;
     }
 
-    [Fact]
+    [Test]
     public void ConsumerImportCannotDowngradeOwningParameterProfile()
     {
         const string ProviderSource = """
@@ -1387,28 +1346,28 @@ public sealed class OwnershipTests
             public int32 Take(Token token) { return token.Id; }
             """;
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource));
-        Assert.False(providerCompilation.HasErrors, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(providerCompilation.Program),
+        Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = providerCompilation.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))(),
             ["Make", "Take", "Token.Close"]);
         var client = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { Token token = Make(42); return Take(move token); }"),
             ModuleCompiler.CreateReference(provider));
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), provider);
-        Assert.Equal("native-13", ModuleCompiler.GetNativeProfileVersion(consumer, true));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = client.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))(), provider);
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(consumer, true), Is.EqualTo("native-13"));
         var forged = (byte[])consumer.Clone();
         var importName = forged.AsSpan().IndexOf("Take"u8);
-        Assert.True(importName >= 4);
-        Assert.Equal(4, BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(importName - 4, 4)));
+        Assert.That(importName >= 4, Is.True);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(importName - 4, 4)), Is.EqualTo(4));
         var contract = importName + 4;
         var marker = contract + 4 + BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(contract, 4)) + 2;
-        Assert.Equal(1, forged[marker]);
+        Assert.That(forged[marker], Is.EqualTo(1));
         forged[marker] = 0;
         var profile = forged.AsSpan().IndexOf("native-13"u8);
-        Assert.True(profile >= 0);
+        Assert.That(profile >= 0, Is.True);
         forged[profile + "native-1".Length] = (byte)'2';
-        Assert.Equal("native-12", ModuleCompiler.GetNativeProfileVersion(forged, true));
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(forged, provider));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(forged, true), Is.EqualTo("native-12"));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(forged, provider))!;
     }
 
     private static async Task AssertExternalCleanupConsumerAsync(string consumerSource, BoundRuntimePolicy policy)
@@ -1424,27 +1383,27 @@ public sealed class OwnershipTests
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(ProducerSource), policy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program),
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual29 = library.Program; Assert.That(__nunitActual29, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual29!; }))(),
             ["Make", "Token.Close"], "external_cleanup", nativePolicy);
         var client = Compilation.Create(SyntaxTree.Parse(consumerSource),
             NativeModuleCompiler.CreateReference(producer), policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program),
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual30 = client.Program; Assert.That(__nunitActual30, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual30!; }))(),
             producer, nativePolicy);
-        Assert.Equal(41, await NativeModuleCompiler.RunAsync(consumer, producer,
-            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, producer,
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(41));
 
         var changed = Compilation.CreateLibrary(SyntaxTree.Parse(
             ProducerSource.Replace("new Token(id)", "new Token(id + 1)", StringComparison.Ordinal)), policy);
-        Assert.False(changed.HasErrors, string.Join(Environment.NewLine, changed.Diagnostics));
-        var replacement = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(changed.Program),
+        Assert.That(changed.HasErrors, Is.False, string.Join(Environment.NewLine, changed.Diagnostics));
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual31 = changed.Program; Assert.That(__nunitActual31, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual31!; }))(),
             ["Make", "Token.Close"], "external_cleanup", nativePolicy);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, replacement,
-            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement,
+            TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task UniqueCleanupContractSurvivesSeparateNativeModulesAsync()
     {
         const string ProviderSource = """
@@ -1456,30 +1415,30 @@ public sealed class OwnershipTests
             public Token Make(int32 id) { return new Token(id); }
             """;
         var producerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(ProviderSource));
-        Assert.False(producerCompilation.HasErrors, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual32 = producerCompilation.Program; Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual32!; }))(),
             ["Make", "Token.Close"], "unique_owner", NativeRuntimePolicy.FailFast);
         var reference = NativeModuleCompiler.CreateReference(producer);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { Token token = Make(42); return token.Id; }"), reference);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer,
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual33 = client.Program; Assert.That(__nunitActual33, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual33!; }))(), producer,
             NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, producer, TimeSpan.FromSeconds(10),
-            NativeRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, producer, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
         var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             ProviderSource.Replace("new Token(id);", "new Token(id + 1);", StringComparison.Ordinal)));
-        Assert.False(replacementCompilation.HasErrors);
-        var replacement = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(replacementCompilation.Program),
+        Assert.That(replacementCompilation.HasErrors, Is.False);
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual34 = replacementCompilation.Program; Assert.That(__nunitActual34, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual34!; }))(),
             ["Make", "Token.Close"], "unique_owner", NativeRuntimePolicy.FailFast);
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10),
-            NativeRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(43));
 
         var incompatibleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             ProviderSource.Replace("Close()", "Release()", StringComparison.Ordinal)));
-        Assert.False(incompatibleCompilation.HasErrors);
-        var incompatible = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(incompatibleCompilation.Program),
+        Assert.That(incompatibleCompilation.HasErrors, Is.False);
+        var incompatible = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual35 = incompatibleCompilation.Program; Assert.That(__nunitActual35, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual35!; }))(),
             ["Make", "Token.Release"], "unique_owner", NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, incompatible));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, incompatible))!;
     }
 
     private const string CompositeOwners = """
@@ -1507,10 +1466,8 @@ public sealed class OwnershipTests
             [NoThrow] public int32 Read() { return First.Read(); }
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompositeOwnerDropsParentThenReverseDeclaredChildrenAsync(BoundRuntimePolicy policy)
     {
         var source = CompositeOwners + """
@@ -1528,14 +1485,12 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, policy, [0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, policy, [0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
     public async Task ConstructorCanRequireReadonlyChildCallAfterAcquisitionAsync(
         BoundRuntimePolicy policy, bool completeParent)
     {
@@ -1562,12 +1517,10 @@ public sealed class OwnershipTests
                 return value.ReadChild();
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, policy).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompositeOwnersDropOnceAcrossLoopsAndConditionalMovesAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -1605,10 +1558,10 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CompositePartialConstructorDropsOnlyAcquiredFieldsOnFailureAsync()
     {
         var source = CompositeOwners + """
@@ -1624,11 +1577,11 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
-            [0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task StraightLineUnsafeConstructorFieldAcquisitionStillUnwindsAsync()
     {
         var source = CompositeOwners.Replace("Second = new Token(2);",
@@ -1645,11 +1598,11 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
-            [0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CompositePartialCleanupReversesAcquisitionRatherThanFieldOrderAsync()
     {
         var source = CompositeOwners.Replace("require First.Read() == 1;",
@@ -1666,11 +1619,11 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
-            [0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CompositeOutputFailureLeavesCallerGuardLiveAsync()
     {
         var source = CompositeOwners + """
@@ -1690,11 +1643,11 @@ public sealed class OwnershipTests
                 return 42;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
-            [0, 0, 0]).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task UnrelatedFieldWriteDoesNotAcquireParentChildAsync()
     {
         const string Source = """
@@ -1728,14 +1681,12 @@ public sealed class OwnershipTests
                 return 0;
             }
             """;
-        Assert.Equal(42, await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("struct Copy { public Token Child; public Copy() { Child = new Token(1); } }")]
-    [InlineData("unique struct Pair { public Token Child; public Pair() { Child = new Token(1); Child = new Token(2); } }")]
-    [InlineData("unique struct Pair { public Token Child; public Pair() { if (true) { Child = new Token(1); } } }")]
-    [InlineData("unique struct Pair { public Token Child; public Pair() { Child = new Token(1); Token stolen = move Child; } }")]
+    [TestCase("struct Copy { public Token Child; public Copy() { Child = new Token(1); } }")]
+    [TestCase("unique struct Pair { public Token Child; public Pair() { Child = new Token(1); Child = new Token(2); } }")]
+    [TestCase("unique struct Pair { public Token Child; public Pair() { if (true) { Child = new Token(1); } } }")]
+    [TestCase("unique struct Pair { public Token Child; public Pair() { Child = new Token(1); Token stolen = move Child; } }")]
     public void UnsupportedCompositeOwnershipIsDiagnosed(string declaration)
     {
         var source = """
@@ -1746,18 +1697,18 @@ public sealed class OwnershipTests
             }
             """ + declaration + " int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void PublicIrCannotEraseOrReorderPartialConstructorCleanup()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(CompositeOwners
             + " int32 Main() { Pair pair = new Pair(true); return pair.Read(); }"),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0, 0], true)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual36 = compilation.Program; Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual36!; }))();
         var index = -1;
         for (var i = 0; i < program.Functions.Length; i++)
         {
@@ -1767,15 +1718,15 @@ public sealed class OwnershipTests
                 break;
             }
         }
-        Assert.True(index >= 0);
+        Assert.That(index >= 0, Is.True);
         var constructor = program.Functions[index];
-        var region = Assert.IsType<BoundTryFinally>(Assert.Single(constructor.Body.Statements));
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual37 = global::System.Linq.Enumerable.Single(constructor.Body.Statements); Assert.That(__nunitActual37, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual37!; }))();
         var erased = program with {
             Functions = program.Functions.SetItem(index, constructor with { Body = region.Body }),
         };
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(erased, NativeRuntimePolicy.CheckedExceptions));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(erased, NativeRuntimePolicy.CheckedExceptions))!;
 
-        var partial = Assert.IsType<BoundDropConstructedFields>(Assert.Single(region.Finally.Statements));
+        var partial = ((global::System.Func<BoundDropConstructedFields>)(() => { var __nunitActual38 = global::System.Linq.Enumerable.Single(region.Finally.Statements); Assert.That(__nunitActual38, Is.TypeOf<BoundDropConstructedFields>()); return (BoundDropConstructedFields)__nunitActual38!; }))();
         var reordered = region with {
             Finally = region.Finally with {
                 Statements = [partial with { AcquisitionOrder = [0, 1] }],
@@ -1786,18 +1737,18 @@ public sealed class OwnershipTests
                 Body = constructor.Body with { Statements = [reordered] },
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.CheckedExceptions));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.CheckedExceptions))!;
     }
 
-    [Fact]
+    [Test]
     public void PublicIrRejectsMalformedConstructorRegionsAndOwningFieldLoans()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(CompositeOwners
             + " int32 Main() { Pair pair = new Pair(true); return pair.Read(); }"),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0, 0], true)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual39 = compilation.Program; Assert.That(__nunitActual39, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual39!; }))();
         var constructorIndex = -1;
         var methodIndex = -1;
         for (var index = 0; index < program.Functions.Length; index++)
@@ -1811,9 +1762,9 @@ public sealed class OwnershipTests
                 methodIndex = index;
             }
         }
-        Assert.True(constructorIndex >= 0 && methodIndex >= 0);
+        Assert.That(constructorIndex >= 0 && methodIndex >= 0, Is.True);
         var constructor = program.Functions[constructorIndex];
-        var region = Assert.IsType<BoundTryFinally>(Assert.Single(constructor.Body.Statements));
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual40 = global::System.Linq.Enumerable.Single(constructor.Body.Statements); Assert.That(__nunitActual40, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual40!; }))();
         Reject(constructorIndex, constructor with {
             Body = constructor.Body with { Statements = [region with { Body = null! }] },
         });
@@ -1826,9 +1777,9 @@ public sealed class OwnershipTests
         });
 
         var method = program.Functions[methodIndex];
-        var result = Assert.IsType<BoundReturn>(Assert.Single(method.Body.Statements));
-        var call = Assert.IsType<BoundCall>(result.Value);
-        var loan = Assert.IsType<BoundFieldLoan>(call.Arguments[0]);
+        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual41 = global::System.Linq.Enumerable.Single(method.Body.Statements); Assert.That(__nunitActual41, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual41!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual42 = result.Value; Assert.That(__nunitActual42, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual42!; }))();
+        var loan = ((global::System.Func<BoundFieldLoan>)(() => { var __nunitActual43 = call.Arguments[0]; Assert.That(__nunitActual43, Is.TypeOf<BoundFieldLoan>()); return (BoundFieldLoan)__nunitActual43!; }))();
         Reject(methodIndex, method with {
             Body = method.Body with {
                 Statements = [result with {
@@ -1849,13 +1800,11 @@ public sealed class OwnershipTests
         {
             var forged = program with { Functions = program.Functions.SetItem(index, function) };
             _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(
-                forged, NativeRuntimePolicy.CheckedExceptions));
+                forged, NativeRuntimePolicy.CheckedExceptions))!;
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompositeOwnershipContractsSurviveSeparateModulesAsync(NativeRuntimePolicy policy)
     {
         const string Provider = """
@@ -1881,42 +1830,40 @@ public sealed class OwnershipTests
             """;
         var boundPolicy = (BoundRuntimePolicy)policy;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Provider), boundPolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual44 = compilation.Program; Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual44!; }))();
         var exports = new[] { "Token.Close", "Token.Read", "Pair.Close", "Pair.Read", "Make", "Take" };
         var semanticProducer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)), Is.EqualTo(76));
         var staleVersion = (byte[])semanticProducer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(staleVersion.AsSpan(4, 4), 13);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion))!;
         var reference = ModuleCompiler.CreateReference(semanticProducer);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() { Pair pair = Make(40); return Take(move pair); }
             """), reference, boundPolicy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumerProgram = Assert.IsType<BoundProgram>(client.Program);
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual45 = client.Program; Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual45!; }))();
         var semanticConsumer = ModuleCompiler.CreateConsumer(consumerProgram, semanticProducer);
-        Assert.Equal("native-14", ModuleCompiler.GetNativeProfileVersion(semanticProducer, false));
-        Assert.Equal("native-14", ModuleCompiler.GetNativeProfileVersion(semanticConsumer, true));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(semanticProducer, false), Is.EqualTo("native-14"));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(semanticConsumer, true), Is.EqualTo("native-14"));
         _ = ModuleCompiler.Link(semanticConsumer, semanticProducer);
         var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "composite_pair", policy);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumerProgram, nativeProducer, policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
 
         var replacementSource = Provider.Replace("new Pair(id)", "new Pair(id + 1)", StringComparison.Ordinal);
         var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(replacementSource), boundPolicy);
-        Assert.False(replacementCompilation.HasErrors, string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
-        var replacement = Assert.IsType<BoundProgram>(replacementCompilation.Program);
+        Assert.That(replacementCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
+        var replacement = ((global::System.Func<BoundProgram>)(() => { var __nunitActual46 = replacementCompilation.Program; Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual46!; }))();
         _ = ModuleCompiler.Link(semanticConsumer, ModuleCompiler.CreateProducer(replacement, exports));
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacement, exports, "composite_pair", policy);
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompositeChildCleanupUsesItsLeafOriginAcrossNativeGraphAsync(NativeRuntimePolicy policy)
     {
         const string Leaf = """
@@ -1939,35 +1886,33 @@ public sealed class OwnershipTests
             """;
         var boundPolicy = (BoundRuntimePolicy)policy;
         var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(Leaf), boundPolicy);
-        Assert.False(leafCompilation.HasErrors, string.Join(Environment.NewLine, leafCompilation.Diagnostics));
-        var leaf = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(leafCompilation.Program),
+        Assert.That(leafCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leaf = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual47 = leafCompilation.Program; Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual47!; }))(),
             ["Make", "Ticket.Close", "Ticket.Read"], "CompositeLeaf", policy);
         var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(Middle),
             NativeModuleCompiler.CreateGraphReference([leaf]), boundPolicy);
-        Assert.False(middleCompilation.HasErrors, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
-        var middle = NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(middleCompilation.Program),
+        Assert.That(middleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
+        var middle = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual48 = middleCompilation.Program; Assert.That(__nunitActual48, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual48!; }))(),
             ["Forward", "Pair.Read"], "CompositeMiddle", [leaf], policy);
         var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() { Pair value = Forward(); return value.Read() + value.Tail; }
             """), NativeModuleCompiler.CreateGraphReference([leaf, middle]), boundPolicy);
-        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+        Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual49 = rootCompilation.Program; Assert.That(__nunitActual49, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual49!; }))(),
             [leaf, middle], policy);
-        Assert.Equal("native-14", NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion, Is.EqualTo("native-14"));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             Leaf.Replace("new Ticket(value)", "new Ticket(value + 1)", StringComparison.Ordinal)), boundPolicy);
-        Assert.False(replacementCompilation.HasErrors);
-        var replacement = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(replacementCompilation.Program),
+        Assert.That(replacementCompilation.HasErrors, Is.False);
+        var replacement = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual50 = replacementCompilation.Program; Assert.That(__nunitActual50, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual50!; }))(),
             ["Make", "Ticket.Close", "Ticket.Read"], "CompositeLeaf", policy);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PrivateCompositeCleanupTargetsSurviveLibraryPruningAsync(NativeRuntimePolicy policy)
     {
         const string Provider = """
@@ -1985,31 +1930,31 @@ public sealed class OwnershipTests
             public int32 Count() { Shell local = new Shell(42); return local.Read(); }
             """;
         var compiled = Compilation.CreateLibrary(SyntaxTree.Parse(Provider), (BoundRuntimePolicy)policy);
-        Assert.False(compiled.HasErrors, string.Join(Environment.NewLine, compiled.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compiled.Program);
+        Assert.That(compiled.HasErrors, Is.False, string.Join(Environment.NewLine, compiled.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual51 = compiled.Program; Assert.That(__nunitActual51, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual51!; }))();
         var semantic = ModuleCompiler.CreateProducer(program, ["Count"]);
-        Assert.Equal("native-14", ModuleCompiler.GetNativeProfileVersion(semantic, false));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(semantic, false), Is.EqualTo("native-14"));
         var reference = ModuleCompiler.CreateReference(semantic);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Count(); }"),
             reference, (BoundRuntimePolicy)policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = Assert.IsType<BoundProgram>(client.Program);
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual52 = client.Program; Assert.That(__nunitActual52, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual52!; }))();
         _ = ModuleCompiler.Link(ModuleCompiler.CreateConsumer(consumer, semantic), semantic);
         var producer = NativeModuleCompiler.CreateProducer(program, ["Count"], "private_shell", policy);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, producer, policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, producer,
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, producer,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     private static async Task<int> RunNativeAsync(string source, BoundRuntimePolicy policy, int[]? trace = null)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, trace is null ? [0, 0] : [.. trace], true)], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
-        var image = NativeEmitter.Emit(Assert.IsType<BoundProgram>(compilation.Program), nativePolicy);
+        var image = NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => { var __nunitActual53 = compilation.Program; Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual53!; }))(), nativePolicy);
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-owner-{Guid.NewGuid():N}.exe");
         try
         {
@@ -2035,7 +1980,7 @@ public sealed class OwnershipTests
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

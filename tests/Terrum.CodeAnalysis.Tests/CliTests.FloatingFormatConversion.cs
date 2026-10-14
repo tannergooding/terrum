@@ -2,7 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -39,12 +39,12 @@ public sealed partial class CliTests
             var actual = widen(bits);
             if (float.IsNaN(value))
             {
-                Assert.Equal(0x7FF0000000000000UL, actual & 0x7FF0000000000000UL);
-                Assert.NotEqual(0UL, actual & 0x000FFFFFFFFFFFFFUL);
+                Assert.That(actual & 0x7FF0000000000000UL, Is.EqualTo(0x7FF0000000000000UL));
+                Assert.That(actual & 0x000FFFFFFFFFFFFFUL, Is.Not.EqualTo(0UL));
             }
             else
             {
-                Assert.Equal(BitConverter.DoubleToUInt64Bits((double)value), actual);
+                Assert.That(actual, Is.EqualTo(BitConverter.DoubleToUInt64Bits((double)value)));
             }
         }
 
@@ -86,12 +86,12 @@ public sealed partial class CliTests
             var actual = narrow(bits);
             if (double.IsNaN(value))
             {
-                Assert.Equal(0x7F800000U, actual & 0x7F800000U);
-                Assert.NotEqual(0U, actual & 0x007FFFFFU);
+                Assert.That(actual & 0x7F800000U, Is.EqualTo(0x7F800000U));
+                Assert.That(actual & 0x007FFFFFU, Is.Not.EqualTo(0U));
             }
             else
             {
-                Assert.Equal(BitConverter.SingleToUInt32Bits((float)value), actual);
+                Assert.That(actual, Is.EqualTo(BitConverter.SingleToUInt32Bits((float)value)));
             }
         }
     }

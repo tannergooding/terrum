@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -43,12 +43,10 @@ public sealed class InitReferenceTests
             return node.Value;
         }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
     public void ConstantConditionalKeepsSelectedOutputPublication(
         NativeRuntimePolicy policy, bool selectTrueArm)
     {
@@ -87,15 +85,13 @@ public sealed class InitReferenceTests
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ConstantDisjunctionKeepsLeftOutputPublication(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
@@ -120,21 +116,19 @@ public sealed class InitReferenceTests
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false, false, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true, false, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true, true, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true, false, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false, false, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, false, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, true, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true, false, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false,false,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true,false,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true,true,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true,false,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false,false,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true,false,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true,true,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true,false,true)]
     public void InfeasibleNestedOutputsRemainVacant(
         NativeRuntimePolicy policy, bool negateInitializationTest, bool compoundInitializationTest,
         bool conditionalInitializationTest)
@@ -187,15 +181,13 @@ public sealed class InitReferenceTests
         source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(84, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void InfeasibleConditionalOutputsRemainVacant(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
@@ -234,101 +226,93 @@ public sealed class InitReferenceTests
         source.AppendLine("}");
 
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(84, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void ManagedInitReferenceRetainsWritableHandleAndVacantPassingMode()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ManagedSource));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill");
-        Assert.True(fill.Variables[1].IsOut);
-        Assert.True(fill.Variables[1].IsInit);
-        Assert.True(ManagedClassTypes.IsManaged(fill.Variables[1].Type));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill");
+        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsInit, Is.True);
+        Assert.That(ManagedClassTypes.IsManaged(fill.Variables[1].Type), Is.True);
         var forged = fill with { IsInternal = false, IsPrivate = false };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program with {
             Functions = program.Functions.SetItem(0, forged),
-        }));
+        }))!;
     }
-
-    [Theory]
-    [InlineData("return node.Value;", "TRM3016")]
-    [InlineData("require Fill(true, out node); return 42;", "TRM3011")]
-    [InlineData("require Fill(true, init node); require Fill(true, init node); return 42;", "TRM3016")]
+    [TestCase("return node.Value;","TRM3016")]
+    [TestCase("require Fill(true, out node); return 42;","TRM3011")]
+    [TestCase("require Fill(true, init node); require Fill(true, init node); return 42;","TRM3016")]
     public void ManagedInitCannotReadVacancyOrReusePublishedStorage(string replacement, string diagnostic)
     {
         var source = ManagedSource.Replace("require Fill(true, init node);", replacement, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void InitReferenceHasDistinctBoundParameterAndArgumentModes()
     {
         var tree = SyntaxTree.Parse(ScalarSource);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(ScalarSource, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(ScalarSource));
         var compilation = Compilation.Create(tree);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill");
-        Assert.True(fill.Variables[1].IsOut);
-        Assert.True(fill.Variables[1].IsInit);
-        Assert.Equal("syntax-46", SyntaxTree.LanguageVersion);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill");
+        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsInit, Is.True);
+        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-46"));
     }
-
-    [Theory]
-    [InlineData("if (Fill(false, init var value)) { return 1; }", "require Fill(true, init var value);", "TRM3016")]
-    [InlineData("require Fill(true, init value);", "require Fill(true, out value);", "TRM3011")]
-    [InlineData("require Fill(true, init value);", "return value;", "TRM3016")]
-    [InlineData("require Fill(true, init value);", "require Fill(true, init value); require Fill(true, init value);", "TRM3016")]
-    [InlineData("if (Fill(false, init var value)) { return 1; }", "if (Fill(false, init var value)) { return 1; } return value;", "TRM3016")]
+    [TestCase("if (Fill(false, init var value)) { return 1; }","require Fill(true, init var value);","TRM3016")]
+    [TestCase("require Fill(true, init value);","require Fill(true, out value);","TRM3011")]
+    [TestCase("require Fill(true, init value);","return value;","TRM3016")]
+    [TestCase("require Fill(true, init value);","require Fill(true, init value); require Fill(true, init value);","TRM3016")]
+    [TestCase("if (Fill(false, init var value)) { return 1; }","if (Fill(false, init var value)) { return 1; } return value;","TRM3016")]
     public void InitReferencesRejectInvalidSource(string before, string after, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ScalarSource.Replace(before, after,
             StringComparison.Ordinal)));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void PublicInitContractRetainsItsDistinctModuleMode()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(ScalarSource.Replace("bool Fill(",
             "public bool Fill(", StringComparison.Ordinal).Replace("int32 Main()",
             "public int32 Read()", StringComparison.Ordinal)));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Fill"]);
-        Assert.True(Assert.Single(ModuleCompiler.CreateReference(producer).Functions).Variables[1].IsInit);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), ["Fill"]);
+        Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions).Variables[1].IsInit, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void PrivateInitPreservesExplicitNoThrowProof()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ScalarSource.Replace("bool Fill(",
             "[NoThrow] bool Fill(", StringComparison.Ordinal)));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
-
-    [Theory]
-    [InlineData("int32 value = 1; require Fill(true, init value);")]
-    [InlineData("if (Fill(true, init var value)) { require Fill(true, init value); }")]
-    [InlineData("if (Fill(true, init var value)) { return value; } return value;")]
+    [TestCase("int32 value = 1; require Fill(true, init value);")]
+    [TestCase("if (Fill(true, init var value)) { require Fill(true, init value); }")]
+    [TestCase("if (Fill(true, init var value)) { return value; } return value;")]
     public void AnInitializedOrPossiblyVacantDestinationCannotBeReinitializedOrRead(string body)
     {
         var source = ScalarSource[..ScalarSource.IndexOf("int32 Main()", StringComparison.Ordinal)]
             + "int32 Main() { " + body + " return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void IsInitTracksScalarPublicationAndLifetime(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -360,15 +344,13 @@ public sealed class InitReferenceTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(59, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(59));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void InitReferenceSeparatesDescriptorDestinationAndForwarding(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -387,13 +369,13 @@ public sealed class InitReferenceTests
                 return value;
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void InitDestinationRemainsVacantWhenLaterArgumentEvaluationFails()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -413,25 +395,21 @@ public sealed class InitReferenceTests
             }
             """), BoundRuntimePolicy.CheckedExceptions);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("1")]
-    [InlineData("Get()")]
+    [TestCase("1")]
+    [TestCase("Get()")]
     public void IsInitRequiresNamedStorage(string operand)
     {
         var source = "int32 Get() { return 42; } int32 Main() { return " + operand
             + " is init ? 1 : 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void IsInitDistinguishesInitializedManagedNullFromVacancy(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -450,13 +428,11 @@ public sealed class InitReferenceTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(0, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), policy), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void IsInitUsesUniqueOwnerLiveness(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -468,11 +444,11 @@ public sealed class InitReferenceTests
                 return 0;
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(0, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), policy), Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public void RepeatedInitAliasInOneCallIsRejected()
     {
         const string Source = """
@@ -487,23 +463,19 @@ public sealed class InitReferenceTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code is "TRM3023" or "TRM3016");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code is "TRM3023" or "TRM3016"),Is.True);
     }
-
-    [Theory]
-    [InlineData("bool Fill(init ref<int32> value) { return true; }", "TRM3016")]
-    [InlineData("bool Fill(out int32 value) { value = 42; return true; } int32 Main() { require Fill(init var item); return item; }", "TRM3011")]
+    [TestCase("bool Fill(init ref<int32> value) { return true; }","TRM3016")]
+    [TestCase("bool Fill(out int32 value) { value = 42; return true; } int32 Main() { require Fill(init var item); return item; }","TRM3011")]
     public void InitModeRequiresNormalReturnPublicationAndMatchingCall(string source, string code)
     {
         ArgumentNullException.ThrowIfNull(source);
         var compilation = Compilation.Create(SyntaxTree.Parse(source.Contains("int32 Main()", StringComparison.Ordinal)
             ? source : source + "int32 Main() { return 42; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void InitReferencePublishesOnEveryNonBooleanCompletion(NativeRuntimePolicy policy)
     {
         foreach (var (source, expected) in new (string Source, int Expected)[] {
@@ -527,25 +499,21 @@ public sealed class InitReferenceTests
         {
             var compilation = Compilation.Create(SyntaxTree.Parse(source),
                 runtimePolicy: (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(expected, NativeJit.Execute(program, policy));
-            Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(expected));
+            Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Fill(init ref<int32> value) { return 42; } int32 Main() { init int32 value; return Fill(init value); }")]
-    [InlineData("void Fill(init ref<int32> value) { } int32 Main() { init int32 value; Fill(init value); return 42; }")]
+    [TestCase("int32 Fill(init ref<int32> value) { return 42; } int32 Main() { init int32 value; return Fill(init value); }")]
+    [TestCase("void Fill(init ref<int32> value) { } int32 Main() { init int32 value; Fill(init value); return 42; }")]
     public void NonBooleanInitReferenceStillRequiresPublicationOnEveryNormalReturn(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3016");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3016"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void PrivateManagedInitReferencePublishesOnNonBooleanCompletion(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -563,15 +531,13 @@ public sealed class InitReferenceTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(49, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(49));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PrivateInitHelperServicesUnchangedSemanticAndNativeConsumersAsync(NativeRuntimePolicy policy)
     {
         var sourcePolicy = policy == NativeRuntimePolicy.FailFast
@@ -590,33 +556,31 @@ public sealed class InitReferenceTests
             """;
         const string Consumer = "int32 Main() { return Read(); }";
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(Library), runtimePolicy: sourcePolicy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producerProgram = Assert.IsType<BoundProgram>(library.Program);
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = library.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var compilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), runtimePolicy: sourcePolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.True(Assert.Single(linked.Functions, function => function.Name == "$producer.Fill")
-            .Variables[1].IsInit);
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(linked, policy));
+        Assert.That(global::System.Linq.Enumerable.Single(linked.Functions, function => function.Name == "$producer.Fill")
+            .Variables[1].IsInit, Is.True);
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Read"], "NodeB", policy);
         var nativeCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             NativeModuleCompiler.CreateGraphReference([nativeProducer]), runtimePolicy: sourcePolicy);
-        Assert.False(nativeCompilation.HasErrors, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        Assert.That(nativeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeProducer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = nativeCompilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), [nativeProducer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedInitStaysPrivateBehindAnUnchangedScalarConsumerAsync(NativeRuntimePolicy policy)
     {
         const string Library = """
@@ -647,8 +611,8 @@ public sealed class InitReferenceTests
         static BoundProgram Compile(string source, BoundRuntimePolicy runtime)
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), runtimePolicy: runtime);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            return Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            return ((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))();
         }
         var producerProgram = Compile(Library, sourcePolicy);
         var updatedProgram = Compile(Library.Replace("TryCreate(41", "TryCreate(42", StringComparison.Ordinal),
@@ -656,53 +620,53 @@ public sealed class InitReferenceTests
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Read"]);
         var updated = ModuleCompiler.CreateProducer(updatedProgram, ["Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
-        Assert.DoesNotContain(reference.Functions, function => function.Name == "Fill");
-        Assert.DoesNotContain(reference.Functions, function => function.Name == "Make");
-        Assert.DoesNotContain(reference.Functions, function => function.Name.StartsWith("Copy<",
-            StringComparison.Ordinal));
-        Assert.DoesNotContain(reference.Functions, function => function.Name.StartsWith("Publish<",
-            StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(reference.Functions,function => function.Name == "Fill"),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(reference.Functions,function => function.Name == "Make"),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(reference.Functions,function => function.Name.StartsWith("Copy<",
+            StringComparison.Ordinal)),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(reference.Functions,function => function.Name.StartsWith("Publish<",
+            StringComparison.Ordinal)),Is.False);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             reference, runtimePolicy: sourcePolicy);
-        Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program),
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = consumerCompilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(),
             producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Contains(linked.Functions, function => function.Name.StartsWith("$producer.Copy<",
-            StringComparison.Ordinal) && function.Variables[1].IsInit);
-        Assert.Contains(linked.Functions, function => function.Name.StartsWith("$producer.Publish<",
-            StringComparison.Ordinal) && function.Variables[2].IsInit);
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
-        Assert.Equal(43, NativeJit.Execute(ModuleCompiler.Link(consumer, updated), policy));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name.StartsWith("$producer.Copy<",
+            StringComparison.Ordinal) && function.Variables[1].IsInit),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name.StartsWith("$producer.Publish<",
+            StringComparison.Ordinal) && function.Variables[2].IsInit),Is.True);
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, updated), policy), Is.EqualTo(43));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Read"], "NodeB", policy);
         var nativeUpdated = NativeModuleCompiler.CreateProducer(updatedProgram, ["Read"], "NodeB", policy);
         var graphReference = NativeModuleCompiler.CreateGraphReference([nativeProducer]);
         var graphCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             graphReference, runtimePolicy: sourcePolicy);
-        Assert.False(graphCompilation.HasErrors, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        Assert.That(graphCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
         var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(graphCompilation.Program), [nativeProducer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeProducer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = graphCompilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(), [nativeProducer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         NativeModuleCompiler.ValidateGraph(graphConsumer, [nativeUpdated]);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeUpdated],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeUpdated],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
     }
 
-    [Fact]
+    [Test]
     public void OutProducerUsesCurrentSemanticRevision()
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
             bool Fill(out int32 value) { value = 42; return true; }
             public int32 Read() { require Fill(out var value); return value; }
             """));
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = library.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(), ["Read"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
     }
 
-    [Fact]
+    [Test]
     public void PrivateInitModeRoundTripsInCurrentSemanticFormat()
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -719,16 +683,14 @@ public sealed class InitReferenceTests
                 return result;
             }
             """));
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = library.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(), ["Read"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), 48);
-        _ = Assert.Throws<ModuleFormatException>(() => _ = ModuleCompiler.CreateReference(producer));
+        _ = Assert.Throws<ModuleFormatException>(() => _ = ModuleCompiler.CreateReference(producer))!;
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void PrivateGenericInitKeepsManagedOutputRooted(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -744,11 +706,11 @@ public sealed class InitReferenceTests
                 return node.Value;
             }
             """), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Contains(program.Functions, function => function.Name.StartsWith("Copy<", StringComparison.Ordinal)
-            && function.Variables[1].IsInit);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = compilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))();
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name.StartsWith("Copy<", StringComparison.Ordinal)
+            && function.Variables[1].IsInit),Is.True);
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
     }
 
 }

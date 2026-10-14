@@ -8,21 +8,20 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class FloatingIntegerConversionModuleTests
 {
-    [Theory]
-    [InlineData(true, true, BoundRuntimePolicy.FailFast)]
-    [InlineData(true, true, BoundRuntimePolicy.CheckedExceptions)]
-    [InlineData(true, false, BoundRuntimePolicy.FailFast)]
-    [InlineData(true, false, BoundRuntimePolicy.CheckedExceptions)]
-    [InlineData(false, true, BoundRuntimePolicy.FailFast)]
-    [InlineData(false, true, BoundRuntimePolicy.CheckedExceptions)]
-    [InlineData(false, false, BoundRuntimePolicy.FailFast)]
-    [InlineData(false, false, BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(true,true,BoundRuntimePolicy.FailFast)]
+    [TestCase(true,true,BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(true,false,BoundRuntimePolicy.FailFast)]
+    [TestCase(true,false,BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(false,true,BoundRuntimePolicy.FailFast)]
+    [TestCase(false,true,BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(false,false,BoundRuntimePolicy.FailFast)]
+    [TestCase(false,false,BoundRuntimePolicy.CheckedExceptions)]
     public async Task FloatingIntegerConversionModuleMatchesHostedTruncationAsync(
         bool isFloat32,
         bool isSigned,
@@ -32,18 +31,18 @@ public sealed class FloatingIntegerConversionModuleTests
         var path = Path.Combine(root, "self-host", "FloatingIntegerConversion.terrum");
         var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var component = SyntaxTree.Parse(text, path);
-        Assert.False(component.HasErrors, string.Join(Environment.NewLine, component.Diagnostics));
+        Assert.That(component.HasErrors, Is.False, string.Join(Environment.NewLine, component.Diagnostics));
 
         var verificationSource = CreateVerificationSource(isFloat32, isSigned);
         var verification = SyntaxTree.Parse(verificationSource,
             isFloat32 ? "floating32-integer-conversion-module.terrum" : "floating64-integer-conversion-module.terrum");
-        Assert.False(verification.HasErrors, string.Join(Environment.NewLine,
+        Assert.That(verification.HasErrors, Is.False, string.Join(Environment.NewLine,
             verification.Diagnostics.Select(diagnostic => $"{diagnostic} near \"{GetContext(verificationSource, diagnostic.Span.Start)}\"")));
         var compilation = Compilation.Create([component, verification], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
     private static string CreateVerificationSource(bool isFloat32, bool isSigned)
@@ -171,8 +170,7 @@ public sealed class FloatingIntegerConversionModuleTests
 
     private static string FormatExpected(object value)
     {
-        return value switch
-        {
+        return value switch {
             int number when number == int.MinValue => "int32.MinValue",
             int number => $"int32({number.ToString(CultureInfo.InvariantCulture)})",
             uint number => $"uint32({number.ToString(CultureInfo.InvariantCulture)})",

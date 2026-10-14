@@ -4,17 +4,16 @@ using System;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData("bool", "true", "false")]
-    [InlineData("char16", "char16(55296)", "char16(0)")]
-    [InlineData("int32", "-2147483648", "0")]
-    [InlineData("int64", "-9223372036854775808", "0")]
+    [TestCase("bool","true","false")]
+    [TestCase("char16","char16(55296)","char16(0)")]
+    [TestCase("int32","-2147483648","0")]
+    [TestCase("int64","-9223372036854775808","0")]
     public async Task DirectCopyFactoryArgumentsSurviveCollectingConstructorsAsync(
         string type, string value, string replacement)
     {
@@ -54,12 +53,10 @@ public sealed partial class JitTests
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(3)]
-    [InlineData(6)]
-    [InlineData(12)]
-    [InlineData(16)]
+    [TestCase(3)]
+    [TestCase(6)]
+    [TestCase(12)]
+    [TestCase(16)]
     public async Task IndirectCopyFactoryArgumentsPreserveEveryByteAndArgumentPositionAsync(int size)
     {
         var declaration = size switch {
@@ -107,13 +104,13 @@ public sealed partial class JitTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(size, Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Structures).Size);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Structures).Size, Is.EqualTo(size));
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task CopyFactoryArgumentsAreSnapshotsBeforeLaterArgumentEffectsAsync()
     {
         const string Source = """
@@ -158,7 +155,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task CopyFactoryConstructorLocalMutationDoesNotChangeTheCallerAsync()
     {
         const string Source = """
@@ -190,7 +187,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedCopyFactoryFailureRetiresUnpublishedStorageAndArgumentsAsync()
     {
         const string Source = """

@@ -10,13 +10,13 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class NativeTests
 {
-    [Fact]
+    [Test]
     public async Task IntegerFactsPredicatesExecuteNativelyAndMatchBigIntegerBoundariesAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -91,8 +91,7 @@ public sealed partial class NativeTests
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var actual = await ExecuteAsync(Emit(source.ToString(), policy)).ConfigureAwait(true);
-            Assert.True(actual == 0,
-                actual > 0 && actual <= failureCases.Count
+            Assert.That(actual == 0, Is.True, actual > 0 && actual <= failureCases.Count
                     ? $"{policy} IntegerFacts boundary case {actual} failed: {failureCases[actual - 1]}."
                     : $"Expected all {policy} IntegerFacts native checks to pass, got exit code {actual}.");
         }
@@ -130,13 +129,20 @@ public sealed partial class NativeTests
     private static int SignedExpectedMask(BigInteger left, BigInteger right, BigInteger minimum, BigInteger maximum)
     {
         var mask = 0;
-        if (IsInRange(left + right, minimum, maximum)) { mask += 1; }
-        if (IsInRange(left - right, minimum, maximum)) { mask += 2; }
-        if (IsInRange(left * right, minimum, maximum)) { mask += 4; }
-        if (!right.IsZero && !(left == minimum && right == -BigInteger.One)) { mask += 8; }
-        if (!right.IsZero) { mask += 16; }
-        if (left != minimum) { mask += 32; }
-        if (left != minimum) { mask += 64; }
+        if (IsInRange(left + right, minimum, maximum))
+        { mask += 1; }
+        if (IsInRange(left - right, minimum, maximum))
+        { mask += 2; }
+        if (IsInRange(left * right, minimum, maximum))
+        { mask += 4; }
+        if (!right.IsZero && !(left == minimum && right == -BigInteger.One))
+        { mask += 8; }
+        if (!right.IsZero)
+        { mask += 16; }
+        if (left != minimum)
+        { mask += 32; }
+        if (left != minimum)
+        { mask += 64; }
         return mask;
     }
 
@@ -149,11 +155,16 @@ public sealed partial class NativeTests
     private static int UnsignedExpectedMask(BigInteger left, BigInteger right, BigInteger maximum)
     {
         var mask = 0;
-        if (left + right <= maximum) { mask += 1; }
-        if (left >= right) { mask += 2; }
-        if (left * right <= maximum) { mask += 4; }
-        if (!right.IsZero) { mask += 8; }
-        if (!right.IsZero) { mask += 16; }
+        if (left + right <= maximum)
+        { mask += 1; }
+        if (left >= right)
+        { mask += 2; }
+        if (left * right <= maximum)
+        { mask += 4; }
+        if (!right.IsZero)
+        { mask += 8; }
+        if (!right.IsZero)
+        { mask += 16; }
         return mask;
     }
 
@@ -172,7 +183,7 @@ public sealed partial class NativeTests
     private static byte[] Emit(string source, BoundRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeEmitter.Emit(Assert.IsType<BoundProgram>(compilation.Program), (NativeRuntimePolicy)policy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), (NativeRuntimePolicy)policy);
     }
 }

@@ -3,7 +3,7 @@
 using System;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -44,31 +44,27 @@ public sealed class StaticProtocolControlFlowTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void StructuredTemplateUsesScalarFlowAndOnlyDeclaredOperators()
     {
         var compilation = Compile(PowerBody, instantiate: true);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var specialization = Assert.Single(program.Functions,
-            function => function.Name.StartsWith("Power<", StringComparison.Ordinal));
-        Assert.Contains(specialization.Body.Statements, statement => statement is BoundWhile);
-        Assert.DoesNotContain(program.Structures, structure => structure.Name == "$T");
-        Assert.DoesNotContain(program.Functions, function => function.Name.Contains("$T", StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var specialization = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name.StartsWith("Power<", StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(specialization.Body.Statements,statement => statement is BoundWhile),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Structures,structure => structure.Name == "$T"),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name.Contains("$T", StringComparison.Ordinal)),Is.False);
     }
 
-    [Fact]
+    [Test]
     public void AnUnusedStructuredTemplateIsCheckedWithoutAConcreteWitness()
     {
         var compilation = Compile(PowerBody, instantiate: false);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.DoesNotContain(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name.StartsWith("Power<", StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().Functions,function => function.Name.StartsWith("Power<", StringComparison.Ordinal)),Is.False);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void ScopedForContinueAndRequireBindAtDefinitionAndSpecialization(bool instantiate)
     {
         var compilation = Compile("""
@@ -80,50 +76,48 @@ public sealed class StaticProtocolControlFlowTests
             require (exponent < 100);
             return result;
             """, instantiate);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
-
-    [Theory]
-    [InlineData("return value + one;", "TRM3007")]
-    [InlineData("return value.Value;", "TRM3007")]
-    [InlineData("return new T();", "TRM3007")]
-    [InlineData("mut uint32 count = exponent; count = value; return one;", "TRM3007")]
-    [InlineData("uint32 count = exponent; count = 0; return one;", "TRM3008")]
-    [InlineData("mut T result = value; mut T result = one; return result;", "TRM3004")]
-    [InlineData("if (value) { return one; } return value;", "TRM3007")]
-    [InlineData("{ mut T local = value; } return local;", "TRM3006")]
-    [InlineData("break; return one;", "TRM3008")]
-    [InlineData("if (exponent == 0) { return one; }", "TRM3012")]
-    [InlineData("return Power<Meters>(value, one, exponent);", "TRM3007")]
-    [InlineData("require (exponent == 0); return Missing(value);", "TRM3011")]
-    [InlineData("mut T result = one; for (mut uint32 i = 0; i < exponent; i = i + 1) { if (i == 0) { continue; } result = result / value; } return result;", "TRM3007")]
+    [TestCase("return value + one;","TRM3007")]
+    [TestCase("return value.Value;","TRM3007")]
+    [TestCase("return new T();","TRM3007")]
+    [TestCase("mut uint32 count = exponent; count = value; return one;","TRM3007")]
+    [TestCase("uint32 count = exponent; count = 0; return one;","TRM3008")]
+    [TestCase("mut T result = value; mut T result = one; return result;","TRM3004")]
+    [TestCase("if (value) { return one; } return value;","TRM3007")]
+    [TestCase("{ mut T local = value; } return local;","TRM3006")]
+    [TestCase("break; return one;","TRM3008")]
+    [TestCase("if (exponent == 0) { return one; }","TRM3012")]
+    [TestCase("return Power<Meters>(value, one, exponent);","TRM3007")]
+    [TestCase("require (exponent == 0); return Missing(value);","TRM3011")]
+    [TestCase("mut T result = one; for (mut uint32 i = 0; i < exponent; i = i + 1) { if (i == 0) { continue; } result = result / value; } return result;","TRM3007")]
     public void InvalidDefinitionRejectsEvenWithoutInstantiation(string body, string expected)
     {
         var compilation = Compile(body, instantiate: false);
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == expected);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == expected),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void InvalidDefinitionCannotBeRescuedByConformingConcreteType()
     {
         var compilation = Compile("return value + one;", instantiate: true);
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void InvalidDefinitionIsReportedOnItsSourceSnapshot()
     {
         var tree = SyntaxTree.Parse(Declarations + Generic("return value + one;") + "int32 Main() { return 0; }",
             "invalid-template.terrum");
         var compilation = Compilation.Create(tree);
-        Assert.Contains(compilation.SourceDiagnostics, item => item.Diagnostic.Code == "TRM3007"
-            && item.SyntaxTree == tree);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,item => item.Diagnostic.Code == "TRM3007"
+            && item.SyntaxTree == tree),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NoThrowStructuredDefinitionRejectsScalarFailuresWithoutInstantiation()
     {
         var source = NoThrowDeclarations + "[NoThrow] " + Generic("""
@@ -132,11 +126,11 @@ public sealed class StaticProtocolControlFlowTests
             return value * one;
             """) + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NoThrowStructuredDefinitionAcceptsOnlyConstrainedNoThrowCalls()
     {
         var source = NoThrowDeclarations + "[NoThrow] " + Generic("""
@@ -144,7 +138,7 @@ public sealed class StaticProtocolControlFlowTests
             return value * one;
             """) + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     private static Compilation Compile(string body, bool instantiate)

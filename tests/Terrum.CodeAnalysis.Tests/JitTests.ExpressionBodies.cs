@@ -1,22 +1,19 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ExpressionBodiedCallablesAgreeAcrossAotAndJitAsync(bool checkedFailures) =>
         checkedFailures ? AssertCheckedExecutionAsync(ExpressionBodyTests.Source, 42)
             : AssertFailFastExecutionAsync(ExpressionBodyTests.Source, 42);
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ExpressionBodyReturnCleansTransferredOwnerAsync(bool checkedFailures)
     {
         const string Source = """
@@ -32,7 +29,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task ExpressionBodyFailureCleansTransferredOwnerAsync()
     {
         const string Source = """
@@ -49,10 +46,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task MutableClassExpressionBodyUpdatesOriginalReceiverAsync(bool checkedFailures)
     {
         const string Source = """

@@ -4,13 +4,13 @@ using System;
 using System.Collections.Generic;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeMappedBufferContractTests
 {
-    [Fact]
+    [Test]
     public void GenericMappedBufferMetadataResolvesForAnUnrelatedNativeApi()
     {
         const string interfaceIdentity = "IFixtureByteReader";
@@ -75,22 +75,21 @@ public sealed class NativeMappedBufferContractTests
         ], 16);
         var structures = new[] { ownerStructure, mappedStructure };
 
-        Assert.True(NativeMappedBufferContract.TryGetDefinition((PrimitiveType)101,
-            catalog, structures, out var selectedMap, out var mappedBuffer));
-        Assert.Same(mapMethod, selectedMap);
-        Assert.NotNull(mappedBuffer);
-        Assert.Equal(3, mappedBuffer.OutputParameterIndex);
-        Assert.Equal("MAPPED_BYTES", mappedBuffer.SourceType);
-        Assert.Equal(0, mappedBuffer.PointerOffset);
-        Assert.Equal(8, mappedBuffer.LengthOffset);
-        Assert.Equal(unmapIdentity, mappedBuffer.UnmapMethodIdentity);
+        Assert.That(NativeMappedBufferContract.TryGetDefinition((PrimitiveType)101,
+            catalog, structures, out var selectedMap, out var mappedBuffer), Is.True);
+        Assert.That(selectedMap, Is.SameAs(mapMethod));
+        TestAssertions.NotNull(mappedBuffer);
+        Assert.That(mappedBuffer.OutputParameterIndex, Is.EqualTo(3));
+        Assert.That(mappedBuffer.SourceType, Is.EqualTo("MAPPED_BYTES"));
+        Assert.That(mappedBuffer.PointerOffset, Is.EqualTo(0));
+        Assert.That(mappedBuffer.LengthOffset, Is.EqualTo(8));
+        Assert.That(mappedBuffer.UnmapMethodIdentity, Is.EqualTo(unmapIdentity));
 
         var functions = NativeComCallContract.DirectMethodFunctions(catalog, [.. structures],
             new HashSet<string>(StringComparer.Ordinal) { "Map", "Unmap" });
-        var mapFunction = Assert.Single(functions,
-            function => function.NativeComMethod?.Identity == mapIdentity);
-        Assert.Equal("Fixture.ByteReader.Map", mapFunction.Name);
-        Assert.Equal(PrimitiveType.NativeStorageAddress, mapFunction.Variables[3].Type);
-        Assert.Contains(functions, function => function.NativeComMethod?.Identity == unmapIdentity);
+        var mapFunction = global::System.Linq.Enumerable.Single(functions, function => function.NativeComMethod?.Identity == mapIdentity);
+        Assert.That(mapFunction.Name, Is.EqualTo("Fixture.ByteReader.Map"));
+        Assert.That(mapFunction.Variables[3].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+        Assert.That(global::System.Linq.Enumerable.Any(functions,function => function.NativeComMethod?.Identity == unmapIdentity),Is.True);
     }
 }

@@ -4,15 +4,14 @@ using System;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScannerApphostRegistersCleanupContinuationsAsync(string policy)
     {
         var scanner = Path.Combine(AppContext.BaseDirectory, $"registrar-scanner-{Guid.NewGuid():N}.terrum");
@@ -31,15 +30,15 @@ public sealed partial class JitTests
             var start = CliStart("scan-component", scanner, "-", "--runtime", policy, "--json");
             start.FileName = Path.ChangeExtension(start.ArgumentList[0], ".exe");
             start.ArgumentList.RemoveAt(0);
-            Assert.True(File.Exists(start.FileName));
+            Assert.That(File.Exists(start.FileName), Is.True);
             var (exit, output, error) = await RunAsync(start, []).ConfigureAwait(true);
-            Assert.True(exit == 0, $"Scanner exit {exit}: {error}{output}");
-            Assert.Empty(error);
+            Assert.That(exit == 0, Is.True, $"Scanner exit {exit}: {error}{output}");
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.True(document.RootElement.GetProperty("success").GetBoolean());
-            Assert.Equal(0, document.RootElement.GetProperty("sourceLength").GetInt32());
-            Assert.Equal(1, document.RootElement.GetProperty("tokens").GetArrayLength());
-            Assert.Equal(0, document.RootElement.GetProperty("diagnostics").GetArrayLength());
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
+            Assert.That(document.RootElement.GetProperty("sourceLength").GetInt32(), Is.EqualTo(0));
+            Assert.That(document.RootElement.GetProperty("tokens").GetArrayLength(), Is.EqualTo(1));
+            Assert.That(document.RootElement.GetProperty("diagnostics").GetArrayLength(), Is.EqualTo(0));
         }
         finally
         {

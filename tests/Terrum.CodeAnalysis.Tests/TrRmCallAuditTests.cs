@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -23,19 +23,17 @@ public sealed class TrRmCallAuditTests
     ];
 
     internal static byte[] IdentityBody() => [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
-
-    [Theory]
-    [InlineData(12, 0)] // wrong call result use count
-    [InlineData(14, 1)] // missing call definition
-    [InlineData(16, 12)] // wrong call definition offset
-    [InlineData(18, 17)] // truncated block extent
-    [InlineData(19, 15)] // wrong terminator boundary
-    [InlineData(23, 0)] // argument's final use excludes the call
-    [InlineData(25, 1)] // call result's last use is not its return
-    [InlineData(32, 0)] // value-returning callee cannot have result zero
-    [InlineData(33, 3)] // nonexistent module ordinal
-    [InlineData(34, 0)] // missing argument
-    [InlineData(35, 2)] // self-dependent call result
+    [TestCase(12,(byte)(0))] // wrong call result use count
+    [TestCase(14,(byte)(1))] // missing call definition
+    [TestCase(16,(byte)(12))] // wrong call definition offset
+    [TestCase(18,(byte)(17))] // truncated block extent
+    [TestCase(19,(byte)(15))] // wrong terminator boundary
+    [TestCase(23,(byte)(0))] // argument's final use excludes the call
+    [TestCase(25,(byte)(1))] // call result's last use is not its return
+    [TestCase(32,(byte)(0))] // value-returning callee cannot have result zero
+    [TestCase(33,(byte)(3))] // nonexistent module ordinal
+    [TestCase(34,(byte)(0))] // missing argument
+    [TestCase(35,(byte)(2))] // self-dependent call result
     public void IndexedCallInventoriesAndOperandsAreAudited(int offset, byte value)
     {
         var body = IndexedCallBody();
@@ -44,13 +42,13 @@ public sealed class TrRmCallAuditTests
             TrRmExecutionAuditTests.LocalCallArtifact(body, IdentityBody())));
     }
 
-    [Fact]
+    [Test]
     public void IndexedCallFixtureIsIndependentlyValid()
     {
         var artifact = TrRmExecutionAuditTests.LocalCallArtifact(IndexedCallBody(), IdentityBody());
         TrRmStructuralMetadataValidator.ValidateCompact(artifact);
-        Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(41));
         var body = IndexedCallBody();
         for (var length = 1; length < body.Length; length++)
         {
@@ -58,10 +56,8 @@ public sealed class TrRmCallAuditTests
                 TrRmExecutionAuditTests.LocalCallArtifact(body[..length], IdentityBody())));
         }
     }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
+    [TestCase((byte)(1))]
+    [TestCase((byte)(4))]
     public void NonminimalCallReferenceOrArgumentCountWidthRejects(byte layout)
     {
         byte[] caller = layout == 1
@@ -73,10 +69,8 @@ public sealed class TrRmCallAuditTests
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
-
-    [Theory]
-    [InlineData(255)]
-    [InlineData(256)]
+    [TestCase(255)]
+    [TestCase(256)]
     public void VoidOperationCountAndParameterCountAreNotAddedForWidth(int operations)
     {
         var artifact = TrRmExecutionAuditTests.LocalCallArtifact(
@@ -84,20 +78,20 @@ public sealed class TrRmCallAuditTests
             RepeatedVoidCalls(operations), resultRow: 7);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Single(program.Functions[1].Variables);
+        Assert.That(program.Functions[1].Variables, Has.Exactly(1).Items);
         // The recursive callee is deliberately uncalled; this proves decode and lowering,
         // not termination of a self-call with no base case.
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void ResultlessCallVisitsStillConsumeTheSharedVerificationBudget()
     {
         var artifact = TrRmExecutionAuditTests.LocalCallArtifact(
             [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1],
             RepeatedVoidCalls(50_300), resultRow: 7);
-        var exception = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
-        Assert.IsType<NotSupportedException>(exception.InnerException);
+        var exception = Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact))!;
+        Assert.That(exception.InnerException, Is.TypeOf<NotSupportedException>());
     }
 
     private static byte[] RepeatedVoidCalls(int count)
@@ -121,7 +115,7 @@ public sealed class TrRmCallAuditTests
         return bytes.ToArray();
     }
 
-    [Fact]
+    [Test]
     public void DeclaredNoThrowCalleeCannotHideACheckedOperation()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 2,
@@ -133,19 +127,17 @@ public sealed class TrRmCallAuditTests
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
-
-    [Theory]
-    [InlineData("bool", "true")]
-    [InlineData("char16", "char16(65535)")]
-    [InlineData("int32", "int32.MinValue")]
-    [InlineData("uint32", "uint32.MaxValue")]
-    [InlineData("int64", "int64.MinValue")]
-    [InlineData("uint64", "uint64.MaxValue")]
+    [TestCase("bool","true")]
+    [TestCase("char16","char16(65535)")]
+    [TestCase("int32","int32.MinValue")]
+    [TestCase("uint32","uint32.MaxValue")]
+    [TestCase("int64","int64.MinValue")]
+    [TestCase("uint64","uint64.MaxValue")]
     public void ScalarCallResultsPreserveFullWidthAndSignedness(string type, string value)
         => RoundTrip($"int32 Main() {{ return Echo({value}) == {value} ? 42 : 0; }} "
             + $"[NoThrow] {type} Echo({type} value) {{ return value; }}", 42);
 
-    [Fact]
+    [Test]
     public void ArgumentSnapshotsSurviveLazyContinuationChanges()
         => RoundTrip("""
             int32 Main() {
@@ -156,7 +148,7 @@ public sealed class TrRmCallAuditTests
             int32 F(int32 a, int32 b, int32 c) { return a * 100 + b * 10 + c; }
             """, 145);
 
-    [Fact]
+    [Test]
     public void MaximumStackArgumentEnvelopeExecutes()
     {
         var parameters = string.Join(", ", Enumerable.Range(0, 64).Select(index => $"int64 p{index}"));
@@ -165,7 +157,7 @@ public sealed class TrRmCallAuditTests
             + $"int64 Sum({parameters}) {{ return p0 + p63; }}", 65);
     }
 
-    [Fact]
+    [Test]
     public void WideMethodOrdinalUsesTheExistingFunctionLimit()
     {
         var functions = string.Join(" ", Enumerable.Range(0, 1023)
@@ -173,7 +165,7 @@ public sealed class TrRmCallAuditTests
         RoundTrip($"int32 Main() {{ F1022(); return 42; }} {functions}", 42);
     }
 
-    [Fact]
+    [Test]
     public void InactiveFailingCalleeAndLoopConditionCallsPreserveLaziness()
         => RoundTrip("""
             int32 Main() {
@@ -191,10 +183,10 @@ public sealed class TrRmCallAuditTests
     private static void RoundTrip(string source, int expected)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var original = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var original = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "calls-audit"));
-        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
-        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
 }

@@ -6,21 +6,20 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("public int32 Value() { while (true) { break; } return 42; }", 40)]
-    [InlineData("public int32 Value() { while (int32(uint64(0)) < 1) { break; } return 42; }", 41)]
-    [InlineData("public int32 Value() { while (true ? true : false) { break; } return 42; }", 42)]
-    [InlineData("public int32 Value() { while (int32(uint64(0)) < 1 ? true : false) { break; } return 42; }", 43)]
-    [InlineData("public int32 Value() { while (true) { if (true) { break; } } return 42; }", 44)]
-    [InlineData("public int32 Value() { if (true) { while (int32(uint64(0)) < 1) { break; } } return 42; }", 45)]
-    [InlineData("public int32 Value() { while (true) { if (true ? true : false) { break; } } return 42; }", 46)]
-    [InlineData("public int32 Value() { while (true) { if (int32(uint64(0)) < 1 ? true : false) { break; } } return 42; }", 47)]
+    [TestCase("public int32 Value() { while (true) { break; } return 42; }",40)]
+    [TestCase("public int32 Value() { while (int32(uint64(0)) < 1) { break; } return 42; }",41)]
+    [TestCase("public int32 Value() { while (true ? true : false) { break; } return 42; }",42)]
+    [TestCase("public int32 Value() { while (int32(uint64(0)) < 1 ? true : false) { break; } return 42; }",43)]
+    [TestCase("public int32 Value() { while (true) { if (true) { break; } } return 42; }",44)]
+    [TestCase("public int32 Value() { if (true) { while (int32(uint64(0)) < 1) { break; } } return 42; }",45)]
+    [TestCase("public int32 Value() { while (true) { if (true ? true : false) { break; } } return 42; }",46)]
+    [TestCase("public int32 Value() { while (true) { if (int32(uint64(0)) < 1 ? true : false) { break; } } return 42; }",47)]
     public async Task FrontendTransferVersionsMatchHostedDllBytesAsync(string source, int version)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -35,28 +34,24 @@ public sealed partial class CliTests
                 var input = Encoding.UTF8.GetBytes(source);
                 var (projectionExit, projectionOutput, projectionError) = await RunAsync(
                     input, "frontend-component", frontend, "-", "--runtime", policy, "--json");
-                Assert.True(projectionExit == 0,
-                    $"frontend-component {policy} exited {projectionExit}: {projectionOutput}{projectionError}");
-                Assert.Empty(projectionError);
+                Assert.That(projectionExit == 0, Is.True, $"frontend-component {policy} exited {projectionExit}: {projectionOutput}{projectionError}");
+                Assert.That(projectionError, Is.Empty);
                 using var document = JsonDocument.Parse(projectionOutput);
                 var projected = document.RootElement.GetProperty("result");
-                Assert.NotEqual(version, projected.GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(87, projected.GetProperty("projectionVersion").GetInt32());
+                Assert.That(projected.GetProperty("projectionVersion").GetInt32(), Is.Not.EqualTo(version));
+                Assert.That(projected.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
                 var statements = projected.GetProperty("statements");
-                Assert.Contains(statements.EnumerateArray(), entry => entry.GetProperty("kind").GetInt32() == 3);
-                Assert.Contains(statements.EnumerateArray(), entry => entry.GetProperty("kind").GetInt32() is 6 or 7);
+                Assert.That(global::System.Linq.Enumerable.Any(statements.EnumerateArray(),entry => entry.GetProperty("kind").GetInt32() == 3),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(statements.EnumerateArray(),entry => entry.GetProperty("kind").GetInt32() is 6 or 7),Is.True);
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build-library", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build-library", "-", "--export", "Value", "-o", hostedPath, "--runtime", policy, "--json");
-                Assert.True(nativeExit == 0,
-                    $"frontend-build-library {policy} exited {nativeExit}: {nativeOutput}{nativeError}");
-                Assert.True(hostedExit == 0,
-                    $"build-library {policy} exited {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.Empty(nativeError);
-                Assert.Empty(hostedError);
-                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
-                    await File.ReadAllBytesAsync(nativePath));
+                Assert.That(nativeExit == 0, Is.True, $"frontend-build-library {policy} exited {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.That(hostedExit == 0, Is.True, $"build-library {policy} exited {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.That(nativeError, Is.Empty);
+                Assert.That(hostedError, Is.Empty);
+                Assert.That(await File.ReadAllBytesAsync(nativePath), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)));
             }
         }
         finally
@@ -65,19 +60,17 @@ public sealed partial class CliTests
             File.Delete(hostedPath);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { while (false) { break; } return 42; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; continue; x = x / 0; } return x + 39; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; if (x < 3) { continue; } } return x + 39; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (true) { break; x = x / 0; } return 42; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 2147483647; while (true) { break; x = x + 1; } return 42; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 3) { while (true) { break; } x = x + 1; if (x == 2) { continue; } } return x + 39; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; while (x < 2) { x = x + 1; continue; } if (x == 2) { break; } } return x + 40; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { if (x == 0) { if (false) { break; } else { x = x + 1; continue; } } else { break; } } return x + 41; }", 42)]
-    [InlineData("int32 Main() { if (true) { while (true) { break; } } return 42; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; if (false) { while (true) { x = x / 0; break; } } return x + 42; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (true ? true : false) { x = false ? x / 0 : x + 42; break; } return x; }", 42)]
+    [TestCase("int32 Main() { while (false) { break; } return 42; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; continue; x = x / 0; } return x + 39; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; if (x < 3) { continue; } } return x + 39; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (true) { break; x = x / 0; } return 42; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 2147483647; while (true) { break; x = x + 1; } return 42; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 3) { while (true) { break; } x = x + 1; if (x == 2) { continue; } } return x + 39; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; while (x < 2) { x = x + 1; continue; } if (x == 2) { break; } } return x + 40; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 2) { if (x == 0) { if (false) { break; } else { x = x + 1; continue; } } else { break; } } return x + 41; }",42)]
+    [TestCase("int32 Main() { if (true) { while (true) { break; } } return 42; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; if (false) { while (true) { x = x / 0; break; } } return x + 42; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (true ? true : false) { x = false ? x / 0 : x + 42; break; } return x; }",42)]
     public async Task FrontendTransfersMatchHostedImageAndExecuteAsync(string source, int expected)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -94,35 +87,29 @@ public sealed partial class CliTests
                     "frontend-build", frontend, "-", "-o", nativePath, "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
-                Assert.True(nativeExit == 0,
-                    $"frontend-build {policy} exited {nativeExit}: {nativeOutput}{nativeError}");
-                Assert.True(hostedExit == 0,
-                    $"build {policy} exited {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.Empty(nativeError);
-                Assert.Empty(hostedError);
-                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
-                Assert.Equal(expected, await ExecuteNativeImageAsync(nativePath));
+                Assert.That(nativeExit == 0, Is.True, $"frontend-build {policy} exited {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.That(hostedExit == 0, Is.True, $"build {policy} exited {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.That(nativeError, Is.Empty);
+                Assert.That(hostedError, Is.Empty);
+                Assert.That(await File.ReadAllBytesAsync(nativePath), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)));
+                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(expected));
                 var (nativeRun, nativeRunOutput, nativeRunError) = await RunAsync(input,
                     "frontend-run", frontend, "-", "--runtime", policy, "--json");
                 var (hostedRun, hostedRunOutput, hostedRunError) = await RunAsync(input,
                     "jit", "-", "--runtime", policy, "--json");
-                Assert.True(nativeRun == expected,
-                    $"frontend-run {policy} exited {nativeRun}: {nativeRunOutput}{nativeRunError}");
-                Assert.True(hostedRun == expected,
-                    $"jit {policy} exited {hostedRun}: {hostedRunOutput}{hostedRunError}");
+                Assert.That(nativeRun == expected, Is.True, $"frontend-run {policy} exited {nativeRun}: {nativeRunOutput}{nativeRunError}");
+                Assert.That(hostedRun == expected, Is.True, $"jit {policy} exited {hostedRun}: {hostedRunOutput}{hostedRunError}");
             }
         }
         finally
         {
-            File.Delete(nativePath);
+            await TestFileCleanup.DeleteWithRetryAsync(nativePath).ConfigureAwait(true);
             File.Delete(hostedPath);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { mut int32 x = 2147483647; while (x > 0) { x = x + 1; continue; } return x; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { mut int32 x = 2147483646; while (x + 1 > 0) { x = 2147483647; continue; } return x; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { mut int32 x = 0; while (true) { if (true) { x = 1 / x; } break; } return x; }", unchecked((int)0xE0540002))]
+    [TestCase("int32 Main() { mut int32 x = 2147483647; while (x > 0) { x = x + 1; continue; } return x; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { mut int32 x = 2147483646; while (x + 1 > 0) { x = 2147483647; continue; } return x; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { mut int32 x = 0; while (true) { if (true) { x = 1 / x; } break; } return x; }",unchecked((int)0xE0540002))]
     public async Task FrontendTransfersPreserveSelectedCheckedFailuresAsync(string source, int expectedExit)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -135,25 +122,22 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build", frontend, "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(exit == 0,
-                    $"frontend-build {policy} exited {exit}: {output}{error}");
-                Assert.Empty(error);
-                Assert.Equal(expectedExit, await ExecuteNativeImageAsync(path));
+                Assert.That(exit == 0, Is.True, $"frontend-build {policy} exited {exit}: {output}{error}");
+                Assert.That(error, Is.Empty);
+                Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(expectedExit));
             }
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { break; while (true) { } return 42; }")]
-    [InlineData("int32 Main() { continue; while (true) { } return 42; }")]
-    [InlineData("int32 Main() { while (true) { break outer; } return 42; }")]
-    [InlineData("int32 Main() { while (true) { continue outer; } return 42; }")]
-    [InlineData("int32 Main() { while (true) { return missing; } return 0; }")]
-    [InlineData("int32 Main() { while (true) { break; } continue; return 42; }")]
+    [TestCase("int32 Main() { break; while (true) { } return 42; }")]
+    [TestCase("int32 Main() { continue; while (true) { } return 42; }")]
+    [TestCase("int32 Main() { while (true) { break outer; } return 42; }")]
+    [TestCase("int32 Main() { while (true) { continue outer; } return 42; }")]
+    [TestCase("int32 Main() { while (true) { return missing; } return 0; }")]
+    [TestCase("int32 Main() { while (true) { break; } continue; return 42; }")]
     public async Task FrontendInvalidTransfersRetainBuiltOutputAsync(string source)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -167,18 +151,16 @@ public sealed partial class CliTests
                 var (initial, initialOutput, initialError) = await RunAsync(
                     Encoding.UTF8.GetBytes("int32 Main() { while (true) { break; } return 42; }"),
                     "frontend-build", frontend, "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(initial == 0,
-                    $"frontend-build {policy} exited {initial}: {initialOutput}{initialError}");
-                Assert.Empty(initialError);
+                Assert.That(initial == 0, Is.True, $"frontend-build {policy} exited {initial}: {initialOutput}{initialError}");
+                Assert.That(initialError, Is.Empty);
                 var original = await File.ReadAllBytesAsync(path);
                 var (failure, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build", frontend, "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(failure == 1,
-                    $"frontend-build {policy} exited {failure}: {output}{error}");
-                Assert.Empty(error);
+                Assert.That(failure == 1, Is.True, $"frontend-build {policy} exited {failure}: {output}{error}");
+                Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
-                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-                Assert.Equal(original, await File.ReadAllBytesAsync(path));
+                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+                Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
             }
         }
         finally
@@ -187,7 +169,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task FrontendTransfersCountTowardExistingStatementLimitAsync()
     {
         var source = "int32 Main() { while (false) { "
@@ -201,19 +183,17 @@ public sealed partial class CliTests
                 + string.Concat(Enumerable.Repeat("break; ", 11)) + "} return 42; }";
             var (accepted, acceptedOutput, acceptedError) = await RunAsync(Encoding.UTF8.GetBytes(maximum),
                 "frontend-component", frontend, "-", "--runtime", policy, "--json");
-            Assert.True(accepted == 0,
-                $"frontend-component {policy} exited {accepted}: {acceptedOutput}{acceptedError}");
-            Assert.Empty(acceptedError);
+            Assert.That(accepted == 0, Is.True, $"frontend-component {policy} exited {accepted}: {acceptedOutput}{acceptedError}");
+            Assert.That(acceptedError, Is.Empty);
             using var acceptedDocument = JsonDocument.Parse(acceptedOutput);
-            Assert.Equal(12, acceptedDocument.RootElement.GetProperty("result")
-                .GetProperty("statements").GetArrayLength());
+            Assert.That(acceptedDocument.RootElement.GetProperty("result")
+                .GetProperty("statements").GetArrayLength(), Is.EqualTo(12));
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "frontend-component", frontend, "-", "--runtime", policy, "--json");
-            Assert.True(exit == 1,
-                $"frontend-component {policy} exited {exit}: {output}{error}");
-            Assert.Empty(error);
+            Assert.That(exit == 1, Is.True, $"frontend-component {policy} exited {exit}: {output}{error}");
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
         }
     }
 }

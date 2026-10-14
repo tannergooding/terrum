@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ConditionalFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReaderChecksThreeConditionalRootsAndIndependentThirdChildren()
     {
         const string text = "public int32 Value(bool b) { if (b ? true : false) { return b ? 1 : 2; } return b ? 3 : 4; }";
@@ -53,7 +53,7 @@ public sealed class ConditionalFrontendProjectionTests
         Node(11, 84, 1, third, four + 1, 8, 9, 10);
 
         var source = SourceText.From(text);
-        Assert.Equal(12, ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length, Is.EqualTo(12));
         foreach (var version in new[] { 20, 21, 22, 23, 25, 26, 27 })
         {
             Reject(0, version);
@@ -108,7 +108,7 @@ public sealed class ConditionalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void LiteralOnlyConditionalCannotSupplyConversionInputContext()
     {
         const string text = "public uint64 Value(bool b) => uint64(b ? 1 : 2);";

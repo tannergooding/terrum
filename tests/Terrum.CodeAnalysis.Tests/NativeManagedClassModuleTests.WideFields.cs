@@ -8,42 +8,39 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class NativeManagedClassModuleTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, 16)]
-    [InlineData(NativeRuntimePolicy.FailFast, 17)]
-    [InlineData(NativeRuntimePolicy.FailFast, 32)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 16)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 17)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, 32)]
+    [TestCase(NativeRuntimePolicy.FailFast,16)]
+    [TestCase(NativeRuntimePolicy.FailFast,17)]
+    [TestCase(NativeRuntimePolicy.FailFast,32)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,16)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,17)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,32)]
     public async Task WideClassTracksFinalFieldAndManagedEdgeAcrossModulesAsync(
         NativeRuntimePolicy policy, int fieldCount)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(WideSource(fieldCount), policy), ["Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         if (fieldCount > 16)
         {
             var retiredRevision = producer.ToArray();
             BinaryPrimitives.WriteInt32LittleEndian(retiredRevision.AsSpan(4, 4), 46);
-            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retiredRevision));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retiredRevision))!;
         }
 
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(fieldCount, Assert.Single(linked.Classes).Fields.Length);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(42, await RunSemanticModuleJitAsync(consumer, producer, policy).ConfigureAwait(true));
+        Assert.That(global::System.Linq.Enumerable.Single(linked.Classes).Fields.Length, Is.EqualTo(fieldCount));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunSemanticModuleJitAsync(consumer, producer, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WideClassGraphLibraryRetainsPrivateLayoutAsync(NativeRuntimePolicy policy)
     {
         var leaf = NativeModuleCompiler.CreateProducer(Compile(
@@ -56,13 +53,11 @@ public sealed partial class NativeManagedClassModuleTests
             NativeModuleCompiler.CreateGraphReference([middle]), library: false),
             [middle], policy);
         NativeModuleCompiler.ValidateGraph(consumer, [leaf, middle]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(consumer, [middle, leaf],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [middle, leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WideClassRevisionRetainsTransparentStructuresAsync(NativeRuntimePolicy policy)
     {
         var source = """
@@ -73,19 +68,17 @@ public sealed partial class NativeManagedClassModuleTests
             """ + WideSource(32).Replace("return wide.Edge.Value;",
                 "Number number = new Number(wide.Edge.Value); return number.Value;", StringComparison.Ordinal);
         var program = Compile(source, policy);
-        Assert.True(Assert.Single(program.Structures).IsTransparent);
+        Assert.That(global::System.Linq.Enumerable.Single(program.Structures).IsTransparent, Is.True);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.True(Assert.Single(linked.Structures).IsTransparent);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.That(global::System.Linq.Enumerable.Single(linked.Structures).IsTransparent, Is.True);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WideClassDescriptorsSurviveFullHeapCollectionAsync(NativeRuntimePolicy policy)
     {
         var source = WideSource(32) + """
@@ -105,13 +98,13 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task FailedWideClassConstructionReleasesLastFieldEdgeAsync()
     {
         var source = WideSource(32).Replace("Edge = edge; }",
@@ -130,16 +123,14 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program,
-            NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ThirtyTwoFieldsFillMaximumClassPayloadAsync(NativeRuntimePolicy policy)
     {
         var fields = string.Join(" ", Enumerable.Range(0, 32).Select(index => $"public int32 F{index};"));
@@ -148,18 +139,16 @@ public sealed partial class NativeManagedClassModuleTests
             + " public int32 Read() { require Dense.TryCreate(out var value);"
             + " return value.F31 + value.F11; }";
         var producer = ModuleCompiler.CreateProducer(Compile(source, policy), ["Read"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(128, Assert.Single(linked.Classes).Size);
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.That(global::System.Linq.Enumerable.Single(linked.Classes).Size, Is.EqualTo(128));
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WidePrivateConsumerLinksScalarProviderAsync(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(
@@ -167,11 +156,11 @@ public sealed partial class NativeManagedClassModuleTests
         var source = WideSource(32) + " int32 Main() { return Read() + Bias(); }";
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(32, Assert.Single(linked.Classes).Fields.Length);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(42, await RunSemanticModuleJitAsync(consumer, producer, policy).ConfigureAwait(true));
+        Assert.That(global::System.Linq.Enumerable.Single(linked.Classes).Fields.Length, Is.EqualTo(32));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await RunSemanticModuleJitAsync(consumer, producer, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     private static string WideSource(int fieldCount, string resultSuffix = "")

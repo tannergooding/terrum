@@ -5,13 +5,13 @@ using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TreeFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReadResultRejectsInventedIntegerComparisonContext()
     {
         const string text = "public bool Value() => 1 < 2;";
@@ -44,7 +44,7 @@ public sealed class TreeFrontendProjectionTests
             ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
     }
 
-    [Fact]
+    [Test]
     public void ReadResultRejectsInvalidTreeReferencesTypesAndSourceAnchors()
     {
         const string text = "public int32 Value(int32 x) => x + (x * 2);";
@@ -77,8 +77,8 @@ public sealed class TreeFrontendProjectionTests
         Node(4, 46, open, end, 3, -1);
         Node(5, 57, first, end, 0, 4);
 
-        Assert.True(ScalarFrontendHost.ReadResult(source, Bytes()).IsValid);
-        Assert.Equal(6, ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).IsValid, Is.True);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length, Is.EqualTo(6));
 
         var child = 42 + 5 * 8 + 5;
         words[child] = 5;
@@ -122,12 +122,10 @@ public sealed class TreeFrontendProjectionTests
             return bytes;
         }
     }
-
-    [Theory]
-    [InlineData(false, 64, true)]
-    [InlineData(false, 65, false)]
-    [InlineData(true, 64, true)]
-    [InlineData(true, 65, false)]
+    [TestCase(false,64,true)]
+    [TestCase(false,65,false)]
+    [TestCase(true,64,true)]
+    [TestCase(true,65,false)]
     public void ReadersEnforceThe64NodeLimitForStandaloneAndCompleteProgramLayouts(
         bool completeProgram, int nodeCount, bool valid)
     {
@@ -137,25 +135,23 @@ public sealed class TreeFrontendProjectionTests
 
         if (!valid)
         {
-            _ = Assert.Throws<ArgumentException>(() => ReadProjection(source, words, completeProgram));
+            _ = Assert.Throws<ArgumentException>(() => ReadProjection(source, words, completeProgram))!;
             return;
         }
 
         var result = ReadProjection(source, words, completeProgram);
-        Assert.True(result.IsValid);
-        Assert.Equal(64, result.Nodes.Length);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(result.Nodes.Length, Is.EqualTo(64));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void ReadersRejectOutOfRangeNodeReferencesWithoutReturningAProjection(bool completeProgram)
     {
         var source = SourceText.From(ExpressionFunctionText());
         var words = ExpressionFunction(source.Text, completeProgram ? 88 : 87);
         words[NodeWordOffset(63) + 5] = 64;
 
-        _ = Assert.Throws<ArgumentException>(() => ReadProjection(source, words, completeProgram));
+        _ = Assert.Throws<ArgumentException>(() => ReadProjection(source, words, completeProgram))!;
     }
 
     private static ScalarFrontendResult ReadProjection(SourceText source, int[] words,
@@ -229,8 +225,8 @@ public sealed class TreeFrontendProjectionTests
             root = node - 1;
             next = x + 1;
         }
-        Assert.Equal(64, node);
-        Assert.Equal(63, root);
+        Assert.That(node, Is.EqualTo(64));
+        Assert.That(root, Is.EqualTo(63));
         return words;
 
         void WriteNode(int operation, int start, int length, int left, int right)

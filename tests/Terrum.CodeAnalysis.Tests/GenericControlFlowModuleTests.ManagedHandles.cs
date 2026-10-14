@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -104,54 +104,50 @@ public sealed partial class GenericControlFlowModuleTests
         }
         int32 Main() { return Proof(); }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task QualifiedManagedCopyTuplesPreserveIdentityAndRootsInAotAndJitAsync(
         NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ManagedGenericSource),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.Identity<write Models.Cell>");
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.Identity<Models.Cell>");
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.Identity<Models.Cell?>");
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.Identity<write Models.Cell?>");
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.Identity<ManagedNode?>");
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.Identity<write ManagedNode?>");
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.Forward<int32, write Models.Cell, Models.Pair>");
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "Models.CreateAndRead<write Models.Cell>");
-        Assert.DoesNotContain(program.Functions, static function => function.IsExternal
-            || function.Name.Contains('$', StringComparison.Ordinal));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.Identity<write Models.Cell>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.Identity<Models.Cell>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.Identity<Models.Cell?>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.Identity<write Models.Cell?>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.Identity<ManagedNode?>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.Identity<write ManagedNode?>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.Forward<int32, write Models.Cell, Models.Pair>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "Models.CreateAndRead<write Models.Cell>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true), Is.EqualTo(42));
         var sourcePath = Path.Combine(AppContext.BaseDirectory, $"managed-generic-{Guid.NewGuid():N}.terrum");
         try
         {
             await File.WriteAllTextAsync(sourcePath, ManagedGenericSource).ConfigureAwait(true);
             var (exit, error) = await RunCliAsync("jit", sourcePath, "--runtime",
                 policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions").ConfigureAwait(true);
-            Assert.Empty(error);
-            Assert.Equal(42, exit);
+            Assert.That(error, Is.Empty);
+            Assert.That(exit, Is.EqualTo(42));
         }
         finally
         {
             File.Delete(sourcePath);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedGenericSpecializationsStayPrivateAcrossProducerReplacementAsync(
         NativeRuntimePolicy policy)
     {
@@ -179,19 +175,18 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var replacementProgram = Compile(ManagedGenericSource, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Models.Proof"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
-        _ = Assert.Single(ModuleCompiler.CreateReference(replacement).Functions);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        _ = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Functions);
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Equal(["Models.Cell", "$producer.Models.Cell", "$producer.Models.Marker"],
-            linked.Classes.Select(static @class => @class.Name));
-        Assert.Contains(linked.Functions, static function =>
-            function.Name == "$producer.Models.Identity<write Models.Cell?>");
-        Assert.Contains(linked.Functions, static function =>
-            function.Name == "$producer.Models.CreateAndRead<write Models.Cell>");
-        Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original),
-            policy)).ConfigureAwait(true));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(linked.Classes.Select(static @class => @class.Name), Is.EqualTo(["Models.Cell", "$producer.Models.Cell", "$producer.Models.Marker"]));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function =>
+            function.Name == "$producer.Models.Identity<write Models.Cell?>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function =>
+            function.Name == "$producer.Models.CreateAndRead<write Models.Cell>"),Is.True);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original),
+            policy)).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram, ["Models.Proof"], "NodeB", policy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram,
@@ -200,38 +195,36 @@ public sealed partial class GenericControlFlowModuleTests
             NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
             [nativeOriginal], policy);
         var nativeHash = SHA256.HashData(nativeConsumer);
-        Assert.Equal(40, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeOriginal],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedGenericSampleRunsAndReplacesUnchangedConsumerAsync(NativeRuntimePolicy policy)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
             "managed-generic-selection.terrum")).ConfigureAwait(true);
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Contains(program.Functions, static function =>
-            function.Name == "RetainReversed<Stamp, write Record>");
-        Assert.DoesNotContain(program.Functions, static function =>
-            function.Name == "RetainReversed<Stamp, Record>");
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "RetainReversed<Stamp, write Record>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
+            function.Name == "RetainReversed<Stamp, Record>"),Is.False);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true), Is.EqualTo(42));
         var sourcePath = Path.Combine(AppContext.BaseDirectory, $"managed-generic-sample-{Guid.NewGuid():N}.terrum");
         try
         {
             await File.WriteAllTextAsync(sourcePath, source).ConfigureAwait(true);
             var (exit, error) = await RunCliAsync("jit", sourcePath, "--runtime",
                 policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions").ConfigureAwait(true);
-            Assert.Empty(error);
-            Assert.Equal(42, exit);
+            Assert.That(error, Is.Empty);
+            Assert.That(exit, Is.EqualTo(42));
         }
         finally
         {
@@ -253,9 +246,9 @@ public sealed partial class GenericControlFlowModuleTests
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Equal(["Record", "$producer.Record"], linked.Classes.Select(static item => item.Name));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(linked.Classes.Select(static item => item.Name), Is.EqualTo(["Record", "$producer.Record"]));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram,
             ["ManagedGenericProbe"], "NodeB", policy);
@@ -265,17 +258,15 @@ public sealed partial class GenericControlFlowModuleTests
             "int32 Main() { return ManagedGenericProbe(); }", policy,
             NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
             [nativeOriginal], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("return value.Value;")]
-    [InlineData("return new T();")]
-    [InlineData("if (value is null) { return value; } return value;")]
-    [InlineData("if (value is some present) { return present; } return value;")]
+    [TestCase("return value.Value;")]
+    [TestCase("return new T();")]
+    [TestCase("if (value is null) { return value; } return value;")]
+    [TestCase("if (value is some present) { return present; } return value;")]
     public void CopyOnlyDefinitionCannotBorrowManagedCapabilitiesFromSpecialization(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -291,15 +282,13 @@ public sealed partial class GenericControlFlowModuleTests
                 return Invalid<Cell>(cell).Value;
             }
             """));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("write Cell stronger = Identity(read);")]
-    [InlineData("write Cell stronger = Identity<write Cell>(read);")]
-    [InlineData("Cell required = Identity<Cell>(optional);")]
-    [InlineData("var value = Identity<write Frozen>(frozen);")]
+    [TestCase("write Cell stronger = Identity(read);")]
+    [TestCase("write Cell stronger = Identity<write Cell>(read);")]
+    [TestCase("Cell required = Identity<Cell>(optional);")]
+    [TestCase("var value = Identity<write Frozen>(frozen);")]
     public void ManagedGenericQualifiersDoNotStrengthenTypedArguments(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -321,14 +310,12 @@ public sealed partial class GenericControlFlowModuleTests
                 return 42;
             }
             """));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("require Copy(writable, out read);", "TRM3007")]
-    [InlineData("require Copy<write Cell>(writable, out read);", "TRM3011")]
-    [InlineData("require Copy<write Cell>(writable, out optional);", "TRM3011")]
+    [TestCase("require Copy(writable, out read);","TRM3007")]
+    [TestCase("require Copy<write Cell>(writable, out read);","TRM3011")]
+    [TestCase("require Copy<write Cell>(writable, out optional);","TRM3011")]
     public void ManagedGenericOutputsRequireExactQualifiedTypes(string body, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -348,15 +335,13 @@ public sealed partial class GenericControlFlowModuleTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("T Bad<T>(T value) where T : [Copy] { return value.Value; }")]
-    [InlineData("T? Bad<T>(T value) where T : [Copy] { return value; }")]
-    [InlineData("T Bad<T>(T value) where T : [Copy] { T? optional = null; return value; }")]
-    [InlineData("T Bad<T>(T value) where T : [Copy] { write T stronger = value; return value; }")]
+    [TestCase("T Bad<T>(T value) where T : [Copy] { return value.Value; }")]
+    [TestCase("T? Bad<T>(T value) where T : [Copy] { return value; }")]
+    [TestCase("T Bad<T>(T value) where T : [Copy] { T? optional = null; return value; }")]
+    [TestCase("T Bad<T>(T value) where T : [Copy] { write T stronger = value; return value; }")]
     public void OpaqueGenericFormalCannotBorrowOptionalOrWriteCapabilities(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -370,13 +355,11 @@ public sealed partial class GenericControlFlowModuleTests
                 return Bad<Cell>(cell).Value;
             }
             """));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("public write Cell Leak() { require Cell.TryCreate(42, out var cell); return Identity(cell); }")]
-    [InlineData("public bool Leak(out Cell? result) { result = Identity<Cell?>(null); return true; }")]
+    [TestCase("public write Cell Leak() { require Cell.TryCreate(42, out var cell); return Identity(cell); }")]
+    [TestCase("public bool Leak(out Cell? result) { result = Identity<Cell?>(null); return true; }")]
     public void ClosedManagedGenericsCannotExportManagedHandles(string declaration)
     {
         var program = Compile("""
@@ -386,12 +369,12 @@ public sealed partial class GenericControlFlowModuleTests
             }
             [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
             """ + declaration, NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Leak"]));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Leak"]))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(program,
-            ["Leak"], "NodeB", NativeRuntimePolicy.FailFast));
+            ["Leak"], "NodeB", NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void FailedManagedGenericOutputRemainsUnavailable()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -405,11 +388,11 @@ public sealed partial class GenericControlFlowModuleTests
                 return value.Value;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedManagedGenericFailureRetainsCallerRootWithoutPublishingOutputsAsync()
     {
         var source = """
@@ -441,9 +424,9 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
-            Assert.IsType<BoundProgram>(compilation.Program), NativeRuntimePolicy.CheckedExceptions))
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), NativeRuntimePolicy.CheckedExceptions))
+            .ConfigureAwait(true), Is.EqualTo(42));
     }
 }

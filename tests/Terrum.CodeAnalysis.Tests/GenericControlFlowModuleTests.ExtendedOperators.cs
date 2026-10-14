@@ -6,15 +6,14 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class GenericControlFlowModuleTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PrivateExtendedOperatorSpecializationReplacesUnchangedConsumerAsync(
         NativeRuntimePolicy policy)
     {
@@ -50,14 +49,14 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var replacementProgram = Compile(Replacement, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
-        Assert.Empty(ModuleCompiler.CreateReference(replacement).Structures);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(ModuleCompiler.CreateReference(replacement).Structures, Is.Empty);
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Contains(linked.Functions, function => function.Name == "$producer.Mix<Value>");
-        Assert.Contains(linked.Functions, function => function.Name == "$producer.Forward<Value>");
-        Assert.Contains(linked.Functions, function => function.Name == "$producer.Value.op_ExclusiveOr");
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Mix<Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Forward<Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Value.op_ExclusiveOr"),Is.True);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
 
         var nativeOriginal = NativeModuleCompiler.CreateProducer(originalProgram, ["LeafValue"], "NodeB", policy);
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(Consumer, policy,
@@ -66,10 +65,10 @@ public sealed partial class GenericControlFlowModuleTests
         var nativeHash = SHA256.HashData(nativeConsumer);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram,
             ["LeafValue"], "NodeB", policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
 }

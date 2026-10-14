@@ -4,7 +4,7 @@ using System;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -59,28 +59,27 @@ public sealed partial class NativeSourceImportTests
             },
         ]), runtimePolicy);
 
-    [Fact]
+    [Test]
     public void NativeAggregateStorageSupportsUnrelatedWritableAndReadonlyLoans()
     {
         var writable = CompileAggregateStorage("""
             mut FixtureRect rectangle = new FixtureRect(1, 2, 3, 4);
             return FillRect(&rectangle);
             """);
-        Assert.False(writable.HasErrors, string.Join(Environment.NewLine, writable.Diagnostics));
-        var writableProgram = Assert.IsType<BoundProgram>(writable.Program);
+        Assert.That(writable.HasErrors, Is.False, string.Join(Environment.NewLine, writable.Diagnostics));
+        var writableProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = writable.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         _ = NativeEmitter.EmitWithNativeImportsForTesting(writableProgram, NativeRuntimePolicy.FailFast);
 
         var readonlyCompilation = CompileAggregateStorage("""
             FixtureRect rectangle = new FixtureRect(1, 2, 3, 4);
             return FillRect(&rectangle);
             """, isReadonly: true);
-        Assert.False(readonlyCompilation.HasErrors,
-            string.Join(Environment.NewLine, readonlyCompilation.Diagnostics));
-        var readonlyProgram = Assert.IsType<BoundProgram>(readonlyCompilation.Program);
+        Assert.That(readonlyCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, readonlyCompilation.Diagnostics));
+        var readonlyProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = readonlyCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         _ = NativeEmitter.EmitWithNativeImportsForTesting(readonlyProgram, NativeRuntimePolicy.FailFast);
     }
 
-    [Fact]
+    [Test]
     public void NativeAggregateStorageSupportsCheckedExceptionsForNoThrowImports()
     {
         var compilation = CompileAggregateStorage("""
@@ -88,28 +87,28 @@ public sealed partial class NativeSourceImportTests
             return FillRect(&rectangle);
             """, runtimePolicy: BoundRuntimePolicy.CheckedExceptions);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         _ = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.CheckedExceptions);
     }
 
-    [Fact]
+    [Test]
     public void NativeAggregateStorageRejectsReadonlyOrUninitializedWritableLoans()
     {
         var readonlyLocal = CompileAggregateStorage("""
             FixtureRect rectangle = new FixtureRect(1, 2, 3, 4);
             return FillRect(&rectangle);
             """);
-        Assert.True(readonlyLocal.HasErrors);
+        Assert.That(readonlyLocal.HasErrors, Is.True);
 
         var uninitializedLocal = CompileAggregateStorage("""
             mut FixtureRect rectangle;
             return FillRect(&rectangle);
             """);
-        Assert.True(uninitializedLocal.HasErrors);
+        Assert.That(uninitializedLocal.HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NativeAggregateStorageRequiresTheCataloguedExtent()
     {
         var compilation = CompileAggregateStorage("""
@@ -117,10 +116,10 @@ public sealed partial class NativeSourceImportTests
             return FillRect(&rectangle);
             """, byteExtent: 12);
 
-        Assert.True(compilation.HasErrors);
+        Assert.That(compilation.HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NativeAggregateAddressCannotBeStoredOrReturned()
     {
         var compilation = CompileAggregateStorage("""
@@ -129,6 +128,6 @@ public sealed partial class NativeSourceImportTests
             return 0;
             """);
 
-        Assert.True(compilation.HasErrors);
+        Assert.That(compilation.HasErrors, Is.True);
     }
 }

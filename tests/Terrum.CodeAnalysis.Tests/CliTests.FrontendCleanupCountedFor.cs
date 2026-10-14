@@ -5,15 +5,14 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendCleanupCountedForExecutesFinitePathsAsync(string policy)
     {
         var cases = new (string Name, string Loop, int Expected)[] {
@@ -51,22 +50,20 @@ public sealed partial class CliTests
                 }
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{testCase.Name} {policy}: {exit}: {output}{error}");
-                Assert.Equal(testCase.Expected, await ExecuteNativeImageAsync(path));
+                Assert.That(exit == 0, Is.True, $"{testCase.Name} {policy}: {exit}: {output}{error}");
+                Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(testCase.Expected));
             }
             finally
             {
                 if (File.Exists(path))
                 {
-                    File.Delete(path);
+                    await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
                 }
             }
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendCleanupCountedForRejectsUnsupportedProofsAsync(string policy)
     {
         var loops = new[] {
@@ -108,7 +105,7 @@ public sealed partial class CliTests
             var (initial, initialOutput, initialError) = await RunAsync(
                 Encoding.UTF8.GetBytes("public int32 Main() => 42;"), "frontend-build",
                 directory, "-", "-o", path, "--runtime", policy, "--json");
-            Assert.True(initial == 0, $"{initial}: {initialOutput}{initialError}");
+            Assert.That(initial == 0, Is.True, $"{initial}: {initialOutput}{initialError}");
             var image = await File.ReadAllBytesAsync(path);
             foreach (var loop in loops)
             {
@@ -118,12 +115,12 @@ public sealed partial class CliTests
                     + " [NoThrow] int32 Overwrite(out int32 value) { { value = 0; } return 0; }";
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build", directory, "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(exit == 1, $"{policy}: {loop}: {exit}: {output}{error}");
-                Assert.Empty(error);
+                Assert.That(exit == 1, Is.True, $"{policy}: {loop}: {exit}: {output}{error}");
+                Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
-                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-                Assert.Equal("TRM5001", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-                Assert.Equal(image, await File.ReadAllBytesAsync(path));
+                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+                Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(image));
             }
         }
         finally
@@ -131,10 +128,8 @@ public sealed partial class CliTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendCleanupCountedForRetainsOrdinaryLoopBoundaryAsync(string policy)
     {
         var cases = new (string Source, bool Accepted)[] {
@@ -152,25 +147,25 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(testCase.Source),
                     "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(exit == (testCase.Accepted ? 0 : 1), $"{policy}: {testCase.Source}: {exit}: {output}{error}");
-                Assert.Empty(error);
+                Assert.That(exit == (testCase.Accepted ? 0 : 1), Is.True, $"{policy}: {testCase.Source}: {exit}: {output}{error}");
+                Assert.That(error, Is.Empty);
                 if (testCase.Accepted)
                 {
-                    Assert.Equal(3, await ExecuteNativeImageAsync(path));
+                    Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(3));
                     image = await File.ReadAllBytesAsync(path);
                 }
                 else
                 {
                     using var document = JsonDocument.Parse(output);
-                    Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-                    Assert.Equal("TRM5001", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-                    Assert.Equal(image, await File.ReadAllBytesAsync(path));
+                    Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+                    Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(image));
                 }
             }
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

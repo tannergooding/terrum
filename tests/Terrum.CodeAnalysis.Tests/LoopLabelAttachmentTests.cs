@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -40,75 +40,68 @@ public sealed class LoopLabelAttachmentTests
             }
         }
     }
-
-    [Theory]
-    [MemberData(nameof(Boundaries))]
+    [TestCaseSource(nameof(Boundaries))]
     public void HostedAndPrelexedLabelsUsePhysicalSourceLines(string loop, string gap, bool invalid)
     {
         var text = Source(loop, gap);
         var lexed = Lexer.Lex(SourceText.From(text));
-        Assert.Empty(lexed.Diagnostics);
+        Assert.That(lexed.Diagnostics, Is.Empty);
         foreach (var tree in new[] { SyntaxTree.Parse(text), SyntaxTree.Parse(lexed) })
         {
-            Assert.Equal(text, tree.Root.ToFullString());
+            Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
             if (invalid)
             {
-                var diagnostic = Assert.Single(tree.Diagnostics);
-                Assert.Equal("TRM1012", diagnostic.Code);
-                Assert.Equal(new TextSpan(text.IndexOf(':', StringComparison.Ordinal), 1), diagnostic.Span);
+                var diagnostic = global::System.Linq.Enumerable.Single(tree.Diagnostics);
+                Assert.That(diagnostic.Code, Is.EqualTo("TRM1012"));
+                Assert.That(diagnostic.Span, Is.EqualTo(new TextSpan(text.IndexOf(':', StringComparison.Ordinal), 1)));
             }
             else
             {
-                Assert.Empty(tree.Diagnostics);
+                Assert.That(tree.Diagnostics, Is.Empty);
             }
         }
     }
-
-    [Theory]
-    [InlineData("a: b: while (true) { break b; }")]
-    [InlineData("a: b: for (;;) { break b; }")]
-    [InlineData("a: b: do { break b; } while (false);")]
-    [InlineData("a:\n")]
-    [InlineData("a: /*\n*/")]
+    [TestCase("a: b: while (true) { break b; }")]
+    [TestCase("a: b: for (;;) { break b; }")]
+    [TestCase("a: b: do { break b; } while (false);")]
+    [TestCase("a:\n")]
+    [TestCase("a: /*\n*/")]
     public void StackedAndIncompleteLabelsRejectWithoutLosingSource(string body)
     {
         var text = $"void Main() {{ {body} }}";
         var tree = SyntaxTree.Parse(text);
-        Assert.True(tree.HasErrors);
-        Assert.Equal(text, tree.Root.ToFullString());
-        Assert.True(Compilation.Create(tree).HasErrors);
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
+        Assert.That(Compilation.Create(tree).HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NamedArgumentColonStillPermitsNewlineTrivia()
     {
         var tree = SyntaxTree.Parse("void Main() { F(value:\n42); }");
-        Assert.Empty(tree.Diagnostics);
+        Assert.That(tree.Diagnostics, Is.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompiledScannerPreservesEveryLabelBoundaryAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var scanner = await ScannerTests.ReadScannerSourceAsync(root);
         var text = string.Join("\n", Boundaries.Select(row => Source((string)row[0], (string)row[1])));
         var source = SourceText.From(text);
-        Assert.True(source.Length <= ScannerHost.MaximumSourceLength);
+        Assert.That(source.Length <= ScannerHost.MaximumSourceLength, Is.True);
         var buffers = ScannerHost.CreateBuffers(source);
         var compilation = Compilation.Create(SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
             buffers, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var native = NativeJit.ExecuteWithData(Assert.IsType<BoundProgram>(compilation.Program), policy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy);
         var adapted = ScannerHost.ReadLexResult(source, native.ExitCode, Buffer(3), Buffer(5), Buffer(4));
-        Assert.Equal(Lexer.Lex(source).Tokens.Select(token => (token.Kind, token.Span)),
-            adapted.Tokens.Select(token => (token.Kind, token.Span)));
+        Assert.That(adapted.Tokens.Select(token => (token.Kind, token.Span)), Is.EqualTo(Lexer.Lex(source).Tokens.Select(token => (token.Kind, token.Span))));
         var hosted = SyntaxTree.Parse(source);
         var actual = SyntaxTree.Parse(adapted);
-        Assert.Equal(text, actual.Root.ToFullString());
-        Assert.Equal(hosted.Diagnostics.ToArray(), actual.Diagnostics.ToArray());
-        Assert.Equal(Boundaries.Count(row => (bool)row[2]), actual.Diagnostics.Count(item => item.Code == "TRM1012"));
+        Assert.That(actual.Root.ToFullString(), Is.EqualTo(text));
+        Assert.That(actual.Diagnostics.ToArray(), Is.EqualTo(hosted.Diagnostics.ToArray()));
+        Assert.That(actual.Diagnostics.Count(item => item.Code == "TRM1012"), Is.EqualTo(Boundaries.Count(row => (bool)row[2])));
 
         ReadOnlySpan<byte> Buffer(int index) =>
             native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));

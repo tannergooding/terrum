@@ -3,15 +3,14 @@
 using System.IO;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericNonBooleanAndVoidOutputsPublishCopyValuesAsync(bool checkedFailures)
     {
         const string Source = """
@@ -46,10 +45,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericInitNonBooleanAndVoidOutputsPublishCopyValuesAsync(bool checkedFailures)
     {
         const string Source = """
@@ -83,10 +80,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task GenericInitNonBooleanOutputPublishesManagedHandleAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -114,10 +109,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 49).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task FloatingCopySpecializationsPreserveConditionalAndVacancyOutputsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -174,10 +167,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericConditionalSelectionPublishesWholeTokensAndRangesAsync(bool checkedFailures)
     {
         string[] components = [
@@ -224,10 +215,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42, components).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericOutputsPreserveMixedStackArgumentsAndWidePayloadsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -295,7 +284,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task GenericInitDoesNotPublishAfterCheckedFailureAsync()
     {
         const string Source = """
@@ -322,7 +311,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task GenericScalarResultsParticipateInControlFlowAndNumericContextAsync()
     {
         const string Source = """
@@ -348,7 +337,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task ConstrainedGenericAccumulationPublishesOnlyOnAcceptedCountsAsync()
     {
         const string Source = """
@@ -384,7 +373,7 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public Task GenericOutputFailuresDoNotPreventSubsequentPublicationAsync()
     {
         const string Source = """
@@ -414,7 +403,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task GenericNonBooleanOutputFailureDoesNotPublishAsync()
     {
         const string Source = """
@@ -444,7 +433,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task GenericInitNonBooleanOutputFailureLeavesDestinationVacantAsync()
     {
         const string Source = """
@@ -473,10 +462,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericMixedOutputsPublishUnderTheirDistinctModesAsync(bool checkedFailures)
     {
         const string Source = """
@@ -530,10 +517,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericFixedScalarOutputsPublishAlongsideGenericOutputsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -567,10 +552,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task FloatingGenericNonBooleanAndVoidOutputsPublishAsync(bool checkedFailures)
     {
         const string Source = """
@@ -610,10 +593,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericFloatingResultsPreserveZeroAndSubnormalOutputsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -673,7 +654,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public Task GenericFloatingResultDoesNotPublishAfterCheckedFailureAsync()
     {
         const string Source = """
@@ -711,7 +692,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task GenericFixedScalarOutputsDoNotPublishAfterCheckedFailureAsync()
     {
         const string Source = """
@@ -749,10 +730,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task GenericMixedOutputsRetainManagedInitRootsAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -790,7 +769,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public Task GenericMixedManagedOutputsRetireRootsAfterCheckedFailureAsync()
     {
         const string Source = """
@@ -830,10 +809,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 49);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GenericBooleanMixedOutputPublicationRemainsConditionalAsync(bool checkedFailures)
     {
         const string Source = """
@@ -861,7 +838,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public Task GenericMixedOutputsDoNotPublishAfterCheckedFailureAsync()
     {
         const string Source = """
@@ -898,7 +875,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task GenericInitManagedOutputFailureRetiresTemporaryRootAsync()
     {
         const string Source = """

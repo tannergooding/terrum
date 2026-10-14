@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -19,51 +19,49 @@ public sealed class TrRmControlFlowTests
     {
         var tree = SyntaxTree.Parse(source);
         var compilation = library ? Compilation.CreateLibrary(tree, policy) : Compilation.Create(tree, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
-
-    [Theory]
-    [InlineData("int32 Main() { if (true) { return 1; } return 0; }", 1)]
-    [InlineData("int32 Main() { return true ? 42 : 0; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 5) { x = x + 1; } return x; }", 5)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 0) { x = 1 / 0; } return 42; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { x = 40; } else { x = 1 / 0; } return x + 2; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; bool choose = x == 0; return choose ? 42 : 1 / 0; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; bool choose = x == 0; if (choose && x == 0) { x = 42; } return x; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; bool choose = x != 0; if (choose || x == 0) { x = 42; } return x; }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; return (x != 0 && 1 / x == 0) ? 1 : 42; }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; return (x == 0 || 1 / x == 0) ? 42 : 1; }", 42)]
-    [InlineData("int32 Main() { bool x = true; bool y = x && false; return 0; }", 0)]
-    [InlineData("int32 Main() { mut int32 x = 0; x = x == 0 ? 42 : 1 / 0; return x; }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; int32 y = x == 0 ? 42 : 1 / 0; return y; }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; return x == 0 ? (x != 0 ? 1 / 0 : 42) : 1 / 0; }", 42)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 3 && x / 1 < 4) { x = x + 1; } return x; }", 3)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 5) { x = x + 1; if (x == 2) { continue; } if (x == 4) { break; } } return x; }", 4)]
-    [InlineData("int32 Main() { mut int32 x = 0; mut int32 y = 1; while (x < 4) { x = y; y = x + 1; } return x + y; }", 9)]
-    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { while (x < 3) { x = x + 1; } } else { return 1 / 0; } return x; }", 3)]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; if (x == 2) { return 42; } } return x; }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; if (x == 0) { return 42; } else { return 1 / 0; } }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; return (x == 0 ? 40 : 1 / 0) + (x == 0 ? 2 : 1 / 0); }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; int64 y = x == 0 ? 5000000000 : 1; return int32(y - 4999999958); }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; uint64 y = x == 0 ? 18446744073709551615 : 1; return int32(y - 18446744073709551573); }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; uint32 y = x == 0 ? 4294967295 : 1; return int32(y - 4294967253); }", 42)]
-    [InlineData("int32 Main() { int32 x = 0; char16 y = x == 0 ? 97 : 98; return y == char16(97) ? 42 : 0; }", 42)]
+    [TestCase("int32 Main() { if (true) { return 1; } return 0; }",1)]
+    [TestCase("int32 Main() { return true ? 42 : 0; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 5) { x = x + 1; } return x; }",5)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 0) { x = 1 / 0; } return 42; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; if (x == 0) { x = 40; } else { x = 1 / 0; } return x + 2; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; bool choose = x == 0; return choose ? 42 : 1 / 0; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; bool choose = x == 0; if (choose && x == 0) { x = 42; } return x; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; bool choose = x != 0; if (choose || x == 0) { x = 42; } return x; }",42)]
+    [TestCase("int32 Main() { int32 x = 0; return (x != 0 && 1 / x == 0) ? 1 : 42; }",42)]
+    [TestCase("int32 Main() { int32 x = 0; return (x == 0 || 1 / x == 0) ? 42 : 1; }",42)]
+    [TestCase("int32 Main() { bool x = true; bool y = x && false; return 0; }",0)]
+    [TestCase("int32 Main() { mut int32 x = 0; x = x == 0 ? 42 : 1 / 0; return x; }",42)]
+    [TestCase("int32 Main() { int32 x = 0; int32 y = x == 0 ? 42 : 1 / 0; return y; }",42)]
+    [TestCase("int32 Main() { int32 x = 0; return x == 0 ? (x != 0 ? 1 / 0 : 42) : 1 / 0; }",42)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 3 && x / 1 < 4) { x = x + 1; } return x; }",3)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 5) { x = x + 1; if (x == 2) { continue; } if (x == 4) { break; } } return x; }",4)]
+    [TestCase("int32 Main() { mut int32 x = 0; mut int32 y = 1; while (x < 4) { x = y; y = x + 1; } return x + y; }",9)]
+    [TestCase("int32 Main() { mut int32 x = 0; if (x == 0) { while (x < 3) { x = x + 1; } } else { return 1 / 0; } return x; }",3)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 3) { x = x + 1; if (x == 2) { return 42; } } return x; }",42)]
+    [TestCase("int32 Main() { int32 x = 0; if (x == 0) { return 42; } else { return 1 / 0; } }",42)]
+    [TestCase("int32 Main() { int32 x = 0; return (x == 0 ? 40 : 1 / 0) + (x == 0 ? 2 : 1 / 0); }",42)]
+    [TestCase("int32 Main() { int32 x = 0; int64 y = x == 0 ? 5000000000 : 1; return int32(y - 4999999958); }",42)]
+    [TestCase("int32 Main() { int32 x = 0; uint64 y = x == 0 ? 18446744073709551615 : 1; return int32(y - 18446744073709551573); }",42)]
+    [TestCase("int32 Main() { int32 x = 0; uint32 y = x == 0 ? 4294967295 : 1; return int32(y - 4294967253); }",42)]
+    [TestCase("int32 Main() { int32 x = 0; char16 y = x == 0 ? 97 : 98; return y == char16(97) ? 42 : 0; }",42)]
     public void IndexedScalarFlowRoundTripsThroughSourceFreeJitAndNativeImage(string source, int expected)
     {
         var original = Compile(source);
         var artifact = TrRmExecutableCompiler.Emit(original, "indexed");
         TrRmStructuralMetadataValidator.ValidateCompact(artifact);
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
-        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var count));
-        Assert.Equal((byte)0x08, (byte)(new TrRmBodyTableReader(bodyBytes, count).GetRow(1)[0] & 0x0C));
+        Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
+        Assert.That((byte)(new TrRmBodyTableReader(bodyBytes, count).GetRow(1)[0] & 0x0C), Is.EqualTo((byte)0x08));
     }
 
-    [Fact]
+    [Test]
     public void NestedLoopsPreserveNearestBreakAndContinue()
     {
         const string source = """
@@ -85,12 +83,12 @@ public sealed class TrRmControlFlowTests
             }
             """;
         var original = Compile(source);
-        Assert.Equal(3, NativeJit.Execute(original, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(3));
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "nested"));
-        Assert.Equal(3, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(3));
     }
 
-    [Fact]
+    [Test]
     public void LongIndexedBodyWidensOffsetsAndPreservesTheDefinitionSentinel()
     {
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; while (x < 1) { ");
@@ -102,16 +100,14 @@ public sealed class TrRmControlFlowTests
         source.Append("} return x; }");
         var artifact = TrRmExecutableCompiler.Emit(Compile(source.ToString()), "wide-indexed");
         var index = new TrRmArtifactIndex(artifact);
-        Assert.True(index.TryGetSection(0x20, out var bodyBytes, out var count));
+        Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
         var body = new TrRmBodyTableReader(bodyBytes, count).GetRow(1);
-        Assert.Equal(0x09, body[0]);
-        Assert.Equal(28, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(body[0], Is.EqualTo(0x09));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(28));
     }
-
-    [Theory]
-    [InlineData(125, true)]
-    [InlineData(126, false)]
+    [TestCase(125,true)]
+    [TestCase(126,false)]
     public void MaterializedValueLimitIsEnforcedAtTheNativeBoundary(int increments, bool supported)
     {
         var source = new StringBuilder("int32 Main() { mut int32 x = 0; while (x < 1) { ");
@@ -127,14 +123,14 @@ public sealed class TrRmControlFlowTests
             return;
         }
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(original, "value-limit"));
-        Assert.Equal(256, loaded.Functions[0].Variables.Length);
-        Assert.Equal(increments, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.That(loaded.Functions[0].Variables.Length, Is.EqualTo(256));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(increments));
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int Choose(int value);
 
-    [Fact]
+    [Test]
     public void PersistedIndexedLibraryExportExecutesIndependentCalls()
     {
         const string source = """
@@ -156,8 +152,8 @@ public sealed class TrRmControlFlowTests
             {
                 var choose = Marshal.GetDelegateForFunctionPointer<Choose>(
                     NativeLibrary.GetExport(handle, "Choose"));
-                Assert.Equal(42, choose(0));
-                Assert.Equal(9, choose(7));
+                Assert.That(choose(0), Is.EqualTo(42));
+                Assert.That(choose(7), Is.EqualTo(9));
             }
             finally
             {
@@ -170,32 +166,30 @@ public sealed class TrRmControlFlowTests
         }
     }
 
-    [Fact]
+    [Test]
     public void CheckedExceptionPolicyRemainsAvailableToDirectSourceButNotIndexedPersistence()
     {
         const string source = "int32 Main() { mut int32 x = 0; while (x < 2) { x = x + 1; } return x; }";
         var checkedProgram = Compile(source, policy: BoundRuntimePolicy.CheckedExceptions);
-        Assert.Equal(2, NativeJit.Execute(checkedProgram, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(checkedProgram, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(2));
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(checkedProgram, "policy"));
     }
 
-    [Fact]
+    [Test]
     public void NoThrowCannotRetainAnUnprovedIndexedFailureTerminator()
     {
         var program = Compile("[NoThrow] void Guard() { require true; } int32 Main() { return 42; }");
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "no-throw-failure"));
     }
-
-    [Theory]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }", 2)]
-    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }", 1)]
+    [TestCase("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }",2)]
+    [TestCase("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }",1)]
     public void ScopedScalarLocalsExecuteThroughIndexedFlow(string source, int expected)
     {
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(Compile(source), "scoped"));
-        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
 
-    [Fact]
+    [Test]
     public void IndexedEvidenceCannotBeReusedUnderDifferentDeclarationContracts()
     {
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(Compile(

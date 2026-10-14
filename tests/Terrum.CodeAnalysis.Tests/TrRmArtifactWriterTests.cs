@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmArtifactWriterTests
 {
-    [Fact]
+    [Test]
     public void FramesAndOwnsTheWorkedMinimalModuleAndStringSections()
     {
         var module = Module();
@@ -20,12 +20,12 @@ public sealed class TrRmArtifactWriterTests
             new TrRmSection(0x0002, 0, 1, strings),
         ]);
 
-        Assert.Equal(124, artifact.Length);
-        Assert.Equal("TRRM"u8.ToArray(), artifact[..4]);
-        Assert.Equal((uint)64, Read(artifact, 32 + 8));
-        Assert.Equal((uint)44, Read(artifact, 32 + 12));
-        Assert.Equal((uint)108, Read(artifact, 48 + 8));
-        Assert.Equal((uint)strings.Length, Read(artifact, 48 + 12));
+        Assert.That(artifact.Length, Is.EqualTo(124));
+        Assert.That(artifact[..4], Is.EqualTo("TRRM"u8.ToArray()));
+        Assert.That(Read(artifact, 32 + 8), Is.EqualTo((uint)64));
+        Assert.That(Read(artifact, 32 + 12), Is.EqualTo((uint)44));
+        Assert.That(Read(artifact, 48 + 8), Is.EqualTo((uint)108));
+        Assert.That(Read(artifact, 48 + 12), Is.EqualTo((uint)strings.Length));
         TrRmStructuralMetadataValidator.Validate(artifact);
 
         module[0] = 0;
@@ -33,7 +33,7 @@ public sealed class TrRmArtifactWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
-    [Fact]
+    [Test]
     public void ValidatesOptionalReferenceSlotsAgainstTheCompletedDirectory()
     {
         var extension = new byte[21];
@@ -55,20 +55,20 @@ public sealed class TrRmArtifactWriterTests
         ]));
     }
 
-    [Fact]
+    [Test]
     public void EncodesOnlyTheSupportedProvisionalFeatureAssignment()
     {
         var features = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]);
-        Assert.Equal(8, features.Length);
-        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputFeatureId, Read(features, 0));
-        Assert.Equal(TrRmFeatureTableReader.ScalarInitOutputRuleRevision, Read(features, sizeof(uint)));
+        Assert.That(features.Length, Is.EqualTo(8));
+        Assert.That(Read(features, 0), Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputFeatureId));
+        Assert.That(Read(features, sizeof(uint)), Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
         var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, Module()),
             new TrRmSection(0x0002, 0, 1, strings),
             new TrRmSection(0x0004, 0, 1, features),
         ]);
-        Assert.True(new TrRmArtifactIndex(artifact).TryGetSection(0x0004, out _, out _));
+        Assert.That(new TrRmArtifactIndex(artifact).TryGetSection(0x0004, out _, out _), Is.True);
         Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, Module()),
             new TrRmSection(0x0002, 0, 1, strings),
@@ -87,7 +87,7 @@ public sealed class TrRmArtifactWriterTests
             ]));
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidOrderCountsAndDirectoryPolicies()
     {
         var module = new TrRmSection(0x0001, 0, 1, Module());

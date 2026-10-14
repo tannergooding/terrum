@@ -3,15 +3,14 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task StructuredGenericPowerSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -25,22 +24,20 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("Int32Value", "0", "0", "1")]
-    [InlineData("Int32Value", "0", "7", "0")]
-    [InlineData("Int32Value", "-2", "5", "-32")]
-    [InlineData("Int32Value", "2147483647", "1", "2147483647")]
-    [InlineData("Int64Value", "9223372036854775807", "1", "9223372036854775807")]
-    [InlineData("Int64Value", "3", "20", "3486784401")]
-    [InlineData("Int64Value", "1", "4294967295", "1")]
+    [TestCase("Int32Value","0","0","1")]
+    [TestCase("Int32Value","0","7","0")]
+    [TestCase("Int32Value","-2","5","-32")]
+    [TestCase("Int32Value","2147483647","1","2147483647")]
+    [TestCase("Int64Value","9223372036854775807","1","9223372036854775807")]
+    [TestCase("Int64Value","3","20","3486784401")]
+    [TestCase("Int64Value","1","4294967295","1")]
     public async Task StructuredGenericPowerPreservesArithmeticBoundariesAsync(
         string type, string value, string exponent, string expected)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
             "static-protocol-power.terrum")).ConfigureAwait(true);
         var entry = source.IndexOf("int32 Main()", StringComparison.Ordinal);
-        Assert.True(entry >= 0);
+        Assert.That(entry >= 0, Is.True);
         source = source[..entry] + $$"""
             int32 Main() {
                 var result = Power<{{type}}>(new {{type}}({{value}}), new {{type}}(1), {{exponent}});

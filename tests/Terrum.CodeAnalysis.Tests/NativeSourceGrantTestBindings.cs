@@ -132,8 +132,7 @@ internal sealed class NativeSourceGrantTestBindings
             ?? throw new InvalidOperationException("Failed to create a test export delegate.");
     }
 
-    private static Type ManagedType(PrimitiveType type) => type switch
-    {
+    private static Type ManagedType(PrimitiveType type) => type switch {
         PrimitiveType.Void => typeof(void),
         PrimitiveType.Bool => typeof(byte),
         PrimitiveType.Char16 => typeof(ushort),

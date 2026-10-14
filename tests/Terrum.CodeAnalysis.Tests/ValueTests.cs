@@ -12,47 +12,44 @@ using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ValueTests
 {
-    [Theory]
-    [InlineData("int32 Main() { return int32(uint32(42)); }", 42)]
-    [InlineData("int32 Main() { char16 unit = char16(uint32(65535)); return int32(unit); }", 65535)]
-    [InlineData("int32 Main() { if (uint32.MaxValue > 2147483647) { return 1; } return 0; }", 1)]
-    [InlineData("int32 Main() { uint32 n = 4000000000; return int32(n / 1000000000); }", 4)]
-    [InlineData("namespace Example; int32 Main() { return int32(Value()); } uint32 Value() { return 7; }", 7)]
-    [InlineData("namespace Example; public struct Value { public int32 Number; public Value(int32 number) { Number = number; } } int32 F(/*type*/ Example.Value value) { return value.Number; } int32 Main() { /*local*/ Example.Value value = new /*new*/ Example.Value(7); require int32 /*constant*/ .MaxValue > value.Number; return Example /*call*/ .F(value); }", 7)]
+    [TestCase("int32 Main() { return int32(uint32(42)); }",42)]
+    [TestCase("int32 Main() { char16 unit = char16(uint32(65535)); return int32(unit); }",65535)]
+    [TestCase("int32 Main() { if (uint32.MaxValue > 2147483647) { return 1; } return 0; }",1)]
+    [TestCase("int32 Main() { uint32 n = 4000000000; return int32(n / 1000000000); }",4)]
+    [TestCase("namespace Example; int32 Main() { return int32(Value()); } uint32 Value() { return 7; }",7)]
+    [TestCase("namespace Example; public struct Value { public int32 Number; public Value(int32 number) { Number = number; } } int32 F(/*type*/ Example.Value value) { return value.Number; } int32 Main() { /*local*/ Example.Value value = new /*new*/ Example.Value(7); require int32 /*constant*/ .MaxValue > value.Number; return Example /*call*/ .F(value); }",7)]
     public async Task ScalarValuesExecuteInNativeCodeAsync(string source, int expected)
     {
         var program = Compile(source);
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
-        Assert.InRange(code.EntryPoint, 0, code.Code.Length - 1);
-        Assert.Equal(code.EntryPoint, code.Functions[0].Start);
-        Assert.Equal(code.AotEntryPoint, code.Functions[1].Start);
+        Assert.That(code.EntryPoint, Is.InRange(0, code.Code.Length - 1));
+        Assert.That(code.Functions[0].Start, Is.EqualTo(code.EntryPoint));
+        Assert.That(code.Functions[1].Start, Is.EqualTo(code.AotEntryPoint));
         for (var index = 1; index < code.Functions.Length; index++)
         {
-            Assert.True(code.Functions[index - 1].End <= code.Functions[index].Start);
+            Assert.That(code.Functions[index - 1].End <= code.Functions[index].Start, Is.True);
         }
         SemanticVerifier.Verify(program);
-        Assert.Equal(expected, await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(expected));
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return int32(uint32.MaxValue); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return int32(uint32.MaxValue + 1); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return int32(uint32(0) - 1); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return int32(uint32(2147483648) * 2); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return int32(char16(uint32(65536))); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return int32(uint32(int32(-1))); }", unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(uint32.MaxValue); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(uint32.MaxValue + 1); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(uint32(0) - 1); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(uint32(2147483648) * 2); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(char16(uint32(65536))); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return int32(uint32(int32(-1))); }",unchecked((int)0xE0540001))]
     public async Task CheckedConversionsAndUnsignedArithmeticFailFastAsync(string source, int expected)
     {
-        Assert.Equal(expected, await RunNativeAsync(NativeEmitter.Emit(Compile(source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(Compile(source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(expected));
     }
 
-    [Fact]
+    [Test]
     public async Task PackedStructConstructorFieldsAndInstanceMethodExecuteAsync()
     {
         const string Source = """
@@ -75,10 +72,10 @@ public sealed class ValueTests
                 return first.End() + copy.End();
             }
             """;
-        Assert.Equal(15, await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(15));
     }
 
-    [Fact]
+    [Test]
     public async Task InstanceMethodsCanCallOtherMethodsOnTheirReceiverAsync()
     {
         const string Source = """
@@ -90,10 +87,10 @@ public sealed class ValueTests
             }
             int32 Main() { Range range = new Range(4); return range.Twice(); }
             """;
-        Assert.Equal(8, await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(8));
     }
 
-    [Fact]
+    [Test]
     public async Task NaturallyAlignedFieldsUseScalarWindowsAbiSizeAsync()
     {
         const string Source = """
@@ -106,13 +103,13 @@ public sealed class ValueTests
             int32 Main() { Pair value = new Pair(true, 7); return value.Read(); }
             """;
         var program = Compile(Source);
-        Assert.Equal(0, program.Structures[0].Fields[0].Offset);
-        Assert.Equal(4, program.Structures[0].Fields[1].Offset);
-        Assert.Equal(8, program.Structures[0].Size);
-        Assert.Equal(7, await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(program.Structures[0].Fields[0].Offset, Is.EqualTo(0));
+        Assert.That(program.Structures[0].Fields[1].Offset, Is.EqualTo(4));
+        Assert.That(program.Structures[0].Size, Is.EqualTo(8));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(7));
     }
 
-    [Fact]
+    [Test]
     public async Task InternalMembersRemainAccessibleWithinCompilationAsync()
     {
         const string Source = """
@@ -127,26 +124,26 @@ public sealed class ValueTests
             }
             """;
         var program = Compile(Source);
-        Assert.True(program.Structures[0].IsInternal);
-        Assert.True(program.Structures[0].Fields[0].IsInternal);
-        Assert.True(program.Functions[0].IsInternal);
-        Assert.Equal(9, await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(program.Structures[0].IsInternal, Is.True);
+        Assert.That(program.Structures[0].Fields[0].IsInternal, Is.True);
+        Assert.That(program.Functions[0].IsInternal, Is.True);
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(9));
     }
 
-    [Fact]
+    [Test]
     public void DefaultVisibilityDoesNotExposeModuleDeclarations()
     {
         var program = Compile("struct Item { int32 Value; Item() { Value = 1; } } "
             + "int32 Main() { return 0; } int32 Hidden() { return 1; }");
-        Assert.True(program.Structures[0].IsInternal);
-        Assert.True(program.Structures[0].Fields[0].IsPrivate);
-        Assert.True(program.Functions[0].IsPrivate);
-        Assert.True(program.Functions[1].IsInternal);
-        Assert.True(program.Functions[2].IsInternal);
+        Assert.That(program.Structures[0].IsInternal, Is.True);
+        Assert.That(program.Structures[0].Fields[0].IsPrivate, Is.True);
+        Assert.That(program.Functions[0].IsPrivate, Is.True);
+        Assert.That(program.Functions[1].IsInternal, Is.True);
+        Assert.That(program.Functions[2].IsInternal, Is.True);
         SemanticVerifier.Verify(program);
     }
 
-    [Fact]
+    [Test]
     public async Task OutValuesCommitOnlyOnTrueAndFlowThroughBranchesAsync()
     {
         const string Source = """
@@ -172,10 +169,10 @@ public sealed class ValueTests
                 return range.End();
             }
             """;
-        Assert.Equal(5, await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(5));
     }
 
-    [Fact]
+    [Test]
     public async Task AssignedOutStructFieldsWritePrivateValueStorageAsync()
     {
         const string Source = """
@@ -194,18 +191,16 @@ public sealed class ValueTests
                 return pair.A * 10 + pair.B;
             }
             """;
-        Assert.Equal(73, await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(73));
     }
-
-    [Theory]
-    [InlineData("int32 Main() { if (Read(out var value)) { return int32(value); } return 0; } bool Read(out char16 value) { value = char16(65535); return true; }", 65535)]
-    [InlineData("int32 Main() { if (Read(out var value) && value) { return 1; } return 0; } bool Read(out bool value) { value = true; return true; }", 1)]
+    [TestCase("int32 Main() { if (Read(out var value)) { return int32(value); } return 0; } bool Read(out char16 value) { value = char16(65535); return true; }",65535)]
+    [TestCase("int32 Main() { if (Read(out var value) && value) { return 1; } return 0; } bool Read(out bool value) { value = true; return true; }",1)]
     public async Task NarrowOutValuesAreCanonicalAfterCommitAsync(string source, int expected)
     {
-        Assert.Equal(expected, await RunNativeAsync(NativeEmitter.Emit(Compile(source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(Compile(source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(expected));
     }
 
-    [Fact]
+    [Test]
     public async Task SourceRangeAndCharacterFactsCompileAsSeparateSourcesAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -226,12 +221,12 @@ public sealed class ValueTests
             }
             """);
         var compilation = Compilation.Create(trees);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(0, await RunNativeAsync(NativeEmitter.Emit(
-            Assert.IsType<BoundProgram>(compilation.Program), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public async Task QualifiedNamesIgnoreDirectiveTriviaAcrossSourcesAsync()
     {
         var trees = new[] {
@@ -239,40 +234,40 @@ public sealed class ValueTests
             SyntaxTree.Parse("using /* scope */ Example.Utility; namespace Client; int32 Main() { return Value(); }"),
         };
         var compilation = Compilation.Create(trees);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(9, await RunNativeAsync(NativeEmitter.Emit(
-            Assert.IsType<BoundProgram>(compilation.Program), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(9));
     }
 
-    [Fact]
+    [Test]
     public void MultipleMainsAndDiagnosticsRetainTheirSourceTree()
     {
         var first = SyntaxTree.Parse("namespace One; int32 Main() { return 0; }");
         var second = SyntaxTree.Parse("namespace Two; int32 Main() { return Missing(); }");
         var compilation = Compilation.Create([first, second]);
-        Assert.Null(compilation.Program);
-        Assert.Equal(2, compilation.SyntaxTrees.Length);
-        Assert.Equal(compilation.Diagnostics.Length, compilation.SourceDiagnostics.Length);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.SyntaxTrees.Length, Is.EqualTo(2));
+        Assert.That(compilation.SourceDiagnostics.Length, Is.EqualTo(compilation.Diagnostics.Length));
         var ambiguous = false;
         var unknown = false;
         foreach (var located in compilation.SourceDiagnostics)
         {
-            Assert.Same(second, located.SyntaxTree);
+            Assert.That(located.SyntaxTree, Is.SameAs(second));
             ambiguous |= located.Diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal);
             unknown |= located.Diagnostic.Message.Contains("Unknown function", StringComparison.Ordinal);
         }
-        Assert.True(ambiguous && unknown);
+        Assert.That(ambiguous && unknown, Is.True);
 
         var malformed = SyntaxTree.Parse("int32 Main() { return ; }");
         compilation = Compilation.Create([first, malformed]);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.Program, Is.Null);
         foreach (var located in compilation.SourceDiagnostics)
         {
-            Assert.Same(malformed, located.SyntaxTree);
+            Assert.That(located.SyntaxTree, Is.SameAs(malformed));
         }
     }
 
-    [Fact]
+    [Test]
     public async Task BoundedHostBuffersExecuteInSharedNativeCodeAsync()
     {
         const string Source = """
@@ -287,60 +282,57 @@ public sealed class ValueTests
             new("Output", PrimitiveType.Int32, [0], true),
         ];
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), buffers);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         SemanticVerifier.Verify(program);
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
-        Assert.Equal(8, code.ReadOnlyDataLength);
-        Assert.Equal(12, code.Data.Length);
-        Assert.NotEmpty(code.DataFixups);
-        Assert.Equal(68, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.Equal(68, await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(code.ReadOnlyDataLength, Is.EqualTo(8));
+        Assert.That(code.Data.Length, Is.EqualTo(12));
+        Assert.That(code.DataFixups, Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(68));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(68));
     }
 
-    [Fact]
+    [Test]
     public async Task BufferBoundsAndReadOnlyRestrictionsAreEnforcedAsync()
     {
         ImmutableArray<HostBuffer> buffers = [new("Source", PrimitiveType.Int32, [5], false)];
         var illegalWrite = Compilation.Create(SyntaxTree.Parse("int32 Main() { Host.Source[0] = 9; return 0; }"), buffers);
-        Assert.Null(illegalWrite.Program);
+        Assert.That(illegalWrite.Program, Is.Null);
         var outputArgument = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { if (Try(out Host.Output[0])) { return 1; } return 0; } bool Try(out int32 value) { value = 1; return true; }"),
             [new HostBuffer("Output", PrimitiveType.Int32, [0], true)]);
-        Assert.Null(outputArgument.Program);
+        Assert.That(outputArgument.Program, Is.Null);
         var outOfRange = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Host.Source[-1]; }"), buffers);
-        var program = Assert.IsType<BoundProgram>(outOfRange.Program);
-        Assert.Equal(unchecked((int)0xE0540004),
-            await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = outOfRange.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540004)));
     }
-
-    [Theory]
-    [InlineData("int32 Main() { if (Try(out var x)) { return x; } return 0; } bool Try(out int32 x) { return true; }", false)]
-    [InlineData("int32 Main() { if (Try(out var x)) { return x; } return x; } bool Try(out int32 x) { x = 3; return true; }", false)]
-    [InlineData("int32 Main() { if (Try(out var x)) { return x; } return 0; } bool Try(out int32 x) { x = 3; return true; }", true)]
-    [InlineData("int32 Main() { mut int32 x = 0; if (Try(out x, out x)) { return x; } return 0; } bool Try(out int32 a, out int32 b) { a = 1; b = 2; return true; }", false)]
-    [InlineData("int32 Main() { if (Try(out var x, x)) { return x; } return 0; } bool Try(out int32 x, int32 value) { x = value; return true; }", false)]
-    [InlineData("int32 Main() { mut int32 x = 9; if (Try(out x)) { return 1; } return x; } bool Try(out int32 x) { x = 5; return false; }", false)]
-    [InlineData("int32 Main() { mut int32 x = 9; if (Try(out x, x)) { return x; } return 0; } bool Try(out int32 x, int32 previous) { x = previous; return true; }", false)]
-    [InlineData("int32 Main() { mut int32 value = 9; Try(out value); return value; } bool Try(out int32 value) { return false; }", false)]
-    [InlineData("int32 Main() { mut int32 value = 9; bool result = false || Try(out value); return value; } bool Try(out int32 value) { return false; }", false)]
-    [InlineData("int32 Main() { mut int32 value = 9; while (value > 0) { Try(out value); } return 0; } bool Try(out int32 value) { return false; }", false)]
+    [TestCase("int32 Main() { if (Try(out var x)) { return x; } return 0; } bool Try(out int32 x) { return true; }",false)]
+    [TestCase("int32 Main() { if (Try(out var x)) { return x; } return x; } bool Try(out int32 x) { x = 3; return true; }",false)]
+    [TestCase("int32 Main() { if (Try(out var x)) { return x; } return 0; } bool Try(out int32 x) { x = 3; return true; }",true)]
+    [TestCase("int32 Main() { mut int32 x = 0; if (Try(out x, out x)) { return x; } return 0; } bool Try(out int32 a, out int32 b) { a = 1; b = 2; return true; }",false)]
+    [TestCase("int32 Main() { if (Try(out var x, x)) { return x; } return 0; } bool Try(out int32 x, int32 value) { x = value; return true; }",false)]
+    [TestCase("int32 Main() { mut int32 x = 9; if (Try(out x)) { return 1; } return x; } bool Try(out int32 x) { x = 5; return false; }",false)]
+    [TestCase("int32 Main() { mut int32 x = 9; if (Try(out x, x)) { return x; } return 0; } bool Try(out int32 x, int32 previous) { x = previous; return true; }",false)]
+    [TestCase("int32 Main() { mut int32 value = 9; Try(out value); return value; } bool Try(out int32 value) { return false; }",false)]
+    [TestCase("int32 Main() { mut int32 value = 9; bool result = false || Try(out value); return value; } bool Try(out int32 value) { return false; }",false)]
+    [TestCase("int32 Main() { mut int32 value = 9; while (value > 0) { Try(out value); } return 0; } bool Try(out int32 value) { return false; }",false)]
     public void OutDefiniteAssignmentIsVerified(string source, bool valid)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         if (valid)
         {
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))());
         }
         else
         {
-            Assert.True(compilation.HasErrors);
-            Assert.Null(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.True);
+            Assert.That(compilation.Program, Is.Null);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task CliAnalyzeReportsOutDefiniteAssignmentAsSourceDiagnosticAsync()
     {
         const string Source = """
@@ -351,13 +343,13 @@ public sealed class ValueTests
             bool Try(out int32 value) { value = 1; return true; }
             """;
         using var json = await AnalyzeSourceAsync(Source).ConfigureAwait(true);
-        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.That(json.RootElement.GetProperty("success").GetBoolean(), Is.False);
         var diagnostic = json.RootElement.GetProperty("diagnostics")[0];
-        Assert.Equal("TRM3016", diagnostic.GetProperty("code").GetString());
-        Assert.Equal(2, diagnostic.GetProperty("range").GetProperty("start").GetProperty("line").GetInt32());
+        Assert.That(diagnostic.GetProperty("code").GetString(), Is.EqualTo("TRM3016"));
+        Assert.That(diagnostic.GetProperty("range").GetProperty("start").GetProperty("line").GetInt32(), Is.EqualTo(2));
     }
 
-    [Fact]
+    [Test]
     public async Task CliAnalyzeCompletesAlternatingShortCircuitFlowWorkAsync()
     {
         var expression = "value";
@@ -367,20 +359,20 @@ public sealed class ValueTests
         }
         var source = $"int32 Main() {{ bool value = true; if ({expression}) {{ return 1; }} return 0; }}";
         using var json = await AnalyzeSourceAsync(source, expectedExitCode: 0).ConfigureAwait(true);
-        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
-        Assert.Empty(json.RootElement.GetProperty("diagnostics").EnumerateArray());
+        Assert.That(json.RootElement.GetProperty("success").GetBoolean(), Is.True);
+        Assert.That(json.RootElement.GetProperty("diagnostics").EnumerateArray(), Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public async Task CliAnalyzeStillBoundsAggregateFlowWorkAsync()
     {
         var statements = string.Concat(Enumerable.Repeat("if (flag) { } ", 20_000));
         var source = $"int32 Main() {{ bool flag = true; {statements} return 0; }}";
         using var json = await AnalyzeSourceAsync(source).ConfigureAwait(true);
-        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.That(json.RootElement.GetProperty("success").GetBoolean(), Is.False);
         var diagnostic = json.RootElement.GetProperty("diagnostics")[0];
-        Assert.Equal("TRM3016", diagnostic.GetProperty("code").GetString());
-        Assert.Equal("Source exceeds the semantic verification work limit.", diagnostic.GetProperty("message").GetString());
+        Assert.That(diagnostic.GetProperty("code").GetString(), Is.EqualTo("TRM3016"));
+        Assert.That(diagnostic.GetProperty("message").GetString(), Is.EqualTo("Source exceeds the semantic verification work limit."));
     }
 
     private static async Task<JsonDocument> AnalyzeSourceAsync(string source, int expectedExitCode = 1)
@@ -389,7 +381,7 @@ public sealed class ValueTests
         var configuration = frameworkDirectory.Parent?.Name ?? throw new InvalidOperationException("Missing configuration directory.");
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var cli = Path.Combine(root, "artifacts", "bin", "sources", "terrumc", configuration, frameworkDirectory.Name, "terrumc.dll");
-        Assert.True(File.Exists(cli));
+        Assert.That(File.Exists(cli), Is.True);
         var start = new ProcessStartInfo("dotnet") {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -419,27 +411,25 @@ public sealed class ValueTests
             }
             throw;
         }
-        Assert.Equal(expectedExitCode, process.ExitCode);
-        Assert.Equal("", await error.ConfigureAwait(true));
+        Assert.That(process.ExitCode, Is.EqualTo(expectedExitCode));
+        Assert.That(await error.ConfigureAwait(true), Is.EqualTo(""));
         return JsonDocument.Parse(await output.ConfigureAwait(true));
     }
-
-    [Theory]
-    [InlineData("int32 Main() { if (Try(out var x) && x == 7) { return x; } return 0; } bool Try(out int32 x) { x = 7; return true; }", 7)]
-    [InlineData("int32 Main() { if (Try(out var x) || false) { return x; } return 0; } bool Try(out int32 x) { x = 7; return true; }", 7)]
-    [InlineData("int32 Main() { if (!Try(out var x)) { return 0; } require x == 7; return x; } bool Try(out int32 x) { x = 7; return true; }", 7)]
-    [InlineData("int32 Main() { mut int32 x = 9; if (!Try(out x)) { x = 9; } return x; } bool Try(out int32 x) { x = 5; return false; }", 9)]
-    [InlineData("int32 Main() { mut int32 x = 9; if (Try(false, out x)) { return 1; } if (Try(true, out x)) { return x; } return 0; } bool Try(bool success, out int32 x) { if (!success) { return false; } x = 7; return true; }", 7)]
-    [InlineData("int32 Main() { mut int32 value = 9; bool result = true || Try(out value); return value; } bool Try(out int32 value) { return false; }", 9)]
-    [InlineData("int32 Main() { mut int32 value = 9; if (Try(out var x) || Try2(out value)) { return value; } return 0; } bool Try(out int32 x) { x = 1; return true; } bool Try2(out int32 x) { x = 7; return true; }", 9)]
-    [InlineData("int32 Main() { require Try(out var x); return x; } bool Try(out int32 x) { if (true) { x = 7; } return true; }", 7)]
-    [InlineData("int32 Main() { mut int32 n = 0; while (n < 1 && Try(out var x)) { require x == 7; n = n + 1; } return n; } bool Try(out int32 x) { x = 7; return true; }", 1)]
+    [TestCase("int32 Main() { if (Try(out var x) && x == 7) { return x; } return 0; } bool Try(out int32 x) { x = 7; return true; }",7)]
+    [TestCase("int32 Main() { if (Try(out var x) || false) { return x; } return 0; } bool Try(out int32 x) { x = 7; return true; }",7)]
+    [TestCase("int32 Main() { if (!Try(out var x)) { return 0; } require x == 7; return x; } bool Try(out int32 x) { x = 7; return true; }",7)]
+    [TestCase("int32 Main() { mut int32 x = 9; if (!Try(out x)) { x = 9; } return x; } bool Try(out int32 x) { x = 5; return false; }",9)]
+    [TestCase("int32 Main() { mut int32 x = 9; if (Try(false, out x)) { return 1; } if (Try(true, out x)) { return x; } return 0; } bool Try(bool success, out int32 x) { if (!success) { return false; } x = 7; return true; }",7)]
+    [TestCase("int32 Main() { mut int32 value = 9; bool result = true || Try(out value); return value; } bool Try(out int32 value) { return false; }",9)]
+    [TestCase("int32 Main() { mut int32 value = 9; if (Try(out var x) || Try2(out value)) { return value; } return 0; } bool Try(out int32 x) { x = 1; return true; } bool Try2(out int32 x) { x = 7; return true; }",9)]
+    [TestCase("int32 Main() { require Try(out var x); return x; } bool Try(out int32 x) { if (true) { x = 7; } return true; }",7)]
+    [TestCase("int32 Main() { mut int32 n = 0; while (n < 1 && Try(out var x)) { require x == 7; n = n + 1; } return n; } bool Try(out int32 x) { x = 7; return true; }",1)]
     public async Task OutputFlowHonorsTrueFalseAndShortCircuitAsync(string source, int expected)
     {
-        Assert.Equal(expected, await RunNativeAsync(NativeEmitter.Emit(Compile(source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        Assert.That(await RunNativeAsync(NativeEmitter.Emit(Compile(source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(expected));
     }
 
-    [Fact]
+    [Test]
     public void ForgedBufferAndOutIrCannotReachCodeGeneration()
     {
         var program = Compile("int32 Main() { return 1; }");
@@ -454,7 +444,7 @@ public sealed class ValueTests
                 Body = new BoundBlock([forgedWrite, new BoundReturn(new BoundConstant(1, PrimitiveType.Int32, span), span)], span),
             }],
         };
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(invalid, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(invalid, NativeRuntimePolicy.FailFast))!;
         invalid = program with {
             Functions = [function with {
                 Variables = [new BoundVariable("x", PrimitiveType.Int32, true, span)],
@@ -462,10 +452,10 @@ public sealed class ValueTests
                     new BoundOutArgument(0, true, PrimitiveType.Int32, span), span)], span),
             }],
         };
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(invalid, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(invalid, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void NamespaceShapedFunctionsCannotReadPrivateStructFields()
     {
         var program = Compile("struct S { private int32 A; public S() { A = 1; } } int32 Main() { return 1; }");
@@ -477,27 +467,27 @@ public sealed class ValueTests
                 0, PrimitiveType.Int32, span), span)], span), span);
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.Add(impostor),
-        }));
+        }))!;
     }
 
-    [Fact]
+    [Test]
     public void MalformedValueLayoutsAndNegativeCodeUnitsFailVerification()
     {
         var program = Compile("struct S { public bool A; public S() { A = true; } } int32 Main() { return 0; }");
         var structure = program.Structures[0];
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Structures = program.Structures.SetItem(0, structure with { Size = 3 }),
-        }));
+        }))!;
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Structures = program.Structures.SetItem(0, structure with { Fields = structure.Fields.SetItem(0, null!) }),
-        }));
+        }))!;
         var constructor = program.Functions[0];
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(0, constructor with { Variables = constructor.Variables.SetItem(0, null!) }),
-        }));
+        }))!;
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Buffers = [new HostBuffer("Source", PrimitiveType.Char16, [-1], false)],
-        }));
+        }))!;
         var main = program.Functions[1];
         var span = main.Span;
         var type = (PrimitiveType)100;
@@ -506,13 +496,13 @@ public sealed class ValueTests
                 Body = new BoundBlock([new BoundReturn(
                     new BoundFieldRead(null!, 0, PrimitiveType.Bool, span), span)], span),
             }),
-        }));
+        }))!;
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(1, main with {
                 Body = new BoundBlock([new BoundReturn(new BoundFieldRead(
                     new BoundConstant(0, type, span), 0, PrimitiveType.Bool, span), span)], span),
             }),
-        }));
+        }))!;
         var equality = new BoundBinary(TokenKind.EqualsEquals,
             new BoundCall(0, [], type, span), new BoundCall(0, [], type, span), PrimitiveType.Bool, span);
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
@@ -521,50 +511,46 @@ public sealed class ValueTests
                     new BoundReturn(new BoundConstant(1, PrimitiveType.Int32, span), span),
                     new BoundReturn(new BoundConstant(0, PrimitiveType.Int32, span), span), span)], span),
             }),
-        }));
+        }))!;
     }
-
-    [Theory]
-    [InlineData("struct S { int32 A; int32 B; public S(int32 a) { this.A = a; } } int32 Main() { S s = new S(1); return s.B; }")]
-    [InlineData("struct S { int32 A; public S() { int32 x = this.A; this.A = x; } } int32 Main() { S s = new S(); return s.A; }")]
-    [InlineData("struct S { int32 A; private S(int32 a) { this.A = a; } } int32 Main() { S s = new S(1); return s.A; }")]
-    [InlineData("struct S { int32 A; public S() { this.A = 2; } } int32 Main() { S s = new S(); s.A = 4; return s.A; }")]
-    [InlineData("struct S { public int32 A; public S() { A = 1; } } int32 Change(S value) { value.A = 2; return value.A; } int32 Main() { S value = new S(); return Change(value); }")]
+    [TestCase("struct S { int32 A; int32 B; public S(int32 a) { this.A = a; } } int32 Main() { S s = new S(1); return s.B; }")]
+    [TestCase("struct S { int32 A; public S() { int32 x = this.A; this.A = x; } } int32 Main() { S s = new S(); return s.A; }")]
+    [TestCase("struct S { int32 A; private S(int32 a) { this.A = a; } } int32 Main() { S s = new S(1); return s.A; }")]
+    [TestCase("struct S { int32 A; public S() { this.A = 2; } } int32 Main() { S s = new S(); s.A = 4; return s.A; }")]
+    [TestCase("struct S { public int32 A; public S() { A = 1; } } int32 Change(S value) { value.A = 2; return value.A; } int32 Main() { S value = new S(); return Change(value); }")]
     public void UninitializedOrImmutableStructStorageCannotBeReadOrMutated(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return int32(uint32(4294967296)); }")]
-    [InlineData("int32 Main() { char16 c = 65536; return 0; }")]
-    [InlineData("int32 Main() { return int32(true); }")]
-    [InlineData("int32 Main() { var n = 42; return n; }")]
-    [InlineData("int32 Main() { uint32 n = -1; return 0; }")]
-    [InlineData("struct S { public int32 A; public S() { A = 1; } public mut void Set() { A = 2; } } int32 Main() { S s = new S(); s.Set(); return s.A; }")]
-    [InlineData("struct S { static int32 A; public S() { A = 1; } } int32 Main() { return 0; }")]
-    [InlineData("struct S { static int32 A; } int32 Main() { return 0; }")]
-    [InlineData("struct S { int32 A = 1; } int32 Main() { return 0; }")]
-    [InlineData("struct S { int32 A; int32 B; int32 C; int32 D; int32 E; } int32 Main() { return 0; }")]
-    [InlineData("private struct S { int32 A; } int32 Main() { return 0; }")]
-    [InlineData("struct S { private int32 A; public S() { A = 1; } } int32 Main() { S value = new S(); return value.A; }")]
+    [TestCase("int32 Main() { return int32(uint32(4294967296)); }")]
+    [TestCase("int32 Main() { char16 c = 65536; return 0; }")]
+    [TestCase("int32 Main() { return int32(true); }")]
+    [TestCase("int32 Main() { var n = 42; return n; }")]
+    [TestCase("int32 Main() { uint32 n = -1; return 0; }")]
+    [TestCase("struct S { public int32 A; public S() { A = 1; } public mut void Set() { A = 2; } } int32 Main() { S s = new S(); s.Set(); return s.A; }")]
+    [TestCase("struct S { static int32 A; public S() { A = 1; } } int32 Main() { return 0; }")]
+    [TestCase("struct S { static int32 A; } int32 Main() { return 0; }")]
+    [TestCase("struct S { int32 A = 1; } int32 Main() { return 0; }")]
+    [TestCase("struct S { int32 A; int32 B; int32 C; int32 D; int32 E; } int32 Main() { return 0; }")]
+    [TestCase("private struct S { int32 A; } int32 Main() { return 0; }")]
+    [TestCase("struct S { private int32 A; public S() { A = 1; } } int32 Main() { S value = new S(); return value.A; }")]
     public void InvalidValuesDoNotProduceExecutableIr(string source)
     {
-        Assert.Null(Compilation.Create(SyntaxTree.Parse(source)).Program);
+        Assert.That(Compilation.Create(SyntaxTree.Parse(source)).Program, Is.Null);
     }
 
     private static BoundProgram Compile(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
     }
 
     private static async Task<int> RunNativeAsync(byte[] image)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-value-{Guid.NewGuid():N}.exe");
         try
         {
@@ -588,7 +574,7 @@ public sealed class ValueTests
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

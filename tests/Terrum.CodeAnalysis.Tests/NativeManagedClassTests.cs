@@ -6,17 +6,16 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeManagedClassTests
 {
-    [Theory]
-    [InlineData(16, true)]
-    [InlineData(17, true)]
-    [InlineData(32, true)]
-    [InlineData(33, false)]
+    [TestCase(16,true)]
+    [TestCase(17,true)]
+    [TestCase(32,true)]
+    [TestCase(33,false)]
     public void ManagedClassFieldLimitDiagnosesAtDeclaration(int fieldCount, bool supported)
     {
         var fields = string.Join(" ", Enumerable.Range(0, fieldCount)
@@ -28,17 +27,17 @@ public sealed class NativeManagedClassTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         if (supported)
         {
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         }
         else
         {
-            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3005"
-                && diagnostic.Message.Contains("at most 32 fields", StringComparison.Ordinal));
-            Assert.Null(compilation.Program);
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3005"
+                && diagnostic.Message.Contains("at most 32 fields", StringComparison.Ordinal)),Is.True);
+            Assert.That(compilation.Program, Is.Null);
         }
     }
 
-    [Fact]
+    [Test]
     public void ThirtySecondFieldMustBeInitializedBeforePublication()
     {
         var fields = string.Join(" ", Enumerable.Range(0, 32)
@@ -48,11 +47,11 @@ public sealed class NativeManagedClassTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             $"class Wide {{ {fields} public Wide() {{ {assignments} }} }}"
             + " int32 Main() { return 42; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ManagedClassPayloadLimitAppliesBelowFieldLimit()
     {
         var fields = string.Join(" ", Enumerable.Range(0, 17)
@@ -62,16 +61,14 @@ public sealed class NativeManagedClassTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             $"class TooLarge {{ {fields} public TooLarge() {{ {assignments} }} }}"
             + " int32 Main() { return 42; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3005"
-            && diagnostic.Message.Contains("bounded payload", StringComparison.Ordinal));
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3005"
+            && diagnostic.Message.Contains("bounded payload", StringComparison.Ordinal)),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("write int32 value = 42;")]
-    [InlineData("write Leaf value = leaf;")]
-    [InlineData("write Pair value = new Pair(42);")]
-    [InlineData("Span<mut Leaf> value = leaf;")]
+    [TestCase("write int32 value = 42;")]
+    [TestCase("write Leaf value = leaf;")]
+    [TestCase("write Pair value = new Pair(42);")]
+    [TestCase("Span<mut Leaf> value = leaf;")]
     public void WriteQualifierDoesNotOpenUnsupportedTypes(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -86,15 +83,13 @@ public sealed class NativeManagedClassTests
             int32 Main() {
                 require Leaf.TryCreate(42, out var leaf);
             """ + declaration + " return leaf.Value; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("mut Leaf @alias = leaf; @alias.Value = 0;")]
-    [InlineData("Leaf @alias = leaf; @alias.Value = 0;")]
-    [InlineData("Leaf? @alias = leaf; require @alias is some projected; projected.Value = 0;")]
-    [InlineData("write Leaf writable = leaf; Leaf view = writable; view.Value = 0;")]
+    [TestCase("mut Leaf @alias = leaf; @alias.Value = 0;")]
+    [TestCase("Leaf @alias = leaf; @alias.Value = 0;")]
+    [TestCase("Leaf? @alias = leaf; require @alias is some projected; projected.Value = 0;")]
+    [TestCase("write Leaf writable = leaf; Leaf view = writable; view.Value = 0;")]
     public void LocalRebindingAndReadonlyProjectionsDoNotUpgradeReferentAccess(string body)
     {
         var source = """
@@ -109,22 +104,18 @@ public sealed class NativeManagedClassTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("mut class Leaf { public mut int32 Value; public Leaf(int32 value) { Value = value; } } bool Forward(out Leaf leaf) { return Leaf.TryCreate(42, out leaf); }")]
-    [InlineData("bool Forward(out ManagedNode node) { return ManagedNode.TryCreate(42, out node); }")]
+    [TestCase("mut class Leaf { public mut int32 Value; public Leaf(int32 value) { Value = value; } } bool Forward(out Leaf leaf) { return Leaf.TryCreate(42, out leaf); }")]
+    [TestCase("bool Forward(out ManagedNode node) { return ManagedNode.TryCreate(42, out node); }")]
     public void FactoryOutputsRequireExactWritableStorage(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         mut class Leaf {
             public mut int32 Value;
             public Leaf(int32 value) { Value = value; }
@@ -137,7 +128,7 @@ public sealed class NativeManagedClassTests
             return writable.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             require ManagedNode.TryCreate(42, out var writable);
             ManagedNode view = writable;
@@ -148,8 +139,8 @@ public sealed class NativeManagedClassTests
     public void ReadonlyReceiversCannotCallMutatingMethods(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
     private const string Leaf = """
@@ -160,10 +151,8 @@ public sealed class NativeManagedClassTests
             public int32 Read() { return Value; }
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void RetainsHeterogeneousClassAndNodeEdges(BoundRuntimePolicy policy)
     {
         var source = """
@@ -193,25 +182,23 @@ public sealed class NativeManagedClassTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var pair = Assert.Single(program.Classes, item => item.Name == "Pair");
-        Assert.Equal(3, pair.Fields.Count(field => ManagedClassTypes.IsManaged(field.Type)));
-        Assert.False(pair.Fields[0].IsMutable);
-        Assert.True(pair.Fields[1].IsMutable);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var pair = global::System.Linq.Enumerable.Single(program.Classes, item => item.Name == "Pair");
+        Assert.That(pair.Fields.Count(field => ManagedClassTypes.IsManaged(field.Type)), Is.EqualTo(3));
+        Assert.That(pair.Fields[0].IsMutable, Is.False);
+        Assert.That(pair.Fields[1].IsMutable, Is.True);
     }
-
-    [Theory]
-    [InlineData("Leaf value = new Leaf(42); return value.Value;", "TRM3005")]
-    [InlineData("require Leaf.TryCreate(42, out var leaf); leaf.Secret = 0; return leaf.Value;", "TRM3011")]
+    [TestCase("Leaf value = new Leaf(42); return value.Value;","TRM3005")]
+    [TestCase("require Leaf.TryCreate(42, out var leaf); leaf.Secret = 0; return leaf.Value;","TRM3011")]
     public void RejectsNewAndPrivateWrites(string body, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Leaf + "int32 Main() { " + body + " }"));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void RejectsReadonlyWritesThroughAliasedFixedHandle()
     {
         var source = """
@@ -227,11 +214,11 @@ public sealed class NativeManagedClassTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3008");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3008"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void RejectsReadonlyFinalFieldThroughImmutableManagedHandleChain()
     {
         var source = """
@@ -251,25 +238,21 @@ public sealed class NativeManagedClassTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3008");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3008"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("this.Read(); Value = value;")]
-    [InlineData("Leaf @alias = this; Value = value;")]
+    [TestCase("this.Read(); Value = value;")]
+    [TestCase("Leaf @alias = this; Value = value;")]
     public void RejectsPartialThisCallsAndEscapes(string body)
     {
         var source = "class Leaf { public int32 Value; public Leaf(int32 value) { " + body
             + " } public int32 Read() { return Value; } } int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void ScalarOnlyPrivateClassLibraryPersistsWithoutManagedExports(
         BoundRuntimePolicy policy)
     {
@@ -281,27 +264,25 @@ public sealed class NativeManagedClassTests
             public int32 Proof() { return Create().Read(); }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         var module = ModuleCompiler.CreateProducer(program, ["Proof"]);
         var reference = ModuleCompiler.CreateReference(module);
-        Assert.Empty(reference.Structures);
-        Assert.Equal("Proof", Assert.Single(reference.Functions).Name);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Create"]));
+        Assert.That(reference.Structures, Is.Empty);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("Proof"));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Create"]))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Create"],
-            (NativeRuntimePolicy)policy));
-        Assert.NotEmpty(NativeEmitter.EmitLibrary(program, ["Proof"], (NativeRuntimePolicy)policy));
+            (NativeRuntimePolicy)policy))!;
+        Assert.That(NativeEmitter.EmitLibrary(program, ["Proof"], (NativeRuntimePolicy)policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public int32 Value;
             public Leaf() {}
         }
         int32 Main() { return 42; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public int32 Value;
             public Leaf(int32 value) { Value = value; }
@@ -309,14 +290,14 @@ public sealed class NativeManagedClassTests
         struct Wrapper { public Leaf Item; }
         int32 Main() { return 42; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public int32 Value;
             public Leaf(int32 value) { Value = value; }
         }
         int32 Main() { Leaf value = new Leaf(42); return value.Value; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public int32 Value;
             public Leaf(int32 value) { Value = value; }
@@ -324,7 +305,7 @@ public sealed class NativeManagedClassTests
         class Derived : Leaf {}
         int32 Main() { return 42; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public Leaf? Next;
             public Leaf() {}
@@ -334,7 +315,7 @@ public sealed class NativeManagedClassTests
     public void RejectsUnsupportedClassShapesAndIncompleteConstruction(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
     }
 }

@@ -9,44 +9,39 @@ using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class PrelexedSyntaxTests
 {
-    [Theory]
-    [InlineData("")]
-    [InlineData(" // trailing\r\n")]
-    [InlineData("void F() { return; }")]
-    [InlineData("void F() { return 1 } // trailing \uD800")]
-    [InlineData("void F() { @ return; } /* unterminated")]
+    [TestCase("")]
+    [TestCase(" // trailing\r\n")]
+    [TestCase("void F() { return; }")]
+    [TestCase("void F() { return 1 } // trailing \uD800")]
+    [TestCase("void F() { @ return; } /* unterminated")]
     public void SuppliedLexingMatchesOrdinaryParsingAndRecovery(string text)
     {
         var lexResult = Lexer.Lex(SourceText.From(text, "fixture.terrum"));
         var supplied = SyntaxTree.Parse(lexResult);
         var ordinary = SyntaxTree.Parse(lexResult.Source);
 
-        Assert.Same(lexResult.Source, supplied.Source);
-        Assert.Equal(lexResult.Tokens.Length, supplied.Tokens.Length);
+        Assert.That(supplied.Source, Is.SameAs(lexResult.Source));
+        Assert.That(supplied.Tokens.Length, Is.EqualTo(lexResult.Tokens.Length));
         for (var index = 0; index < supplied.Tokens.Length; index++)
         {
-            Assert.Same(lexResult.Tokens[index], supplied.Tokens[index]);
+            Assert.That(supplied.Tokens[index], Is.SameAs(lexResult.Tokens[index]));
         }
 
-        Assert.Equal(text, supplied.Root.ToFullString());
-        Assert.Equal(ordinary.Root.ToFullString(), supplied.Root.ToFullString());
-        Assert.Equal(ordinary.ContentId, supplied.ContentId);
-        Assert.Equal<Diagnostic>(ordinary.Diagnostics, supplied.Diagnostics);
-        Assert.Equal<(SyntaxKind, TextSpan, TextSpan)>(
-            ordinary.Root.DescendantNodes(includeSelf: true).Select(node => (node.Kind, node.Span, node.FullSpan)),
-            supplied.Root.DescendantNodes(includeSelf: true).Select(node => (node.Kind, node.Span, node.FullSpan)));
-        Assert.Equal<(TokenKind, TextSpan, bool)>(
-            ordinary.Root.DescendantTokens().Select(token => (token.Kind, token.Span, token.IsMissing)),
-            supplied.Root.DescendantTokens().Select(token => (token.Kind, token.Span, token.IsMissing)));
+        Assert.That(supplied.Root.ToFullString(), Is.EqualTo(text));
+        Assert.That(supplied.Root.ToFullString(), Is.EqualTo(ordinary.Root.ToFullString()));
+        Assert.That(supplied.ContentId, Is.EqualTo(ordinary.ContentId));
+        Assert.That(supplied.Diagnostics, Is.EqualTo(ordinary.Diagnostics));
+        Assert.That(supplied.Root.DescendantNodes(includeSelf: true).Select(node => (node.Kind, node.Span, node.FullSpan)), Is.EqualTo(ordinary.Root.DescendantNodes(includeSelf: true).Select(node => (node.Kind, node.Span, node.FullSpan))));
+        Assert.That(supplied.Root.DescendantTokens().Select(token => (token.Kind, token.Span, token.IsMissing)), Is.EqualTo(ordinary.Root.DescendantTokens().Select(token => (token.Kind, token.Span, token.IsMissing))));
     }
 
-    [Fact]
+    [Test]
     public void SuppliedClassificationIsAcceptedWithoutRelexing()
     {
         var lexResult = Lexer.Lex(SourceText.From("void F() { return true; }"));
@@ -55,12 +50,12 @@ public sealed class PrelexedSyntaxTests
         var substituted = ForgeToken(TokenKind.FalseKeyword, original.Text, original.Span, original.LeadingTrivia);
         var tree = SyntaxTree.Parse(lexResult with { Tokens = lexResult.Tokens.SetItem(index, substituted) });
 
-        Assert.Same(substituted, tree.Tokens[index]);
-        Assert.Contains(tree.Root.DescendantTokens(), token => ReferenceEquals(substituted, token));
-        Assert.Equal(lexResult.Source.Text, tree.Root.ToFullString());
+        Assert.That(tree.Tokens[index], Is.SameAs(substituted));
+        Assert.That(global::System.Linq.Enumerable.Any(tree.Root.DescendantTokens(),token => ReferenceEquals(substituted, token)),Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(lexResult.Source.Text));
     }
 
-    [Fact]
+    [Test]
     public void ReservedUnderscoreCannotBeForgedAsAnIdentifierInPrelexedSource()
     {
         var lexResult = Lexer.Lex(SourceText.From("int32 Main() { _ = int32(42); return 42; }"));
@@ -70,50 +65,49 @@ public sealed class PrelexedSyntaxTests
         var forged = ForgeToken(TokenKind.Identifier, token.Text, token.Span, token.LeadingTrivia);
 
         _ = Assert.Throws<ArgumentException>(() =>
-            SyntaxTree.Parse(lexResult with { Tokens = lexResult.Tokens.SetItem(index, forged) }));
+            SyntaxTree.Parse(lexResult with { Tokens = lexResult.Tokens.SetItem(index, forged) }))!;
     }
 
-    [Fact]
+    [Test]
     public void TrustedCallerClassificationIsNotHostileCompletedScannerInterchange()
     {
         const string text = "int32 !!() { return 1; }";
         var lexed = Lexer.Lex(SourceText.From(text));
-        var token = Assert.Single(lexed.Tokens, item => item.Kind == TokenKind.Bad);
+        var token = global::System.Linq.Enumerable.Single(lexed.Tokens, item => item.Kind == TokenKind.Bad);
         var forged = ForgeToken(TokenKind.Identifier, token.Text, token.Span, token.LeadingTrivia);
         var tree = SyntaxTree.Parse(lexed with {
-            Tokens = lexed.Tokens.SetItem(lexed.Tokens.IndexOf(token), forged), Diagnostics = [],
+            Tokens = lexed.Tokens.SetItem(lexed.Tokens.IndexOf(token), forged),
+            Diagnostics = [],
         });
-        Assert.Empty(tree.Diagnostics);
-        Assert.Equal(text, tree.Root.ToFullString());
+        Assert.That(tree.Diagnostics, Is.Empty);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
     }
-
-    [Theory]
-    [InlineData("null-source")]
-    [InlineData("default-tokens")]
-    [InlineData("empty-tokens")]
-    [InlineData("null-token")]
-    [InlineData("missing-eof")]
-    [InlineData("extra-eof")]
-    [InlineData("early-eof")]
-    [InlineData("missing-token")]
-    [InlineData("invalid-kind")]
-    [InlineData("token-text")]
-    [InlineData("token-gap")]
-    [InlineData("default-trivia")]
-    [InlineData("null-trivia")]
-    [InlineData("invalid-trivia-kind")]
-    [InlineData("trivia-text")]
-    [InlineData("trivia-gap")]
-    [InlineData("zero-trivia")]
-    [InlineData("eof-position")]
-    [InlineData("default-diagnostics")]
-    [InlineData("null-diagnostic")]
-    [InlineData("diagnostic-code")]
-    [InlineData("null-code")]
-    [InlineData("diagnostic-message")]
-    [InlineData("null-message")]
-    [InlineData("diagnostic-severity")]
-    [InlineData("diagnostic-span")]
+    [TestCase("null-source")]
+    [TestCase("default-tokens")]
+    [TestCase("empty-tokens")]
+    [TestCase("null-token")]
+    [TestCase("missing-eof")]
+    [TestCase("extra-eof")]
+    [TestCase("early-eof")]
+    [TestCase("missing-token")]
+    [TestCase("invalid-kind")]
+    [TestCase("token-text")]
+    [TestCase("token-gap")]
+    [TestCase("default-trivia")]
+    [TestCase("null-trivia")]
+    [TestCase("invalid-trivia-kind")]
+    [TestCase("trivia-text")]
+    [TestCase("trivia-gap")]
+    [TestCase("zero-trivia")]
+    [TestCase("eof-position")]
+    [TestCase("default-diagnostics")]
+    [TestCase("null-diagnostic")]
+    [TestCase("diagnostic-code")]
+    [TestCase("null-code")]
+    [TestCase("diagnostic-message")]
+    [TestCase("null-message")]
+    [TestCase("diagnostic-severity")]
+    [TestCase("diagnostic-span")]
     public void RejectsMalformedExternalLexicalResults(string caseName)
     {
         var lexResult = Lexer.Lex(SourceText.From(" a"));
@@ -157,20 +151,20 @@ public sealed class PrelexedSyntaxTests
             _ => throw new ArgumentOutOfRangeException(nameof(caseName)),
         };
 
-        _ = Assert.Throws<ArgumentException>(() => SyntaxTree.Parse(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SyntaxTree.Parse(malformed))!;
     }
 
-    [Fact]
+    [Test]
     public void RejectsNullAndHonorsCancellation()
     {
-        _ = Assert.Throws<ArgumentNullException>(() => SyntaxTree.Parse((LexResult)null!));
+        _ = Assert.Throws<ArgumentNullException>(() => SyntaxTree.Parse((LexResult)null!))!;
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         var lexResult = Lexer.Lex(SourceText.From("void F() {}"));
-        _ = Assert.Throws<OperationCanceledException>(() => SyntaxTree.Parse(lexResult, cancellation.Token));
+        _ = Assert.Throws<OperationCanceledException>(() => SyntaxTree.Parse(lexResult, cancellation.Token))!;
     }
 
-    [Fact]
+    [Test]
     public void SuppliedShiftClassificationWithDifferentTextDoesNotSplitSource()
     {
         var lex = Lexer.Lex(SourceText.From("void F(Box<Box<int32 x value) {}"));
@@ -178,10 +172,10 @@ public sealed class PrelexedSyntaxTests
         var token = lex.Tokens[index];
         var classified = ForgeToken(TokenKind.ShiftRight, token.Text, token.Span, token.LeadingTrivia);
         var tree = SyntaxTree.Parse(lex with { Tokens = lex.Tokens.SetItem(index, classified) });
-        Assert.True(tree.HasErrors);
-        Assert.Equal(lex.Source.Text, tree.Root.ToFullString());
-        Assert.Same(classified, tree.Tokens[index]);
-        Assert.Contains(classified, tree.Root.DescendantTokens());
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(lex.Source.Text));
+        Assert.That(tree.Tokens[index], Is.SameAs(classified));
+        Assert.That(tree.Root.DescendantTokens(), Does.Contain(classified));
     }
 
     private static LexResult WithFirstToken(LexResult result, SyntaxToken token)
@@ -189,7 +183,7 @@ public sealed class PrelexedSyntaxTests
 
     private static SyntaxToken ForgeToken(TokenKind kind, string text, TextSpan span, ImmutableArray<SyntaxTrivia> leadingTrivia)
     {
-        var constructor = Assert.Single(typeof(SyntaxToken).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic));
-        return Assert.IsType<SyntaxToken>(constructor.Invoke([kind, text, span, leadingTrivia, false]));
+        var constructor = global::System.Linq.Enumerable.Single(typeof(SyntaxToken).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic));
+        return ((global::System.Func<SyntaxToken>)(() => { var __nunitActual0 = constructor.Invoke([kind, text, span, leadingTrivia, false]); Assert.That(__nunitActual0, Is.TypeOf<SyntaxToken>()); return (SyntaxToken)__nunitActual0!; }))();
     }
 }

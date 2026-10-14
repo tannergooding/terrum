@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -29,17 +29,15 @@ public sealed class NativeLoopTransferModuleTests
             return sum + 2;
         }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CurrentSemanticFormatRoundTripsPostTestedNamedLoopsAsync(NativeRuntimePolicy policy)
     {
         var previous = NativeModuleCompiler.CreateProducer(Compile("public int32 Leaf() { return 1; }", policy),
             ["Leaf"], "NodeB", policy);
         var replacementProgram = Compile(StructuredLeaf, policy);
         var semantic = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
-        Assert.Equal(76,VersionOf(semantic));
+        Assert.That(VersionOf(semantic), Is.EqualTo(76));
         var reference = ModuleCompiler.CreateReference(semantic);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
             int32 Main() {
@@ -48,11 +46,11 @@ public sealed class NativeLoopTransferModuleTests
                 return answer;
             }
             """, policy, reference, library: false), semantic);
-        Assert.Equal(76,VersionOf(consumer));
+        Assert.That(VersionOf(consumer), Is.EqualTo(76));
         SemanticVerifier.Verify(ModuleCompiler.Link(consumer, semantic));
         var downgraded = (byte[])semantic.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 50);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded))!;
         var replacement = NativeModuleCompiler.CreateProducer(replacementProgram, ["Leaf"], "NodeB", policy);
         var middle = NativeModuleCompiler.CreateGraphProducer(Compile(
             "public int32 Middle() { return Leaf(); }", policy,
@@ -61,12 +59,12 @@ public sealed class NativeLoopTransferModuleTests
             "int32 Main() { return Middle(); }", policy,
             NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
         NativeModuleCompiler.ValidateGraph(root, [middle, replacement]);
-        Assert.Equal(1, await NativeModuleCompiler.RunGraphAsync(root, [middle, previous],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, previous],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(1));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     private const string Leaf = """
@@ -100,17 +98,14 @@ public sealed class NativeLoopTransferModuleTests
             return box.Value;
         }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void CurrentSemanticFormatRoundTripsNearestLoopAndForIterator(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Leaf"]);
-        Assert.Equal(76,VersionOf(producer));
-        Assert.Equal(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11",
-            ModuleCompiler.GetNativeProfileVersion(producer, false));
-        _ = Assert.Single(ModuleCompiler.CreateReference(producer).Functions);
+        Assert.That(VersionOf(producer), Is.EqualTo(76));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11"));
+        _ = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
             int32 Main() {
                 mut int32 result = Leaf();
@@ -118,10 +113,10 @@ public sealed class NativeLoopTransferModuleTests
                 return result;
             }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.Equal(76,VersionOf(consumer));
+        Assert.That(VersionOf(consumer), Is.EqualTo(76));
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Contains(linked.Functions, static function => function.Name == "Leaf" && !function.IsExternal);
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Advance");
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "Leaf" && !function.IsExternal),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Advance"),Is.True);
         var old = ModuleCompiler.CreateProducer(Compile("""
             public int32 Leaf() {
                 mut int32 sum = 0;
@@ -129,13 +124,11 @@ public sealed class NativeLoopTransferModuleTests
                 return sum;
             }
             """, policy), ["Leaf"]);
-        Assert.Equal(76,VersionOf(old));
+        Assert.That(VersionOf(old), Is.EqualTo(76));
         _ = ModuleCompiler.CreateReference(old);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CurrentSemanticFormatLeafReplacesUnchangedNativeGraphAsync(NativeRuntimePolicy policy)
     {
         var original = NativeModuleCompiler.CreateProducer(Compile("public int32 Leaf() { return 20; }", policy),
@@ -148,22 +141,19 @@ public sealed class NativeLoopTransferModuleTests
             NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
         var hashes = (SHA256.HashData(root), SHA256.HashData(middle));
         var replacement = NativeModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Leaf"], "NodeB", policy);
-        Assert.Equal(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11",
-            NativeModuleCompiler.Inspect(replacement).NativeProfileVersion);
+        Assert.That(NativeModuleCompiler.Inspect(replacement).NativeProfileVersion, Is.EqualTo(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11"));
         NativeModuleCompiler.ValidateGraph(root, [middle, replacement]);
-        Assert.Equal(22, await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(25, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(25, await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(hashes.Item1, SHA256.HashData(root));
-        Assert.Equal(hashes.Item2, SHA256.HashData(middle));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(22));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(25));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(25));
+        Assert.That(SHA256.HashData(root), Is.EqualTo(hashes.Item1));
+        Assert.That(SHA256.HashData(middle), Is.EqualTo(hashes.Item2));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CurrentSemanticFormatClassLeafAndClassFreeGraphMembersRetainTheirShapesAsync(
         NativeRuntimePolicy policy)
     {
@@ -192,17 +182,17 @@ public sealed class NativeLoopTransferModuleTests
             "samples", "native", "graph", "managed-copy-class-leaf.terrum")).ConfigureAwait(true))
             .Replace("return result;", "while (true) { break; } return result;", StringComparison.Ordinal);
         var replacement = NativeModuleCompiler.CreateProducer(Compile(copyLeaf, policy), ["Leaf"], "NodeB", policy);
-        Assert.Equal("native-20", NativeModuleCompiler.Inspect(replacement).NativeProfileVersion);
+        Assert.That(NativeModuleCompiler.Inspect(replacement).NativeProfileVersion, Is.EqualTo("native-20"));
         NativeModuleCompiler.ValidateGraph(root, [middle, replacement]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, original],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, original],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(44));
     }
 
-    [Fact]
+    [Test]
     public async Task CurrentSemanticFormatModuleSetKeepsBothLeafImportsIndependentAsync()
     {
         var alpha = NativeModuleCompiler.CreateProducer(Compile(Leaf.Replace("Leaf()", "Alpha()",
@@ -219,17 +209,17 @@ public sealed class NativeLoopTransferModuleTests
             """, NativeRuntimePolicy.FailFast, NativeModuleCompiler.CreateReferenceSet([alpha, beta]),
             library: false), [alpha, beta], NativeRuntimePolicy.FailFast);
         NativeModuleCompiler.ValidateConsumerSet(consumer, [beta, alpha]);
-        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [beta, alpha],
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [beta, alpha],
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void CurrentSemanticFormatRejectsForgedTags()
     {
         var policy = NativeRuntimePolicy.FailFast;
         var oldProgram = Compile("public int32 Leaf() { return 42; }", policy);
         var old = ModuleCompiler.CreateProducer(oldProgram, ["Leaf"]);
-        Assert.Equal(76,VersionOf(old));
+        Assert.That(VersionOf(old), Is.EqualTo(76));
         var classProgram = Compile("""
             class Box {
                 public int32 Value;
@@ -238,12 +228,12 @@ public sealed class NativeLoopTransferModuleTests
             public int32 Leaf() { require Box.TryCreate(out var box); return box.Value; }
             """, policy);
         var classOnly = ModuleCompiler.CreateProducer(classProgram, ["Leaf"]);
-        Assert.Equal(76,VersionOf(classOnly));
+        Assert.That(VersionOf(classOnly), Is.EqualTo(76));
         _ = ModuleCompiler.CreateReference(classOnly);
         var copyProgram = Compile(File.ReadAllText(Path.Combine(RepositoryRoot(),
             "samples", "native", "graph", "managed-copy-class-leaf.terrum")), policy);
         var copy = ModuleCompiler.CreateProducer(copyProgram, ["Leaf"]);
-        Assert.Equal(76,VersionOf(copy));
+        Assert.That(VersionOf(copy), Is.EqualTo(76));
         _ = ModuleCompiler.CreateReference(copy);
         foreach (var (legacy, program) in new[] {
             (old, oldProgram), (classOnly, classProgram), (copy, copyProgram),
@@ -252,26 +242,26 @@ public sealed class NativeLoopTransferModuleTests
             var invalid = (byte[])legacy.Clone();
             var bodyTag = FindReturnTag(invalid, program);
             invalid[bodyTag] = 18;
-            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalid));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalid))!;
         }
         var transferred = ModuleCompiler.CreateProducer(Compile(ClassLeaf, policy), ["Leaf"]);
-        Assert.Equal(76,VersionOf(transferred));
+        Assert.That(VersionOf(transferred), Is.EqualTo(76));
         var downgraded = (byte[])transferred.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 19);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded))!;
     }
 
     private static int FindReturnTag(byte[] bytes, BoundProgram program)
     {
-        var function = Assert.Single(program.Functions, static item => item.Name == "Leaf");
-        var statement = Assert.Single(function.Body.Statements.OfType<BoundReturn>());
+        var function = global::System.Linq.Enumerable.Single(program.Functions, static item => item.Name == "Leaf");
+        var statement = global::System.Linq.Enumerable.Single(function.Body.Statements.OfType<BoundReturn>());
         var marker = new byte[9];
         marker[0] = 8;
         BinaryPrimitives.WriteInt32LittleEndian(marker.AsSpan(1), statement.Span.Start);
         BinaryPrimitives.WriteInt32LittleEndian(marker.AsSpan(5), statement.Span.Length);
         var index = bytes.AsSpan().IndexOf(marker);
-        Assert.True(index >= 0);
-        Assert.Equal(-1, bytes.AsSpan(index + 1).IndexOf(marker));
+        Assert.That(index >= 0, Is.True);
+        Assert.That(bytes.AsSpan(index + 1).IndexOf(marker), Is.EqualTo(-1));
         return index;
     }
 
@@ -284,9 +274,9 @@ public sealed class NativeLoopTransferModuleTests
         var compilation = library
             ? reference is null ? Compilation.CreateLibrary(syntax, (BoundRuntimePolicy)policy)
                 : Compilation.CreateLibrary(syntax, reference, (BoundRuntimePolicy)policy)
-            : Compilation.Create(syntax, Assert.IsType<CompilationReference>(reference), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), (BoundRuntimePolicy)policy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
     private static string Apphost()

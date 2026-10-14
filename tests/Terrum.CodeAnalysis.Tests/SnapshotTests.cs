@@ -3,13 +3,13 @@
 using System;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class SnapshotTests
 {
-    [Fact]
+    [Test]
     public void AppliesAnAtomicOrderedEditBatchWithoutMutatingOriginal()
     {
         var original = SyntaxTree.Parse("void F() { return; }", "source.terrum");
@@ -18,33 +18,33 @@ public sealed class SnapshotTests
             new TextChange(new TextSpan(5, 1), "Main"),
             new TextChange(new TextSpan(11, 7), "Terminal.WriteLine(\"hello\");"),
         ]);
-        Assert.Equal("void F() { return; }", original.Root.ToFullString());
-        Assert.Equal("void Main() { Terminal.WriteLine(\"hello\"); }", changed.Root.ToFullString());
-        Assert.Equal(original.Source.Path, changed.Source.Path);
-        Assert.False(changed.HasErrors);
-        Assert.NotEqual(original.ContentId, changed.ContentId);
+        Assert.That(original.Root.ToFullString(), Is.EqualTo("void F() { return; }"));
+        Assert.That(changed.Root.ToFullString(), Is.EqualTo("void Main() { Terminal.WriteLine(\"hello\"); }"));
+        Assert.That(changed.Source.Path, Is.EqualTo(original.Source.Path));
+        Assert.That(changed.HasErrors, Is.False);
+        Assert.That(changed.ContentId, Is.Not.EqualTo(original.ContentId));
     }
 
-    [Fact]
+    [Test]
     public void RejectsStaleOverlappingAndOutOfRangeChanges()
     {
         var tree = SyntaxTree.Parse("void F() {}");
-        _ = Assert.Throws<InvalidOperationException>(() => tree.WithChanges("stale", []));
+        _ = Assert.Throws<InvalidOperationException>(() => tree.WithChanges("stale", []))!;
         _ = Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId,
-            [new TextChange(new TextSpan(1, 3), ""), new TextChange(new TextSpan(2, 0), "x")]));
+            [new TextChange(new TextSpan(1, 3), ""), new TextChange(new TextSpan(2, 0), "x")]))!;
         _ = Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId,
-            [new TextChange(new TextSpan(0, 0), "a"), new TextChange(new TextSpan(0, 0), "b")]));
-        _ = Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId, [new TextChange(new TextSpan(50, 0), "")]));
-        Assert.Equal("void F() {}", tree.Root.ToFullString());
+            [new TextChange(new TextSpan(0, 0), "a"), new TextChange(new TextSpan(0, 0), "b")]))!;
+        _ = Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId, [new TextChange(new TextSpan(50, 0), "")]))!;
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo("void F() {}"));
     }
 
-    [Fact]
+    [Test]
     public void ContentIdentityIsDeterministicAndPreservesMalformedCodeUnits()
     {
-        Assert.Equal(SyntaxTree.Parse("a").ContentId, SyntaxTree.Parse("a", "other-path").ContentId);
-        Assert.NotEqual(SyntaxTree.Parse("\uD800").ContentId, SyntaxTree.Parse("\uD801").ContentId);
-        Assert.NotEqual(SyntaxTree.Parse("\uD800").ContentId, SyntaxTree.Parse("\uFFFD").ContentId);
+        Assert.That(SyntaxTree.Parse("a", "other-path").ContentId, Is.EqualTo(SyntaxTree.Parse("a").ContentId));
+        Assert.That(SyntaxTree.Parse("\uD801").ContentId, Is.Not.EqualTo(SyntaxTree.Parse("\uD800").ContentId));
+        Assert.That(SyntaxTree.Parse("\uFFFD").ContentId, Is.Not.EqualTo(SyntaxTree.Parse("\uD800").ContentId));
         var tree = SyntaxTree.Parse("void F() {}");
-        Assert.Equal(tree.ContentId, tree.WithChanges(tree.ContentId, []).ContentId);
+        Assert.That(tree.WithChanges(tree.ContentId, []).ContentId, Is.EqualTo(tree.ContentId));
     }
 }

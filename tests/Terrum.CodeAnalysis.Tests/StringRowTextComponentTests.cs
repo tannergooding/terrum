@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -91,10 +91,8 @@ public sealed class StringRowTextComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringRowTextMatchesHostedStrictDecoding(BoundRuntimePolicy policy)
     {
         var fixtures = new FixtureSet();
@@ -152,20 +150,20 @@ public sealed class StringRowTextComponentTests
         var root = RepositoryRoot();
         var layoutPath = Path.Combine(root, "self-host", "StringRowLayout.terrum");
         var layout = SyntaxTree.Parse(await File.ReadAllTextAsync(layoutPath).ConfigureAwait(true), layoutPath);
-        Assert.False(layout.HasErrors, string.Join(Environment.NewLine, layout.Diagnostics));
+        Assert.That(layout.HasErrors, Is.False, string.Join(Environment.NewLine, layout.Diagnostics));
         var textPath = Path.Combine(root, "self-host", "StringRowText.terrum");
         var text = SyntaxTree.Parse(await File.ReadAllTextAsync(textPath).ConfigureAwait(true), textPath);
-        Assert.False(text.HasErrors, string.Join(Environment.NewLine, text.Diagnostics));
+        Assert.That(text.HasErrors, Is.False, string.Join(Environment.NewLine, text.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "string-row-text-component.terrum");
         var compilation = Compilation.Create([layout, text, entry],
         [
             new HostBuffer("Rows", PrimitiveType.Int32, [.. fixtures.Rows], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. fixtures.Expected.SelectMany(static item => item)], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static byte[] EncodeText(string value, int encoding)
@@ -204,7 +202,7 @@ public sealed class StringRowTextComponentTests
         var decoded = isName
             ? TrRmStringRowReader.DecodeName(row)
             : TrRmStringRowReader.DecodeNamespace(row);
-        Assert.Equal(expectedText, decoded);
+        Assert.That(decoded, Is.EqualTo(expectedText));
         var scalars = new List<int>();
         foreach (var rune in decoded.EnumerateRunes())
         {
@@ -223,8 +221,7 @@ public sealed class StringRowTextComponentTests
 
     private static void AddInvalidText(FixtureSet fixtures, byte[] row, bool isName)
     {
-        Assert.Throws<InvalidDataException>(() =>
-        {
+        Assert.Throws<InvalidDataException>(() => {
             if (isName)
             {
                 TrRmStringRowReader.DecodeName(row);

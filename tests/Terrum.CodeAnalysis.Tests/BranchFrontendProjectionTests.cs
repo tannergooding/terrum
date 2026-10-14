@@ -4,15 +4,14 @@ using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class BranchFrontendProjectionTests
 {
-    [Theory]
-    [InlineData("if", 32, 4)]
-    [InlineData("while", 36, 3)]
+    [TestCase("if",32,4)]
+    [TestCase("while",36,3)]
     public void NestedBodyCannotConsumeAnEnclosingElse(string keyword, int version, int kind)
     {
         var text = $"public int32 Value() {{ if (true) {{ {keyword} (false) {{ }} }} else {{ }} return 42; }}";
@@ -46,9 +45,9 @@ public sealed class BranchFrontendProjectionTests
         nested.CopyTo(words, 337);
         marker.CopyTo(words, 342);
         var parsed = ScalarFrontendHost.ReadResult(source, Encode(words));
-        Assert.Equal(3, parsed.Statements.Length);
-        Assert.Equal("{ }", text.Substring(parsed.Statements[1].BodySpan.Start,
-            parsed.Statements[1].BodySpan.Length));
+        Assert.That(parsed.Statements.Length, Is.EqualTo(3));
+        Assert.That(text.Substring(parsed.Statements[1].BodySpan.Start,
+            parsed.Statements[1].BodySpan.Length), Is.EqualTo("{ }"));
 
         Reject(333, 1);
         Reject(338, 3);
@@ -67,7 +66,7 @@ public sealed class BranchFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReaderRequiresSourceBoundBranchArmsAndSelectedFeatures()
     {
         const string text = "public int32 Value() { if (true) { } else { } return 42; }";
@@ -93,13 +92,13 @@ public sealed class BranchFrontendProjectionTests
         Statement(1, 5, 2, -1, otherwise, text.IndexOf("} return", StringComparison.Ordinal) + 1);
 
         var result = ScalarFrontendHost.ReadResult(source, Bytes());
-        Assert.Equal(2, result.Statements.Length);
-        Assert.Equal(4, result.Statements[0].Kind);
-        Assert.Equal(5, result.Statements[1].Kind);
-        Assert.Equal("{ }", text.Substring(result.Statements[0].BodySpan.Start,
-            result.Statements[0].BodySpan.Length));
-        Assert.Equal("{ }", text.Substring(result.Statements[1].BodySpan.Start,
-            result.Statements[1].BodySpan.Length));
+        Assert.That(result.Statements.Length, Is.EqualTo(2));
+        Assert.That(result.Statements[0].Kind, Is.EqualTo(4));
+        Assert.That(result.Statements[1].Kind, Is.EqualTo(5));
+        Assert.That(text.Substring(result.Statements[0].BodySpan.Start,
+            result.Statements[0].BodySpan.Length), Is.EqualTo("{ }"));
+        Assert.That(text.Substring(result.Statements[1].BodySpan.Start,
+            result.Statements[1].BodySpan.Length), Is.EqualTo("{ }"));
 
         Reject(0, 28);
         Reject(0, 33);

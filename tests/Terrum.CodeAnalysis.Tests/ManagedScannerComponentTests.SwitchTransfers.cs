@@ -8,13 +8,13 @@ using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class ManagedScannerComponentTests
 {
-    [Fact]
+    [Test]
     public async Task ScalarFrontendSwitchTransferAuditsIdentityAndNestedLoopDepthAsync()
     {
         const string text = "public int32 Main() { switch (1) { 1 => { while (true) { continue _; } }, _ => { return 42; } } }";
@@ -23,31 +23,30 @@ public sealed partial class ManagedScannerComponentTests
             var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
             var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes,
                 (BoundRuntimePolicy)policy);
-            var projection = Assert.Single(read.Projection.Functions);
-            var transfer = Assert.Single(projection.Statements, static statement => statement.Kind == 40);
-            Assert.Equal(0, transfer.Slot);
-            Assert.Equal(-1, transfer.Root);
-            Assert.Equal(new TextSpan(text.IndexOf("continue _;", StringComparison.Ordinal), 11), transfer.Span);
-            Assert.Single(projection.Locals);
-            var program = Assert.IsType<BoundProgram>(read.Program);
-            var function = Assert.Single(program.Functions);
-            Assert.Equal(2, function.Variables.Length);
-            var selection = Assert.IsType<BoundBlock>(Assert.Single(function.Body.Statements));
-            var state = Assert.IsType<BoundLocal>(selection.Statements[1]);
-            var dispatcher = Assert.IsType<BoundWhile>(selection.Statements[2]);
-            var arms = Assert.IsType<BoundIf>(dispatcher.Body);
-            Assert.Equal(state.Variable, Assert.IsType<BoundRead>(
-                Assert.IsType<BoundBinary>(arms.Condition).Left).Variable);
-            var arm = Assert.IsType<BoundBlock>(arms.Then);
-            var nestedLoop = Assert.IsType<BoundWhile>(arm.Statements[0]);
-            var nestedBody = Assert.IsType<BoundBlock>(nestedLoop.Body);
-            Assert.Equal(state.Variable, Assert.IsType<BoundAssignment>(nestedBody.Statements[0]).Variable);
-            Assert.Equal(2, Assert.IsType<BoundContinue>(nestedBody.Statements[1]).TargetDepth);
-            Assert.Equal(42, NativeJit.Execute(program with { EntryPoint = 0 }, policy));
+            var projection = global::System.Linq.Enumerable.Single(read.Projection.Functions);
+            var transfer = global::System.Linq.Enumerable.Single(projection.Statements, static statement => statement.Kind == 40);
+            Assert.That(transfer.Slot, Is.EqualTo(0));
+            Assert.That(transfer.Root, Is.EqualTo(-1));
+            Assert.That(transfer.Span, Is.EqualTo(new TextSpan(text.IndexOf("continue _;", StringComparison.Ordinal), 11)));
+            Assert.That(projection.Locals, Has.Exactly(1).Items);
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = read.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var function = global::System.Linq.Enumerable.Single(program.Functions);
+            Assert.That(function.Variables.Length, Is.EqualTo(2));
+            var selection = ((global::System.Func<BoundBlock>)(() => { var __nunitActual1 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual1, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual1!; }))();
+            var state = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = selection.Statements[1]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))();
+            var dispatcher = ((global::System.Func<BoundWhile>)(() => { var __nunitActual3 = selection.Statements[2]; Assert.That(__nunitActual3, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual3!; }))();
+            var arms = ((global::System.Func<BoundIf>)(() => { var __nunitActual4 = dispatcher.Body; Assert.That(__nunitActual4, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual4!; }))();
+            Assert.That(((global::System.Func<BoundRead>)(() => { var __nunitActual6 = ((global::System.Func<BoundBinary>)(() => { var __nunitActual5 = arms.Condition; Assert.That(__nunitActual5, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual5!; }))().Left; Assert.That(__nunitActual6, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual6!; }))().Variable, Is.EqualTo(state.Variable));
+            var arm = ((global::System.Func<BoundBlock>)(() => { var __nunitActual7 = arms.Then; Assert.That(__nunitActual7, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual7!; }))();
+            var nestedLoop = ((global::System.Func<BoundWhile>)(() => { var __nunitActual8 = arm.Statements[0]; Assert.That(__nunitActual8, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual8!; }))();
+            var nestedBody = ((global::System.Func<BoundBlock>)(() => { var __nunitActual9 = nestedLoop.Body; Assert.That(__nunitActual9, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual9!; }))();
+            Assert.That(((global::System.Func<BoundAssignment>)(() => { var __nunitActual10 = nestedBody.Statements[0]; Assert.That(__nunitActual10, Is.TypeOf<BoundAssignment>()); return (BoundAssignment)__nunitActual10!; }))().Variable, Is.EqualTo(state.Variable));
+            Assert.That(((global::System.Func<BoundContinue>)(() => { var __nunitActual11 = nestedBody.Statements[1]; Assert.That(__nunitActual11, Is.TypeOf<BoundContinue>()); return (BoundContinue)__nunitActual11!; }))().TargetDepth, Is.EqualTo(2));
+            Assert.That(NativeJit.Execute(program with { EntryPoint = 0 }, policy), Is.EqualTo(42));
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ScalarFrontendSwitchTransferReaderRejectsTamperedAndStaleRecordsAsync()
     {
         const string text = "public int32 Main() { switch (1) { 1 => { continue _; }, _ => { return 42; } } }";
@@ -56,7 +55,7 @@ public sealed partial class ManagedScannerComponentTests
             var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
             var source = SourceText.From(text);
             var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes, (BoundRuntimePolicy)policy);
-            var function = Assert.Single(read.Projection.Functions);
+            var function = global::System.Linq.Enumerable.Single(read.Projection.Functions);
             var transferIndex = Array.FindIndex(function.Statements.ToArray(),
                 static statement => statement.Kind == 40);
             var offset = 8 + 332 + transferIndex * 5;
@@ -78,7 +77,7 @@ public sealed partial class ManagedScannerComponentTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ScalarFrontendSwitchTransferNestedCleanupRunsBeforeTargetAsync()
     {
         const string text = """
@@ -100,12 +99,12 @@ public sealed partial class ManagedScannerComponentTests
             var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
             var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes,
                 (BoundRuntimePolicy)policy);
-            var program = Assert.IsType<BoundProgram>(read.Program);
-            Assert.Equal(18, NativeJit.Execute(program with { EntryPoint = 0 }, policy));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = read.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+            Assert.That(NativeJit.Execute(program with { EntryPoint = 0 }, policy), Is.EqualTo(18));
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ScalarFrontendSwitchTransferCyclesHaveNoNormalCompletionAsync()
     {
         foreach (var declaration in new[] { "public int32", "[NoThrow][DoesNotReturn] public void" })
@@ -116,10 +115,10 @@ public sealed partial class ManagedScannerComponentTests
                 var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
                 var read = ScalarFrontendHost.ReadProgram(SourceText.From(text), bytes, programBytes,
                     (BoundRuntimePolicy)policy);
-                var function = Assert.Single(read.Projection.Functions);
-                Assert.Equal(2, function.Statements.Count(static statement => statement.Kind == 40));
-                var program = Assert.IsType<BoundProgram>(read.Program);
-                Assert.NotEmpty(NativeEmitter.EmitLibrary(program, ["Main"], policy));
+                var function = global::System.Linq.Enumerable.Single(read.Projection.Functions);
+                Assert.That(function.Statements.Count(static statement => statement.Kind == 40), Is.EqualTo(2));
+                var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = read.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+                Assert.That(NativeEmitter.EmitLibrary(program, ["Main"], policy), Is.Not.Empty);
             }
         }
     }

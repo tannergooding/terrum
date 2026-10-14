@@ -5,15 +5,14 @@ using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeManagedOptionalTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void CyclesAndNullableNodeLocalsBindUnderBothPolicies(BoundRuntimePolicy policy)
     {
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -21,20 +20,18 @@ public sealed class NativeManagedOptionalTests
         var source = File.ReadAllText(Path.Combine(repository, "samples", "native",
             "managed-optional-cycle.terrum"));
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal("native-20", compilation.NativeProfileVersion);
-        Assert.NotNull(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.NativeProfileVersion, Is.EqualTo("native-20"));
+        TestAssertions.NotNull(compilation.Program);
     }
-
-    [Theory]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public Leaf? Next;
             public Leaf() {}
         }
         int32 Main() { return 42; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public Leaf? Next;
             public int32 Value;
@@ -42,14 +39,14 @@ public sealed class NativeManagedOptionalTests
         }
         int32 Main() { Leaf? item = null; return item.Value; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public Leaf? Next;
             public Leaf() { Next = null; }
         }
         int32 Main() { int32 invalid = null; return invalid; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public Leaf? Next;
             public Leaf() { this.Read(); Next = null; }
@@ -57,7 +54,7 @@ public sealed class NativeManagedOptionalTests
         }
         int32 Main() { return 42; }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public int32 Value;
             public Leaf(int32 value) { Value = value; }
@@ -69,14 +66,14 @@ public sealed class NativeManagedOptionalTests
             return invalid.Value;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         class Leaf {
             public int32 Value;
             public Leaf(int32 value) { Value = value; }
         }
         int32 Main() { Leaf invalid = null; return invalid.Value; }
         """)]
-    [InlineData("""
+    [TestCase("""
         bool Reject(out ManagedNode? result) { return false; }
         int32 Main() {
             if (Reject(out var absent)) { return 0; }
@@ -84,7 +81,7 @@ public sealed class NativeManagedOptionalTests
             return 0;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         bool Reject(out ManagedNode? result) { return false; }
         bool Inspect(ManagedNode? value) { return value is null; }
         int32 Main() {
@@ -93,7 +90,7 @@ public sealed class NativeManagedOptionalTests
             return 0;
         }
         """)]
-    [InlineData("""
+    [TestCase("""
         int32 Main() {
             ManagedNode? optional = null;
             if (optional is some value) { return value.Value; }
@@ -103,11 +100,11 @@ public sealed class NativeManagedOptionalTests
     public void RejectsUntypedOptionalAccessAndIncompleteConstruction(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void OptionalManagedValuesRemainOutsidePersistedModules()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -117,8 +114,8 @@ public sealed class NativeManagedOptionalTests
                 return 42;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]))!;
     }
 }

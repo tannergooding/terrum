@@ -8,7 +8,7 @@ using System.Reflection.PortableExecutable;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -47,57 +47,57 @@ public sealed class NativeLibraryTests
     internal static BoundProgram Compile(string source = Source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
 
     internal static string[] Exports => ["TryWide", "Evaluate", "MakeWide", "MakeTwelve"];
 
-    [Fact]
+    [Test]
     public void LibraryHasDeterministicExportAndUnwindTables()
     {
         var program = Compile();
         var image = NativeEmitter.EmitLibrary(program, Exports, NativeRuntimePolicy.FailFast);
-        Assert.Equal(image, NativeEmitter.EmitLibrary(program, Exports.Reverse().ToArray(), NativeRuntimePolicy.FailFast));
-        Assert.NotEqual(image, NativeEmitter.EmitLibrary(Compile(Source.Replace("Hidden() { return 5;", "Hidden() { return 6;",
-            StringComparison.Ordinal)), Exports, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeEmitter.EmitLibrary(program, Exports.Reverse().ToArray(), NativeRuntimePolicy.FailFast), Is.EqualTo(image));
+        Assert.That(NativeEmitter.EmitLibrary(Compile(Source.Replace("Hidden() { return 5;", "Hidden() { return 6;",
+            StringComparison.Ordinal)), Exports, NativeRuntimePolicy.FailFast), Is.Not.EqualTo(image));
         using var stream = new MemoryStream(image);
         using var reader = new PEReader(stream);
         var headers = reader.PEHeaders;
-        var header = Assert.IsType<PEHeader>(headers.PEHeader);
-        Assert.Equal(0, header.AddressOfEntryPoint);
-        Assert.NotEqual(0, (int)headers.CoffHeader.Characteristics & 0x2000);
-        Assert.Equal(0, (int)headers.CoffHeader.Characteristics & 1);
-        Assert.Equal(0x60, (int)header.DllCharacteristics & 0x60);
-        Assert.Equal(0, header.BaseRelocationTableDirectory.Size);
-        Assert.Equal(0, header.CorHeaderTableDirectory.Size);
-        Assert.NotEqual(0, header.ExceptionTableDirectory.Size);
-        Assert.NotEqual(0, header.ImportTableDirectory.Size);
-        Assert.NotEqual(0, header.ImportAddressTableDirectory.Size);
+        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual1 = headers.PEHeader; Assert.That(__nunitActual1, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual1!; }))();
+        Assert.That(header.AddressOfEntryPoint, Is.EqualTo(0));
+        Assert.That((int)headers.CoffHeader.Characteristics & 0x2000, Is.Not.EqualTo(0));
+        Assert.That((int)headers.CoffHeader.Characteristics & 1, Is.EqualTo(0));
+        Assert.That((int)header.DllCharacteristics & 0x60, Is.EqualTo(0x60));
+        Assert.That(header.BaseRelocationTableDirectory.Size, Is.EqualTo(0));
+        Assert.That(header.CorHeaderTableDirectory.Size, Is.EqualTo(0));
+        Assert.That(header.ExceptionTableDirectory.Size, Is.Not.EqualTo(0));
+        Assert.That(header.ImportTableDirectory.Size, Is.Not.EqualTo(0));
+        Assert.That(header.ImportAddressTableDirectory.Size, Is.Not.EqualTo(0));
         var export = header.ExportTableDirectory;
-        var section = Assert.Single(headers.SectionHeaders, static candidate => candidate.Name == ".edata");
-        Assert.Equal(section.VirtualAddress, export.RelativeVirtualAddress);
-        Assert.Equal(section.VirtualSize, export.Size);
-        Assert.InRange((long)section.PointerToRawData + section.SizeOfRawData, 0, image.Length);
-        Assert.Equal(0, section.VirtualAddress % header.SectionAlignment);
-        Assert.Equal(0, section.PointerToRawData % header.FileAlignment);
+        var section = global::System.Linq.Enumerable.Single(headers.SectionHeaders, static candidate => candidate.Name == ".edata");
+        Assert.That(export.RelativeVirtualAddress, Is.EqualTo(section.VirtualAddress));
+        Assert.That(export.Size, Is.EqualTo(section.VirtualSize));
+        Assert.That((long)section.PointerToRawData + section.SizeOfRawData, Is.InRange(0, image.Length));
+        Assert.That(section.VirtualAddress % header.SectionAlignment, Is.EqualTo(0));
+        Assert.That(section.PointerToRawData % header.FileAlignment, Is.EqualTo(0));
         var at = section.PointerToRawData;
-        Assert.Equal(1, Read32(at + 16));
-        Assert.Equal(4, Read32(at + 20));
-        Assert.Equal(4, Read32(at + 24));
-        Assert.Equal("terrum.dll", Name(Read32(at + 12)));
+        Assert.That(Read32(at + 16), Is.EqualTo(1));
+        Assert.That(Read32(at + 20), Is.EqualTo(4));
+        Assert.That(Read32(at + 24), Is.EqualTo(4));
+        Assert.That(Name(Read32(at + 12)), Is.EqualTo("terrum.dll"));
         var names = Read32(at + 32);
         var addresses = Read32(at + 28);
         var ordinals = Read32(at + 36);
         var expected = Exports.Order(StringComparer.Ordinal).ToArray();
         for (var i = 0; i < expected.Length; i++)
         {
-            Assert.Equal(expected[i], Name(Read32(Offset(names) + (4 * i))));
-            Assert.Equal(i, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals) + (2 * i))));
+            Assert.That(Name(Read32(Offset(names) + (4 * i))), Is.EqualTo(expected[i]));
+            Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals) + (2 * i))), Is.EqualTo(i));
             var codeRva = Read32(Offset(addresses) + (4 * i));
-            var text = Assert.Single(headers.SectionHeaders, static candidate => candidate.Name == ".text");
-            Assert.InRange(codeRva, text.VirtualAddress, text.VirtualAddress + text.VirtualSize - 1);
-            Assert.False(codeRva >= export.RelativeVirtualAddress && codeRva < export.RelativeVirtualAddress + export.Size);
+            var text = global::System.Linq.Enumerable.Single(headers.SectionHeaders, static candidate => candidate.Name == ".text");
+            Assert.That(codeRva, Is.InRange(text.VirtualAddress, text.VirtualAddress + text.VirtualSize - 1));
+            Assert.That(codeRva >= export.RelativeVirtualAddress && codeRva < export.RelativeVirtualAddress + export.Size, Is.False);
         }
 
         int Read32(int offset)
@@ -112,44 +112,44 @@ public sealed class NativeLibraryTests
         {
             var offset = Offset(rva);
             var end = Array.IndexOf(image, (byte)0, offset, at + section.VirtualSize - offset);
-            Assert.True(end > offset);
+            Assert.That(end > offset, Is.True);
             return System.Text.Encoding.ASCII.GetString(image, offset, end - offset);
         }
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidExportsAndMalformedLibrariesBeforeCodegen()
     {
         var program = Compile();
         foreach (var names in new[] { Array.Empty<string>(), ["Hidden"], ["Unknown"],
             ["Evaluate", "Evaluate"], ["Evaluate\0bad"], ["Evaluate\u0080"] })
         {
-            _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, names, NativeRuntimePolicy.FailFast));
+            _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, names, NativeRuntimePolicy.FailFast))!;
         }
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program with { EntryPoint = 0 },
-            Exports, NativeRuntimePolicy.FailFast));
+            Exports, NativeRuntimePolicy.FailFast))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program with {
             Functions = program.Functions.SetItem(0, program.Functions[0] with { IsExternal = true }),
-        }, Exports, NativeRuntimePolicy.FailFast));
+        }, Exports, NativeRuntimePolicy.FailFast))!;
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibrary(program with {
             Buffers = [new HostBuffer("Input", PrimitiveType.Int32, [1], IsWritable: false)],
-        }, Exports, NativeRuntimePolicy.FailFast));
+        }, Exports, NativeRuntimePolicy.FailFast))!;
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibrary(program,
-            Exports, (NativeRuntimePolicy)42));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+            Exports, (NativeRuntimePolicy)42))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void RejectsNonPublicValueSignatures()
     {
         var privateType = Compile("struct Private { public int32 Value; } public int32 Read(Private value) { return value.Value; }");
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateType, ["Read"], NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateType, ["Read"], NativeRuntimePolicy.FailFast))!;
         var privateField = Compile("public struct Hidden { int32 Value; public Hidden(int32 n) { Value = n; } }"
             + " public Hidden Make() { return new Hidden(42); }");
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateField, ["Make"], NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateField, ["Make"], NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void ValidatesRepeatedNestedValueTypesInLibrarySignatures()
     {
         var publicValues = Compile("""
@@ -158,7 +158,7 @@ public sealed class NativeLibraryTests
             public struct Envelope { public Pair Left; public Pair Right; }
             public Envelope Echo(Envelope value) { return value; }
             """);
-        Assert.NotEmpty(NativeEmitter.EmitLibrary(publicValues, ["Echo"], NativeRuntimePolicy.FailFast));
+        Assert.That(NativeEmitter.EmitLibrary(publicValues, ["Echo"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var privateValues = Compile("""
             public struct Leaf { int32 Value; }
@@ -166,21 +166,19 @@ public sealed class NativeLibraryTests
             public Pair Echo(Pair value) { return value; }
             """);
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateValues, ["Echo"],
-            NativeRuntimePolicy.FailFast));
+            NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void AllowsAbsentPrimitiveDeclaringStructOwner()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public struct Cell { public int32 Value; public int32 Read() { return 42; } }"));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var function = Assert.Single(program.Functions);
-        var primitiveOwner = program with
-        {
-            Functions = program.Functions.SetItem(0, function with
-            {
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var function = global::System.Linq.Enumerable.Single(program.Functions);
+        var primitiveOwner = program with {
+            Functions = program.Functions.SetItem(0, function with {
                 Name = "int32.Read",
                 DeclaringStruct = "int32",
                 Variables = function.Variables.SetItem(0, function.Variables[0] with { Type = PrimitiveType.Int32 }),
@@ -190,24 +188,22 @@ public sealed class NativeLibraryTests
         _ = NativeEmitter.EmitLibrary(primitiveOwner, ["int32.Read"], NativeRuntimePolicy.FailFast);
     }
 
-    [Fact]
+    [Test]
     public void AllowsPublicMatchingDeclaringStructOwner()
     {
         var program = Compile();
-        var function = Assert.Single(program.Functions, static function => function.DeclaringStruct == "Twelve");
+        var function = global::System.Linq.Enumerable.Single(program.Functions, static function => function.DeclaringStruct == "Twelve");
 
         _ = NativeEmitter.EmitLibrary(program, [function.Name], NativeRuntimePolicy.FailFast);
     }
-
-    [Theory]
-    [InlineData("struct Private", "Private")]
-    [InlineData("internal struct Internal", "Internal")]
+    [TestCase("struct Private","Private")]
+    [TestCase("internal struct Internal","Internal")]
     public void RejectsNonPublicMatchingDeclaringStructOwner(string declaration, string owner)
     {
         var program = Compile($"{declaration} {{ public int32 Value; public {owner}(int32 value) {{ Value = value; }} }}");
-        var function = Assert.Single(program.Functions, function => function.DeclaringStruct == owner);
+        var function = global::System.Linq.Enumerable.Single(program.Functions, function => function.DeclaringStruct == owner);
 
-        var exception = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, [function.Name], NativeRuntimePolicy.FailFast));
-        Assert.Contains($"'{function.Name}' is not an accessible native library export.", exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, [function.Name], NativeRuntimePolicy.FailFast))!;
+        Assert.That(exception.Message, Does.Contain($"'{function.Name}' is not an accessible native library export."));
     }
 }

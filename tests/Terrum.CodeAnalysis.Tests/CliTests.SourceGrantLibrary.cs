@@ -9,18 +9,17 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Semantics;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task BuildLibraryEmitsSourceGrantManifestFromSelectedExportsAsync(string runtime)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-cli-{Guid.NewGuid():N}");
         _ = Directory.CreateDirectory(temporaryDirectory);
@@ -36,18 +35,17 @@ public sealed partial class CliTests
                 "-o", imagePath, "--runtime", runtime,
                 "--source-grant", "--abi-output", manifestPath,
             ]);
-            Assert.Equal(0, ExitCode);
-            Assert.Empty(Error);
+            Assert.That(ExitCode, Is.EqualTo(0));
+            Assert.That(Error, Is.Empty);
 
             var image = File.ReadAllBytes(imagePath);
             using var manifest = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
             var root = manifest.RootElement;
-            Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-            Assert.Equal(1, root.GetProperty("sourceGrantAbiVersion").GetInt32());
-            Assert.Equal(16_384, root.GetProperty("maximumSourceCodeUnits").GetInt32());
-            Assert.Equal(runtime, root.GetProperty("runtimePolicy").GetString());
-            Assert.Equal(Convert.ToHexString(SHA256.HashData(image)),
-                root.GetProperty("imageSha256").GetString());
+            Assert.That(root.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(1));
+            Assert.That(root.GetProperty("sourceGrantAbiVersion").GetInt32(), Is.EqualTo(1));
+            Assert.That(root.GetProperty("maximumSourceCodeUnits").GetInt32(), Is.EqualTo(16_384));
+            Assert.That(root.GetProperty("runtimePolicy").GetString(), Is.EqualTo(runtime));
+            Assert.That(root.GetProperty("imageSha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(image))));
 
             var exports = root.GetProperty("exports").EnumerateArray()
                 .Select(static export => (
@@ -66,15 +64,11 @@ public sealed partial class CliTests
             try
             {
                 var bindings = new NativeSourceGrantTestBindings(module, exports);
-                Assert.Equal(0x1F600,
-                    bindings.Invoke<int>("Terrum.CodeAnalysis.ReadUtf16ScalarChecked", ['\uD83D', '\uDE00'], 0, 2));
-                Assert.Equal(0x1F600,
-                    bindings.Invoke<int>("Terrum.CodeAnalysis.DecodeUtf16Scalar", null,
-                        (ushort)'\uD83D', (ushort)'\uDE00'));
-                Assert.True(Assert.Single(exports,
-                    static export => export.Name == "Terrum.CodeAnalysis.ReadUtf16ScalarChecked").SourceDependent);
-                Assert.False(Assert.Single(exports,
-                    static export => export.Name == "Terrum.CodeAnalysis.DecodeUtf16Scalar").SourceDependent);
+                Assert.That(bindings.Invoke<int>("Terrum.CodeAnalysis.ReadUtf16ScalarChecked", ['\uD83D', '\uDE00'], 0, 2), Is.EqualTo(0x1F600));
+                Assert.That(bindings.Invoke<int>("Terrum.CodeAnalysis.DecodeUtf16Scalar", null,
+                        (ushort)'\uD83D', (ushort)'\uDE00'), Is.EqualTo(0x1F600));
+                Assert.That(global::System.Linq.Enumerable.Single(exports, static export => export.Name == "Terrum.CodeAnalysis.ReadUtf16ScalarChecked").SourceDependent, Is.True);
+                Assert.That(global::System.Linq.Enumerable.Single(exports, static export => export.Name == "Terrum.CodeAnalysis.DecodeUtf16Scalar").SourceDependent, Is.False);
             }
             finally
             {
@@ -94,13 +88,11 @@ public sealed partial class CliTests
             Directory.Delete(temporaryDirectory);
         }
     }
-
-    [Theory]
-    [InlineData("image")]
-    [InlineData("manifest")]
+    [TestCase("image")]
+    [TestCase("manifest")]
     public async Task FailedSourceGrantArtifactReplacementPreservesTheExistingPairAsync(string lockedArtifact)
     {
-        Assert.True(OperatingSystem.IsWindows());
+        Assert.That(OperatingSystem.IsWindows(), Is.True);
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-pair-{Guid.NewGuid():N}");
         _ = Directory.CreateDirectory(temporaryDirectory);
         var sourcePath = Path.Combine(temporaryDirectory, "library.terrum");
@@ -117,8 +109,8 @@ public sealed partial class CliTests
                 "build-library", sourcePath, "--export", "SourceGrant.Pair.GetValue",
                 "-o", imagePath, "--runtime", "fail-fast", "--source-grant", "--abi-output", manifestPath,
             ]);
-            Assert.Equal(0, initialExitCode);
-            Assert.Empty(initialError);
+            Assert.That(initialExitCode, Is.EqualTo(0));
+            Assert.That(initialError, Is.Empty);
             var originalImage = File.ReadAllBytes(imagePath);
             var originalManifest = File.ReadAllBytes(manifestPath);
 
@@ -133,12 +125,12 @@ public sealed partial class CliTests
                     "build-library", sourcePath, "--export", "SourceGrant.Pair.GetValue",
                     "-o", imagePath, "--runtime", "fail-fast", "--source-grant", "--abi-output", manifestPath,
                 ]);
-                Assert.Equal(2, failedExitCode);
-                Assert.Contains("TRM2002", output + error, StringComparison.Ordinal);
+                Assert.That(failedExitCode, Is.EqualTo(2));
+                Assert.That(output + error, Does.Contain("TRM2002"));
             }
 
-            Assert.Equal(originalImage, File.ReadAllBytes(imagePath));
-            Assert.Equal(originalManifest, File.ReadAllBytes(manifestPath));
+            Assert.That(File.ReadAllBytes(imagePath), Is.EqualTo(originalImage));
+            Assert.That(File.ReadAllBytes(manifestPath), Is.EqualTo(originalManifest));
         }
         finally
         {

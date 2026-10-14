@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -447,50 +447,48 @@ public sealed class BootstrapInt32MainReturnComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 0; void Helper() { }", true, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 0; void Helper() { }", true, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 0x12345678; void Helper() { }", true, 0x12345678)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 0x12345678; void Helper() { }", true, 0x12345678)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 2147483647; void Helper() { }", true, int.MaxValue)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 2147483647; void Helper() { }", true, int.MaxValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int64 Main() => 42; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int64 Main() => 42; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main(int32 value) => value; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main(int32 value) => value; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => -1; void Helper() { }", true, -1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => -1; void Helper() { }", true, -1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => -0x12345678; void Helper() { }", true, -0x12345678)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => -0x12345678; void Helper() { }", true, -0x12345678)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => -2147483648; void Helper() { }", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => -2147483648; void Helper() { }", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 + 2; void Helper() { }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 + 2; void Helper() { }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 - 2; void Helper() { }", true, 38)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 - 2; void Helper() { }", true, 38)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 6 * 7; void Helper() { }", true, 42, 6, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 6 * 7; void Helper() { }", true, 42, 6, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 0 * 0; void Helper() { }", true, 0, 0, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 0 * 0; void Helper() { }", true, 0, 0, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 50000 * 50000; void Helper() { }", false, 0, 50000, 50000)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 50000 * 50000; void Helper() { }", false, 0, 50000, 50000)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 / 2; void Helper() { }", true, 20)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 / 2; void Helper() { }", true, 20)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 % 3; void Helper() { }", true, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 % 3; void Helper() { }", true, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 / 0; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 / 0; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 2147483647 + 1; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 2147483647 + 1; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return 42; } void Helper() { }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return 42; } void Helper() { }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return -2147483648; } void Helper() { }", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return -2147483648; } void Helper() { }", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return 40 + 2; } void Helper() { }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return 40 + 2; } void Helper() { }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 42; return value; } void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 42; return value; } void Helper() { }", false, 0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 0; void Helper() { }",true,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 0; void Helper() { }",true,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 0x12345678; void Helper() { }",true,0x12345678)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 0x12345678; void Helper() { }",true,0x12345678)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 2147483647; void Helper() { }",true,int.MaxValue)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 2147483647; void Helper() { }",true,int.MaxValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int64 Main() => 42; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int64 Main() => 42; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main(int32 value) => value; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main(int32 value) => value; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => -1; void Helper() { }",true,-1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => -1; void Helper() { }",true,-1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => -0x12345678; void Helper() { }",true,-0x12345678)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => -0x12345678; void Helper() { }",true,-0x12345678)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => -2147483648; void Helper() { }",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => -2147483648; void Helper() { }",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 + 2; void Helper() { }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 + 2; void Helper() { }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 - 2; void Helper() { }",true,38)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 - 2; void Helper() { }",true,38)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 6 * 7; void Helper() { }",true,42,6,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 6 * 7; void Helper() { }",true,42,6,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 0 * 0; void Helper() { }",true,0,0,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 0 * 0; void Helper() { }",true,0,0,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 50000 * 50000; void Helper() { }",false,0,50000,50000)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 50000 * 50000; void Helper() { }",false,0,50000,50000)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 / 2; void Helper() { }",true,20)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 / 2; void Helper() { }",true,20)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 % 3; void Helper() { }",true,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 % 3; void Helper() { }",true,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 / 0; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 / 0; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 2147483647 + 1; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 2147483647 + 1; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return 42; } void Helper() { }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return 42; } void Helper() { }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return -2147483648; } void Helper() { }",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return -2147483648; } void Helper() { }",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return 40 + 2; } void Helper() { }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return 40 + 2; } void Helper() { }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 42; return value; } void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 42; return value; } void Helper() { }",false,0)]
     public async Task EmitsOnlySupportedMainLiteralLeafBytesAsync(
         BoundRuntimePolicy policy, string sourceText, bool shouldEmit, int value,
         int firstOperand = 0, int secondOperand = 0)
@@ -521,44 +519,42 @@ public sealed class BootstrapInt32MainReturnComponentTests
             ["BootstrapInt32MainLeaf", "BootstrapInt32MainReturn"], VerifyEmitterSource)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers.ToImmutableArray(), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
-        Assert.Equal(0, jit.ExitCode);
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(jit.ExitCode, Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
 
         var lengthOffset = jit.BufferOffsets[4];
-        Assert.Equal(0, ReadInt32(jit.Data, lengthOffset));
+        Assert.That(ReadInt32(jit.Data, lengthOffset), Is.EqualTo(0));
         if (shouldEmit)
         {
             var snapshotOffset = jit.BufferOffsets[5];
             var actual = Enumerable.Range(0, 16)
                 .Select(index => ReadInt32(jit.Data, snapshotOffset + index * sizeof(int)));
-            Assert.Equal(expected.Skip(2), actual);
+            Assert.That(actual, Is.EqualTo(expected.Skip(2)));
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 42; void Helper() { }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 42; void Helper() { }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 + 2; void Helper() { }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 + 2; void Helper() { }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 - 2; void Helper() { }", 38, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 - 2; void Helper() { }", 38, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 6 * 7; void Helper() { }", 42, 3, 6, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 6 * 7; void Helper() { }", 42, 3, 6, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 0 * 0; void Helper() { }", 0, 3, 0, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 0 * 0; void Helper() { }", 0, 3, 0, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 / 2; void Helper() { }", 20, 4)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 / 2; void Helper() { }", 20, 4)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 % 3; void Helper() { }", 1, 5)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 % 3; void Helper() { }", 1, 5)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return 42; } void Helper() { }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return 42; } void Helper() { }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return 40 + 2; } void Helper() { }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return 40 + 2; } void Helper() { }", 42, 1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 42; void Helper() { }",42,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 42; void Helper() { }",42,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 + 2; void Helper() { }",42,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 + 2; void Helper() { }",42,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 - 2; void Helper() { }",38,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 - 2; void Helper() { }",38,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 6 * 7; void Helper() { }",42,3,6,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 6 * 7; void Helper() { }",42,3,6,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 0 * 0; void Helper() { }",0,3,0,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 0 * 0; void Helper() { }",0,3,0,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 / 2; void Helper() { }",20,4)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 / 2; void Helper() { }",20,4)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 % 3; void Helper() { }",1,5)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 % 3; void Helper() { }",1,5)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return 42; } void Helper() { }",42,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return 42; } void Helper() { }",42,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return 40 + 2; } void Helper() { }",42,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return 40 + 2; } void Helper() { }",42,1)]
     public async Task TerrumFrontendEmitsAndRunsBootstrapPeImageAsync(
         BoundRuntimePolicy policy, string sourceText, int value, int operation,
         int firstOperand = 0, int secondOperand = 0)
@@ -579,281 +575,279 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 [.. new int[1536]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         const int expectedImageLength = 0x600;
         var expected = CreateExpectedBytes(true, value,
             operation == 1, operation == 2, operation == 3,
             operation == 4, operation == 5, firstOperand, secondOperand);
-        Assert.Equal(expectedImageLength, jit.ExitCode);
+        Assert.That(jit.ExitCode, Is.EqualTo(expectedImageLength));
         AssertPublishedFrontendAudits(source, jit, policy);
         AssertOutputCode(jit, buffers.Length - 4, buffers.Length - 3, expected);
         var image = ReadBootstrapPeImage(
             jit, buffers.Length - 2, buffers.Length - 1, expected);
-        Assert.Equal(value, await ExecuteImageAsync(image).ConfigureAwait(true));
-        Assert.Equal(expectedImageLength, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(await ExecuteImageAsync(image).ConfigureAwait(true), Is.EqualTo(value));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(expectedImageLength));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 42;", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 42;", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() => Answer();", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() => Answer();", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => -2147483648; public int32 Main() => Answer();", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => -2147483648; public int32 Main() => Answer();", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() => Answer();", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() => Answer();", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 - 2; public int32 Main() => Answer();", true, 38, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 - 2; public int32 Main() => Answer();", true, 38, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(42);", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(42);", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 40 + 2; return Answer(result); }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 40 + 2; return Answer(result); }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => right + left; public int32 Main() { int32 first = 20; int32 second = 22; return Add(first, second); }", true, 42, 20, 22)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => right + left; public int32 Main() { int32 first = 20; int32 second = 22; return Add(first, second); }", true, 42, 20, 22)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);", true, 42, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);", true, 42, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);", true, -7, -2, -3, -2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);", true, -7, -2, -3, -2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);", true, 15, 1, 2, 4, 8)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);", true, 15, 1, 2, 4, 8)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);", true, 31, 1, 2, 4, 8, 16)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2, -3, -5, -7, -11);", true, -28, -2, -3, -5, -7, -11)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() { int32 firstValue = 1; int32 fifthValue = 16; return Sum5(firstValue, 2, 4, 8, fifthValue); }", true, 31, 1, 2, 4, 8, 16)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 4, 8, 16, 32);", true, 63, 1, 2, 4, 8, 16, 32)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(-2, -3, -5, -7, -11, -13);", true, -41, -2, -3, -5, -7, -11, -13)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 firstValue = 1; int32 sixthValue = 32; return Sum6(firstValue, 2, 4, 8, 16, sixthValue); }", true, 63, 1, 2, 4, 8, 16, 32)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 fifthValue = 16; int32 sixthValue = 32; return Sum6(1, 2, 4, 8, fifthValue, sixthValue); }", true, 63, 1, 2, 4, 8, 16, 32)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 4, 8, 16, 32, 64);", true, 127, 1, 2, 4, 8, 16, 32, 64)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(-2, -3, -5, -7, -11, -13, -17);", true, -58, -2, -3, -5, -7, -11, -13, -17)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() { int32 fifthValue = 16; int32 seventhValue = 64; return Sum7(1, 2, 4, 8, fifthValue, 32, seventhValue); }", true, 127, 1, 2, 4, 8, 16, 32, 64)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 4, 8, 16, 32, 64, 128);", true, 255, 1, 2, 4, 8, 16, 32, 64, 128)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(-2, -3, -5, -7, -11, -13, -17, -19);", true, -77, -2, -3, -5, -7, -11, -13, -17, -19)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() { int32 fifthValue = 16; int32 eighthValue = 128; return Sum8(1, 2, 4, 8, fifthValue, 32, 64, eighthValue); }", true, 255, 1, 2, 4, 8, 16, 32, 64, 128)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 4, 8, 16, 32, 64, 128, 256);", true, 511, 1, 2, 4, 8, 16, 32, 64, 128, 256)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 3, 4, 5, 6, 7, 8, 9);", true, 45, 1, 2, 3, 4, 5, 6, 7, 8, 9)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(-2, -3, -5, -7, -11, -13, -17, -19, -23);", true, -103, -2, -3, -5, -7, -11, -13, -17, -19, -23)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() { int32 fifthValue = 16; int32 ninthValue = 256; return Sum9(1, 2, 4, 8, fifthValue, 32, 64, 128, ninthValue); }", true, 511, 1, 2, 4, 8, 16, 32, 64, 128, 256)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 4, 8, 16, 32, 64, 128, 256, 512);", true, 1023, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29);", true, -129, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() { int32 fifthValue = 16; int32 tenthValue = 512; return Sum10(1, 2, 4, 8, fifthValue, 32, 64, 128, 256, tenthValue); }", true, 1023, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);", true, 66, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31);", true, -160, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() { int32 eleventhValue = 11; return Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, eleventhValue); }", true, 66, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);", true, 78, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37);", true, -197, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() { int32 twelfthValue = 12; return Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, twelfthValue); }", true, 78, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);", true, 91, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41);", true, -238, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() { int32 thirteenthValue = 13; return Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, thirteenthValue); }", true, 91, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);", true, 105, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41, -43);", true, -281, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41, -43)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() { int32 fourteenthValue = 14; return Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, fourteenthValue); }", true, 105, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);", true, 120, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41, -43, -47);", true, -328, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41, -43, -47)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() { int32 fifteenthValue = 15; return Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, fifteenthValue); }", true, 120, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum16(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth; public int32 Main() => Sum16(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);", true, 136, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17);", true, 153, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum16(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth; public int32 Main() => Sum16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2147483647);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2147483647);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);", true, 171, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2147483647);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -2147483648);", true, -2147483631, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }", true, 42, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }", true, 42, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }", true, -42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }", true, -42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public /* header */ int32 Main() => 42; // trailing", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public /* header */ int32 Main() => 42; // trailing", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return 40 + 2; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return 40 + 2; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 42; return value; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 42; return value; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 answer = 40 + 2; return answer; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 answer = 40 + 2; return answer; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return value + 2; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return value + 2; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 2; return 40 + value; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 2; return 40 + value; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => -2147483648;", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => -2147483648;", true, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => -0x12345678;", true, -0x12345678)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => -0x12345678;", true, -0x12345678)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 - 2;", true, 38)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 - 2;", true, 38)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 / 2;", true, 20)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 / 2;", true, 20)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 % 3;", true, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 % 3;", true, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 / 0;", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 / 0;", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 0x2A;", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 0x2A;", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 2147483648;", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 2147483648;", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => -2147483649;", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => -2147483649;", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 42; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 42; void Helper() { }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main(int32 value) => value;", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main(int32 value) => value;", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { mut int32 value = 42; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { mut int32 value = 42; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 42; return other; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 42; return other; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 42; return -value; }", true, -42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 42; return -value; }", true, -42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = -2147483648; return -value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = -2147483648; return -value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return 42; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return 42; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 42; value = 41; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 42; value = 41; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; int32 value = 2; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; int32 value = 2; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 left = 40; int32 right = 2; int32 extra = 0; return left + right; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 left = 40; int32 right = 2; int32 extra = 0; return left + right; }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 left = 2147483647; int32 right = left + 1; return right; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 left = 2147483647; int32 right = left + 1; return right; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 left = 40; int32 right = 0; return left / right; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 left = 40; int32 right = 0; return left / right; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 2147483647 + 1; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 2147483647 + 1; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() => Other();", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() => Other();", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }", true, 42, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 first = 1; int32 second = first; int32 third = 3; return Answer(); }", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 first = 1; int32 second = first; int32 third = 3; return Answer(); }", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 first = 2147483647 + 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 first = 2147483647 + 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 first = 1 / 0; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 first = 1 / 0; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 value = 7; value = 8; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 value = 7; value = 8; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { return Other(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { return Other(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 value = 2147483647 + 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 value = 2147483647 + 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 value = 1 / 0; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 value = 1 / 0; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 Answer = 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 Answer = 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { mut int32 value = 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { mut int32 value = 1; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 value = 1; int32 value = 2; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 value = 1; int32 value = 2; return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main() { int32 value = Other(); return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main() { int32 value = Other(); return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 42; public int32 Main(int32 input) { return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 42; public int32 Main(int32 input) { return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 input) => 42; public int32 Main() { return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 input) => 42; public int32 Main() { return Answer(); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(1, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(1, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(40 + 2);", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(40 + 2);", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1, 2, 3);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1, 2, 3);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(2147483647, 1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(2147483647, 1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(-2147483648, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(-2147483648, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left - right; public int32 Main() => Add(40, 2);", true, 38, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left - right; public int32 Main() => Add(40, 2);", true, 38, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2, 3, 4);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2, 3, 4);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sum(1, 2, 3);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sum(1, 2, 3);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483647, 1, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483647, 1, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483646, 0, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483646, 0, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2147483647, 0, -2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2147483647, 0, -2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(2147483646, 0, 0, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(2147483646, 0, 0, 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2147483647, 0, 0, 0, -2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2147483647, 0, 0, 0, -2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(2147483647, 1, -1, 0, 0, 0);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(2147483647, 0, 0, 0, 0, 1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(-2147483648, 0, 0, 0, 0, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 3, 4, 5);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 3, 4, 5, 6, 7);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(2147483647, 0, 0, 0, 0, 0, 1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(-2147483648, 0, 0, 0, 0, 0, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(2147483647, 0, 0, 0, 0, 0, 0, 1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(-2147483648, 0, 0, 0, 0, 0, 0, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(2147483393, 2, 4, 8, 16, 32, 64, 128, 256);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(-2147483393, -2, -4, -8, -16, -32, -64, -128, -256);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(2147483647, 0, 0, 0, 0, 0, 0, 0, 1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(-2147483648, 0, 0, 0, 0, 0, 0, 0, -1);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, -8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 3, 4, 5, 6);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 3, 4, 5, 6, 7, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 3, 4, 5, 6, 7);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 3, 4, 5, 6, 7, 8, 9);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + eighth + seventh; public int32 Main() => Sum8(1, 2, 3, 4, 5, 6, 7, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 3, 4, 5, 6, 7, 8);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 3, 4, 5, 6, 7, 8, 9);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fifth + fourth; public int32 Main() => Sum5(1, 2, 3, 4, 5);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fifth + fourth; public int32 Main() => Sum5(1, 2, 3, 4, 5);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4, 5, 6);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4, 5, 6);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => 42; public int32 Main() => Answer(42);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => 42; public int32 Main() => Answer(42);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 first, int32 second) => first; public int32 Main() => Answer(42);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 first, int32 second) => first; public int32 Main() => Answer(42);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 Answer() => 42; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 Answer() => 42; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Answer() => 42; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Answer() => 42; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int64 Answer() => 42; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int64 Answer() => 42; public int32 Main() => Answer();", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 42; /*", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 42; /*", false, 0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 42;",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 42;",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() => Answer();",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() => Answer();",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => -2147483648; public int32 Main() => Answer();",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => -2147483648; public int32 Main() => Answer();",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() => Answer();",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() => Answer();",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 - 2; public int32 Main() => Answer();",true,38,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 - 2; public int32 Main() => Answer();",true,38,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(42);",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(42);",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 40 + 2; return Answer(result); }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 40 + 2; return Answer(result); }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => right + left; public int32 Main() { int32 first = 20; int32 second = 22; return Add(first, second); }",true,42,20,22)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => right + left; public int32 Main() { int32 first = 20; int32 second = 22; return Add(first, second); }",true,42,20,22)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);",true,42,20,20,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);",true,42,20,20,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);",true,-7,-2,-3,-2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);",true,-7,-2,-3,-2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);",true,15,1,2,4,8)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);",true,15,1,2,4,8)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);",true,31,1,2,4,8,16)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2, -3, -5, -7, -11);",true,-28,-2,-3,-5,-7,-11)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() { int32 firstValue = 1; int32 fifthValue = 16; return Sum5(firstValue, 2, 4, 8, fifthValue); }",true,31,1,2,4,8,16)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 4, 8, 16, 32);",true,63,1,2,4,8,16,32)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(-2, -3, -5, -7, -11, -13);",true,-41,-2,-3,-5,-7,-11,-13)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 firstValue = 1; int32 sixthValue = 32; return Sum6(firstValue, 2, 4, 8, 16, sixthValue); }",true,63,1,2,4,8,16,32)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 fifthValue = 16; int32 sixthValue = 32; return Sum6(1, 2, 4, 8, fifthValue, sixthValue); }",true,63,1,2,4,8,16,32)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 4, 8, 16, 32, 64);",true,127,1,2,4,8,16,32,64)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(-2, -3, -5, -7, -11, -13, -17);",true,-58,-2,-3,-5,-7,-11,-13,-17)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() { int32 fifthValue = 16; int32 seventhValue = 64; return Sum7(1, 2, 4, 8, fifthValue, 32, seventhValue); }",true,127,1,2,4,8,16,32,64)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 4, 8, 16, 32, 64, 128);",true,255,1,2,4,8,16,32,64,128)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(-2, -3, -5, -7, -11, -13, -17, -19);",true,-77,-2,-3,-5,-7,-11,-13,-17,-19)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() { int32 fifthValue = 16; int32 eighthValue = 128; return Sum8(1, 2, 4, 8, fifthValue, 32, 64, eighthValue); }",true,255,1,2,4,8,16,32,64,128)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 4, 8, 16, 32, 64, 128, 256);",true,511,1,2,4,8,16,32,64,128,256)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 3, 4, 5, 6, 7, 8, 9);",true,45,1,2,3,4,5,6,7,8,9)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(-2, -3, -5, -7, -11, -13, -17, -19, -23);",true,-103,-2,-3,-5,-7,-11,-13,-17,-19,-23)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() { int32 fifthValue = 16; int32 ninthValue = 256; return Sum9(1, 2, 4, 8, fifthValue, 32, 64, 128, ninthValue); }",true,511,1,2,4,8,16,32,64,128,256)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 4, 8, 16, 32, 64, 128, 256, 512);",true,1023,1,2,4,8,16,32,64,128,256,512)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29);",true,-129,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() { int32 fifthValue = 16; int32 tenthValue = 512; return Sum10(1, 2, 4, 8, fifthValue, 32, 64, 128, 256, tenthValue); }",true,1023,1,2,4,8,16,32,64,128,256,512)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);",true,66,1,2,3,4,5,6,7,8,9,10,11)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31);",true,-160,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() { int32 eleventhValue = 11; return Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, eleventhValue); }",true,66,1,2,3,4,5,6,7,8,9,10,11)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);",true,78,1,2,3,4,5,6,7,8,9,10,11,12)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37);",true,-197,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31,-37)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() { int32 twelfthValue = 12; return Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, twelfthValue); }",true,78,1,2,3,4,5,6,7,8,9,10,11,12)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);",true,91,1,2,3,4,5,6,7,8,9,10,11,12,13)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41);",true,-238,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31,-37,-41)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() { int32 thirteenthValue = 13; return Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, thirteenthValue); }",true,91,1,2,3,4,5,6,7,8,9,10,11,12,13)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);",true,105,1,2,3,4,5,6,7,8,9,10,11,12,13,14)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41, -43);",true,-281,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31,-37,-41,-43)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() { int32 fourteenthValue = 14; return Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, fourteenthValue); }",true,105,1,2,3,4,5,6,7,8,9,10,11,12,13,14)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);",true,120,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41, -43, -47);",true,-328,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31,-37,-41,-43,-47)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() { int32 fifteenthValue = 15; return Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, fifteenthValue); }",true,120,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum16(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth; public int32 Main() => Sum16(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);",true,136,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17);",true,153,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum16(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth; public int32 Main() => Sum16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2147483647);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2147483647);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);",true,171,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2147483647);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -2147483648);",true,-2147483631,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }",true,42,20,20,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }",true,42,20,20,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }",true,-42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }",true,-42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public /* header */ int32 Main() => 42; // trailing",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public /* header */ int32 Main() => 42; // trailing",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return 40 + 2; }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return 40 + 2; }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 42; return value; }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 42; return value; }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 answer = 40 + 2; return answer; }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 answer = 40 + 2; return answer; }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return value + 2; }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return value + 2; }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 2; return 40 + value; }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 2; return 40 + value; }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => -2147483648;",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => -2147483648;",true,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => -0x12345678;",true,-0x12345678)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => -0x12345678;",true,-0x12345678)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 - 2;",true,38)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 - 2;",true,38)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 / 2;",true,20)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 / 2;",true,20)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 % 3;",true,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 % 3;",true,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 / 0;",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 / 0;",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 0x2A;",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 0x2A;",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 2147483648;",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 2147483648;",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => -2147483649;",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => -2147483649;",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 42; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 42; void Helper() { }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main(int32 value) => value;",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main(int32 value) => value;",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { mut int32 value = 42; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { mut int32 value = 42; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 42; return other; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 42; return other; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 42; return -value; }",true,-42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 42; return -value; }",true,-42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = -2147483648; return -value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = -2147483648; return -value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return 42; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return 42; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 42; value = 41; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 42; value = 41; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; int32 value = 2; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; int32 value = 2; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 left = 40; int32 right = 2; int32 extra = 0; return left + right; }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 left = 40; int32 right = 2; int32 extra = 0; return left + right; }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 left = 2147483647; int32 right = left + 1; return right; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 left = 2147483647; int32 right = left + 1; return right; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 left = 40; int32 right = 0; return left / right; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 left = 40; int32 right = 0; return left / right; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 2147483647 + 1; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 2147483647 + 1; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() => Other();",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() => Other();",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }",true,42,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 first = 1; int32 second = first; int32 third = 3; return Answer(); }",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 first = 1; int32 second = first; int32 third = 3; return Answer(); }",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 first = 2147483647 + 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 first = 2147483647 + 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 first = 1 / 0; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 first = 1 / 0; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 value = 7; value = 8; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 value = 7; value = 8; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { return Other(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { return Other(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 value = 2147483647 + 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 value = 2147483647 + 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 value = 1 / 0; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 value = 1 / 0; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 Answer = 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 Answer = 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { mut int32 value = 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { mut int32 value = 1; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 value = 1; int32 value = 2; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 value = 1; int32 value = 2; return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main() { int32 value = Other(); return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main() { int32 value = Other(); return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 42; public int32 Main(int32 input) { return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 42; public int32 Main(int32 input) { return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 input) => 42; public int32 Main() { return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 input) => 42; public int32 Main() { return Answer(); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(1, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(1, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(40 + 2);",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(40 + 2);",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1, 2, 3);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(1, 2, 3);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(2147483647, 1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(2147483647, 1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(-2147483648, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(-2147483648, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left - right; public int32 Main() => Add(40, 2);",true,38,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left - right; public int32 Main() => Add(40, 2);",true,38,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2, 3, 4);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(1, 2, 3, 4);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sum(1, 2, 3);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sum(1, 2, 3);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483647, 1, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483647, 1, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483646, 0, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(2147483646, 0, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2147483647, 0, -2);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2147483647, 0, -2);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(2147483646, 0, 0, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(2147483646, 0, 0, 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2147483647, 0, 0, 0, -2);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2147483647, 0, 0, 0, -2);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(2147483647, 1, -1, 0, 0, 0);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(2147483647, 0, 0, 0, 0, 1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(-2147483648, 0, 0, 0, 0, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 3, 4, 5);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 3, 4, 5, 6, 7);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(2147483647, 0, 0, 0, 0, 0, 1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(-2147483648, 0, 0, 0, 0, 0, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(2147483647, 0, 0, 0, 0, 0, 0, 1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(-2147483648, 0, 0, 0, 0, 0, 0, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(2147483393, 2, 4, 8, 16, 32, 64, 128, 256);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(-2147483393, -2, -4, -8, -16, -32, -64, -128, -256);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(2147483647, 0, 0, 0, 0, 0, 0, 0, 1);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(-2147483648, 0, 0, 0, 0, 0, 0, 0, -1);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, -8);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(2147483640, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(-2147483641, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 3, 4, 5, 6);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 3, 4, 5, 6, 7, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 3, 4, 5, 6, 7);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 3, 4, 5, 6, 7, 8, 9);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + eighth + seventh; public int32 Main() => Sum8(1, 2, 3, 4, 5, 6, 7, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 3, 4, 5, 6, 7, 8);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 3, 4, 5, 6, 7, 8, 9);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fifth + fourth; public int32 Main() => Sum5(1, 2, 3, 4, 5);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fifth + fourth; public int32 Main() => Sum5(1, 2, 3, 4, 5);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4, 5, 6);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 3, 4, 5, 6);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => 42; public int32 Main() => Answer(42);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => 42; public int32 Main() => Answer(42);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 first, int32 second) => first; public int32 Main() => Answer(42);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 first, int32 second) => first; public int32 Main() => Answer(42);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 Answer() => 42; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 Answer() => 42; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Answer() => 42; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Answer() => 42; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int64 Answer() => 42; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int64 Answer() => 42; public int32 Main() => Answer();",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 42; /*",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 42; /*",false,0)]
     public async Task EmitsOnlyTheDirectSourceSubsetAsync(
         BoundRuntimePolicy policy, string sourceText, bool shouldEmit, int value,
         int firstOperand = 0, int secondOperand = 0, int thirdOperand = 0,
@@ -1068,34 +1062,32 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, VerifyBootstrapSourceEmitter)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
-        Assert.Equal(0, jit.ExitCode);
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(jit.ExitCode, Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 + 2 * 3 - 2;", true, 44)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 + 2 * 3 - 2;", true, 44)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => (40 + 2) * 3;", true, 126)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => (40 + 2) * 3;", true, 126)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 + -(2 * 3);", true, 34)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 + -(2 * 3);", true, 34)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => -1 + 2;", true, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => -1 + 2;", true, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 % 7 + 2 * 3;", true, 11)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 % 7 + 2 * 3;", true, 11)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return 40 + 2 * 3; }", true, 46)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return 40 + 2 * 3; }", true, 46)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 2147483647 + 1 - 1;", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 2147483647 + 1 - 1;", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 / (2 - 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 / (2 - 2);", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => (-2147483648) / -1;", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => (-2147483648) / -1;", false, 0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 + 2 * 3 - 2;",true,44)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 + 2 * 3 - 2;",true,44)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => (40 + 2) * 3;",true,126)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => (40 + 2) * 3;",true,126)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 + -(2 * 3);",true,34)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 + -(2 * 3);",true,34)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => -1 + 2;",true,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => -1 + 2;",true,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 % 7 + 2 * 3;",true,11)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 % 7 + 2 * 3;",true,11)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return 40 + 2 * 3; }",true,46)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return 40 + 2 * 3; }",true,46)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 2147483647 + 1 - 1;",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 2147483647 + 1 - 1;",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 / (2 - 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 / (2 - 2);",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => (-2147483648) / -1;",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => (-2147483648) / -1;",false,0)]
     public Task BootstrapDirectMainFoldsBoundedExpressionsAsync(
         BoundRuntimePolicy policy, string sourceText, bool shouldEmit, int value)
     {
@@ -1103,56 +1095,52 @@ public sealed class BootstrapInt32MainReturnComponentTests
             policy, sourceText, shouldEmit, value,
             foldMainExpression: true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40 + 2 * 3; return value; }", true, 46)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40 + 2 * 3; return value; }", true, 46)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = (40 + 2) * 3; return value; }", true, 126)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = (40 + 2) * 3; return value; }", true, 126)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = 20; int32 second = (first + 2) * 2; return second; }", true, 44)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = 20; int32 second = (first + 2) * 2; return second; }", true, 44)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return value + 2 * 3; }", true, 46)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return value + 2 * 3; }", true, 46)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; int32 next = value + 1; return next + value + 2; }", true, 83)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; int32 next = value + 1; return next + value + 2; }", true, 83)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = -1; return value + 2; }", true, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = -1; return value + 2; }", true, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = 20; int32 second = 22; return (first + second) * 3; }", true, 126)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = 20; int32 second = 22; return (first + second) * 3; }", true, 126)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return value + -(2 * 3); }", true, 34)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return value + -(2 * 3); }", true, 34)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 2147483647 + 1 - 1; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 2147483647 + 1 - 1; return value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = 1; int32 second = 1 / (first - first); return second; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = 1; int32 second = 1 / (first - first); return second; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return 40 + 2 * 3; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return 40 + 2 * 3; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return missing + value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return missing + value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = second; int32 second = 2; return second; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = second; int32 second = 2; return second; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = 1; int32 second = second + first; return second; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = 1; int32 second = second + first; return second; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = 1; int32 first = 2; return first + 1; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = 1; int32 first = 2; return first + 1; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = 1; return first + 2147483647 + 1; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = 1; return first + 2147483647 + 1; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 first = 1; return first + 1 / (first - first); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 first = 1; return first + 1 / (first - first); }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = -2147483648; return -value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = -2147483648; return -value; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = -2147483648; return value / -1; }", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = -2147483648; return value / -1; }", false, 0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40 + 2 * 3; return value; }",true,46)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40 + 2 * 3; return value; }",true,46)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = (40 + 2) * 3; return value; }",true,126)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = (40 + 2) * 3; return value; }",true,126)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = 20; int32 second = (first + 2) * 2; return second; }",true,44)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = 20; int32 second = (first + 2) * 2; return second; }",true,44)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return value + 2 * 3; }",true,46)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return value + 2 * 3; }",true,46)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; int32 next = value + 1; return next + value + 2; }",true,83)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; int32 next = value + 1; return next + value + 2; }",true,83)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = -1; return value + 2; }",true,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = -1; return value + 2; }",true,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = 20; int32 second = 22; return (first + second) * 3; }",true,126)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = 20; int32 second = 22; return (first + second) * 3; }",true,126)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return value + -(2 * 3); }",true,34)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return value + -(2 * 3); }",true,34)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 2147483647 + 1 - 1; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 2147483647 + 1 - 1; return value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = 1; int32 second = 1 / (first - first); return second; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = 1; int32 second = 1 / (first - first); return second; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return 40 + 2 * 3; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return 40 + 2 * 3; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return missing + value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return missing + value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = second; int32 second = 2; return second; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = second; int32 second = 2; return second; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = 1; int32 second = second + first; return second; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = 1; int32 second = second + first; return second; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = 1; int32 first = 2; return first + 1; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = 1; int32 first = 2; return first + 1; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = 1; return first + 2147483647 + 1; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = 1; return first + 2147483647 + 1; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 first = 1; return first + 1 / (first - first); }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 first = 1; return first + 1 / (first - first); }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = -2147483648; return -value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = -2147483648; return -value; }",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = -2147483648; return value / -1; }",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = -2147483648; return value / -1; }",false,0)]
     public Task BootstrapDirectMainLocalsFoldBoundedExpressionsAsync(
         BoundRuntimePolicy policy, string sourceText, bool shouldEmit, int value)
     {
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit, value, foldMainExpression: true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapDirectMainLocalExpressionsScaleGroupingToScannerLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -1166,20 +1154,18 @@ public sealed class BootstrapInt32MainReturnComponentTests
             + innerExpression
             + new string(')', groupingDepth)
             + suffix;
-        Assert.InRange(sourceText.Length, 1, ScannerHost.MaximumSourceLength);
+        Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
         var excessiveSource = prefix
             + new string('(', groupingDepth + 1)
             + innerExpression
             + new string(')', groupingDepth + 1)
             + suffix;
-        Assert.True(excessiveSource.Length > ScannerHost.MaximumSourceLength);
+        Assert.That(excessiveSource.Length > ScannerHost.MaximumSourceLength, Is.True);
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit: true, value: -42, foldMainExpression: true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapDirectMainLocalExpressionsRespectScannerSourceLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -1189,30 +1175,28 @@ public sealed class BootstrapInt32MainReturnComponentTests
         const bool shouldEmit = true;
         var sourceLength = ScannerHost.MaximumSourceLength;
         var paddingLength = sourceLength - body.Length - suffix.Length;
-        Assert.True(paddingLength >= 0);
+        Assert.That(paddingLength >= 0, Is.True);
         var sourceText = body + new string(' ', paddingLength) + suffix;
-        Assert.Equal(sourceLength, sourceText.Length);
+        Assert.That(sourceText.Length, Is.EqualTo(sourceLength));
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit, shouldEmit ? 46 : 0,
             foldMainExpression: true);
     }
 
-    [Fact]
+    [Test]
     public void BootstrapSourceBufferFactoryRejectsBeyondScannerSourceLimit()
     {
         var source = SourceText.From(new string(' ', ScannerHost.MaximumSourceLength + 1));
-        _ = Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(source));
+        _ = Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(source))!;
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, true, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, false)]
-    [InlineData(BoundRuntimePolicy.FailFast, false, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, false)]
-    [InlineData(BoundRuntimePolicy.FailFast, true, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, true)]
-    [InlineData(BoundRuntimePolicy.FailFast, false, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,true,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,false)]
+    [TestCase(BoundRuntimePolicy.FailFast,false,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,true)]
     public Task BootstrapDirectMainLocalExpressionRejectsInsufficientTableCapacityAsync(
         BoundRuntimePolicy policy, bool shortNameTable, bool twoLocals)
     {
@@ -1226,10 +1210,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             bootstrapMainLocalNameCapacity: shortNameTable ? 0 : source.Length,
             bootstrapMainLocalValueCapacity: shortNameTable ? source.Length : 0);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapParameterlessHelperSupportsSourceSizedMainLocalsAsync(
         BoundRuntimePolicy policy)
     {
@@ -1240,8 +1222,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
             + string.Join(" ", Enumerable.Repeat(")", nestedGroupCount))
             + " + 0";
         var declarations = string.Join(" ", Enumerable.Range(0, localCount)
-            .Select(index => index switch
-            {
+            .Select(index => index switch {
                 0 => "int32 local0 = 1;",
                 2 => $"int32 local2 = {nestedExpression};",
                 _ => $"int32 local{index} = local{index - 1} + 1;",
@@ -1249,28 +1230,26 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var sourceText =
             $"internal int32 Answer() => 40 + 2; public int32 Main() {{ {declarations} "
             + "return Answer(); }";
-        Assert.Equal(16_384, sourceText.Length);
+        Assert.That(sourceText.Length, Is.EqualTo(16_384));
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit: true, value: 42, firstOperand: 40, secondOperand: 2);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "40 * 2", true, 80)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "40 * 2", true, 80)]
-    [InlineData(BoundRuntimePolicy.FailFast, "40 + 2 * 3 - 2", true, 44)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "40 + 2 * 3 - 2", true, 44)]
-    [InlineData(BoundRuntimePolicy.FailFast, "(40 + 2) * 3", true, 126)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "(40 + 2) * 3", true, 126)]
-    [InlineData(BoundRuntimePolicy.FailFast, "40 + -(2 * 3)", true, 34)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "40 + -(2 * 3)", true, 34)]
-    [InlineData(BoundRuntimePolicy.FailFast, "40 / (2 + 3) + 7 % 4", true, 11)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "40 / (2 + 3) + 7 % 4", true, 11)]
-    [InlineData(BoundRuntimePolicy.FailFast, "2147483647 + 1 - 1", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "2147483647 + 1 - 1", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "40 / (2 - 2)", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "40 / (2 - 2)", false, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "(-2147483648) / -1", false, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "(-2147483648) / -1", false, 0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"40 * 2",true,80)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"40 * 2",true,80)]
+    [TestCase(BoundRuntimePolicy.FailFast,"40 + 2 * 3 - 2",true,44)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"40 + 2 * 3 - 2",true,44)]
+    [TestCase(BoundRuntimePolicy.FailFast,"(40 + 2) * 3",true,126)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"(40 + 2) * 3",true,126)]
+    [TestCase(BoundRuntimePolicy.FailFast,"40 + -(2 * 3)",true,34)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"40 + -(2 * 3)",true,34)]
+    [TestCase(BoundRuntimePolicy.FailFast,"40 / (2 + 3) + 7 % 4",true,11)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"40 / (2 + 3) + 7 % 4",true,11)]
+    [TestCase(BoundRuntimePolicy.FailFast,"2147483647 + 1 - 1",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"2147483647 + 1 - 1",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"40 / (2 - 2)",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"40 / (2 - 2)",false,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"(-2147483648) / -1",false,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"(-2147483648) / -1",false,0)]
     public Task BootstrapParameterlessHelperFoldsBoundedExpressionsAsync(
         BoundRuntimePolicy policy, string helperExpression, bool shouldEmit, int value)
     {
@@ -1279,10 +1258,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit, value, foldMainExpression: true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapParameterlessHelperFoldsMaximumSourceBoundedGroupingAsync(
         BoundRuntimePolicy policy)
     {
@@ -1293,10 +1270,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var paddingLength = remaining - (nestingDepth * 2);
         var expression = new string('(', nestingDepth) + "40" + new string(')', nestingDepth);
         var sourceText = prefix + expression + new string(' ', paddingLength) + suffix;
-        Assert.Equal(ScannerHost.MaximumSourceLength, sourceText.Length);
+        Assert.That(sourceText.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var beyondSource = prefix + new string('(', nestingDepth + 1) + "40"
             + new string(')', nestingDepth + 1) + new string(' ', paddingLength) + suffix;
-        Assert.Equal(ScannerHost.MaximumSourceLength + 2, beyondSource.Length);
+        Assert.That(beyondSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength + 2));
         Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit: true, value: 40, foldMainExpression: true);
@@ -1318,9 +1295,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
     }
-
-    [Theory]
-    [MemberData(nameof(BootstrapParameterlessCallChainCases))]
+    [TestCaseSource(nameof(BootstrapParameterlessCallChainCases))]
     public Task BootstrapParameterlessCallChainsExecuteAndUnwindAsync(
         BoundRuntimePolicy policy, int forwardingCount, string expression,
         int value, int? leftOperand, int rightOperand, bool subtraction)
@@ -1349,9 +1324,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 "int32 first = (40 + 2) * 3; int32 result = first / 3; return result;", 42];
         }
     }
-
-    [Theory]
-    [MemberData(nameof(BootstrapParameterlessHelperBlockLocalCases))]
+    [TestCaseSource(nameof(BootstrapParameterlessHelperBlockLocalCases))]
     public Task BootstrapParameterlessHelperBlockLocalsExecuteAndUnwindAsync(
         BoundRuntimePolicy policy, int forwardingCount, string helperBody, int value)
     {
@@ -1365,10 +1338,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return AssertBootstrapParameterlessCallChainAsync(
             policy, sourceText, forwardingCount, value);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task BootstrapParameterlessCallChainsScaleToSourceLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -1380,10 +1351,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
         var sourceText = CreateBootstrapParameterlessCallChainSource("42", forwardingCount)
             .PadRight(ScannerHost.MaximumSourceLength);
-        Assert.Equal(ScannerHost.MaximumSourceLength, sourceText.Length);
-        Assert.True(forwardingCount > 256);
+        Assert.That(sourceText.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
+        Assert.That(forwardingCount > 256, Is.True);
         var beyondSource = CreateBootstrapParameterlessCallChainSource("42", forwardingCount + 1);
-        Assert.True(beyondSource.Length > ScannerHost.MaximumSourceLength);
+        Assert.That(beyondSource.Length > ScannerHost.MaximumSourceLength, Is.True);
         Assert.Throws<ArgumentException>(() => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
         await AssertBootstrapParameterlessCallChainAsync(
             policy, sourceText, forwardingCount, 42).ConfigureAwait(true);
@@ -1394,12 +1365,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
             policy, sourceText, forwardingCount, 42,
             shortImage: true).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
     public Task BootstrapParameterlessCallChainsRejectInsufficientCapacityAsync(
         BoundRuntimePolicy policy, bool shortCode)
         => AssertBootstrapParameterlessCallChainAsync(
@@ -1449,22 +1418,18 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
     }
-
-    [Theory]
-    [MemberData(nameof(UnsupportedBootstrapParameterlessCallChainCases))]
+    [TestCaseSource(nameof(UnsupportedBootstrapParameterlessCallChainCases))]
     public Task BootstrapParameterlessCallChainsRejectMalformedOrOverflowingSourceAsync(
         BoundRuntimePolicy policy, string sourceText)
         => AssertParameterizedArithmeticRejectsBeforePublicationAsync(policy, sourceText);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapCallArgumentValues", 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapCallArgumentValues", 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapCallArgumentOperators", 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapCallArgumentOperators", 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapMainLocalNames", 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapMainLocalNames", 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapMainLocalValues", 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapMainLocalValues", 1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapCallArgumentValues",0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapCallArgumentValues",0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapCallArgumentOperators",0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapCallArgumentOperators",0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapMainLocalNames",1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapMainLocalNames",1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapMainLocalValues",1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapMainLocalValues",1)]
     public Task BootstrapParameterlessCallChainsRejectInsufficientWorkspaceAsync(
         BoundRuntimePolicy policy, string workspaceName, int capacity)
         => AssertParameterizedArithmeticRejectsBeforePublicationAsync(
@@ -1497,24 +1462,20 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
     }
-
-    [Theory]
-    [MemberData(nameof(UnsupportedBootstrapParameterlessHelperBlockLocalCases))]
+    [TestCaseSource(nameof(UnsupportedBootstrapParameterlessHelperBlockLocalCases))]
     public Task BootstrapParameterlessHelperBlockLocalsRejectMalformedSourcesAsync(
         BoundRuntimePolicy policy, string helperBody)
         => AssertParameterizedArithmeticRejectsBeforePublicationAsync(
             policy, CreateBootstrapParameterlessCallChainSource(
                 "42", 1, leafDeclaration: $"internal int32 Leaf() {{ {helperBody} }} "));
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapMainLocalNames", 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapMainLocalNames", 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapMainLocalValues", 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapMainLocalValues", 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapCallArgumentValues", 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapCallArgumentValues", 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "BootstrapCallArgumentOperators", 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "BootstrapCallArgumentOperators", 0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapMainLocalNames",1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapMainLocalNames",1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapMainLocalValues",1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapMainLocalValues",1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapCallArgumentValues",0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapCallArgumentValues",0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"BootstrapCallArgumentOperators",0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"BootstrapCallArgumentOperators",0)]
     public Task BootstrapParameterlessHelperBlockLocalsRejectInsufficientWorkspaceAsync(
         BoundRuntimePolicy policy, string workspaceName, int capacity)
         => AssertParameterizedArithmeticRejectsBeforePublicationAsync(
@@ -1523,10 +1484,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     "internal int32 Leaf() { int32 first = 40 + 2; "
                     + "int32 second = first; return second; } "),
             workspaceName, capacity);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task BootstrapParameterlessHelperBlockLocalsScaleToSourceLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -1538,10 +1497,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
         var sourceText = CreateBootstrapParameterlessHelperBlockChainSource(localCount)
             .PadRight(ScannerHost.MaximumSourceLength);
-        Assert.Equal(ScannerHost.MaximumSourceLength, sourceText.Length);
-        Assert.True(localCount > 256);
+        Assert.That(sourceText.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
+        Assert.That(localCount > 256, Is.True);
         var beyondSource = CreateBootstrapParameterlessHelperBlockChainSource(localCount + 1);
-        Assert.True(beyondSource.Length > ScannerHost.MaximumSourceLength);
+        Assert.That(beyondSource.Length > ScannerHost.MaximumSourceLength, Is.True);
         Assert.Throws<ArgumentException>(
             () => CreateBootstrapSourceBuffers(SourceText.From(beyondSource)));
         await AssertBootstrapParameterlessCallChainAsync(
@@ -1621,17 +1580,14 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, EndToEndBootstrapSourceOnly)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         var expectedExit = shortCode ? -1 : shortImage ? -2 : imageLength;
-        Assert.Equal(expectedExit, execution.ExitCode);
-        Assert.Equal(shortCode ? 0 : codeLength,
-            ReadInt32(execution.Data, execution.BufferOffsets[buffers.Length - 3]));
-        Assert.Equal(shortCode || shortImage ? 0 : imageLength,
-            ReadInt32(execution.Data, execution.BufferOffsets[buffers.Length - 1]));
-        Assert.Equal(expectedExit,
-            await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(execution.ExitCode, Is.EqualTo(expectedExit));
+        Assert.That(ReadInt32(execution.Data, execution.BufferOffsets[buffers.Length - 3]), Is.EqualTo(shortCode ? 0 : codeLength));
+        Assert.That(ReadInt32(execution.Data, execution.BufferOffsets[buffers.Length - 1]), Is.EqualTo(shortCode || shortImage ? 0 : imageLength));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(expectedExit));
         if (shortCode || shortImage)
         {
             return;
@@ -1643,54 +1599,51 @@ public sealed class BootstrapInt32MainReturnComponentTests
         {
             var emitted = ReadInt32(execution.Data,
                 execution.BufferOffsets[buffers.Length - 4] + index * sizeof(int));
-            Assert.InRange(emitted, 0, byte.MaxValue);
+            Assert.That(emitted, Is.InRange(0, byte.MaxValue));
             code[index] = (byte)emitted;
         }
         for (var index = 0; index < image.Length; index++)
         {
             var emitted = ReadInt32(execution.Data,
                 execution.BufferOffsets[buffers.Length - 2] + index * sizeof(int));
-            Assert.InRange(emitted, 0, byte.MaxValue);
+            Assert.That(emitted, Is.InRange(0, byte.MaxValue));
             image[index] = (byte)emitted;
         }
-        Assert.Equal(leaf, code.AsSpan(helperOffset).ToArray());
-        Assert.Equal(0x1000 + metadataOffset, ReadInt32(image, 0x120));
-        Assert.Equal(functionCount * 12, ReadInt32(image, 0x124));
-        Assert.Equal(virtualSize, ReadInt32(image, 0x190));
-        Assert.Equal(imageLength - 0x400, ReadInt32(image, 0x198));
-        Assert.Equal(0x1000 + ((virtualSize + 0xFFF) & ~0xFFF), ReadInt32(image, 0xD0));
+        Assert.That(code.AsSpan(helperOffset).ToArray(), Is.EqualTo(leaf));
+        Assert.That(ReadInt32(image, 0x120), Is.EqualTo(0x1000 + metadataOffset));
+        Assert.That(ReadInt32(image, 0x124), Is.EqualTo(functionCount * 12));
+        Assert.That(ReadInt32(image, 0x190), Is.EqualTo(virtualSize));
+        Assert.That(ReadInt32(image, 0x198), Is.EqualTo(imageLength - 0x400));
+        Assert.That(ReadInt32(image, 0xD0), Is.EqualTo(0x1000 + ((virtualSize + 0xFFF) & ~0xFFF)));
         byte[] frame = [0x48, 0x83, 0xEC, 0x28, 0xE8, 5, 0, 0, 0,
             0x48, 0x83, 0xC4, 0x28, 0xC3];
         for (var index = 0; index < functionCount; index++)
         {
-            Assert.Equal(frame, code.AsSpan(index * 14, 14).ToArray());
+            Assert.That(code.AsSpan(index * 14, 14).ToArray(), Is.EqualTo(frame));
             var recordOffset = 0x400 + metadataOffset + index * 12;
-            Assert.Equal(0x1000 + index * 14, ReadInt32(image, recordOffset));
-            Assert.Equal(0x1000 + (index + 1) * 14, ReadInt32(image, recordOffset + 4));
+            Assert.That(ReadInt32(image, recordOffset), Is.EqualTo(0x1000 + index * 14));
+            Assert.That(ReadInt32(image, recordOffset + 4), Is.EqualTo(0x1000 + (index + 1) * 14));
             var unwindOffset = metadataOffset + functionCount * 12 + index * 8;
-            Assert.Equal(0x1000 + unwindOffset, ReadInt32(image, recordOffset + 8));
+            Assert.That(ReadInt32(image, recordOffset + 8), Is.EqualTo(0x1000 + unwindOffset));
             AssertBootstrapCallChainUnwindInfo(image, 0x400 + unwindOffset, 0x28, 4);
         }
-        Assert.Equal(code, image.AsSpan(0x400, codeLength).ToArray());
-        Assert.All(image.AsSpan(0x400 + virtualSize).ToArray(),
-            static emitted => Assert.Equal(0, emitted));
-        Assert.Equal(value, await ExecuteImageAsync(image).ConfigureAwait(true));
+        Assert.That(image.AsSpan(0x400, codeLength).ToArray(), Is.EqualTo(code));
+        {var __nunitItems0 = image.AsSpan(0x400 + virtualSize).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem4 in __nunitItems0) { Assert.That(__nunitItem4, Is.EqualTo(0)); } });}
+        Assert.That(await ExecuteImageAsync(image).ConfigureAwait(true), Is.EqualTo(value));
         foreach (var probeForwarder in new[] { true, false })
         {
             var probe = CreateBootstrapCallChainAlignmentProbeImage(
                 image, 0, probeForwarder, forwardingCount);
-            Assert.Equal(8, await ExecuteImageAsync(probe).ConfigureAwait(true));
+            Assert.That(await ExecuteImageAsync(probe).ConfigureAwait(true), Is.EqualTo(8));
         }
         await AssertBootstrapAllocationUnwindsAsync(
             image, 0x28, value, callChain: true, forwardingCount: forwardingCount)
             .ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
     public async Task BootstrapParameterlessHelperRejectsInsufficientLocalCapacityAsync(
         BoundRuntimePolicy policy, bool shortNameTable)
     {
@@ -1722,28 +1675,26 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, VerifyBootstrapSourceEmitter)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
-        Assert.Equal(0, jit.ExitCode);
-        Assert.Equal(0, ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 1]));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(jit.ExitCode, Is.EqualTo(0));
+        Assert.That(ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 1]), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);", 32)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);", 32)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);", 40)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);", 40)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);", 40)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);", 40)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 4, 8, 16, 32);", 60)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 4, 8, 16, 32, 64);", 80)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 4, 8, 16, 32, 64, 128);", 80)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 4, 8, 16, 32, 64, 128, 256);", 106)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 4, 8, 16, 32, 64, 128, 256, 512);", 118)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);",32)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);",32)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);",40)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);",40)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);",40)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);",40)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 4, 8, 16, 32);",60)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 4, 8, 16, 32, 64);",80)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 4, 8, 16, 32, 64, 128);",80)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 4, 8, 16, 32, 64, 128, 256);",106)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 4, 8, 16, 32, 64, 128, 256, 512);",118)]
     public async Task HelperCallsRejectInsufficientCodeBuffersAsync(
         BoundRuntimePolicy policy, string sourceText, int codeCapacity)
     {
@@ -1760,122 +1711,120 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, VerifyBootstrapSourceEmitter)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
-        Assert.Equal(0, jit.ExitCode);
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(jit.ExitCode, Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 42;", 42, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 42;", 42, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => -2147483648; public int32 Main() => Answer();", int.MinValue, 6)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => -2147483648; public int32 Main() => Answer();", int.MinValue, 6)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() => Answer();", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() => Answer();", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 - 2; public int32 Main() => Answer();", 38, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 - 2; public int32 Main() => Answer();", 38, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(-42);", -42, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() => Answer(-42);", -42, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 20 + 22; return Answer(result); }", 42, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 20 + 22; return Answer(result); }", 42, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);", 42, 8, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);", 42, 8, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() { int32 left = 20; int32 right = 22; return Add(left, right); }", 42, 8, 20, 22)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() { int32 left = 20; int32 right = 22; return Add(left, right); }", 42, 8, 20, 22)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);", 42, 9, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);", 42, 9, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);", -7, 9, -2, -3, -2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);", -7, 9, -2, -3, -2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);", 15, 10, 1, 2, 4, 8)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);", 15, 10, 1, 2, 4, 8)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);", 31, 11, 1, 2, 4, 8, 16)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2, -3, -5, -7, -11);", -28, 11, -2, -3, -5, -7, -11)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() { int32 firstValue = 1; int32 fifthValue = 16; return Sum5(firstValue, 2, 4, 8, fifthValue); }", 31, 11, 1, 2, 4, 8, 16)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 4, 8, 16, 32);", 63, 12, 1, 2, 4, 8, 16, 32)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(-2, -3, -5, -7, -11, -13);", -41, 12, -2, -3, -5, -7, -11, -13)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 firstValue = 1; int32 sixthValue = 32; return Sum6(firstValue, 2, 4, 8, 16, sixthValue); }", 63, 12, 1, 2, 4, 8, 16, 32)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 fifthValue = 16; int32 sixthValue = 32; return Sum6(1, 2, 4, 8, fifthValue, sixthValue); }", 63, 12, 1, 2, 4, 8, 16, 32)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 4, 8, 16, 32, 64);", 127, 13, 1, 2, 4, 8, 16, 32, 64)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(-2, -3, -5, -7, -11, -13, -17);", -58, 13, -2, -3, -5, -7, -11, -13, -17)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() { int32 fifthValue = 16; int32 seventhValue = 64; return Sum7(1, 2, 4, 8, fifthValue, 32, seventhValue); }", 127, 13, 1, 2, 4, 8, 16, 32, 64)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 4, 8, 16, 32, 64, 128);", 255, 14, 1, 2, 4, 8, 16, 32, 64, 128)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(-2, -3, -5, -7, -11, -13, -17, -19);", -77, 14, -2, -3, -5, -7, -11, -13, -17, -19)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() { int32 fifthValue = 16; int32 eighthValue = 128; return Sum8(1, 2, 4, 8, fifthValue, 32, 64, eighthValue); }", 255, 14, 1, 2, 4, 8, 16, 32, 64, 128)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 4, 8, 16, 32, 64, 128, 256);", 511, 15, 1, 2, 4, 8, 16, 32, 64, 128, 256)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() { int32 fifthValue = 16; int32 ninthValue = 256; return Sum9(1, 2, 4, 8, fifthValue, 32, 64, 128, ninthValue); }", 511, 15, 1, 2, 4, 8, 16, 32, 64, 128, 256)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 4, 8, 16, 32, 64, 128, 256, 512);", 1023, 16, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29);", -129, 16, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() { int32 fifthValue = 16; int32 tenthValue = 512; return Sum10(1, 2, 4, 8, fifthValue, 32, 64, 128, 256, tenthValue); }", 1023, 16, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);", 66, 17, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31);", -160, 17, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() { int32 eleventhValue = 11; return Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, eleventhValue); }", 66, 17, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);", 78, 18, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37);", -197, 18, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() { int32 twelfthValue = 12; return Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, twelfthValue); }", 78, 18, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);", 91, 19, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41);", -238, 19, -2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() { int32 thirteenthValue = 13; return Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, thirteenthValue); }", 91, 19, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }", 42, 9, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }", 42, 9, 20, 20, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }", 42, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }", 42, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }", -42, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }", -42, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }", 42, 6, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { return 40 + 2; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { return 40 + 2; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 42; return value; }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 42; return value; }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 42; return -value; }", -42, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 42; return -value; }", -42, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 answer = 40 + 2; return answer; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 answer = 40 + 2; return answer; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 answer = 40 + 2; return answer + 1; }", 43, 1, 42, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 answer = 40 + 2; return answer + 1; }", 43, 1, 42, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return value + 2; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return value + 2; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 40; return value - 2; }", 38, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 40; return value - 2; }", 38, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 6; return value * 7; }", 42, 3, 6, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 6; return value * 7; }", 42, 3, 6, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 2; return 40 / value; }", 20, 4)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 2; return 40 / value; }", 20, 4)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 3; return 40 % value; }", 1, 5)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 3; return 40 % value; }", 1, 5)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 value = 2; return 40 + value; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 value = 2; return 40 + value; }", 42, 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 left = 40; int32 right = 2; return left + right; }", 42, 1, 40, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 left = 40; int32 right = 2; return left + right; }", 42, 1, 40, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 left = 40; int32 right = left + 2; return right; }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 left = 40; int32 right = left + 2; return right; }", 42, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 left = 40; int32 right = left / 2; return right; }", 20, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 left = 40; int32 right = left / 2; return right; }", 20, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() { int32 left = 42; int32 right = -left; return right; }", -42, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() { int32 left = 42; int32 right = -left; return right; }", -42, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 6 * 7;", 42, 3, 6, 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 6 * 7;", 42, 3, 6, 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 - 2;", 38, 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 - 2;", 38, 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 / 2;", 20, 4)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 / 2;", 20, 4)]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 40 % 3;", 1, 5)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 40 % 3;", 1, 5)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);", 105, 20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);", 120, 21, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum16(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth; public int32 Main() => Sum16(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);", 136, 22, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17);", 153, 23, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -2147483648);", -2147483632, 23, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, int.MinValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);", 171, 24, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18)]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -2147483648);", -2147483631, 24, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 42;",42,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 42;",42,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => -2147483648; public int32 Main() => Answer();",int.MinValue,6)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => -2147483648; public int32 Main() => Answer();",int.MinValue,6)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() => Answer();",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() => Answer();",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 - 2; public int32 Main() => Answer();",38,6,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 - 2; public int32 Main() => Answer();",38,6,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(-42);",-42,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() => Answer(-42);",-42,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 20 + 22; return Answer(result); }",42,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 20 + 22; return Answer(result); }",42,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);",42,8,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() => Add(40, 2);",42,8,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() { int32 left = 20; int32 right = 22; return Add(left, right); }",42,8,20,22)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Add(int32 left, int32 right) => left + right; public int32 Main() { int32 left = 20; int32 right = 22; return Add(left, right); }",42,8,20,22)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);",42,9,20,20,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(20, 20, 2);",42,9,20,20,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);",-7,9,-2,-3,-2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() => Sum(-2, -3, -2);",-7,9,-2,-3,-2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);",15,10,1,2,4,8)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum4(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth; public int32 Main() => Sum4(1, 2, 4, 8);",15,10,1,2,4,8)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(1, 2, 4, 8, 16);",31,11,1,2,4,8,16)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() => Sum5(-2, -3, -5, -7, -11);",-28,11,-2,-3,-5,-7,-11)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first + second + third + fourth + fifth; public int32 Main() { int32 firstValue = 1; int32 fifthValue = 16; return Sum5(firstValue, 2, 4, 8, fifthValue); }",31,11,1,2,4,8,16)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(1, 2, 4, 8, 16, 32);",63,12,1,2,4,8,16,32)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() => Sum6(-2, -3, -5, -7, -11, -13);",-41,12,-2,-3,-5,-7,-11,-13)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 firstValue = 1; int32 sixthValue = 32; return Sum6(firstValue, 2, 4, 8, 16, sixthValue); }",63,12,1,2,4,8,16,32)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first + second + third + fourth + fifth + sixth; public int32 Main() { int32 fifthValue = 16; int32 sixthValue = 32; return Sum6(1, 2, 4, 8, fifthValue, sixthValue); }",63,12,1,2,4,8,16,32)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(1, 2, 4, 8, 16, 32, 64);",127,13,1,2,4,8,16,32,64)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() => Sum7(-2, -3, -5, -7, -11, -13, -17);",-58,13,-2,-3,-5,-7,-11,-13,-17)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum7(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh) => first + second + third + fourth + fifth + sixth + seventh; public int32 Main() { int32 fifthValue = 16; int32 seventhValue = 64; return Sum7(1, 2, 4, 8, fifthValue, 32, seventhValue); }",127,13,1,2,4,8,16,32,64)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(1, 2, 4, 8, 16, 32, 64, 128);",255,14,1,2,4,8,16,32,64,128)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() => Sum8(-2, -3, -5, -7, -11, -13, -17, -19);",-77,14,-2,-3,-5,-7,-11,-13,-17,-19)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum8(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth) => first + second + third + fourth + fifth + sixth + seventh + eighth; public int32 Main() { int32 fifthValue = 16; int32 eighthValue = 128; return Sum8(1, 2, 4, 8, fifthValue, 32, 64, eighthValue); }",255,14,1,2,4,8,16,32,64,128)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() => Sum9(1, 2, 4, 8, 16, 32, 64, 128, 256);",511,15,1,2,4,8,16,32,64,128,256)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum9(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth; public int32 Main() { int32 fifthValue = 16; int32 ninthValue = 256; return Sum9(1, 2, 4, 8, fifthValue, 32, 64, 128, ninthValue); }",511,15,1,2,4,8,16,32,64,128,256)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(1, 2, 4, 8, 16, 32, 64, 128, 256, 512);",1023,16,1,2,4,8,16,32,64,128,256,512)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() => Sum10(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29);",-129,16,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum10(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth; public int32 Main() { int32 fifthValue = 16; int32 tenthValue = 512; return Sum10(1, 2, 4, 8, fifthValue, 32, 64, 128, 256, tenthValue); }",1023,16,1,2,4,8,16,32,64,128,256,512)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);",66,17,1,2,3,4,5,6,7,8,9,10,11)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() => Sum11(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31);",-160,17,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum11(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh; public int32 Main() { int32 eleventhValue = 11; return Sum11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, eleventhValue); }",66,17,1,2,3,4,5,6,7,8,9,10,11)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);",78,18,1,2,3,4,5,6,7,8,9,10,11,12)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() => Sum12(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37);",-197,18,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31,-37)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum12(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth; public int32 Main() { int32 twelfthValue = 12; return Sum12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, twelfthValue); }",78,18,1,2,3,4,5,6,7,8,9,10,11,12)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);",91,19,1,2,3,4,5,6,7,8,9,10,11,12,13)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() => Sum13(-2, -3, -5, -7, -11, -13, -17, -19, -23, -29, -31, -37, -41);",-238,19,-2,-3,-5,-7,-11,-13,-17,-19,-23,-29,-31,-37,-41)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum13(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth; public int32 Main() { int32 thirteenthValue = 13; return Sum13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, thirteenthValue); }",91,19,1,2,3,4,5,6,7,8,9,10,11,12,13)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }",42,9,20,20,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sum(int32 first, int32 second, int32 third) => first + second + third; public int32 Main() { int32 one = 20; int32 two = 20; return Sum(one, two, 2); }",42,9,20,20,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }",42,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 first = 20; int32 result = first + 22; return Answer(result); }",42,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }",-42,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer(int32 value) => value; public int32 Main() { int32 result = 42; return Answer(-result); }",-42,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 value = 7; return Answer(); }",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() { return Answer(); }",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Answer() => 40 + 2; public int32 Main() { int32 first = 7; int32 second = first + 1; return Answer(); }",42,6,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { return 40 + 2; }",42,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { return 40 + 2; }",42,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 42; return value; }",42,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 42; return value; }",42,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 42; return -value; }",-42,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 42; return -value; }",-42,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 answer = 40 + 2; return answer; }",42,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 answer = 40 + 2; return answer; }",42,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 answer = 40 + 2; return answer + 1; }",43,1,42,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 answer = 40 + 2; return answer + 1; }",43,1,42,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return value + 2; }",42,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return value + 2; }",42,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 40; return value - 2; }",38,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 40; return value - 2; }",38,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 6; return value * 7; }",42,3,6,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 6; return value * 7; }",42,3,6,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 2; return 40 / value; }",20,4)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 2; return 40 / value; }",20,4)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 3; return 40 % value; }",1,5)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 3; return 40 % value; }",1,5)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 value = 2; return 40 + value; }",42,1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 value = 2; return 40 + value; }",42,1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 left = 40; int32 right = 2; return left + right; }",42,1,40,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 left = 40; int32 right = 2; return left + right; }",42,1,40,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 left = 40; int32 right = left + 2; return right; }",42,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 left = 40; int32 right = left + 2; return right; }",42,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 left = 40; int32 right = left / 2; return right; }",20,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 left = 40; int32 right = left / 2; return right; }",20,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() { int32 left = 42; int32 right = -left; return right; }",-42,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() { int32 left = 42; int32 right = -left; return right; }",-42,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 6 * 7;",42,3,6,7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 6 * 7;",42,3,6,7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 - 2;",38,2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 - 2;",38,2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 / 2;",20,4)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 / 2;",20,4)]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 40 % 3;",1,5)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 40 % 3;",1,5)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum14(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth; public int32 Main() => Sum14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);",105,20,1,2,3,4,5,6,7,8,9,10,11,12,13,14)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum15(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth; public int32 Main() => Sum15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);",120,21,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum16(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth; public int32 Main() => Sum16(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);",136,22,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17);",153,23,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum17(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth; public int32 Main() => Sum17(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -2147483648);",-2147483632,23,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18);",171,24,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sum18(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth, int32 seventh, int32 eighth, int32 ninth, int32 tenth, int32 eleventh, int32 twelfth, int32 thirteenth, int32 fourteenth, int32 fifteenth, int32 sixteenth, int32 seventeenth, int32 eighteenth) => first + second + third + fourth + fifth + sixth + seventh + eighth + ninth + tenth + eleventh + twelfth + thirteenth + fourteenth + fifteenth + sixteenth + seventeenth + eighteenth; public int32 Main() => Sum18(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -2147483648);",-2147483631,24,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,int.MinValue)]
 
     public async Task TerrumScannerAndSourceEmitterProduceBootstrapPeImageAsync(
         BoundRuntimePolicy policy, string sourceText, int value, int operation,
@@ -1921,8 +1870,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 [.. new int[imageCapacity]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
         var expectedImageLength = helperArgumentCount > 0
@@ -1973,23 +1922,21 @@ public sealed class BootstrapInt32MainReturnComponentTests
             helperArguments: helperArguments,
             helperSubtraction: helperSubtraction,
             helperMultiplication: helperMultiplication);
-        Assert.True(jit.ExitCode == expectedImageLength,
-            $"PE emission returned {jit.ExitCode}; codeLength="
+        Assert.That(jit.ExitCode == expectedImageLength, Is.True, $"PE emission returned {jit.ExitCode}; codeLength="
                 + $"{ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 3])}, imageLength="
                 + $"{ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 1])}.");
         AssertOutputCode(jit, buffers.Length - 4, buffers.Length - 3, expected);
         var image = ReadBootstrapPeImage(
             jit, buffers.Length - 2, buffers.Length - 1, expected,
             helperArgumentCount);
-        Assert.Equal(value, await ExecuteImageAsync(image).ConfigureAwait(true));
+        Assert.That(await ExecuteImageAsync(image).ConfigureAwait(true), Is.EqualTo(value));
         if (callAlignmentProbeArgumentCount >= 1 && shouldProbeCallFrame)
         {
             var alignmentProbeImage = CreateBootstrapHelperEntryAlignmentProbeImage(
                 image, callAlignmentProbeArgumentCount);
             var helperEntryRspAlignment = await ExecuteImageAsync(alignmentProbeImage)
                 .ConfigureAwait(true);
-            Assert.True(helperEntryRspAlignment == 8,
-                $"The {callAlignmentProbeArgumentCount}-argument helper had RSP mod 16 = {helperEntryRspAlignment} at entry.");
+            Assert.That(helperEntryRspAlignment == 8, Is.True, $"The {callAlignmentProbeArgumentCount}-argument helper had RSP mod 16 = {helperEntryRspAlignment} at entry.");
         }
         if (helperArguments is not null && shouldProbeCallFrame
             && (helperArgumentCount is 1 or 6 or 8 or 10 or 12
@@ -1999,17 +1946,15 @@ public sealed class BootstrapInt32MainReturnComponentTests
             await AssertBootstrapAllocationUnwindsAsync(image, expectedAllocation, value)
                 .ConfigureAwait(true);
         }
-        Assert.Equal(expectedImageLength, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(expectedImageLength));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(40, 2);", 38, new int[] { 40, 2 })]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(40, 2);", 38, new int[] { 40, 2 })]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth) => first - second - third - fourth; public int32 Main() => Sub(40, 2, 3, 4);", 31, new int[] { 40, 2, 3, 4 })]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth) => first - second - third - fourth; public int32 Main() => Sub(40, 2, 3, 4);", 31, new int[] { 40, 2, 3, 4 })]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first - second - third - fourth - fifth; public int32 Main() => Sub(100, 1, 2, 3, 4);", 90, new int[] { 100, 1, 2, 3, 4 })]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first - second - third - fourth - fifth; public int32 Main() => Sub(100, 1, 2, 3, 4);", 90, new int[] { 100, 1, 2, 3, 4 })]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(40, 2);",38,new int[] { 40, 2 })]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(40, 2);",38,new int[] { 40, 2 })]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth) => first - second - third - fourth; public int32 Main() => Sub(40, 2, 3, 4);",31,new int[] { 40, 2, 3, 4 })]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth) => first - second - third - fourth; public int32 Main() => Sub(40, 2, 3, 4);",31,new int[] { 40, 2, 3, 4 })]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first - second - third - fourth - fifth; public int32 Main() => Sub(100, 1, 2, 3, 4);",90,new int[] { 100, 1, 2, 3, 4 })]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first - second - third - fourth - fifth; public int32 Main() => Sub(100, 1, 2, 3, 4);",90,new int[] { 100, 1, 2, 3, 4 })]
     public Task ParameterizedSubtractionExecutesFromGeneratedPeAsync(
         BoundRuntimePolicy policy, string sourceText, int value, int[] arguments)
         => TerrumScannerAndSourceEmitterProduceBootstrapPeImageAsync(
@@ -2032,19 +1977,15 @@ public sealed class BootstrapInt32MainReturnComponentTests
             yield return [policy, new[] { 17 }, "", 17, false, 32];
         }
     }
-
-    [Theory]
-    [MemberData(nameof(BootstrapHelperCallChainCases))]
+    [TestCaseSource(nameof(BootstrapHelperCallChainCases))]
     public Task BootstrapHelperCallChainsExecuteAndValidateAsync(
         BoundRuntimePolicy policy, int[] arguments, string operation,
         int expectedResult, bool useMainLocal, int forwardingCount)
         => AssertBootstrapHelperCallChainAsync(
             policy, arguments, operation, expectedResult, useMainLocal,
             forwardingCount: forwardingCount);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallChainsProbeAndUnwindNestedFramesAsync(
         BoundRuntimePolicy policy)
     {
@@ -2052,10 +1993,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return AssertBootstrapHelperCallChainAsync(
             policy, arguments, "+", 131328, false, verifyNestedUnwind: true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallChainsProbeAndUnwindMultipleForwardersAsync(
         BoundRuntimePolicy policy)
     {
@@ -2064,23 +2003,19 @@ public sealed class BootstrapInt32MainReturnComponentTests
             policy, arguments, "+", 32896, false, verifyNestedUnwind: true,
             forwardingCount: 3);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, 32)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 32)]
-    [InlineData(BoundRuntimePolicy.FailFast, 128)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 128)]
-    [InlineData(BoundRuntimePolicy.FailFast, 256)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 256)]
+    [TestCase(BoundRuntimePolicy.FailFast,32)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,32)]
+    [TestCase(BoundRuntimePolicy.FailFast,128)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,128)]
+    [TestCase(BoundRuntimePolicy.FailFast,256)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,256)]
     public Task BootstrapHelperCallChainsProbeAndUnwindDeepChainAsync(
         BoundRuntimePolicy policy, int forwardingCount)
         => AssertBootstrapHelperCallChainAsync(
             policy, [17], "", 17, false, verifyNestedUnwind: true,
             forwardingCount: forwardingCount);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task BootstrapHelperCallChainDepthScalesToSourceLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -2105,9 +2040,9 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
 
         var sourceText = CreateSource(minimumForwardingCount);
-        Assert.InRange(sourceText.Length, 1, ScannerHost.MaximumSourceLength);
+        Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
         var excessiveSource = CreateSource(minimumForwardingCount + 1);
-        Assert.True(excessiveSource.Length > ScannerHost.MaximumSourceLength);
+        Assert.That(excessiveSource.Length > ScannerHost.MaximumSourceLength, Is.True);
 
         var imageCapacity = GetBootstrapCallChainImageLength(
             1, multiplication: false, forwardingCount: minimumForwardingCount);
@@ -2126,10 +2061,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 forwardingCount: minimumForwardingCount) - 1,
             expectCodeRejection: true).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task BootstrapHelperCallChainArgumentCountScalesToSourceLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -2164,9 +2097,9 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
 
         var (sourceText, arguments) = CreateCase(minimumArgumentCount, forwardingCount);
-        Assert.InRange(sourceText.Length, 1, ScannerHost.MaximumSourceLength);
-        Assert.True(CreateCase(minimumArgumentCount + 1, forwardingCount).SourceText.Length
-            > ScannerHost.MaximumSourceLength);
+        Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
+        Assert.That(CreateCase(minimumArgumentCount + 1, forwardingCount).SourceText.Length
+            > ScannerHost.MaximumSourceLength, Is.True);
 
         var codeCapacity = GetBootstrapCallChainCodeLength(
             arguments.Length, multiplication: false,
@@ -2187,10 +2120,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             forwardingCount: forwardingCount, codeCapacity: codeCapacity - 1,
             expectCodeRejection: true).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallChainsForwardManyStackArgumentsThroughDeepChainAsync(
         BoundRuntimePolicy policy)
     {
@@ -2201,22 +2132,18 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 arguments.Length, multiplication: false, forwardingCount: 32),
             forwardingCount: 32);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo; public int32 Main() => 42;", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo; public int32 Main() => 42;", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo.Core; public int32 Main() => 42;", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo.Core; public int32 Main() => 42;", true, 42)]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo.Core; internal int32 Answer() => 40 + 2; public int32 Main() => Answer();", true, 42)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo.Core; internal int32 Answer() => 40 + 2; public int32 Main() => Answer();", true, 42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo; public int32 Main() => 42;",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo; public int32 Main() => 42;",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo.Core; public int32 Main() => 42;",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo.Core; public int32 Main() => 42;",true,42)]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo.Core; internal int32 Answer() => 40 + 2; public int32 Main() => Answer();",true,42)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo.Core; internal int32 Answer() => 40 + 2; public int32 Main() => Answer();",true,42)]
     public Task BootstrapFileScopedNamespacePreservesMainAndHelperAsync(
         BoundRuntimePolicy policy, string sourceText, bool shouldEmit, int expectedValue)
         => EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, shouldEmit, expectedValue);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapStandaloneLeafSupportsSourceSizedLocalsAsync(
         BoundRuntimePolicy policy)
     {
@@ -2252,50 +2179,44 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
 
         var sourceText = CreateSource(minimumLocalCount);
-        Assert.InRange(sourceText.Length, 1, ScannerHost.MaximumSourceLength);
-        Assert.True(CreateSource(minimumLocalCount + 1).Length
-            > ScannerHost.MaximumSourceLength);
+        Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
+        Assert.That(CreateSource(minimumLocalCount + 1).Length
+            > ScannerHost.MaximumSourceLength, Is.True);
         return TerrumScannerAndSourceEmitterProduceBootstrapPeImageAsync(
             policy, sourceText, -(minimumLocalCount + 6), 0);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 1; int32 second = 2; int32 third = 3; return first + second * third;", 7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 1; int32 second = 2; int32 third = 3; return first + second * third;", 7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 4; int32 second = first * 3 + 2; int32 third = (second - 1) / 3; return -(third + first);", -8)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 4; int32 second = first * 3 + 2; int32 third = (second - 1) / 3; return -(third + first);", -8)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = -1; int32 second = 2; int32 third = 3; return first + second;", 1)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = -1; int32 second = 2; int32 third = 3; return first + second;", 1)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 1; int32 second = 2; int32 third = 3; return first + second + third;", 6)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 1; int32 second = 2; int32 third = 3; return first + second + third;", 6)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 1; int32 second = 2; int32 third = 3; return first + second * third;",7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 1; int32 second = 2; int32 third = 3; return first + second * third;",7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 4; int32 second = first * 3 + 2; int32 third = (second - 1) / 3; return -(third + first);",-8)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 4; int32 second = first * 3 + 2; int32 third = (second - 1) / 3; return -(third + first);",-8)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = -1; int32 second = 2; int32 third = 3; return first + second;",1)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = -1; int32 second = 2; int32 third = 3; return first + second;",1)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 1; int32 second = 2; int32 third = 3; return first + second + third;",6)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 1; int32 second = 2; int32 third = 3; return first + second + third;",6)]
     public Task BootstrapStandaloneLeafFoldsCallArgumentExpressionsAsync(
         BoundRuntimePolicy policy, string body, int expectedValue)
         => TerrumScannerAndSourceEmitterProduceBootstrapPeImageAsync(
             policy, $"public int32 Main() {{ {body} }}", expectedValue, 0);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = second; int32 second = 2; int32 third = 3; return second;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = second; int32 second = 2; int32 third = 3; return second;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 1; int32 first = 2; int32 third = 3; return first;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 1; int32 first = 2; int32 third = 3; return first;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 1; int32 second = 2; int32 third = 3; return 1;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 1; int32 second = 2; int32 third = 3; return 1;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 2147483647 + 1; int32 second = 2; int32 third = 3; return third;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 2147483647 + 1; int32 second = 2; int32 third = 3; return third;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 1 / 0; int32 second = 2; int32 third = 3; return third;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 1 / 0; int32 second = 2; int32 third = 3; return third;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = -2147483648; int32 second = -first; int32 third = 3; return third;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = -2147483648; int32 second = -first; int32 third = 3; return third;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = second; int32 second = 2; int32 third = 3; return second;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = second; int32 second = 2; int32 third = 3; return second;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 1; int32 first = 2; int32 third = 3; return first;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 1; int32 first = 2; int32 third = 3; return first;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 1; int32 second = 2; int32 third = 3; return 1;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 1; int32 second = 2; int32 third = 3; return 1;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 2147483647 + 1; int32 second = 2; int32 third = 3; return third;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 2147483647 + 1; int32 second = 2; int32 third = 3; return third;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 1 / 0; int32 second = 2; int32 third = 3; return third;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 1 / 0; int32 second = 2; int32 third = 3; return third;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = -2147483648; int32 second = -first; int32 third = 3; return third;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = -2147483648; int32 second = -first; int32 third = 3; return third;")]
     public Task BootstrapStandaloneLeafRejectsInvalidSourceSizedLocalsAsync(
         BoundRuntimePolicy policy, string body)
         => EmitsOnlyTheDirectSourceSubsetAsync(
             policy, $"public int32 Main() {{ {body} }}", false, 0);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
     public async Task BootstrapStandaloneLeafRejectsInsufficientLocalCapacityAsync(
         BoundRuntimePolicy policy, bool shortNameTable)
     {
@@ -2333,54 +2254,47 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, rejectSource)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Equal(0, ReadInt32(execution.Data,
-            execution.BufferOffsets[buffers.Length - 3]));
-        Assert.Equal(0, ReadInt32(execution.Data,
-            execution.BufferOffsets[buffers.Length - 1]));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(execution.ExitCode, Is.EqualTo(0));
+        Assert.That(ReadInt32(execution.Data,
+            execution.BufferOffsets[buffers.Length - 3]), Is.EqualTo(0));
+        Assert.That(ReadInt32(execution.Data,
+            execution.BufferOffsets[buffers.Length - 1]), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace ; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace ; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo.; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo.; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo..Core; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo..Core; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo; namespace Other; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo; namespace Other; public int32 Main() => 42;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo { public int32 Main() => 42; }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo { public int32 Main() => 42; }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "public int32 Main() => 42; namespace Demo;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "public int32 Main() => 42; namespace Demo;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "namespace Demo; internal int32 Answer() => 1; internal int32 Answer() => 2; public int32 Main() => Answer();")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "namespace Demo; internal int32 Answer() => 1; internal int32 Answer() => 2; public int32 Main() => Answer();")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace ; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace ; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo.; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo.; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo..Core; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo..Core; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo; namespace Other; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo; namespace Other; public int32 Main() => 42;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo { public int32 Main() => 42; }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo { public int32 Main() => 42; }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"public int32 Main() => 42; namespace Demo;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"public int32 Main() => 42; namespace Demo;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"namespace Demo; internal int32 Answer() => 1; internal int32 Answer() => 2; public int32 Main() => Answer();")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"namespace Demo; internal int32 Answer() => 1; internal int32 Answer() => 2; public int32 Main() => Answer();")]
     public Task BootstrapFileScopedNamespaceRejectsMalformedOrDuplicateInputAsync(
         BoundRuntimePolicy policy, string sourceText)
         => EmitsOnlyTheDirectSourceSubsetAsync(policy, sourceText, false, 0);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapFileScopedNamespacePreservesForwardingChainAsync(
         BoundRuntimePolicy policy)
         => AssertBootstrapHelperCallChainAsync(
             policy, [20, 22], "+", 42, false, verifyNestedUnwind: true,
             forwardingCount: 3, fileScopedNamespace: "Demo.Core");
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
     public Task BootstrapHelperCallArgumentsFoldCheckedExpressionsAsync(
         BoundRuntimePolicy policy, bool forwardingChain)
     {
@@ -2400,25 +2314,21 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, true, 15, helperArguments: [-5, 4, 9, 5, 1, 1]);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallMinimumLiteralRemainsRepresentableAsync(
         BoundRuntimePolicy policy)
         => AssertBootstrapHelperCallChainAsync(
             policy, [int.MinValue], "", int.MinValue, false,
             mainArgumentExpressions: ["-2147483648"]);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "(seed + 2) * 3", "first / 2 + 7 % 4", true, 66, 106)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "(seed + 2) * 3", "first / 2 + 7 % 4", true, 66, 106)]
-    [InlineData(BoundRuntimePolicy.FailFast, "seed - 55", "-(first - 5) + 18 % 5", true, 23, 63)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "seed - 55", "-(first - 5) + 18 % 5", true, 23, 63)]
-    [InlineData(BoundRuntimePolicy.FailFast, "2147483647 + 1", "first", false, 0, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "2147483647 + 1", "first", false, 0, 0)]
-    [InlineData(BoundRuntimePolicy.FailFast, "seed / (40 - 40)", "first", false, 0, 0)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "seed / (40 - 40)", "first", false, 0, 0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"(seed + 2) * 3","first / 2 + 7 % 4",true,66,106)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"(seed + 2) * 3","first / 2 + 7 % 4",true,66,106)]
+    [TestCase(BoundRuntimePolicy.FailFast,"seed - 55","-(first - 5) + 18 % 5",true,23,63)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"seed - 55","-(first - 5) + 18 % 5",true,23,63)]
+    [TestCase(BoundRuntimePolicy.FailFast,"2147483647 + 1","first",false,0,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"2147483647 + 1","first",false,0,0)]
+    [TestCase(BoundRuntimePolicy.FailFast,"seed / (40 - 40)","first",false,0,0)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"seed / (40 - 40)","first",false,0,0)]
     public Task BootstrapParameterizedHelperCallFoldsBoundedMainLocalExpressionsAsync(
         BoundRuntimePolicy policy, string firstInitializer, string secondInitializer,
         bool shouldEmit, int secondValue, int value)
@@ -2433,10 +2343,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             policy, sourceText, shouldEmit, value,
             helperArguments: [shouldEmit ? secondValue : 0, 40]);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapParameterizedHelperCallSupportsSourceSizedMainLocalsAsync(
         BoundRuntimePolicy policy)
     {
@@ -2470,19 +2378,17 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
 
         var sourceText = CreateSource(minimumLocalCount);
-        Assert.True(minimumLocalCount > 2);
-        Assert.InRange(sourceText.Length, 1, ScannerHost.MaximumSourceLength);
-        Assert.True(CreateSource(minimumLocalCount + 1).Length > ScannerHost.MaximumSourceLength);
+        Assert.That(minimumLocalCount > 2, Is.True);
+        Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
+        Assert.That(CreateSource(minimumLocalCount + 1).Length > ScannerHost.MaximumSourceLength, Is.True);
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, true, minimumLocalCount * 2 - 1,
             helperArguments: [minimumLocalCount, minimumLocalCount - 1]);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
     public Task BootstrapParameterizedHelperCallRejectsInsufficientMainLocalTablesAsync(
         BoundRuntimePolicy policy, bool shortNameTable)
     {
@@ -2495,12 +2401,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
             bootstrapMainLocalNameCapacity: shortNameTable ? 0 : sourceText.Length,
             bootstrapMainLocalValueCapacity: shortNameTable ? sourceText.Length : 0);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
     public Task BootstrapHelperCallLargeStackArgumentExpressionsFoldCheckedAsync(
         BoundRuntimePolicy policy, bool forwardingChain)
     {
@@ -2534,10 +2438,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return EmitsOnlyTheDirectSourceSubsetAsync(
             policy, sourceText, true, 484, helperArguments: arguments);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallArgumentCountScalesBeyondRegisterArgumentsAsync(
         BoundRuntimePolicy policy)
     {
@@ -2556,10 +2458,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             helperArguments: arguments,
             imageCapacity: GetStackArgumentImageLength(argumentCount));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallArgumentCountScalesToSourceLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -2569,10 +2469,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             helperArguments: arguments,
             imageCapacity: GetStackArgumentImageLength(arguments.Length));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallSourceLimitRejectsInsufficientCodeCapacityAsync(
         BoundRuntimePolicy policy)
     {
@@ -2581,10 +2479,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return HelperCallsRejectInsufficientCodeBuffersAsync(
             policy, sourceText, codeCapacity);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallArgumentGroupingScalesToScannerLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -2620,24 +2516,22 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var sourceText = CreateBootstrapHelperCallChainSource(
             [3], "", useMainLocal: false, forwardingCount: 1,
             mainArgumentExpressions: [nestedExpression]);
-        Assert.InRange(sourceText.Length, 1, ScannerHost.MaximumSourceLength);
+        Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
         var excessiveExpression = "-("
             + new string('(', minimumGroupingDepth + 1)
             + "-(1+2)"
             + new string(')', minimumGroupingDepth + 1)
             + ")";
-        Assert.True(CreateBootstrapHelperCallChainSource(
+        Assert.That(CreateBootstrapHelperCallChainSource(
                 [3], "", useMainLocal: false, forwardingCount: 1,
                 mainArgumentExpressions: [excessiveExpression]).Length
-            > ScannerHost.MaximumSourceLength);
+            > ScannerHost.MaximumSourceLength, Is.True);
         return AssertBootstrapHelperCallChainAsync(
             policy, [3], "", 3, false,
             mainArgumentExpressions: [nestedExpression]);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallChainLocalInitializersScaleGroupingToScannerLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -2672,19 +2566,16 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
 
-        Assert.InRange(CreateSource(minimumGroupingDepth).Length,
-            1, ScannerHost.MaximumSourceLength);
-        Assert.True(CreateSource(minimumGroupingDepth + 1).Length
-            > ScannerHost.MaximumSourceLength);
+        Assert.That(CreateSource(minimumGroupingDepth).Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
+        Assert.That(CreateSource(minimumGroupingDepth + 1).Length
+            > ScannerHost.MaximumSourceLength, Is.True);
         return AssertBootstrapHelperCallChainAsync(
             policy, [3], "", 3, true,
             mainArgumentExpressions: ["value"],
             mainLocalDeclarations: $"int32 value={CreateInitializer(minimumGroupingDepth)};");
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallChainLocalInitializersScaleNestedUnaryGroupingToScannerLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -2721,19 +2612,16 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
 
-        Assert.InRange(CreateSource(minimumGroupingDepth).Length,
-            1, ScannerHost.MaximumSourceLength);
-        Assert.True(CreateSource(minimumGroupingDepth + 1).Length
-            > ScannerHost.MaximumSourceLength);
+        Assert.That(CreateSource(minimumGroupingDepth).Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
+        Assert.That(CreateSource(minimumGroupingDepth + 1).Length
+            > ScannerHost.MaximumSourceLength, Is.True);
         return AssertBootstrapHelperCallChainAsync(
             policy, [3], "", 3, true,
             mainArgumentExpressions: ["value"],
             mainLocalDeclarations: $"int32 value = {CreateInitializer(minimumGroupingDepth)};");
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallChainScalesMainLocalsToScannerLimitAsync(
         BoundRuntimePolicy policy)
     {
@@ -2770,10 +2658,9 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
 
-        Assert.InRange(CreateSource(minimumLocalCount).Length,
-            1, ScannerHost.MaximumSourceLength);
-        Assert.True(CreateSource(minimumLocalCount + 1).Length
-            > ScannerHost.MaximumSourceLength);
+        Assert.That(CreateSource(minimumLocalCount).Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
+        Assert.That(CreateSource(minimumLocalCount + 1).Length
+            > ScannerHost.MaximumSourceLength, Is.True);
         var declarations = CreateDeclarations(minimumLocalCount);
         return AssertBootstrapHelperCallChainAsync(
             policy, [minimumLocalCount], "", minimumLocalCount, true,
@@ -2781,12 +2668,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
             mainLocalDeclarations: declarations,
             fileScopedNamespace: "Demo.Core");
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, true)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
-    [InlineData(BoundRuntimePolicy.FailFast, false)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    [TestCase(BoundRuntimePolicy.FailFast,true)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true)]
+    [TestCase(BoundRuntimePolicy.FailFast,false)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false)]
     public async Task BootstrapHelperCallChainsRejectInsufficientMainLocalCapacityAsync(
         BoundRuntimePolicy policy, bool shortNameTable)
     {
@@ -2825,40 +2710,37 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, rejectSource)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Equal(0, ReadInt32(execution.Data,
-            execution.BufferOffsets[buffers.Length - 3]));
-        Assert.Equal(0, ReadInt32(execution.Data,
-            execution.BufferOffsets[buffers.Length - 1]));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(execution.ExitCode, Is.EqualTo(0));
+        Assert.That(ReadInt32(execution.Data,
+            execution.BufferOffsets[buffers.Length - 3]), Is.EqualTo(0));
+        Assert.That(ReadInt32(execution.Data,
+            execution.BufferOffsets[buffers.Length - 1]), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 7; int32 result = first - 2;", "result", 5)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 7; int32 result = first - 2;", "result", 5)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 3; int32 result = first * 4;", "result", 12)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 3; int32 result = first * 4;", "result", 12)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 24; int32 result = first / 3;", "result", 8)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 24; int32 result = first / 3;", "result", 8)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 17; int32 result = first % 5;", "result", 2)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 17; int32 result = first % 5;", "result", 2)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 2 + 3 * 4; int32 result = -(first - 20) + 0 * 7;", "result", 6)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 2 + 3 * 4; int32 result = -(first - 20) + 0 * 7;", "result", 6)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 result = -7;", "result", -7)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 result = -7;", "result", -7)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 result = -2147483648;", "result", int.MinValue)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 result = -2147483648;", "result", int.MinValue)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = 1; int32 result = first + 2 + 3;", "result", 6)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = 1; int32 result = first + 2 + 3;", "result", 6)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 first = -3; int32 result = 7 + first;", "result", 4)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 first = -3; int32 result = 7 + first;", "result", 4)]
-    [InlineData(BoundRuntimePolicy.FailFast, "int32 result = -((-(1 + 2)));", "result", 3)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "int32 result = -((-(1 + 2)));", "result", 3)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 7; int32 result = first - 2;","result",5)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 7; int32 result = first - 2;","result",5)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 3; int32 result = first * 4;","result",12)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 3; int32 result = first * 4;","result",12)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 24; int32 result = first / 3;","result",8)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 24; int32 result = first / 3;","result",8)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 17; int32 result = first % 5;","result",2)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 17; int32 result = first % 5;","result",2)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 2 + 3 * 4; int32 result = -(first - 20) + 0 * 7;","result",6)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 2 + 3 * 4; int32 result = -(first - 20) + 0 * 7;","result",6)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 result = -7;","result",-7)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 result = -7;","result",-7)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 result = -2147483648;","result",int.MinValue)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 result = -2147483648;","result",int.MinValue)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = 1; int32 result = first + 2 + 3;","result",6)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = 1; int32 result = first + 2 + 3;","result",6)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 first = -3; int32 result = 7 + first;","result",4)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 first = -3; int32 result = 7 + first;","result",4)]
+    [TestCase(BoundRuntimePolicy.FailFast,"int32 result = -((-(1 + 2)));","result",3)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"int32 result = -((-(1 + 2)));","result",3)]
     public Task BootstrapHelperCallChainMainLocalsFoldBoundedArithmeticAsync(
         BoundRuntimePolicy policy, string localDeclarations, string resultLocal,
         int expectedResult)
@@ -2866,76 +2748,74 @@ public sealed class BootstrapInt32MainReturnComponentTests
             policy, [expectedResult], "", expectedResult, true,
             mainArgumentExpressions: [resultLocal],
             mainLocalDeclarations: localDeclarations);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "2147483647 + 1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "2147483647 + 1")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "2147483647 + 1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "2147483647 + 1")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "50000 * 50000")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "50000 * 50000")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "50000 * 50000")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "50000 * 50000")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "1 / 0")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "1 / 0")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "1 / 0")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "1 / 0")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "(1 / 0)")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "(1 / 0)")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "(1 / 0)")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "(1 / 0)")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "1 % 0")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "1 % 0")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "1 % 0")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "1 % 0")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "2147483647+1*1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "2147483647+1*1")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "2147483647+1*1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "2147483647+1*1")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "50000*50000/50000")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "50000*50000/50000")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "50000*50000/50000")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "50000*50000/50000")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "(2147483647 + 1)")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "(2147483647 + 1)")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "(2147483647 + 1)")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "(2147483647 + 1)")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "1 + ( )")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "1 + ( )")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "1 + ( )")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "1 + ( )")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "(1 + 2")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "(1 + 2")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "(1 + 2")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "(1 + 2")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "1 + (2 + 3) )")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "1 + (2 + 3) )")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "1 + (2 + 3) )")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "1 + (2 + 3) )")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "- - (1 + 2)")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "- - (1 + 2)")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "- - (1 + 2)")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "- - (1 + 2)")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "- ( -2147483648 )")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "- ( -2147483648 )")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "- ( -2147483648 )")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "- ( -2147483648 )")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "-2147483648-1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "-2147483648-1")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "-2147483648-1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "-2147483648-1")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "-2147483648 / -1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "-2147483648 / -1")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "-2147483648 / -1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "-2147483648 / -1")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "-2147483648 % -1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "-2147483648 % -1")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "-2147483648 % -1")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "-2147483648 % -1")]
-    [InlineData(BoundRuntimePolicy.FailFast, false, "-50000*50000")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, false, "-50000*50000")]
-    [InlineData(BoundRuntimePolicy.FailFast, true, "-50000*50000")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, true, "-50000*50000")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"2147483647 + 1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"2147483647 + 1")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"2147483647 + 1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"2147483647 + 1")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"50000 * 50000")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"50000 * 50000")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"50000 * 50000")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"50000 * 50000")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"1 / 0")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"1 / 0")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"1 / 0")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"1 / 0")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"(1 / 0)")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"(1 / 0)")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"(1 / 0)")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"(1 / 0)")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"1 % 0")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"1 % 0")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"1 % 0")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"1 % 0")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"2147483647+1*1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"2147483647+1*1")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"2147483647+1*1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"2147483647+1*1")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"50000*50000/50000")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"50000*50000/50000")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"50000*50000/50000")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"50000*50000/50000")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"(2147483647 + 1)")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"(2147483647 + 1)")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"(2147483647 + 1)")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"(2147483647 + 1)")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"1 + ( )")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"1 + ( )")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"1 + ( )")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"1 + ( )")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"(1 + 2")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"(1 + 2")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"(1 + 2")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"(1 + 2")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"1 + (2 + 3) )")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"1 + (2 + 3) )")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"1 + (2 + 3) )")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"1 + (2 + 3) )")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"- - (1 + 2)")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"- - (1 + 2)")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"- - (1 + 2)")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"- - (1 + 2)")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"- ( -2147483648 )")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"- ( -2147483648 )")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"- ( -2147483648 )")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"- ( -2147483648 )")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"-2147483648-1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"-2147483648-1")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"-2147483648-1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"-2147483648-1")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"-2147483648 / -1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"-2147483648 / -1")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"-2147483648 / -1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"-2147483648 / -1")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"-2147483648 % -1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"-2147483648 % -1")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"-2147483648 % -1")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"-2147483648 % -1")]
+    [TestCase(BoundRuntimePolicy.FailFast,false,"-50000*50000")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,false,"-50000*50000")]
+    [TestCase(BoundRuntimePolicy.FailFast,true,"-50000*50000")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,true,"-50000*50000")]
     public Task InvalidBootstrapCallArgumentExpressionsRejectBeforePublicationAsync(
         BoundRuntimePolicy policy, bool forwardingChain, string firstArgument)
     {
@@ -2955,10 +2835,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
 
         return EmitsOnlyTheDirectSourceSubsetAsync(policy, sourceText, false, 0);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task NegatingMinimumLocalInBootstrapCallArgumentRejectsBeforePublicationAsync(
         BoundRuntimePolicy policy)
     {
@@ -2967,49 +2845,45 @@ public sealed class BootstrapInt32MainReturnComponentTests
             + " public int32 Main() { int32 minimum = -2147483648; return Sum6(-minimum, 2, 3, 4, 5, 6); }";
         return EmitsOnlyTheDirectSourceSubsetAsync(policy, sourceText, false, 0);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0) => B(a0); public int32 Main() => A(1);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0) => B(a0); public int32 Main() => A(1);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a1, a0); public int32 Main() => A(1, 2);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a1, a0); public int32 Main() => A(1, 2);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a0); public int32 Main() => A(1, 2);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a0); public int32 Main() => A(1, 2);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0 + 1, a1); public int32 Main() => A(1, 2);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0 + 1, a1); public int32 Main() => A(1, 2);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 B(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => B(1, 2);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 B(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => B(1, 2);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(1, 2); internal int32 C() => 3;")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(1, 2); internal int32 C() => 3;")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1; int32 first = 2; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1; int32 first = 2; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 A = 1; return A(A); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 A = 1; return A(A); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 B = 1; return A(B); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 B = 1; return A(B); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 Main = 1; return A(Main); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 Main = 1; return A(Main); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = second; int32 second = 2; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = second; int32 second = 2; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 2147483647 + 1; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 2147483647 + 1; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 50000 * 50000; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 50000 * 50000; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 / 0; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 / 0; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 % 0; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 % 0; return A(first); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 minimum = -2147483648; int32 result = -minimum; return A(result); }")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 minimum = -2147483648; int32 result = -minimum; return A(result); }")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(2147483647, 1);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(2147483647, 1);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0) => B(a0); public int32 Main() => A(1);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0) => B(a0); public int32 Main() => A(1);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a1, a0); public int32 Main() => A(1, 2);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a1, a0); public int32 Main() => A(1, 2);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a0); public int32 Main() => A(1, 2);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a0); public int32 Main() => A(1, 2);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0 + 1, a1); public int32 Main() => A(1, 2);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0 + 1, a1); public int32 Main() => A(1, 2);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 B(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => B(1, 2);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 B(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => B(1, 2);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(1, 2); internal int32 C() => 3;")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(1, 2); internal int32 C() => 3;")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1; int32 first = 2; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1; int32 first = 2; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 A = 1; return A(A); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 A = 1; return A(A); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 B = 1; return A(B); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 B = 1; return A(B); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 Main = 1; return A(Main); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 Main = 1; return A(Main); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = second; int32 second = 2; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = second; int32 second = 2; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 2147483647 + 1; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 2147483647 + 1; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 50000 * 50000; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 50000 * 50000; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 / 0; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 / 0; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 % 0; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 first = 1 % 0; return A(first); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 minimum = -2147483648; int32 result = -minimum; return A(result); }")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0) => b0; internal int32 A(int32 a0) => B(a0); public int32 Main() { int32 minimum = -2147483648; int32 result = -minimum; return A(result); }")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(2147483647, 1);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 B(int32 b0, int32 b1) => b0 + b1; internal int32 A(int32 a0, int32 a1) => B(a0, a1); public int32 Main() => A(2147483647, 1);")]
     public Task UnsupportedBootstrapHelperCallChainsRejectBeforePublicationAsync(
         BoundRuntimePolicy policy, string sourceText)
         => EmitsOnlyTheDirectSourceSubsetAsync(policy, sourceText, false, 0);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task BootstrapHelperCallChainsRejectInsufficientCodeCapacityAsync(
         BoundRuntimePolicy policy)
     {
@@ -3036,18 +2910,15 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, rejectSource)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.ExecuteWithData(
-            program, (NativeRuntimePolicy)policy).ExitCode);
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        Assert.That(NativeJit.ExecuteWithData(
+            program, (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task BootstrapHelperCallChainsRejectInsufficientImageCapacityAsync(
         BoundRuntimePolicy policy)
     {
@@ -3095,8 +2966,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 [.. new int[imageCapacity]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
         var execution = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
 
         var codeLength = ReadInt32(execution.Data,
@@ -3107,20 +2978,19 @@ public sealed class BootstrapInt32MainReturnComponentTests
             arguments.Length, multiplication, forwardingCount);
         var expectedExitCode = expectCodeRejection ? -1
             : expectImageRejection ? -2 : expectedImageLength;
-        Assert.True(execution.ExitCode == expectedExitCode,
-            $"Expected exit code {expectedExitCode}, got {execution.ExitCode}; "
+        Assert.That(execution.ExitCode == expectedExitCode, Is.True, $"Expected exit code {expectedExitCode}, got {execution.ExitCode}; "
                 + $"codeLength={codeLength}, imageLength={imageLength}.");
         if (expectCodeRejection)
         {
-            Assert.Equal(0, codeLength);
-            Assert.Equal(0, imageLength);
+            Assert.That(codeLength, Is.EqualTo(0));
+            Assert.That(imageLength, Is.EqualTo(0));
             return;
         }
-        Assert.Equal(requiredCodeCapacity, codeLength);
+        Assert.That(codeLength, Is.EqualTo(requiredCodeCapacity));
         if (expectImageRejection)
         {
-            Assert.Equal(0, ReadInt32(
-                execution.Data, execution.BufferOffsets[buffers.Length - 1]));
+            Assert.That(ReadInt32(
+                execution.Data, execution.BufferOffsets[buffers.Length - 1]), Is.EqualTo(0));
             return;
         }
         var code = new byte[codeLength];
@@ -3128,7 +2998,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         {
             var value = ReadInt32(execution.Data,
                 execution.BufferOffsets[buffers.Length - 4] + index * sizeof(int));
-            Assert.InRange(value, 0, byte.MaxValue);
+            Assert.That(value, Is.InRange(0, byte.MaxValue));
             code[index] = (byte)value;
         }
 
@@ -3139,12 +3009,12 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var (mainFunctionEnd, forwardingFunctionEnd, expectedCodeLength) =
             GetBootstrapCallChainLayout(
                 arguments.Length, multiplication, forwardingCount);
-        Assert.Equal(codeLength, expectedCodeLength);
+        Assert.That(expectedCodeLength, Is.EqualTo(codeLength));
         AssertBootstrapCallChainFrameProlog(code, 0, frameSize);
-        Assert.Equal(0xE8, code[mainCallOffset]);
-        Assert.Equal(epilogueLength, ReadInt32(code, mainCallOffset + 1));
-        Assert.Equal(mainFunctionEnd, mainCallOffset + 5
-            + ReadInt32(code, mainCallOffset + 1));
+        Assert.That(code[mainCallOffset], Is.EqualTo(0xE8));
+        Assert.That(ReadInt32(code, mainCallOffset + 1), Is.EqualTo(epilogueLength));
+        Assert.That(mainCallOffset + 5
+            + ReadInt32(code, mainCallOffset + 1), Is.EqualTo(mainFunctionEnd));
 
         var forwardingLength = forwardingFunctionEnd - mainFunctionEnd;
         for (var forwardingIndex = 0; forwardingIndex < forwardingCount; forwardingIndex++)
@@ -3161,11 +3031,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
             var forwardingCallOffset = forwardingStart + forwardingLength
                 - 5 - epilogueLength;
-            Assert.Equal(forwardingCallOffset, copyOffset);
-            Assert.Equal(0xE8, code[forwardingCallOffset]);
-            Assert.Equal(epilogueLength, ReadInt32(code, forwardingCallOffset + 1));
-            Assert.Equal(forwardingStart + forwardingLength,
-                forwardingCallOffset + 5 + ReadInt32(code, forwardingCallOffset + 1));
+            Assert.That(copyOffset, Is.EqualTo(forwardingCallOffset));
+            Assert.That(code[forwardingCallOffset], Is.EqualTo(0xE8));
+            Assert.That(ReadInt32(code, forwardingCallOffset + 1), Is.EqualTo(epilogueLength));
+            Assert.That(forwardingCallOffset + 5 + ReadInt32(code, forwardingCallOffset + 1), Is.EqualTo(forwardingStart + forwardingLength));
         }
 
         var metadataOffset = (codeLength + 3) & ~3;
@@ -3179,11 +3048,11 @@ public sealed class BootstrapInt32MainReturnComponentTests
         for (var index = 0; index < image.Length; index++)
         {
             var value = ReadInt32(execution.Data, imageBytesOffset + index * sizeof(int));
-            Assert.InRange(value, 0, byte.MaxValue);
+            Assert.That(value, Is.InRange(0, byte.MaxValue));
             image[index] = (byte)value;
         }
-        Assert.Equal(functionTableRva, ReadInt32(image, 0x120));
-        Assert.Equal(functionTableSize, ReadInt32(image, 0x124));
+        Assert.That(ReadInt32(image, 0x120), Is.EqualTo(functionTableRva));
+        Assert.That(ReadInt32(image, 0x124), Is.EqualTo(functionTableSize));
         for (var functionIndex = 0; functionIndex < functionCount; functionIndex++)
         {
             var functionStart = functionIndex == 0 ? 0
@@ -3191,35 +3060,29 @@ public sealed class BootstrapInt32MainReturnComponentTests
             var functionEnd = functionIndex == 0 ? mainFunctionEnd
                 : functionStart + forwardingLength;
             var functionOffset = functionTableOffset + functionIndex * 12;
-            Assert.Equal(0x1000 + functionStart,
-                ReadInt32(image, functionOffset));
-            Assert.Equal(0x1000 + functionEnd,
-                ReadInt32(image, functionOffset + 4));
-            Assert.Equal(functionTableRva + functionTableSize + functionIndex * 8,
-                ReadInt32(image, functionOffset + 8));
+            Assert.That(ReadInt32(image, functionOffset), Is.EqualTo(0x1000 + functionStart));
+            Assert.That(ReadInt32(image, functionOffset + 4), Is.EqualTo(0x1000 + functionEnd));
+            Assert.That(ReadInt32(image, functionOffset + 8), Is.EqualTo(functionTableRva + functionTableSize + functionIndex * 8));
             AssertBootstrapCallChainUnwindInfo(
                 image, functionTableOffset + functionTableSize + functionIndex * 8,
                 frameSize, prologLength);
         }
-        Assert.Equal(sectionVirtualSize, ReadInt32(image, 0x190));
-        Assert.Equal(code.Select(static value => (int)value),
-            image.AsSpan(0x400, codeLength).ToArray().Select(static value => (int)value));
-        Assert.All(image.AsSpan(0x400 + sectionVirtualSize).ToArray(),
-            static value => Assert.Equal(0, value));
+        Assert.That(ReadInt32(image, 0x190), Is.EqualTo(sectionVirtualSize));
+        Assert.That(image.AsSpan(0x400, codeLength).ToArray().Select(static value => (int)value), Is.EqualTo(code.Select(static value => (int)value)));
+        {var __nunitItems1 = image.AsSpan(0x400 + sectionVirtualSize).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem12 in __nunitItems1) { Assert.That(__nunitItem12, Is.EqualTo(0)); } });}
 
-        Assert.Equal(expectedResult, await ExecuteImageAsync(image).ConfigureAwait(true));
-        Assert.Equal(expectedImageLength,
-            await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(await ExecuteImageAsync(image).ConfigureAwait(true), Is.EqualTo(expectedResult));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(expectedImageLength));
         if (verifyNestedUnwind)
         {
             var forwardingAlignmentImage = CreateBootstrapCallChainAlignmentProbeImage(
                 image, arguments.Length, probeForwardingHelper: true);
             var leafAlignmentImage = CreateBootstrapCallChainAlignmentProbeImage(
                 image, arguments.Length, probeForwardingHelper: false);
-            Assert.Equal(8, await ExecuteImageAsync(forwardingAlignmentImage)
-                .ConfigureAwait(true));
-            Assert.Equal(8, await ExecuteImageAsync(leafAlignmentImage)
-                .ConfigureAwait(true));
+            Assert.That(await ExecuteImageAsync(forwardingAlignmentImage)
+                .ConfigureAwait(true), Is.EqualTo(8));
+            Assert.That(await ExecuteImageAsync(leafAlignmentImage)
+                .ConfigureAwait(true), Is.EqualTo(8));
             await AssertBootstrapAllocationUnwindsAsync(
                 image, frameSize, expectedResult, callChain: true,
                 forwardingCount: forwardingCount).ConfigureAwait(true);
@@ -3315,32 +3178,32 @@ public sealed class BootstrapInt32MainReturnComponentTests
     {
         if (incomingOffset > 0x7F)
         {
-            Assert.Equal(0x8B, code[offset]);
-            Assert.Equal(0x84, code[offset + 1]);
-            Assert.Equal(0x24, code[offset + 2]);
-            Assert.Equal(incomingOffset, ReadInt32(code, offset + 3));
+            Assert.That(code[offset], Is.EqualTo(0x8B));
+            Assert.That(code[offset + 1], Is.EqualTo(0x84));
+            Assert.That(code[offset + 2], Is.EqualTo(0x24));
+            Assert.That(ReadInt32(code, offset + 3), Is.EqualTo(incomingOffset));
             offset += 7;
         }
         else
         {
-            Assert.Equal(0x8B, code[offset]);
-            Assert.Equal(0x44, code[offset + 1]);
-            Assert.Equal(0x24, code[offset + 2]);
-            Assert.Equal(incomingOffset, code[offset + 3]);
+            Assert.That(code[offset], Is.EqualTo(0x8B));
+            Assert.That(code[offset + 1], Is.EqualTo(0x44));
+            Assert.That(code[offset + 2], Is.EqualTo(0x24));
+            Assert.That(code[offset + 3], Is.EqualTo(incomingOffset));
             offset += 4;
         }
         if (outgoingOffset > 0x7F)
         {
-            Assert.Equal(0x89, code[offset]);
-            Assert.Equal(0x84, code[offset + 1]);
-            Assert.Equal(0x24, code[offset + 2]);
-            Assert.Equal(outgoingOffset, ReadInt32(code, offset + 3));
+            Assert.That(code[offset], Is.EqualTo(0x89));
+            Assert.That(code[offset + 1], Is.EqualTo(0x84));
+            Assert.That(code[offset + 2], Is.EqualTo(0x24));
+            Assert.That(ReadInt32(code, offset + 3), Is.EqualTo(outgoingOffset));
             return offset + 7;
         }
-        Assert.Equal(0x89, code[offset]);
-        Assert.Equal(0x44, code[offset + 1]);
-        Assert.Equal(0x24, code[offset + 2]);
-        Assert.Equal(outgoingOffset, code[offset + 3]);
+        Assert.That(code[offset], Is.EqualTo(0x89));
+        Assert.That(code[offset + 1], Is.EqualTo(0x44));
+        Assert.That(code[offset + 2], Is.EqualTo(0x24));
+        Assert.That(code[offset + 3], Is.EqualTo(outgoingOffset));
         return offset + 4;
     }
 
@@ -3364,28 +3227,28 @@ public sealed class BootstrapInt32MainReturnComponentTests
     {
         if (frameSize >= 0x1000)
         {
-            Assert.Equal(0x49, code[offset]);
-            Assert.Equal(0x89, code[offset + 1]);
-            Assert.Equal(0xE3, code[offset + 2]);
-            Assert.Equal(frameSize, ReadInt32(code, offset + 5));
-            Assert.Equal(0x48, code[offset + 43]);
-            Assert.Equal(0x81, code[offset + 44]);
-            Assert.Equal(0xEC, code[offset + 45]);
-            Assert.Equal(frameSize, ReadInt32(code, offset + 46));
+            Assert.That(code[offset], Is.EqualTo(0x49));
+            Assert.That(code[offset + 1], Is.EqualTo(0x89));
+            Assert.That(code[offset + 2], Is.EqualTo(0xE3));
+            Assert.That(ReadInt32(code, offset + 5), Is.EqualTo(frameSize));
+            Assert.That(code[offset + 43], Is.EqualTo(0x48));
+            Assert.That(code[offset + 44], Is.EqualTo(0x81));
+            Assert.That(code[offset + 45], Is.EqualTo(0xEC));
+            Assert.That(ReadInt32(code, offset + 46), Is.EqualTo(frameSize));
         }
         else if (frameSize > 0x7F)
         {
-            Assert.Equal(0x48, code[offset]);
-            Assert.Equal(0x81, code[offset + 1]);
-            Assert.Equal(0xEC, code[offset + 2]);
-            Assert.Equal(frameSize, ReadInt32(code, offset + 3));
+            Assert.That(code[offset], Is.EqualTo(0x48));
+            Assert.That(code[offset + 1], Is.EqualTo(0x81));
+            Assert.That(code[offset + 2], Is.EqualTo(0xEC));
+            Assert.That(ReadInt32(code, offset + 3), Is.EqualTo(frameSize));
         }
         else
         {
-            Assert.Equal(0x48, code[offset]);
-            Assert.Equal(0x83, code[offset + 1]);
-            Assert.Equal(0xEC, code[offset + 2]);
-            Assert.Equal(frameSize, code[offset + 3]);
+            Assert.That(code[offset], Is.EqualTo(0x48));
+            Assert.That(code[offset + 1], Is.EqualTo(0x83));
+            Assert.That(code[offset + 2], Is.EqualTo(0xEC));
+            Assert.That(code[offset + 3], Is.EqualTo(frameSize));
         }
     }
 
@@ -3393,35 +3256,30 @@ public sealed class BootstrapInt32MainReturnComponentTests
         byte[] image, int offset, int frameSize, int prologLength)
     {
         var largeFrame = frameSize > 0x7F;
-        Assert.Equal(1, image[offset]);
-        Assert.Equal(prologLength, image[offset + 1]);
-        Assert.Equal(largeFrame ? 2 : 1, image[offset + 2]);
-        Assert.Equal(0, image[offset + 3]);
-        Assert.Equal(prologLength, image[offset + 4]);
-        Assert.Equal(largeFrame ? 0x01 : ((frameSize / 8 - 1) << 4) | 0x02,
-            image[offset + 5]);
-        Assert.Equal(largeFrame ? frameSize / 8 & 0xFF : 0, image[offset + 6]);
-        Assert.Equal(largeFrame ? frameSize / 8 >> 8 & 0xFF : 0, image[offset + 7]);
+        Assert.That(image[offset], Is.EqualTo(1));
+        Assert.That(image[offset + 1], Is.EqualTo(prologLength));
+        Assert.That(image[offset + 2], Is.EqualTo(largeFrame ? 2 : 1));
+        Assert.That(image[offset + 3], Is.EqualTo(0));
+        Assert.That(image[offset + 4], Is.EqualTo(prologLength));
+        Assert.That(image[offset + 5], Is.EqualTo(largeFrame ? 0x01 : ((frameSize / 8 - 1) << 4) | 0x02));
+        Assert.That(image[offset + 6], Is.EqualTo(largeFrame ? frameSize / 8 & 0xFF : 0));
+        Assert.That(image[offset + 7], Is.EqualTo(largeFrame ? frameSize / 8 >> 8 & 0xFF : 0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-7, 6);", -42, new int[] { -7, 6 })]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-7, 6);", -42, new int[] { -7, 6 })]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul4(int32 first, int32 second, int32 third, int32 fourth) => first * second * third * fourth; public int32 Main() => Mul4(-2, -3, 2, -1);", -12, new int[] { -2, -3, 2, -1 })]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul4(int32 first, int32 second, int32 third, int32 fourth) => first * second * third * fourth; public int32 Main() => Mul4(-2, -3, 2, -1);", -12, new int[] { -2, -3, 2, -1 })]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first * second * third * fourth * fifth; public int32 Main() => Mul5(2, 3, 4, 5, 6);", 720, new int[] { 2, 3, 4, 5, 6 })]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first * second * third * fourth * fifth; public int32 Main() => Mul5(2, 3, 4, 5, 6);", 720, new int[] { 2, 3, 4, 5, 6 })]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first * second * third * fourth * fifth * sixth; public int32 Main() => Mul6(-2, 3, 4, 0, -5, 7);", 0, new int[] { -2, 3, 4, 0, -5, 7 })]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first * second * third * fourth * fifth * sixth; public int32 Main() => Mul6(-2, 3, 4, 0, -5, 7);", 0, new int[] { -2, 3, 4, 0, -5, 7 })]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-7, 6);",-42,new int[] { -7, 6 })]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-7, 6);",-42,new int[] { -7, 6 })]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul4(int32 first, int32 second, int32 third, int32 fourth) => first * second * third * fourth; public int32 Main() => Mul4(-2, -3, 2, -1);",-12,new int[] { -2, -3, 2, -1 })]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul4(int32 first, int32 second, int32 third, int32 fourth) => first * second * third * fourth; public int32 Main() => Mul4(-2, -3, 2, -1);",-12,new int[] { -2, -3, 2, -1 })]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first * second * third * fourth * fifth; public int32 Main() => Mul5(2, 3, 4, 5, 6);",720,new int[] { 2, 3, 4, 5, 6 })]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul5(int32 first, int32 second, int32 third, int32 fourth, int32 fifth) => first * second * third * fourth * fifth; public int32 Main() => Mul5(2, 3, 4, 5, 6);",720,new int[] { 2, 3, 4, 5, 6 })]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first * second * third * fourth * fifth * sixth; public int32 Main() => Mul6(-2, 3, 4, 0, -5, 7);",0,new int[] { -2, 3, 4, 0, -5, 7 })]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul6(int32 first, int32 second, int32 third, int32 fourth, int32 fifth, int32 sixth) => first * second * third * fourth * fifth * sixth; public int32 Main() => Mul6(-2, 3, 4, 0, -5, 7);",0,new int[] { -2, 3, 4, 0, -5, 7 })]
     public Task ParameterizedProductExecutesFromGeneratedPeAsync(
         BoundRuntimePolicy policy, string sourceText, int value, int[] arguments)
         => TerrumScannerAndSourceEmitterProduceBootstrapPeImageAsync(
             policy, sourceText, value, arguments.Length + 6,
             helperArguments: arguments, helperMultiplication: true);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task ParameterizedProductExecutesWithWideStackDisplacementsAsync(
         BoundRuntimePolicy policy)
     {
@@ -3442,41 +3300,37 @@ public sealed class BootstrapInt32MainReturnComponentTests
             policy, sourceText, -6, argumentCount + 6,
             helperArguments: arguments, helperMultiplication: true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(50000, 50000);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(50000, 50000);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-2147483648, -1);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-2147483648, -1);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul3(int32 first, int32 second, int32 third) => first * second * third; public int32 Main() => Mul3(50000, 50000, 0);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul3(int32 first, int32 second, int32 third) => first * second * third; public int32 Main() => Mul3(50000, 50000, 0);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second, int32 third) => first * second + third; public int32 Main() => Mul(2, 3, 4);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second, int32 third) => first * second + third; public int32 Main() => Mul(2, 3, 4);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second, int32 third) => first * second - third; public int32 Main() => Mul(2, 3, 4);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second, int32 third) => first * second - third; public int32 Main() => Mul(2, 3, 4);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second, int32 third) => first * third * second; public int32 Main() => Mul(2, 3, 4);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second, int32 third) => first * third * second; public int32 Main() => Mul(2, 3, 4);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second) => second * first; public int32 Main() => Mul(2, 3);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second) => second * first; public int32 Main() => Mul(2, 3);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second) => first / second; public int32 Main() => Mul(6, 3);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second) => first / second; public int32 Main() => Mul(6, 3);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Mul(int32 first, int32 second) => first * ; public int32 Main() => Mul(6, 3);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Mul(int32 first, int32 second) => first * ; public int32 Main() => Mul(6, 3);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(50000, 50000);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(50000, 50000);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-2147483648, -1);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second) => first * second; public int32 Main() => Mul(-2147483648, -1);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul3(int32 first, int32 second, int32 third) => first * second * third; public int32 Main() => Mul3(50000, 50000, 0);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul3(int32 first, int32 second, int32 third) => first * second * third; public int32 Main() => Mul3(50000, 50000, 0);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second, int32 third) => first * second + third; public int32 Main() => Mul(2, 3, 4);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second, int32 third) => first * second + third; public int32 Main() => Mul(2, 3, 4);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second, int32 third) => first * second - third; public int32 Main() => Mul(2, 3, 4);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second, int32 third) => first * second - third; public int32 Main() => Mul(2, 3, 4);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second, int32 third) => first * third * second; public int32 Main() => Mul(2, 3, 4);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second, int32 third) => first * third * second; public int32 Main() => Mul(2, 3, 4);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second) => second * first; public int32 Main() => Mul(2, 3);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second) => second * first; public int32 Main() => Mul(2, 3);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second) => first / second; public int32 Main() => Mul(6, 3);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second) => first / second; public int32 Main() => Mul(6, 3);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Mul(int32 first, int32 second) => first * ; public int32 Main() => Mul(6, 3);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Mul(int32 first, int32 second) => first * ; public int32 Main() => Mul(6, 3);")]
     public Task OverflowingOrUnsupportedParameterizedProductRejectsBeforePublicationAsync(
         BoundRuntimePolicy policy, string sourceText)
         => AssertParameterizedArithmeticRejectsBeforePublicationAsync(policy, sourceText);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second, int32 third) => first - second - third; public int32 Main() => Sub(-2147483648, 1, -2147483648);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second, int32 third) => first - second - third; public int32 Main() => Sub(-2147483648, 1, -2147483648);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(2147483647, -1);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(2147483647, -1);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second) => second - first; public int32 Main() => Sub(40, 2);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second) => second - first; public int32 Main() => Sub(40, 2);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sub(40, 2, 3);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sub(40, 2, 3);")]
-    [InlineData(BoundRuntimePolicy.FailFast, "internal int32 Sub(int32 first, int32 second, int32 third) => first - third - second; public int32 Main() => Sub(40, 2, 3);")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "internal int32 Sub(int32 first, int32 second, int32 third) => first - third - second; public int32 Main() => Sub(40, 2, 3);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second, int32 third) => first - second - third; public int32 Main() => Sub(-2147483648, 1, -2147483648);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second, int32 third) => first - second - third; public int32 Main() => Sub(-2147483648, 1, -2147483648);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(2147483647, -1);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second) => first - second; public int32 Main() => Sub(2147483647, -1);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second) => second - first; public int32 Main() => Sub(40, 2);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second) => second - first; public int32 Main() => Sub(40, 2);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sub(40, 2, 3);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second, int32 third) => first - second + third; public int32 Main() => Sub(40, 2, 3);")]
+    [TestCase(BoundRuntimePolicy.FailFast,"internal int32 Sub(int32 first, int32 second, int32 third) => first - third - second; public int32 Main() => Sub(40, 2, 3);")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"internal int32 Sub(int32 first, int32 second, int32 third) => first - third - second; public int32 Main() => Sub(40, 2, 3);")]
     public async Task OverflowingOrUnsupportedParameterizedSubtractionRejectsBeforePublicationAsync(
         BoundRuntimePolicy policy, string sourceText)
         => await AssertParameterizedArithmeticRejectsBeforePublicationAsync(
@@ -3510,15 +3364,15 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(components, RejectBootstrapSourcePublication)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
 
         var jit = NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy);
-        Assert.Equal(0, jit.ExitCode);
-        Assert.Equal(0, ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 3]));
-        Assert.Equal(0, ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 1]));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(jit.ExitCode, Is.EqualTo(0));
+        Assert.That(ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 3]), Is.EqualTo(0));
+        Assert.That(ReadInt32(jit.Data, jit.BufferOffsets[buffers.Length - 1]), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
 
     public static IEnumerable<object[]> StackArgumentSourceCases()
@@ -3649,11 +3503,11 @@ public sealed class BootstrapInt32MainReturnComponentTests
             .ToArray();
         var sourceText = CreateStackArgumentSource(
             minimumArgumentCount, arguments, compactNames: true, compactSyntax: true);
-        Assert.InRange(sourceText.Length, 1, ScannerHost.MaximumSourceLength);
-        Assert.True(CreateStackArgumentSource(
+        Assert.That(sourceText.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
+        Assert.That(CreateStackArgumentSource(
                 minimumArgumentCount + 1, new int[minimumArgumentCount + 1],
                 compactNames: true, compactSyntax: true).Length
-            > ScannerHost.MaximumSourceLength);
+            > ScannerHost.MaximumSourceLength, Is.True);
         return (sourceText, arguments);
     }
 
@@ -3799,44 +3653,36 @@ public sealed class BootstrapInt32MainReturnComponentTests
             }
         }
     }
-
-    [Theory]
-    [MemberData(nameof(StackArgumentSourceCases))]
+    [TestCaseSource(nameof(StackArgumentSourceCases))]
     public Task StackArgumentSourceAndPeAsync(
         BoundRuntimePolicy policy, string sourceText, int[] arguments, bool shouldEmit)
         => AssertExtendedStackArgumentSourceAndPeAsync(policy, sourceText, arguments, shouldEmit);
-
-    [Theory]
-    [MemberData(nameof(StackArgumentAlignmentSourceCases))]
+    [TestCaseSource(nameof(StackArgumentAlignmentSourceCases))]
     public Task StackArgumentCallAlignmentAsync(
         BoundRuntimePolicy policy, string sourceText, int[] arguments)
         => AssertExtendedStackArgumentSourceAndPeAsync(policy, sourceText, arguments, true);
-
-    [Theory]
-    [MemberData(nameof(StackArgumentCapacityBoundaryCases))]
+    [TestCaseSource(nameof(StackArgumentCapacityBoundaryCases))]
     public Task StackArgumentCapacityBoundariesAsync(
         BoundRuntimePolicy policy, string sourceText, int codeCapacity)
         => HelperCallsRejectInsufficientCodeBuffersAsync(policy, sourceText, codeCapacity);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, 33, 2048)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 33, 2048)]
-    [InlineData(BoundRuntimePolicy.FailFast, 231, 5120)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 231, 5120)]
-    [InlineData(BoundRuntimePolicy.FailFast, 232, 5632)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 232, 5632)]
-    [InlineData(BoundRuntimePolicy.FailFast, 511, 10240)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 511, 10240)]
-    [InlineData(BoundRuntimePolicy.FailFast, 512, 10240)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 512, 10240)]
-    [InlineData(BoundRuntimePolicy.FailFast, 513, 10240)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 513, 10240)]
-    [InlineData(BoundRuntimePolicy.FailFast, 514, 10752)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 514, 10752)]
-    [InlineData(BoundRuntimePolicy.FailFast, 684, 13312)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 684, 13312)]
-    [InlineData(BoundRuntimePolicy.FailFast, 685, 13824)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 685, 13824)]
+    [TestCase(BoundRuntimePolicy.FailFast,33,2048)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,33,2048)]
+    [TestCase(BoundRuntimePolicy.FailFast,231,5120)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,231,5120)]
+    [TestCase(BoundRuntimePolicy.FailFast,232,5632)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,232,5632)]
+    [TestCase(BoundRuntimePolicy.FailFast,511,10240)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,511,10240)]
+    [TestCase(BoundRuntimePolicy.FailFast,512,10240)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,512,10240)]
+    [TestCase(BoundRuntimePolicy.FailFast,513,10240)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,513,10240)]
+    [TestCase(BoundRuntimePolicy.FailFast,514,10752)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,514,10752)]
+    [TestCase(BoundRuntimePolicy.FailFast,684,13312)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,684,13312)]
+    [TestCase(BoundRuntimePolicy.FailFast,685,13824)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,685,13824)]
     public Task StackArgumentCallsScalePeSectionsAndProbeStacksAsync(
         BoundRuntimePolicy policy, int argumentCount, int imageCapacity)
     {
@@ -3845,10 +3691,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return AssertExtendedStackArgumentSourceAndPeAsync(
             policy, source, arguments, true, imageCapacity);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task StackArgumentProbeLoopsAcrossPagesAsync(BoundRuntimePolicy policy)
     {
         var arguments = new int[1025];
@@ -3858,10 +3702,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return AssertExtendedStackArgumentSourceAndPeAsync(
             policy, source, arguments, true, 19456, forceNativeProbe: true);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task StackArgumentSourceEmitsPageProbePrologAsync(BoundRuntimePolicy policy)
     {
         var arguments = Enumerable.Range(1, 512).ToArray();
@@ -3872,10 +3714,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             arguments.Sum(),
             helperArguments: arguments);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StackProbeFrameEncodingLimitsAsync(BoundRuntimePolicy policy)
     {
         var source = SourceText.From(VerifyBootstrapStackProbeFrameLimitsSource);
@@ -3893,23 +3733,21 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 [.. new int[1536]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [0], true));
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
 
-        Assert.Equal(0, NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy).ExitCode);
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, 33, 2047)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 33, 2047)]
-    [InlineData(BoundRuntimePolicy.FailFast, 512, 10239)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 512, 10239)]
-    [InlineData(BoundRuntimePolicy.FailFast, 685, 13823)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 685, 13823)]
-    [InlineData(BoundRuntimePolicy.FailFast, 1025, 19455)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, 1025, 19455)]
+    [TestCase(BoundRuntimePolicy.FailFast,33,2047)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,33,2047)]
+    [TestCase(BoundRuntimePolicy.FailFast,512,10239)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,512,10239)]
+    [TestCase(BoundRuntimePolicy.FailFast,685,13823)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,685,13823)]
+    [TestCase(BoundRuntimePolicy.FailFast,1025,19455)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,1025,19455)]
     public Task PeImageRejectsWhenOutputBufferIsInsufficientAsync(
         BoundRuntimePolicy policy, int argumentCount, int imageCapacity)
     {
@@ -3919,10 +3757,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
         return RejectOverCapacityBootstrapPeImageAsync(
             policy, sourceText, argumentCount, imageCapacity);
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public Task PeImageRejectsAtSourceLimitArgumentCountWhenOutputIsInsufficientAsync(
         BoundRuntimePolicy policy)
     {
@@ -3951,12 +3787,12 @@ public sealed class BootstrapInt32MainReturnComponentTests
                 [.. new int[imageCapacity]], true))
             .Add(new HostBuffer("BootstrapImageLength", PrimitiveType.Int32, [1], true));
         var compilation = Compilation.Create(trees, buffers, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
 
-        Assert.Equal(0, NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy).ExitCode);
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(NativeJit.ExecuteWithData(program, (NativeRuntimePolicy)policy).ExitCode, Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private async Task AssertExtendedStackArgumentSourceAndPeAsync(
@@ -3986,13 +3822,12 @@ public sealed class BootstrapInt32MainReturnComponentTests
         byte[] image, int expectedAllocation, int expectedValue,
         bool callChain = false, int forwardingCount = 1)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "The generated-image unwind probe requires Windows x64.");
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True, "The generated-image unwind probe requires Windows x64.");
 
         var root = RepositoryRoot();
         var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Microsoft Visual Studio", "Installer", "vswhere.exe");
-        Assert.True(File.Exists(vswhere), "Visual Studio discovery is required to build the unwind probe.");
+        Assert.That(File.Exists(vswhere), Is.True, "Visual Studio discovery is required to build the unwind probe.");
 
         var discover = new ProcessStartInfo(vswhere) { WorkingDirectory = root };
         foreach (var argument in new[] {
@@ -4005,7 +3840,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var installation = (await RunProbeProcessAsync(discover, TimeSpan.FromSeconds(10))
             .ConfigureAwait(true)).Trim();
         var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
-        Assert.True(File.Exists(environment), "Visual Studio x64 C build tools are required for the unwind probe.");
+        Assert.That(File.Exists(environment), Is.True, "Visual Studio x64 C build tools are required for the unwind probe.");
 
         var directory = Directory.CreateTempSubdirectory("terrum-bootstrap-unwind-").FullName;
         var imagePath = Path.Combine(directory, "bootstrap.exe");
@@ -4027,21 +3862,13 @@ public sealed class BootstrapInt32MainReturnComponentTests
             var output = await RunProbeProcessAsync(run, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
             var expectedUnwindStateCount = expectedAllocation >= 0x1000 ? 13 : 4;
             var functionCount = forwardingCount + 1;
-            Assert.Contains(
-                $"unwind-states={expectedUnwindStateCount} allocation={expectedAllocation}",
-                output, StringComparison.Ordinal);
-            Assert.Contains(
-                "probe-execution-result="
-                    + unchecked((uint)expectedValue).ToString(CultureInfo.InvariantCulture),
-                output, StringComparison.Ordinal);
+            Assert.That(output, Does.Contain($"unwind-states={expectedUnwindStateCount} allocation={expectedAllocation}"));
+            Assert.That(output, Does.Contain("probe-execution-result="
+                    + unchecked((uint)expectedValue).ToString(CultureInfo.InvariantCulture)));
             if (callChain)
             {
-                Assert.Contains(
-                    $"nested-unwind-states={forwardingCount * 4} allocation={expectedAllocation}",
-                    output, StringComparison.Ordinal);
-                Assert.Contains(
-                    $"leaf-chain-unwind-states={functionCount + 1} allocation={expectedAllocation}",
-                    output, StringComparison.Ordinal);
+                Assert.That(output, Does.Contain($"nested-unwind-states={forwardingCount * 4} allocation={expectedAllocation}"));
+                Assert.That(output, Does.Contain($"leaf-chain-unwind-states={functionCount + 1} allocation={expectedAllocation}"));
             }
             if ((long)expectedAllocation * (callChain ? functionCount : 1) >= 0x2000)
             {
@@ -4049,15 +3876,14 @@ public sealed class BootstrapInt32MainReturnComponentTests
                     ['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
                     .Single(static line => line.StartsWith(
                         "probe-stack-growth-bytes=", StringComparison.Ordinal));
-                Assert.True(ulong.TryParse(growthLine["probe-stack-growth-bytes=".Length..],
+                Assert.That(ulong.TryParse(growthLine["probe-stack-growth-bytes=".Length..],
                     NumberStyles.None, CultureInfo.InvariantCulture, out var growthBytes)
-                    && growthBytes >= 0x1000,
-                    $"Expected at least one page of measured stack growth, got '{growthLine}'.");
+                    && growthBytes >= 0x1000, Is.True, $"Expected at least one page of measured stack growth, got '{growthLine}'.");
             }
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(directory).ConfigureAwait(true);
         }
     }
 
@@ -4087,8 +3913,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         }
         var standardOutput = await output.ConfigureAwait(true);
         var standardError = await error.ConfigureAwait(true);
-        Assert.True(process.ExitCode == 0,
-            $"Process exited with {process.ExitCode}.{Environment.NewLine}{standardOutput}{Environment.NewLine}{standardError}");
+        Assert.That(process.ExitCode == 0, Is.True, $"Process exited with {process.ExitCode}.{Environment.NewLine}{standardOutput}{Environment.NewLine}{standardError}");
         return standardOutput;
     }
 
@@ -4098,10 +3923,10 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var trees = await ReadComponentsAsync(s_frontendComponents, PublishFrontendSource)
             .ConfigureAwait(true);
         var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var execution = NativeJit.ExecuteWithData(
-            Assert.IsType<BoundProgram>(compilation.Program), (NativeRuntimePolicy)policy);
-        Assert.Equal(0, execution.ExitCode);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), (NativeRuntimePolicy)policy);
+        Assert.That(execution.ExitCode, Is.EqualTo(0));
 
         var summary = execution.Data.AsSpan(
             execution.BufferOffsets[ScalarFrontendHost.BufferIndex],
@@ -4110,8 +3935,8 @@ public sealed class BootstrapInt32MainReturnComponentTests
             execution.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
             ScalarFrontendHost.ProgramWordCount * sizeof(int)).ToArray();
         var audit = ScalarFrontendHost.ReadProgram(source, summary, publication, policy);
-        Assert.True(audit.Projection.IsValid);
-        Assert.NotNull(audit.Program);
+        Assert.That(audit.Projection.IsValid, Is.True);
+        TestAssertions.NotNull(audit.Program);
         return publication;
     }
 
@@ -4142,20 +3967,20 @@ public sealed class BootstrapInt32MainReturnComponentTests
             execution.BufferOffsets[ScalarFrontendHost.ProgramBufferIndex],
             ScalarFrontendHost.ProgramWordCount * sizeof(int));
         var audit = ScalarFrontendHost.ReadProgram(source, summary, publication, policy);
-        Assert.True(audit.Projection.IsValid);
-        Assert.NotNull(audit.Program);
+        Assert.That(audit.Projection.IsValid, Is.True);
+        TestAssertions.NotNull(audit.Program);
     }
 
     private static void AssertOutputCode(
         NativeExecutionResult execution, int codeBytesBuffer, int codeLengthBuffer,
         int[] expected)
     {
-        Assert.Equal(expected[1], ReadInt32(execution.Data,
-            execution.BufferOffsets[codeLengthBuffer]));
+        Assert.That(ReadInt32(execution.Data,
+            execution.BufferOffsets[codeLengthBuffer]), Is.EqualTo(expected[1]));
         for (var index = 0; index < expected[1]; index++)
         {
-            Assert.Equal(expected[index + 2], ReadInt32(execution.Data,
-                execution.BufferOffsets[codeBytesBuffer] + index * sizeof(int)));
+            Assert.That(ReadInt32(execution.Data,
+                execution.BufferOffsets[codeBytesBuffer] + index * sizeof(int)), Is.EqualTo(expected[index + 2]));
         }
     }
 
@@ -4190,73 +4015,65 @@ public sealed class BootstrapInt32MainReturnComponentTests
         {
             var value = ReadInt32(execution.Data,
                 imageBytesOffset + index * sizeof(int));
-            Assert.InRange(value, 0, byte.MaxValue);
+            Assert.That(value, Is.InRange(0, byte.MaxValue));
             image[index] = (byte)value;
         }
 
-        Assert.Equal(imageLength, ReadInt32(execution.Data,
-            execution.BufferOffsets[imageLengthBuffer]));
-        Assert.Equal(0x5A4D,
-            System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image));
-        Assert.Equal(0x80, ReadInt32(image, 0x3C));
-        Assert.Equal(0x00004550, ReadInt32(image, 0x80));
-        Assert.Equal(0x8664,
-            System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x84)));
-        Assert.Equal(1,
-            System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x86)));
-        Assert.Equal(0x0022,
-            System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x96)));
-        Assert.Equal(0x1000, ReadInt32(image, 0xA8));
-        Assert.Equal(0x1000 + imageVirtualSize, ReadInt32(image, 0xD0));
-        Assert.Equal(0x400, ReadInt32(image, 0xD4));
-        Assert.Equal(sectionRawSize, ReadInt32(image, 0x9C));
-        Assert.Equal(16, ReadInt32(image, 0x104));
-        Assert.Equal(0, ReadInt32(image, 0x108));
-        Assert.Equal(0, ReadInt32(image, 0x10C));
+        Assert.That(ReadInt32(execution.Data,
+            execution.BufferOffsets[imageLengthBuffer]), Is.EqualTo(imageLength));
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image), Is.EqualTo(0x5A4D));
+        Assert.That(ReadInt32(image, 0x3C), Is.EqualTo(0x80));
+        Assert.That(ReadInt32(image, 0x80), Is.EqualTo(0x00004550));
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x84)), Is.EqualTo(0x8664));
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x86)), Is.EqualTo(1));
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x96)), Is.EqualTo(0x0022));
+        Assert.That(ReadInt32(image, 0xA8), Is.EqualTo(0x1000));
+        Assert.That(ReadInt32(image, 0xD0), Is.EqualTo(0x1000 + imageVirtualSize));
+        Assert.That(ReadInt32(image, 0xD4), Is.EqualTo(0x400));
+        Assert.That(ReadInt32(image, 0x9C), Is.EqualTo(sectionRawSize));
+        Assert.That(ReadInt32(image, 0x104), Is.EqualTo(16));
+        Assert.That(ReadInt32(image, 0x108), Is.EqualTo(0));
+        Assert.That(ReadInt32(image, 0x10C), Is.EqualTo(0));
         if (hasUnwindInfo)
         {
             var functionTableRva = 0x1000 + metadataOffset;
             var functionTableOffset = 0x400 + metadataOffset;
             var unwindInfoOffset = functionTableOffset + 12;
-            Assert.Equal(functionTableRva, ReadInt32(image, 0x120));
-            Assert.Equal(12, ReadInt32(image, 0x124));
-            Assert.Equal(0x1000, ReadInt32(image, functionTableOffset));
-            Assert.Equal(expectedFunctionEndRva,
-                ReadInt32(image, functionTableOffset + 4));
-            Assert.Equal(functionTableRva + 12, ReadInt32(image, functionTableOffset + 8));
-            Assert.Equal(1, image[unwindInfoOffset]);
-            Assert.Equal(prologSize, image[unwindInfoOffset + 1]);
-            Assert.Equal(usesLargeAllocation ? 2 : 1, image[unwindInfoOffset + 2]);
-            Assert.Equal(0, image[unwindInfoOffset + 3]);
-            Assert.Equal(prologSize, image[unwindInfoOffset + 4]);
-            Assert.Equal(usesLargeAllocation
+            Assert.That(ReadInt32(image, 0x120), Is.EqualTo(functionTableRva));
+            Assert.That(ReadInt32(image, 0x124), Is.EqualTo(12));
+            Assert.That(ReadInt32(image, functionTableOffset), Is.EqualTo(0x1000));
+            Assert.That(ReadInt32(image, functionTableOffset + 4), Is.EqualTo(expectedFunctionEndRva));
+            Assert.That(ReadInt32(image, functionTableOffset + 8), Is.EqualTo(functionTableRva + 12));
+            Assert.That(image[unwindInfoOffset], Is.EqualTo(1));
+            Assert.That(image[unwindInfoOffset + 1], Is.EqualTo(prologSize));
+            Assert.That(image[unwindInfoOffset + 2], Is.EqualTo(usesLargeAllocation ? 2 : 1));
+            Assert.That(image[unwindInfoOffset + 3], Is.EqualTo(0));
+            Assert.That(image[unwindInfoOffset + 4], Is.EqualTo(prologSize));
+            Assert.That(image[unwindInfoOffset + 5], Is.EqualTo(usesLargeAllocation
                     ? 0x01
-                    : ((stackFrameSize / 8 - 1) << 4) | 0x02,
-                image[unwindInfoOffset + 5]);
-            Assert.Equal(usesLargeAllocation ? stackFrameSize / 8 & 0xFF : 0,
-                image[unwindInfoOffset + 6]);
-            Assert.Equal(usesLargeAllocation ? stackFrameSize / 8 >> 8 & 0xFF : 0,
-                image[unwindInfoOffset + 7]);
-            Assert.All(image.AsSpan(0x400 + expected[1],
-                metadataOffset - expected[1]).ToArray(),
-                static value => Assert.Equal(0, value));
+                    : ((stackFrameSize / 8 - 1) << 4) | 0x02));
+            Assert.That(image[unwindInfoOffset + 6], Is.EqualTo(usesLargeAllocation ? stackFrameSize / 8 & 0xFF : 0));
+            Assert.That(image[unwindInfoOffset + 7], Is.EqualTo(usesLargeAllocation ? stackFrameSize / 8 >> 8 & 0xFF : 0));
+            {var __nunitItems2 = image.AsSpan(0x400 + expected[1],
+                metadataOffset - expected[1]).ToArray();            Assert.Multiple(() => {
+                foreach (var __nunitItem17 in __nunitItems2)
+                { Assert.That(__nunitItem17, Is.EqualTo(0)); }
+            });}
         }
         else
         {
-            Assert.Equal(0, ReadInt32(image, 0x120));
-            Assert.Equal(0, ReadInt32(image, 0x124));
+            Assert.That(ReadInt32(image, 0x120), Is.EqualTo(0));
+            Assert.That(ReadInt32(image, 0x124), Is.EqualTo(0));
         }
-        Assert.Equal(".text", System.Text.Encoding.ASCII.GetString(image, 0x188, 5));
-        Assert.Equal(sectionVirtualSize, ReadInt32(image, 0x190));
-        Assert.Equal(0x1000, ReadInt32(image, 0x194));
-        Assert.Equal(sectionRawSize, ReadInt32(image, 0x198));
-        Assert.Equal(0x400, ReadInt32(image, 0x19C));
-        Assert.Equal(0x60000020, ReadInt32(image, 0x1AC));
-        Assert.Equal(expected.Skip(2).Take(expected[1]).Select(static value => (byte)value),
-            image.AsSpan(0x400, expected[1]).ToArray());
+        Assert.That(System.Text.Encoding.ASCII.GetString(image, 0x188, 5), Is.EqualTo(".text"));
+        Assert.That(ReadInt32(image, 0x190), Is.EqualTo(sectionVirtualSize));
+        Assert.That(ReadInt32(image, 0x194), Is.EqualTo(0x1000));
+        Assert.That(ReadInt32(image, 0x198), Is.EqualTo(sectionRawSize));
+        Assert.That(ReadInt32(image, 0x19C), Is.EqualTo(0x400));
+        Assert.That(ReadInt32(image, 0x1AC), Is.EqualTo(0x60000020));
+        Assert.That(image.AsSpan(0x400, expected[1]).ToArray(), Is.EqualTo(expected.Skip(2).Take(expected[1]).Select(static value => (byte)value)));
         var usedTextSize = hasUnwindInfo ? sectionVirtualSize : expected[1];
-        Assert.All(image.AsSpan(0x400 + usedTextSize).ToArray(),
-            static value => Assert.Equal(0, value));
+        {var __nunitItems3 = image.AsSpan(0x400 + usedTextSize).ToArray();        Assert.Multiple(() => { foreach (var __nunitItem18 in __nunitItems3) { Assert.That(__nunitItem18, Is.EqualTo(0)); } });}
         return image;
     }
 
@@ -4288,7 +4105,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var callOffset = GetStackArgumentCallerEndOffset(argumentCount);
         var helperOffset = callOffset + 5 + (frameSize > 0x7F ? 8 : 5);
         var probeImage = (byte[])image.Clone();
-        Assert.Equal(0xE8, probeImage[0x400 + callOffset]);
+        Assert.That(probeImage[0x400 + callOffset], Is.EqualTo(0xE8));
 
         // Replace only the leaf helper to report its actual entry RSP alignment.
         new byte[] { 0x89, 0xE0, 0x83, 0xE0, 0x0F, 0xC3 }
@@ -5180,7 +4997,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         {
             var path = Path.Combine(root, "self-host", name + ".terrum");
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(verificationSource, "bootstrap-int32-main-return.terrum"));

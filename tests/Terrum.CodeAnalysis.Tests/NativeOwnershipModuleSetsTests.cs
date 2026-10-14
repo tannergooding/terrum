@@ -6,7 +6,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -46,10 +46,8 @@ public sealed class NativeOwnershipModuleSetsTests
             return int32(ticket.Value);
         }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedCallsAndOutputsSurviveIndependentProviderReplacementAsync(NativeRuntimePolicy policy)
     {
         var first = Producer(First, ["CreateFirst", "ConsumeFirst", "FirstTicket.Close"], "First", policy);
@@ -77,22 +75,22 @@ public sealed class NativeOwnershipModuleSetsTests
                     + ConsumeSecond(move initialized) - 2;
             }
             """), NativeModuleCompiler.CreateReferenceSet([second, first]), boundPolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumerSet(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumerSet(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             [first, second], policy);
         var original = (byte[])consumer.Clone();
-        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, first],
-            TimeSpan.FromSeconds(10), policy));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [second, first],
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
 
         var firstReplacement = Producer(First.Replace("new FirstTicket(20)", "new FirstTicket(21)", StringComparison.Ordinal),
             ["CreateFirst", "ConsumeFirst", "FirstTicket.Close"], "First", policy);
         var secondReplacement = Producer(Second.Replace("new SecondTicket(22)", "new SecondTicket(23)", StringComparison.Ordinal),
             secondExports, "Second", policy);
-        Assert.Equal(43, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [firstReplacement, second],
-            TimeSpan.FromSeconds(10), policy));
-        Assert.Equal(43, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [secondReplacement, first],
-            TimeSpan.FromSeconds(10), policy));
-        Assert.Equal(original, consumer);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [firstReplacement, second],
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, [secondReplacement, first],
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+        Assert.That(consumer, Is.EqualTo(original));
     }
 
     private static byte[] Producer(string source, string[] exports, string identity, NativeRuntimePolicy policy)
@@ -100,8 +98,8 @@ public sealed class NativeOwnershipModuleSetsTests
         var boundPolicy = policy == NativeRuntimePolicy.FailFast
             ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), boundPolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
             exports, identity, policy);
     }
 }

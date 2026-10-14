@@ -5,7 +5,7 @@ using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -21,15 +21,13 @@ public sealed class MutableBufferFieldViewTests
             }
         }
         """;
-
-    [Theory]
-    [InlineData("owner.Words.Read(0);")]
-    [InlineData("int32 count = owner.Sibling.Count;")]
-    [InlineData("owner.Words.Clear();")]
-    [InlineData("owner.Sibling.TryAppend(1);")]
-    [InlineData("Owner moved = move owner;")]
-    [InlineData("ReadonlyInt32BufferView other = owner.Sibling.Slice(0, 0);")]
-    [InlineData("mut MutableInt32BufferView other = owner.Sibling.SliceMutable(0, 0);")]
+    [TestCase("owner.Words.Read(0);")]
+    [TestCase("int32 count = owner.Sibling.Count;")]
+    [TestCase("owner.Words.Clear();")]
+    [TestCase("owner.Sibling.TryAppend(1);")]
+    [TestCase("Owner moved = move owner;")]
+    [TestCase("ReadonlyInt32BufferView other = owner.Sibling.Slice(0, 0);")]
+    [TestCase("mut MutableInt32BufferView other = owner.Sibling.SliceMutable(0, 0);")]
     public void ActiveFieldViewExcludesAllUsesOfItsUniqueRoot(string operation)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
@@ -39,11 +37,11 @@ public sealed class MutableBufferFieldViewTests
                 mut Owner owner = new Owner(move first, move second);
                 mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 0);
             """ + operation + " return view.Length; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ActiveFieldViewAlsoExcludesDirectScalarReadsFromRoot()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -60,16 +58,14 @@ public sealed class MutableBufferFieldViewTests
                 return view.Length;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 0);")]
-    [InlineData("mut MutableInt32BufferView view = new Owner(move first, move second).Words.SliceMutable(0, 0);")]
-    [InlineData("mut Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(ToInt(Replace(out owner)), 0);")]
-    [InlineData("mut Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(0, ToInt(Replace(out owner)));")]
-    [InlineData("mut Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(ToInt(owner.Words.TryAppend(1)), 0);")]
+    [TestCase("Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 0);")]
+    [TestCase("mut MutableInt32BufferView view = new Owner(move first, move second).Words.SliceMutable(0, 0);")]
+    [TestCase("mut Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(ToInt(Replace(out owner)), 0);")]
+    [TestCase("mut Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(0, ToInt(Replace(out owner)));")]
+    [TestCase("mut Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(ToInt(owner.Words.TryAppend(1)), 0);")]
     public void FieldViewAcquisitionRequiresWritableLiveRootWithoutArgumentInvalidation(string acquisition)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
@@ -84,11 +80,11 @@ public sealed class MutableBufferFieldViewTests
                 require OwnedInt32Buffer.TryCreate(1, out var first);
                 require OwnedInt32Buffer.TryCreate(1, out var second);
             """ + acquisition + " return 0; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void PartiallyConstructedOwnerCannotAcquireMutableFieldView()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -102,13 +98,11 @@ public sealed class MutableBufferFieldViewTests
                 }
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("public OwnedInt32Buffer Words;", "owner.Words")]
-    [InlineData("private mut OwnedInt32Buffer Words;", "owner.Words")]
+    [TestCase("public OwnedInt32Buffer Words;","owner.Words")]
+    [TestCase("private mut OwnedInt32Buffer Words;","owner.Words")]
     public void FieldViewRequiresWritableAccessibleField(string declaration, string receiver)
     {
         var source = $$"""
@@ -124,15 +118,13 @@ public sealed class MutableBufferFieldViewTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
     public void ForgedMutableFieldViewCannotBypassPlaceOrLoanChecks(int mutation)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -146,12 +138,12 @@ public sealed class MutableBufferFieldViewTests
             }
             int32 Main() { return 42; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var index = Array.FindIndex(program.Functions.ToArray(), static function => function.Name == "Owner.Update");
         var function = program.Functions[index];
-        var scope = Assert.IsType<BoundViewScope>(function.Body.Statements[0]);
-        var loan = Assert.IsType<BoundMutableFieldLoan>(scope.Owner);
+        var scope = ((global::System.Func<BoundViewScope>)(() => { var __nunitActual1 = function.Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundViewScope>()); return (BoundViewScope)__nunitActual1!; }))();
+        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual2 = scope.Owner; Assert.That(__nunitActual2, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual2!; }))();
         var forgedOwner = mutation switch {
             0 => (BoundExpression)new BoundFieldLoan(loan.Place, loan.Type, loan.Span),
             1 => loan with { Place = loan.Place with { Field = 99 } },
@@ -167,7 +159,7 @@ public sealed class MutableBufferFieldViewTests
                 Body = function.Body with { Statements = function.Body.Statements.SetItem(0, scope with { Owner = forgedOwner }) },
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
 }

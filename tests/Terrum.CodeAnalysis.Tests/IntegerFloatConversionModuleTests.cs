@@ -6,15 +6,14 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class IntegerFloatConversionModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task IntegerFloatConversionModuleMatchesHostedRoundingAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -25,15 +24,15 @@ public sealed class IntegerFloatConversionModuleTests
             var path = Path.Combine(root, "self-host", dependencyNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse(CreateVerificationSource(), "integer-float-conversion-module.terrum");
         var compilation = Compilation.Create(trees, policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
     private static string CreateVerificationSource()

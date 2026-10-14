@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -33,10 +33,8 @@ public sealed class FieldDefTableValidationComponentTests
             return valid == (Host.Expected[13] != 0) ? 0 : 1;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task FieldDefValidationMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var strings = TrRmStringTableWriter.EncodeTextRows([
@@ -147,7 +145,7 @@ public sealed class FieldDefTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(VerificationSource, "field-def-table-validation.terrum"));
@@ -157,8 +155,7 @@ public sealed class FieldDefTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                Assert.True(testCase.ExpectedValid == ValidateHosted(testCase),
-                    $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
+                Assert.That(testCase.ExpectedValid == ValidateHosted(testCase), Is.True, $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
             }
 
             var compilation = Compilation.Create(components,
@@ -193,12 +190,10 @@ public sealed class FieldDefTableValidationComponentTests
                     testCase.ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.True(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0,
-                $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
-            Assert.True(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0,
-                $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
         }
     }
 
@@ -229,7 +224,8 @@ public sealed class FieldDefTableValidationComponentTests
             stringCount: stringCount, typeDefCount: typeDefCount,
             fieldCount: fieldCount, layoutCount: layoutCount,
             typeSpecCount: typeSpecCount) with {
-            ExpectedValid = false, HasHostedOracle = hasHostedOracle,
+            ExpectedValid = false,
+            HasHostedOracle = hasHostedOracle,
         };
 
     private static bool ValidateHosted(TableCase testCase)
@@ -364,7 +360,7 @@ public sealed class FieldDefTableValidationComponentTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

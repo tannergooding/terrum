@@ -6,15 +6,14 @@ using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeManagedCollectorUnwindTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void LeafMarkHelperIsOutsideCollectorUnwindRange(BoundRuntimePolicy policy)
     {
         var source = """
@@ -28,22 +27,21 @@ public sealed class NativeManagedCollectorUnwindTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var code = NativeEmitter.EmitCode(program, (NativeRuntimePolicy)policy);
         var collector = code.Functions[^1];
-        Assert.Equal(120, collector.StackSize);
-        Assert.Equal(0xC3, code.Code[collector.End - 1]);
-        Assert.True(collector.End + 3 < code.Code.Length);
-        Assert.Equal(0x48, code.Code[collector.End]);
-        Assert.Equal(0x85, code.Code[collector.End + 1]);
-        Assert.Equal(0xC0, code.Code[collector.End + 2]);
+        Assert.That(collector.StackSize, Is.EqualTo(120));
+        Assert.That(code.Code[collector.End - 1], Is.EqualTo(0xC3));
+        Assert.That(collector.End + 3 < code.Code.Length, Is.True);
+        Assert.That(code.Code[collector.End], Is.EqualTo(0x48));
+        Assert.That(code.Code[collector.End + 1], Is.EqualTo(0x85));
+        Assert.That(code.Code[collector.End + 2], Is.EqualTo(0xC0));
         var callsToHelper = Enumerable.Range(collector.Start, collector.End - collector.Start - 4)
             .Where(at => code.Code[at] == 0xE8
                 && at + 5 + BinaryPrimitives.ReadInt32LittleEndian(code.Code.AsSpan(at + 1, 4))
                     == collector.End).ToArray();
-        Assert.Equal(2, callsToHelper.Length);
-        Assert.DoesNotContain(code.Functions,
-            range => range.Start <= collector.End && collector.End < range.End);
+        Assert.That(callsToHelper.Length, Is.EqualTo(2));
+        Assert.That(global::System.Linq.Enumerable.Any(code.Functions,range => range.Start <= collector.End && collector.End < range.End),Is.False);
     }
 }

@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task PostTestedAndNamedTransfersKeepConditionAndIteratorOrderAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -28,10 +27,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ContinueInPostTestedLoopChecksConditionAndUnwindsCleanupAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -51,10 +48,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NamedOuterTransferRetiresInnerManagedRootsAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -73,10 +68,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NamedBreakUnwindsNestedFinallyBeforeOuterExitAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -93,10 +86,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ForContinueRunsIteratorAndBreakSkipsItAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -112,10 +103,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task IteratorSideEffectsDistinguishContinueFromBreakAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -132,10 +121,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NestedLoopsTransferOnlyToNearestTargetAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -154,10 +141,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task BreakCarriesConditionalOutputFactsToLoopExitAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -172,10 +157,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NestedFinallyOnLoopExitRunsOnceInsideOutAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -195,10 +178,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ContinueRunsFinallyBeforeForIteratorAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -221,10 +202,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task LoopLocalRootsRetireAcrossContinueAndBreakAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -243,10 +222,8 @@ public sealed partial class JitTests
             """;
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task LoopWithinFinallyCanExitLocallyAsync(bool checkedExceptions)
     {
         const string Source = """
@@ -260,7 +237,7 @@ public sealed partial class JitTests
         return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedCatchBreakRunsEnclosingFinallyOnceAsync()
     {
         const string Source = """

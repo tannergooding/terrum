@@ -9,22 +9,21 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class IntegerFactsModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task IntegerFactsPersistedConsumerMatchesBoundaryMasks(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
         var componentPath = Path.Combine(root, "self-host", "IntegerFacts.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var componentTree = SyntaxTree.Parse(componentText, componentPath);
-        Assert.False(componentTree.HasErrors, string.Join(Environment.NewLine, componentTree.Diagnostics));
+        Assert.That(componentTree.HasErrors, Is.False, string.Join(Environment.NewLine, componentTree.Diagnostics));
 
         var producerSource = componentText + """
 
@@ -71,10 +70,9 @@ public sealed class IntegerFactsModuleTests
             int32 Main() { return 0; }
             """;
         var producerTree = SyntaxTree.Parse(producerSource, componentPath);
-        Assert.False(producerTree.HasErrors, string.Join(Environment.NewLine, producerTree.Diagnostics));
+        Assert.That(producerTree.HasErrors, Is.False, string.Join(Environment.NewLine, producerTree.Diagnostics));
         var producerCompilation = Compilation.Create(producerTree, policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] {
             "IntegerFactsInt32Mask",
@@ -82,7 +80,7 @@ public sealed class IntegerFactsModuleTests
             "IntegerFactsInt64Mask",
             "IntegerFactsUInt64Mask",
         };
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             exports);
         var assertions = new StringBuilder();
         var failureCases = new List<string>();
@@ -103,27 +101,25 @@ public sealed class IntegerFactsModuleTests
 
         var consumerSource = "int32 Main() {\n" + assertions + "\nreturn 0;\n}";
         var consumerTree = SyntaxTree.Parse(consumerSource, "integer-facts-consumer.terrum");
-        Assert.False(consumerTree.HasErrors, string.Join(Environment.NewLine, consumerTree.Diagnostics));
+        Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
         var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         var actual = NativeJit.Execute(linked, (NativeRuntimePolicy)policy);
-        Assert.True(actual == 0,
-            actual > 0 && actual <= failureCases.Count
+        Assert.That(actual == 0, Is.True, actual > 0 && actual <= failureCases.Count
                 ? $"Boundary case {actual} failed: {failureCases[actual - 1]}."
                 : $"Expected no failed boundary checks, got consumer result {actual}.");
 
-        Assert.Equal(0, Int32ExpectedMask(int.MinValue, -1) & 8);
-        Assert.NotEqual(0, Int32ExpectedMask(int.MinValue, -1) & 16);
-        Assert.Equal(0, Int32ExpectedMask(int.MinValue, -1) & 32);
-        Assert.Equal(0, Int32ExpectedMask(int.MinValue, -1) & 64);
-        Assert.Equal(0, Int64ExpectedMask(long.MinValue, -1) & 8);
-        Assert.NotEqual(0, Int64ExpectedMask(long.MinValue, -1) & 16);
-        Assert.Equal(0, Int64ExpectedMask(long.MinValue, -1) & 32);
-        Assert.Equal(0, Int64ExpectedMask(long.MinValue, -1) & 64);
+        Assert.That(Int32ExpectedMask(int.MinValue, -1) & 8, Is.EqualTo(0));
+        Assert.That(Int32ExpectedMask(int.MinValue, -1) & 16, Is.Not.EqualTo(0));
+        Assert.That(Int32ExpectedMask(int.MinValue, -1) & 32, Is.EqualTo(0));
+        Assert.That(Int32ExpectedMask(int.MinValue, -1) & 64, Is.EqualTo(0));
+        Assert.That(Int64ExpectedMask(long.MinValue, -1) & 8, Is.EqualTo(0));
+        Assert.That(Int64ExpectedMask(long.MinValue, -1) & 16, Is.Not.EqualTo(0));
+        Assert.That(Int64ExpectedMask(long.MinValue, -1) & 32, Is.EqualTo(0));
+        Assert.That(Int64ExpectedMask(long.MinValue, -1) & 64, Is.EqualTo(0));
     }
 
     private static void AddPairwiseChecks<T>(StringBuilder assertions, List<string> failureCases,
@@ -157,13 +153,20 @@ public sealed class IntegerFactsModuleTests
         var minimumValue = new BigInteger(minimum.ToDecimal(CultureInfo.InvariantCulture));
         var maximumValue = new BigInteger(maximum.ToDecimal(CultureInfo.InvariantCulture));
         var mask = 0;
-        if (leftValue + rightValue >= minimumValue && leftValue + rightValue <= maximumValue) { mask += 1; }
-        if (leftValue - rightValue >= minimumValue && leftValue - rightValue <= maximumValue) { mask += 2; }
-        if (leftValue * rightValue >= minimumValue && leftValue * rightValue <= maximumValue) { mask += 4; }
-        if (!rightValue.IsZero && !(leftValue == minimumValue && rightValue == -BigInteger.One)) { mask += 8; }
-        if (!rightValue.IsZero) { mask += 16; }
-        if (leftValue != minimumValue) { mask += 32; }
-        if (leftValue != minimumValue) { mask += 64; }
+        if (leftValue + rightValue >= minimumValue && leftValue + rightValue <= maximumValue)
+        { mask += 1; }
+        if (leftValue - rightValue >= minimumValue && leftValue - rightValue <= maximumValue)
+        { mask += 2; }
+        if (leftValue * rightValue >= minimumValue && leftValue * rightValue <= maximumValue)
+        { mask += 4; }
+        if (!rightValue.IsZero && !(leftValue == minimumValue && rightValue == -BigInteger.One))
+        { mask += 8; }
+        if (!rightValue.IsZero)
+        { mask += 16; }
+        if (leftValue != minimumValue)
+        { mask += 32; }
+        if (leftValue != minimumValue)
+        { mask += 64; }
         return mask;
     }
 
@@ -179,11 +182,16 @@ public sealed class IntegerFactsModuleTests
         var rightValue = new BigInteger(right.ToDecimal(CultureInfo.InvariantCulture));
         var maximumValue = new BigInteger(maximum.ToDecimal(CultureInfo.InvariantCulture));
         var mask = 0;
-        if (leftValue + rightValue <= maximumValue) { mask += 1; }
-        if (leftValue >= rightValue) { mask += 2; }
-        if (leftValue * rightValue <= maximumValue) { mask += 4; }
-        if (!rightValue.IsZero) { mask += 8; }
-        if (!rightValue.IsZero) { mask += 16; }
+        if (leftValue + rightValue <= maximumValue)
+        { mask += 1; }
+        if (leftValue >= rightValue)
+        { mask += 2; }
+        if (leftValue * rightValue <= maximumValue)
+        { mask += 4; }
+        if (!rightValue.IsZero)
+        { mask += 8; }
+        if (!rightValue.IsZero)
+        { mask += 16; }
         return mask;
     }
 

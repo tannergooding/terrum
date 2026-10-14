@@ -6,24 +6,22 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CharacterFactsModuleTests
 {
     private const int BatchSize = 16_384;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CharacterFactsModuleClassifiesEveryUtf16CodeUnit(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
         var componentPath = Path.Combine(root, "self-host", "CharacterFacts.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var componentTree = SyntaxTree.Parse(componentText, componentPath);
-        Assert.False(componentTree.HasErrors, string.Join(Environment.NewLine, componentTree.Diagnostics));
+        Assert.That(componentTree.HasErrors, Is.False, string.Join(Environment.NewLine, componentTree.Diagnostics));
         var verifierTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return VerifyBatch(); }
@@ -69,20 +67,18 @@ public sealed class CharacterFactsModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.VerifyBatch"]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             int32 Main() { return VerifyBatch(); }
             """, "character-facts-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         for (var start = 0; start < char.MaxValue + 1; start += BatchSize)
@@ -95,7 +91,7 @@ public sealed class CharacterFactsModuleTests
             var grant = new HostBuffer("Source", PrimitiveType.Char16, values.MoveToImmutable(), false) {
                 IsInvocationScoped = true,
             };
-            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
+            Assert.That(NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy), Is.EqualTo(0));
         }
     }
 

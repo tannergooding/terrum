@@ -9,21 +9,20 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class SourceLineComponentTests
 {
-    [Theory]
-    [InlineData("")]
-    [InlineData("plain")]
-    [InlineData("\r\n")]
-    [InlineData("\r\r\n\n\r")]
-    [InlineData("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n")]
-    [InlineData("a\r\nb\rc\nd\u0085e\u2028f\u2029")]
-    [InlineData("\uD800\r\n\uDC00\0\uD800\uDC00")]
-    [InlineData("\u000B\u000C\u001C\u001D\u001E\u001F\u00A0")]
+    [TestCase("")]
+    [TestCase("plain")]
+    [TestCase("\r\n")]
+    [TestCase("\r\r\n\n\r")]
+    [TestCase("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n")]
+    [TestCase("a\r\nb\rc\nd\u0085e\u2028f\u2029")]
+    [TestCase("\uD800\r\n\uDC00\0\uD800\uDC00")]
+    [TestCase("\u000B\u000C\u001C\u001D\u001E\u001F\u00A0")]
     public async Task OwnedLineIndexMatchesEverySourcePositionAsync(string text)
     {
         var source = SourceText.From(text);
@@ -40,8 +39,8 @@ public sealed partial class SourceLineComponentTests
         for (var position = 0; position <= source.Length; position++)
         {
             var location = source.GetLinePosition(position);
-            Assert.True(source.TryGetOffset(location.Line, location.Character, out var offset));
-            Assert.Equal(position, offset);
+            Assert.That(source.TryGetOffset(location.Line, location.Character, out var offset), Is.True);
+            Assert.That(offset, Is.EqualTo(position));
             expected.Add(location.Line);
             expected.Add(location.Character);
         }
@@ -116,22 +115,20 @@ public sealed partial class SourceLineComponentTests
                 new HostBuffer("ExpectedExtents", PrimitiveType.Int32, extents.ToImmutable(), false),
                 new HostBuffer("ExpectedContentExtents", PrimitiveType.Int32, contentExtents.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("", 1)]
-    [InlineData("plain", 1)]
-    [InlineData("\n", 2)]
-    [InlineData("a\r\n", 2)]
-    [InlineData("\r\nb", 2)]
-    [InlineData("\r\nx\n", 3)]
-    [InlineData("\n\n\n\n", 5)]
-    [InlineData("a\r\nb\rc\nd\u0085e\u2028f\u2029", 7)]
+    [TestCase("",1)]
+    [TestCase("plain",1)]
+    [TestCase("\n",2)]
+    [TestCase("a\r\n",2)]
+    [TestCase("\r\nb",2)]
+    [TestCase("\r\nx\n",3)]
+    [TestCase("\n\n\n\n",5)]
+    [TestCase("a\r\nb\rc\nd\u0085e\u2028f\u2029",7)]
     public async Task OwnedLineIndexUsesOneWordPerLineAsync(string text, int expectedCount)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -156,12 +153,12 @@ public sealed partial class SourceLineComponentTests
             var compilation = Compilation.Create(trees.Add(entry),
                 [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
                 (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), policy).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task OwnedLineIndexDecodesCrLfMarkersAtLineStartBoundariesAsync()
     {
         const int BreakCount = 64;
@@ -204,18 +201,16 @@ public sealed partial class SourceLineComponentTests
                 new HostBuffer("ExpectedExtents", PrimitiveType.Int32, extents.ToImmutable(), false),
                 new HostBuffer("ExpectedContentExtents", PrimitiveType.Int32, contentExtents.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true)]
     public async Task SparseLineIndexFitsAtMaximumSourceLengthAsync(NativeRuntimePolicy policy, bool fewLines)
     {
         const int MaximumCapacity = 1_048_576;
@@ -240,15 +235,13 @@ public sealed partial class SourceLineComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true)]
     public async Task DenseLineIndexHonorsExactBufferCapacityAsync(NativeRuntimePolicy policy, bool overflow)
     {
         const int MaximumCapacity = 1_048_576;
@@ -294,15 +287,13 @@ public sealed partial class SourceLineComponentTests
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy,
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), policy,
             overflow && policy == NativeRuntimePolicy.FailFast ? unchecked((int)0xE0540001) : 0)
             .ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedLineIndexDoesNotRereadSourceAfterConstructionAsync(NativeRuntimePolicy policy)
     {
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
@@ -328,13 +319,11 @@ public sealed partial class SourceLineComponentTests
             """;
         var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-snapshot-entry.terrum")),
             [new HostBuffer("Source", PrimitiveType.Char16, [97, 13, 10, 98], true)], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedLineIndexPacksCrLfWidthsAcrossWordBoundariesAsync(NativeRuntimePolicy policy)
     {
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
@@ -358,19 +347,17 @@ public sealed partial class SourceLineComponentTests
         var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-packed-break-entry.terrum")),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], true)],
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("index.TryGetPosition(-1, init var line, init var character); return line;")]
-    [InlineData("index.TryGetPosition(2, init var line, init var character); return character;")]
-    [InlineData("index.TryGetOffset(-1, 0, init var position); return position;")]
-    [InlineData("index.TryGetOffset(0, 2, init var position); return position;")]
-    [InlineData("index.TryGetLineExtent(-1, init var extent); return extent.Start;")]
-    [InlineData("index.TryGetLineExtent(1, init var extent); return extent.Length;")]
-    [InlineData("SourceLineIndex copy = index; return copy.GetLineCount();")]
-    [InlineData("SourceLineIndex moved = move index; return index.GetLineCount();")]
+    [TestCase("index.TryGetPosition(-1, init var line, init var character); return line;")]
+    [TestCase("index.TryGetPosition(2, init var line, init var character); return character;")]
+    [TestCase("index.TryGetOffset(-1, 0, init var position); return position;")]
+    [TestCase("index.TryGetOffset(0, 2, init var position); return position;")]
+    [TestCase("index.TryGetLineExtent(-1, init var extent); return extent.Start;")]
+    [TestCase("index.TryGetLineExtent(1, init var extent); return extent.Length;")]
+    [TestCase("SourceLineIndex copy = index; return copy.GetLineCount();")]
+    [TestCase("SourceLineIndex moved = move index; return index.GetLineCount();")]
     public async Task OwnedLineIndexRejectsUnpublishedOutputsAndCopiesAsync(string body)
     {
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
@@ -378,12 +365,12 @@ public sealed partial class SourceLineComponentTests
             + "require SourceLineIndex.TryCreate(init var index); " + body + " }", "invalid-index-entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.SourceDiagnostics, diagnostic => diagnostic.SyntaxTree == entry);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry),Is.True);
     }
 
-    [Fact]
+    [Test]
     public async Task OwnedLineIndexCannotReadOutputWithoutSuccessfulCreationAsync()
     {
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
@@ -396,9 +383,9 @@ public sealed partial class SourceLineComponentTests
             """, "unpublished-index-entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [], false)]);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.SourceDiagnostics, diagnostic => diagnostic.SyntaxTree == entry);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry),Is.True);
     }
 
     private static async Task<ImmutableArray<SyntaxTree>> ReadIndexComponentsAsync()
@@ -407,8 +394,8 @@ public sealed partial class SourceLineComponentTests
         var path = Path.Combine(RepositoryRoot(), "self-host", "SourceLineIndex.terrum");
         var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var tree = SyntaxTree.Parse(text, path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(text, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
         return trees.Add(tree);
     }
 
@@ -417,11 +404,11 @@ public sealed partial class SourceLineComponentTests
         var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
         var source = trees[^1].Source;
         var marker = source.Text.IndexOf("    [NoThrow]", StringComparison.Ordinal);
-        Assert.True(marker >= 0);
+        Assert.That(marker >= 0, Is.True);
         var instrumented = source.Text.Insert(marker,
             "    public int32 GetCapacityForTest() { return _starts.Capacity; }\n\n");
         var tree = SyntaxTree.Parse(instrumented, source.Path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         return trees.SetItem(trees.Length - 1, tree);
     }
 }

@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmCompactLinearBodyReaderTests
 {
-    [Fact]
+    [Test]
     public void ReconstructsCheckedAddDefinitionsAndLastUses()
     {
         byte[] row =
@@ -22,89 +22,81 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x83, 5,
         ];
         var index = Inspect(row, 2);
-        Assert.Equal(3, index.Operations);
-        Assert.Equal(5, index.ValueCount);
-        Assert.Equal([-1, -1, 7, 12, 16], index.Definitions);
-        Assert.Equal([0, 0, 2, 2, 3], index.LastUses);
-        Assert.Equal([1, 1, 1, 1, 1], index.UseBlocks);
+        Assert.That(index.Operations, Is.EqualTo(3));
+        Assert.That(index.ValueCount, Is.EqualTo(5));
+        Assert.That(index.Definitions, Is.EqualTo([-1, -1, 7, 12, 16]));
+        Assert.That(index.LastUses, Is.EqualTo([0, 0, 2, 2, 3]));
+        Assert.That(index.UseBlocks, Is.EqualTo([1, 1, 1, 1, 1]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 2, 1, 1, 0xFF, 0x83, 1 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x83, 1 }, 1)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 2, 1, 1, 0xFF, 0x83, 1 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x83, 1 },1)]
     public void ReadsConstantAndParameterReturns(byte[] row, int parameterCount)
     {
         var index = Inspect(row, parameterCount);
-        Assert.Equal(1, index.ValueCount);
-        Assert.Equal(parameterCount == 0 ? 7 : -1, index.Definitions[0]);
-        Assert.Equal(index.Operations, index.LastUses[0]);
-        Assert.Equal([1], index.UseBlocks);
+        Assert.That(index.ValueCount, Is.EqualTo(1));
+        Assert.That(index.Definitions[0], Is.EqualTo(parameterCount == 0 ? 7 : -1));
+        Assert.That(index.LastUses[0], Is.EqualTo(index.Operations));
+        Assert.That(index.UseBlocks, Is.EqualTo([1]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x05, 1, 0, 1, 0, 0, 0, 0, 0, 0x83, 1 })]
-    [InlineData(new byte[] { 0x06, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0x83, 1 })]
+    [TestCase(new byte[] { 0x05, 1, 0, 1, 0, 0, 0, 0, 0, 0x83, 1 })]
+    [TestCase(new byte[] { 0x06, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0x83, 1 })]
     public void BodyLocalWidthDoesNotWidenInstructionOperands(byte[] row)
-        => Assert.Equal([-1], Inspect(row, 1).Definitions);
+        => Assert.That(Inspect(row, 1).Definitions, Is.EqualTo([-1]));
 
-    [Fact]
+    [Test]
     public void ReadsWideSignedConstantWithoutChangingBodyLocalWidth()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 0xF0, 0x10, 2, 1, 1, 200, 0, 0x83, 1];
         var index = Inspect(row, 0);
-        Assert.Equal([7], index.Definitions);
-        Assert.Equal([1], index.LastUses);
+        Assert.That(index.Definitions, Is.EqualTo([7]));
+        Assert.That(index.LastUses, Is.EqualTo([1]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
-        0xF0, 0x20, 1, 1, 1, 0, 0, 1, 0, 0x83, 1 }, (byte)9)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
+        0xF0, 0x20, 1, 1, 1, 0, 0, 1, 0, 0x83, 1 },(byte)9)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
         0xF0, 0x30, 1, 1, 1, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0x83, 1 }, (byte)9)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
-        2, 1, 1, 0xFF, 0x83, 1 }, (byte)9)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
+        0xFF, 0xFF, 0xFF, 0xFF, 0x83, 1 },(byte)9)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
+        2, 1, 1, 0xFF, 0x83, 1 },(byte)9)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1,
         0xF0, 0x30, 2, 1, 1, 0xFF, 0xFF, 0xFF, 0xFF,
-        0, 0, 0, 0, 0x83, 1 }, (byte)0x0D)]
+        0, 0, 0, 0, 0x83, 1 },(byte)0x0D)]
     public void AcceptsFullWidthAndSignedNumericConstants(byte[] row, byte typeCode)
-        => Assert.Equal([1], Inspect(row, 0, typeCode: typeCode).UseBlocks);
-
-    [Theory]
-    [InlineData((byte)0x0D)]
-    [InlineData((byte)0x0E)]
+        => Assert.That(Inspect(row, 0, typeCode: typeCode).UseBlocks, Is.EqualTo([1]));
+    [TestCase((byte)0x0D)]
+    [TestCase((byte)0x0E)]
     public void RejectsNegativeSignedLiteralForUnsignedType(byte typeCode)
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 2, 1, 1, 0xFF, 0x83, 1];
         Assert.Throws<InvalidDataException>(() => Inspect(row, 0, typeCode: typeCode));
     }
 
-    [Fact]
+    [Test]
     public void AcceptsValueFreeFailWithoutTypeMap()
     {
         byte[] row = [0x04, 0, 0, 0x87, 1];
         var index = Inspect(row, 0);
-        Assert.Equal(0, index.ValueCount);
-        Assert.Equal(0, index.Operations);
-        Assert.Empty(index.Definitions);
+        Assert.That(index.ValueCount, Is.EqualTo(0));
+        Assert.That(index.Operations, Is.EqualTo(0));
+        Assert.That(index.Definitions, Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public void ReturnZeroRequiresVoidResultAndNoValueDefinition()
     {
         byte[] row = [0x04, 0, 0, 0x83, 0];
         var index = Inspect(row, 0, typeCode: 0);
-        Assert.Equal(0, index.ValueCount);
-        Assert.Equal(0, index.Operations);
-        Assert.Empty(index.UseBlocks);
+        Assert.That(index.ValueCount, Is.EqualTo(0));
+        Assert.That(index.Operations, Is.EqualTo(0));
+        Assert.That(index.UseBlocks, Is.Empty);
         Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
 
         byte[] invalid = [0x04, 0, 0, 0x83, 1];
         Assert.Throws<InvalidDataException>(() => Inspect(invalid, 0, typeCode: 0));
     }
 
-    [Fact]
+    [Test]
     public void OptionalPresenceRetainsCompleteValueTypes()
     {
         byte[] make =
@@ -114,29 +106,29 @@ public sealed class TrRmCompactLinearBodyReaderTests
         ];
         var wrapped = Inspect(make, 1, secondTypeCode: 1, secondTypeOptional: true,
             resultUsesSecondType: true, typeCode: 1);
-        Assert.Equal([false, true], wrapped.Optional);
-        Assert.Equal([1, 1], wrapped.TypeCodes);
-        Assert.Equal([0, 1], wrapped.LastUses);
+        Assert.That(wrapped.Optional, Is.EqualTo([false, true]));
+        Assert.That(wrapped.TypeCodes, Is.EqualTo([1, 1]));
+        Assert.That(wrapped.LastUses, Is.EqualTo([0, 1]));
 
         byte[] none = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 9, 1, 2, 0x83, 1];
-        Assert.Equal([true], Inspect(none, 0, typeCode: 1, secondTypeCode: 1,
-            secondTypeOptional: true, resultUsesSecondType: true).Optional);
+        Assert.That(Inspect(none, 0, typeCode: 1, secondTypeCode: 1,
+            secondTypeOptional: true, resultUsesSecondType: true).Optional, Is.EqualTo([true]));
 
         byte[] present = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0x0A, 2, 1, 0x83, 2];
         var checkedPresence = Inspect(present, 1, typeCode: 1, secondTypeCode: 1,
             secondTypeOptional: true, parameterUsesSecondType: true);
-        Assert.Equal([true, false], checkedPresence.Optional);
-        Assert.Equal([0, 1], checkedPresence.LastUses);
+        Assert.That(checkedPresence.Optional, Is.EqualTo([true, false]));
+        Assert.That(checkedPresence.LastUses, Is.EqualTo([0, 1]));
     }
 
-    [Fact]
+    [Test]
     public void OptionalCopyAndSelectKeepPresenceQualified()
     {
         byte[] copied = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 3, 2, 1, 0x83, 2];
         var copy = Inspect(copied, 1, typeCode: 8, secondTypeCode: 8,
             secondTypeOptional: true, parameterUsesSecondType: true, resultUsesSecondType: true);
-        Assert.Equal([true, true], copy.Optional);
-        Assert.Equal([8, 8], copy.TypeCodes);
+        Assert.That(copy.Optional, Is.EqualTo([true, true]));
+        Assert.That(copy.TypeCodes, Is.EqualTo([8, 8]));
 
         byte[] selected =
         [
@@ -149,11 +141,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
         ];
         var choice = Inspect(selected, 0, typeCode: 1, secondTypeCode: 1,
             secondTypeOptional: true, resultUsesSecondType: true);
-        Assert.Equal([false, true, true, true], choice.Optional);
-        Assert.Equal([3, 3, 3, 4], choice.LastUses);
+        Assert.That(choice.Optional, Is.EqualTo([false, true, true, true]));
+        Assert.That(choice.LastUses, Is.EqualTo([3, 3, 3, 4]));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOptionalUseAsScalarOrUnmappedOptionalType()
     {
         byte[] header = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1];
@@ -178,40 +170,34 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(comparison, 2, typeCode: 1,
             secondTypeCode: 1, secondTypeOptional: true, parameterUsesSecondType: true));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 3, 2, 1 }, (byte)8)]
-    [InlineData(new byte[] { 4, 2, 1, 1 }, (byte)1)]
-    [InlineData(new byte[] { 4, 2, 2, 1 }, (byte)8)]
-    [InlineData(new byte[] { 4, 2, 3, 1 }, (byte)0x0D)]
-    [InlineData(new byte[] { 0x17, 2, 1 }, (byte)8)]
-    [InlineData(new byte[] { 0x17, 2, 1 }, (byte)9)]
+    [TestCase(new byte[] { 3, 2, 1 },(byte)8)]
+    [TestCase(new byte[] { 4, 2, 1, 1 },(byte)1)]
+    [TestCase(new byte[] { 4, 2, 2, 1 },(byte)8)]
+    [TestCase(new byte[] { 4, 2, 3, 1 },(byte)0x0D)]
+    [TestCase(new byte[] { 0x17, 2, 1 },(byte)8)]
+    [TestCase(new byte[] { 0x17, 2, 1 },(byte)9)]
     public void ScalarCopyUnaryAndNegateRetainType(byte[] operation, byte typeCode)
     {
         var row = OneParameterOperation(operation);
         var index = Inspect(row, 1, typeCode: typeCode);
-        Assert.Equal([typeCode, typeCode], index.TypeCodes);
-        Assert.Equal([1, 1], index.UseBlocks);
-        Assert.Equal([0, 1], index.LastUses);
+        Assert.That(index.TypeCodes, Is.EqualTo([typeCode, typeCode]));
+        Assert.That(index.UseBlocks, Is.EqualTo([1, 1]));
+        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 4, 2, 1, 1 }, (byte)8)]
-    [InlineData(new byte[] { 4, 2, 2, 1 }, (byte)1)]
-    [InlineData(new byte[] { 4, 2, 0, 1 }, (byte)8)]
-    [InlineData(new byte[] { 0x17, 2, 1 }, (byte)0x0D)]
-    [InlineData(new byte[] { 3, 2, 2 }, (byte)8)]
+    [TestCase(new byte[] { 4, 2, 1, 1 },(byte)8)]
+    [TestCase(new byte[] { 4, 2, 2, 1 },(byte)1)]
+    [TestCase(new byte[] { 4, 2, 0, 1 },(byte)8)]
+    [TestCase(new byte[] { 0x17, 2, 1 },(byte)0x0D)]
+    [TestCase(new byte[] { 3, 2, 2 },(byte)8)]
     public void RejectsMismatchedUnaryAndForwardCopy(byte[] operation, byte typeCode)
         => Assert.Throws<InvalidDataException>(() =>
             Inspect(OneParameterOperation(operation), 1, typeCode: typeCode));
-
-    [Theory]
-    [InlineData(new byte[] { 5, 3, 1, 1, 2 }, (byte)8)]
-    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, (byte)8)]
-    [InlineData(new byte[] { 5, 3, 6, 1, 2 }, (byte)8)]
-    [InlineData(new byte[] { 5, 3, 10, 1, 2 }, (byte)8)]
-    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, (byte)1)]
-    [InlineData(new byte[] { 5, 3, 5, 1, 2 }, (byte)3)]
+    [TestCase(new byte[] { 5, 3, 1, 1, 2 },(byte)8)]
+    [TestCase(new byte[] { 5, 3, 4, 1, 2 },(byte)8)]
+    [TestCase(new byte[] { 5, 3, 6, 1, 2 },(byte)8)]
+    [TestCase(new byte[] { 5, 3, 10, 1, 2 },(byte)8)]
+    [TestCase(new byte[] { 5, 3, 4, 1, 2 },(byte)1)]
+    [TestCase(new byte[] { 5, 3, 5, 1, 2 },(byte)3)]
     public void BinaryOperationChecksItsScalarResult(byte[] operation, byte sourceType)
     {
         var returnsBool = operation[2] is >= 4 and <= 9;
@@ -220,20 +206,18 @@ public sealed class TrRmCompactLinearBodyReaderTests
         var index = Inspect(row, 2, typeCode: sourceType,
             secondTypeCode: differentResult ? (byte)1 : null,
             resultUsesSecondType: differentResult);
-        Assert.Equal(returnsBool ? (byte)1 : sourceType, index.TypeCodes[2]);
-        Assert.Equal([0, 0, 1], index.LastUses);
+        Assert.That(index.TypeCodes[2], Is.EqualTo(returnsBool ? (byte)1 : sourceType));
+        Assert.That(index.LastUses, Is.EqualTo([0, 0, 1]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 5, 3, 0, 1, 2 }, (byte)8)]
-    [InlineData(new byte[] { 5, 3, 1, 1, 2 }, (byte)1)]
-    [InlineData(new byte[] { 5, 3, 6, 1, 2 }, (byte)3)]
-    [InlineData(new byte[] { 0x15, 3, 6, 1, 2 }, (byte)8)]
+    [TestCase(new byte[] { 5, 3, 0, 1, 2 },(byte)8)]
+    [TestCase(new byte[] { 5, 3, 1, 1, 2 },(byte)1)]
+    [TestCase(new byte[] { 5, 3, 6, 1, 2 },(byte)3)]
+    [TestCase(new byte[] { 0x15, 3, 6, 1, 2 },(byte)8)]
     public void RejectsInvalidBinaryKindOrOperandType(byte[] operation, byte typeCode)
         => Assert.Throws<InvalidDataException>(() =>
             Inspect(TwoParameterOperation(operation, false), 2, typeCode: typeCode));
 
-    [Fact]
+    [Test]
     public void ComparisonMustMapItsImplicitBooleanResult()
     {
         byte[] operation = [5, 3, 4, 1, 2];
@@ -241,7 +225,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
             Inspect(TwoParameterOperation(operation, false), 2));
     }
 
-    [Fact]
+    [Test]
     public void SelectRequiresBooleanConditionAndEqualValueTypes()
     {
         byte[] row =
@@ -254,14 +238,14 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x83, 4,
         ];
         var index = Inspect(row, 0, secondTypeCode: 1);
-        Assert.Equal([1, 8, 8, 8], index.TypeCodes);
-        Assert.Equal([3, 3, 3, 4], index.LastUses);
+        Assert.That(index.TypeCodes, Is.EqualTo([1, 8, 8, 8]));
+        Assert.That(index.LastUses, Is.EqualTo([3, 3, 3, 4]));
 
         row[25] = 2;
         Assert.Throws<InvalidDataException>(() => Inspect(row, 0, secondTypeCode: 1));
     }
 
-    [Fact]
+    [Test]
     public void CheckedShiftRequiresUnsigned32Count()
     {
         byte[] row =
@@ -271,27 +255,25 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x15, 3, 6, 1, 2,
             0x83, 3,
         ];
-        Assert.Equal([8, 0x0D, 8], Inspect(row, 1, secondTypeCode: 0x0D).TypeCodes);
+        Assert.That(Inspect(row, 1, secondTypeCode: 0x0D).TypeCodes, Is.EqualTo([8, 0x0D, 8]));
         Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondTypeCode: 1));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 6, 2, 2, 1, 1 }, (byte)8, (byte)0x0D)]
-    [InlineData(new byte[] { 6, 2, 2, 2, 1 }, (byte)9, (byte)0x0D)]
-    [InlineData(new byte[] { 6, 2, 2, 3, 1 }, (byte)8, (byte)0x0D)]
-    [InlineData(new byte[] { 0x16, 2, 2, 1 }, (byte)3, (byte)0x0D)]
-    [InlineData(new byte[] { 0x16, 2, 2, 1 }, (byte)8, (byte)3)]
+    [TestCase(new byte[] { 6, 2, 2, 1, 1 },(byte)8,(byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 2, 2, 1 },(byte)9,(byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 2, 3, 1 },(byte)8,(byte)0x0D)]
+    [TestCase(new byte[] { 0x16, 2, 2, 1 },(byte)3,(byte)0x0D)]
+    [TestCase(new byte[] { 0x16, 2, 2, 1 },(byte)8,(byte)3)]
     public void NumericConversionsRetainSelectedPolicyAndTargetType(
         byte[] operation, byte sourceType, byte destinationType)
     {
         var row = OneParameterMappedOperation(operation);
         var index = Inspect(row, 1, typeCode: sourceType,
             secondTypeCode: destinationType, resultUsesSecondType: true);
-        Assert.Equal([sourceType, destinationType], index.TypeCodes);
-        Assert.Equal([0, 1], index.LastUses);
+        Assert.That(index.TypeCodes, Is.EqualTo([sourceType, destinationType]));
+        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
     }
 
-    [Fact]
+    [Test]
     public void CheckedDivRemDefinesTwoValuesAtOneOperation()
     {
         byte[] row =
@@ -301,17 +283,17 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x83, 4,
         ];
         var index = Inspect(row, 2);
-        Assert.Equal(4, index.ValueCount);
-        Assert.Equal([-1, -1, 7, 7], index.Definitions);
-        Assert.Equal([0, 0, 0, 1], index.LastUses);
-        Assert.Equal([1, 1, 0, 1], index.UseBlocks);
-        Assert.Equal([8, 8, 8, 8], index.TypeCodes);
+        Assert.That(index.ValueCount, Is.EqualTo(4));
+        Assert.That(index.Definitions, Is.EqualTo([-1, -1, 7, 7]));
+        Assert.That(index.LastUses, Is.EqualTo([0, 0, 0, 1]));
+        Assert.That(index.UseBlocks, Is.EqualTo([1, 1, 0, 1]));
+        Assert.That(index.TypeCodes, Is.EqualTo([8, 8, 8, 8]));
 
         row[9] = 5;
         Assert.Throws<InvalidDataException>(() => Inspect(row, 2));
     }
 
-    [Fact]
+    [Test]
     public void MultipleDivRemOperationsKeepSequentialResultIds()
     {
         byte[] row =
@@ -322,54 +304,50 @@ public sealed class TrRmCompactLinearBodyReaderTests
             0x83, 6,
         ];
         var index = Inspect(row, 2);
-        Assert.Equal(6, index.ValueCount);
-        Assert.Equal([-1, -1, 7, 7, 12, 12], index.Definitions);
-        Assert.Equal([0, 0, 1, 1, 0, 2], index.LastUses);
+        Assert.That(index.ValueCount, Is.EqualTo(6));
+        Assert.That(index.Definitions, Is.EqualTo([-1, -1, 7, 7, 12, 12]));
+        Assert.That(index.LastUses, Is.EqualTo([0, 0, 1, 1, 0, 2]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 6, 2, 2, 0, 1 }, (byte)8, (byte)0x0D)]
-    [InlineData(new byte[] { 6, 2, 2, 4, 1 }, (byte)8, (byte)0x0D)]
-    [InlineData(new byte[] { 6, 2, 2, 3, 1 }, (byte)8, (byte)0x0E)]
-    [InlineData(new byte[] { 6, 2, 2, 1, 1 }, (byte)3, (byte)0x0D)]
-    [InlineData(new byte[] { 0x16, 2, 2, 1 }, (byte)1, (byte)8)]
-    [InlineData(new byte[] { 0x16, 2, 3, 1 }, (byte)8, (byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 2, 0, 1 },(byte)8,(byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 2, 4, 1 },(byte)8,(byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 2, 3, 1 },(byte)8,(byte)0x0E)]
+    [TestCase(new byte[] { 6, 2, 2, 1, 1 },(byte)3,(byte)0x0D)]
+    [TestCase(new byte[] { 0x16, 2, 2, 1 },(byte)1,(byte)8)]
+    [TestCase(new byte[] { 0x16, 2, 3, 1 },(byte)8,(byte)0x0D)]
     public void RejectsInvalidConversionPolicyTypesAndTypeId(
         byte[] operation, byte sourceType, byte destinationType)
         => Assert.Throws<InvalidDataException>(() =>
             Inspect(OneParameterMappedOperation(operation), 1, typeCode: sourceType,
                 secondTypeCode: destinationType, resultUsesSecondType: true));
 
-    [Fact]
+    [Test]
     public void UnusedParameterHasNoUseBlock()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 1, 2, 1, 42, 0x83, 2];
         var index = Inspect(row, 1);
-        Assert.Equal([0, 1], index.UseBlocks);
-        Assert.Equal([0, 1], index.LastUses);
+        Assert.That(index.UseBlocks, Is.EqualTo([0, 1]));
+        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
     }
 
-    [Fact]
+    [Test]
     public void MatchesMethodSignatureByResolvedTypeRatherThanTypeSpecRow()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 0, 0x83, 1];
-        Assert.Equal([1], Inspect(row, 1, duplicateSignatureType: true).UseBlocks);
+        Assert.That(Inspect(row, 1, duplicateSignatureType: true).UseBlocks, Is.EqualTo([1]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1, 0 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 1, 2, 1, 42, 0x83, 1 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 0xF0, 0x04, 1, 1, 1, 42, 0x83, 1 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 0xF0, 0x00, 1, 1, 1, 42, 0x83, 1 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 0x15, 1, 1, 1, 2, 0x83, 1 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 3, 1, 0x83, 1 }, 0)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x83, 2 }, 1)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x81, 1 }, 1)]
-    [InlineData(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x87, 5 }, 0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1, 0 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 1, 2, 1, 42, 0x83, 1 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 0xF0, 0x04, 1, 1, 1, 42, 0x83, 1 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 0xF0, 0x00, 1, 1, 1, 42, 0x83, 1 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 0x15, 1, 1, 1, 2, 0x83, 1 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 1, 3, 1, 0x83, 1 },0)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x83, 2 },1)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x81, 1 },1)]
+    [TestCase(new byte[] { 0x04, 1, 1, 0, 0, 0, 0, 0x87, 5 },0)]
     public void RejectsMalformedOrUnsupportedBodies(byte[] row, int parameterCount)
         => Assert.Throws<InvalidDataException>(() => Inspect(row, parameterCount));
 
-    [Fact]
+    [Test]
     public void RejectsCheckedExceptionPolicyAndNonValueParameters()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 0, 0x83, 1];
@@ -377,59 +355,55 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(row, 1, parameterMode: 2));
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnknownTypeMapReference()
     {
         byte[] row = [0x04, 1, 2, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
         Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
     }
 
-    [Fact]
+    [Test]
     public void RejectsDuplicateResolvedTypesInTypeMap()
     {
         byte[] row = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
         Assert.Throws<InvalidDataException>(() => Inspect(row, 0, secondTypeCode: 8));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x12, 2, 2, 1, 1 })]
-    [InlineData(new byte[] { 0xF0, 0x04, 0x12, 2, 2, 1, 0, 1 })]
-    [InlineData(new byte[] { 0xF0, 0x05, 0x12, 2, 0, 2, 0, 1, 0, 1, 0 })]
+    [TestCase(new byte[] { 0x12, 2, 2, 1, 1 })]
+    [TestCase(new byte[] { 0xF0, 0x04, 0x12, 2, 2, 1, 0, 1 })]
+    [TestCase(new byte[] { 0xF0, 0x05, 0x12, 2, 0, 2, 0, 1, 0, 1, 0 })]
     public void InspectsLocalStaticScalarCall(byte[] operation)
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, .. operation, 0x83, 2];
         var index = Inspect(row, 1, secondMethod: true);
-        Assert.Equal(2, index.ValueCount);
-        Assert.Equal([-1, 7], index.Definitions);
-        Assert.Equal([0, 1], index.LastUses);
-        Assert.Equal([1, 1], index.UseBlocks);
+        Assert.That(index.ValueCount, Is.EqualTo(2));
+        Assert.That(index.Definitions, Is.EqualTo([-1, 7]));
+        Assert.That(index.LastUses, Is.EqualTo([0, 1]));
+        Assert.That(index.UseBlocks, Is.EqualTo([1, 1]));
     }
 
-    [Fact]
+    [Test]
     public void InspectsVoidLocalCallWithoutValueDefinition()
     {
         byte[] row = [0x04, 0, 1, 0x12, 0, 2, 0, 0x83, 0];
         var index = Inspect(row, 0, typeCode: 0, secondMethod: true);
-        Assert.Equal(1, index.Operations);
-        Assert.Equal(0, index.ValueCount);
-        Assert.Empty(index.Definitions);
+        Assert.That(index.Operations, Is.EqualTo(1));
+        Assert.That(index.ValueCount, Is.EqualTo(0));
+        Assert.That(index.Definitions, Is.Empty);
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x12, 2, 0, 1, 1 })]
-    [InlineData(new byte[] { 0x12, 2, 3, 1, 1 })]
-    [InlineData(new byte[] { 0x12, 2, 2, 0, 1 })]
-    [InlineData(new byte[] { 0x12, 2, 2, 2, 1 })]
-    [InlineData(new byte[] { 0x12, 0, 2, 1, 1 })]
-    [InlineData(new byte[] { 0x12, 2, 2, 1, 2 })]
-    [InlineData(new byte[] { 0xF0, 0x0C, 0x12, 2, 2, 1, 1 })]
+    [TestCase(new byte[] { 0x12, 2, 0, 1, 1 })]
+    [TestCase(new byte[] { 0x12, 2, 3, 1, 1 })]
+    [TestCase(new byte[] { 0x12, 2, 2, 0, 1 })]
+    [TestCase(new byte[] { 0x12, 2, 2, 2, 1 })]
+    [TestCase(new byte[] { 0x12, 0, 2, 1, 1 })]
+    [TestCase(new byte[] { 0x12, 2, 2, 1, 2 })]
+    [TestCase(new byte[] { 0xF0, 0x0C, 0x12, 2, 2, 1, 1 })]
     public void RejectsMalformedLocalCalls(byte[] operation)
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, .. operation, 0x83, 2];
         Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondMethod: true));
     }
 
-    [Fact]
+    [Test]
     public void RejectsLocalCallToMethodWithoutBodyOrMatchingParameterMode()
     {
         byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
@@ -438,13 +412,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
             secondMethod: true, parameterMode: 2));
     }
-
-    [Theory]
-    [InlineData(1, 0, 0, 2, true)]
-    [InlineData(0, 0, 0, 2, true)]
-    [InlineData(0, 1, 0, 2, false)]
-    [InlineData(1, 0, 1, 2, false)]
-    [InlineData(1, 0, 0, 0, false)]
+    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(2),true)]
+    [TestCase((byte)(0),(byte)(0),(byte)(0),(byte)(2),true)]
+    [TestCase((byte)(0),(byte)(1),(byte)(0),(byte)(2),false)]
+    [TestCase((byte)(1),(byte)(0),(byte)(1),(byte)(2),false)]
+    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(0),false)]
     public void ChecksPackedPublicGlobalCall(byte callerRequirement,
         byte targetRequirement, byte targetPolicy, byte targetVisibility, bool valid)
     {
@@ -458,8 +430,8 @@ public sealed class TrRmCompactLinearBodyReaderTests
             var index = Inspect(row, 1, secondMethod: true, packedTarget: true,
                 callerRequirement: callerRequirement, targetRequirement: targetRequirement,
                 targetPolicy: targetPolicy, targetVisibility: targetVisibility);
-            Assert.Equal(2, index.ValueCount);
-            Assert.Equal([0, 1], index.LastUses);
+            Assert.That(index.ValueCount, Is.EqualTo(2));
+            Assert.That(index.LastUses, Is.EqualTo([0, 1]));
         }
         else
         {
@@ -469,12 +441,10 @@ public sealed class TrRmCompactLinearBodyReaderTests
                 targetPolicy: targetPolicy, targetVisibility: targetVisibility));
         }
     }
-
-    [Theory]
-    [InlineData(0, 0x15)]
-    [InlineData(0, 0x17)]
-    [InlineData(1, 0x16)]
-    [InlineData(3, 0x16)]
+    [TestCase((byte)(0),(byte)(0x15))]
+    [TestCase((byte)(0),(byte)(0x17))]
+    [TestCase((byte)(1),(byte)(0x16))]
+    [TestCase((byte)(3),(byte)(0x16))]
     public void RejectsMalformedPackedCallTarget(byte targetRow, byte kind)
     {
         byte[] row =
@@ -485,13 +455,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
             secondMethod: true, packedTarget: true));
     }
-
-    [Theory]
-    [InlineData(1, 0, 0, 2, true)]
-    [InlineData(0, 0, 0, 2, true)]
-    [InlineData(0, 1, 0, 2, false)]
-    [InlineData(1, 0, 1, 2, false)]
-    [InlineData(1, 0, 0, 0, false)]
+    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(2),true)]
+    [TestCase((byte)(0),(byte)(0),(byte)(0),(byte)(2),true)]
+    [TestCase((byte)(0),(byte)(1),(byte)(0),(byte)(2),false)]
+    [TestCase((byte)(1),(byte)(0),(byte)(1),(byte)(2),false)]
+    [TestCase((byte)(1),(byte)(0),(byte)(0),(byte)(0),false)]
     public void ChecksRetainedImportedGlobalCall(byte callerRequirement,
         byte targetRequirement, byte targetPolicy, byte targetVisibility, bool valid)
     {
@@ -502,8 +470,8 @@ public sealed class TrRmCompactLinearBodyReaderTests
                 expectedTarget: true, callerRequirement: callerRequirement,
                 targetRequirement: targetRequirement, targetPolicy: targetPolicy,
                 targetVisibility: targetVisibility);
-            Assert.Equal(2, index.ValueCount);
-            Assert.Equal([0, 1], index.LastUses);
+            Assert.That(index.ValueCount, Is.EqualTo(2));
+            Assert.That(index.LastUses, Is.EqualTo([0, 1]));
         }
         else
         {
@@ -513,18 +481,16 @@ public sealed class TrRmCompactLinearBodyReaderTests
                 targetPolicy: targetPolicy, targetVisibility: targetVisibility));
         }
     }
-
-    [Theory]
-    [InlineData(false, false, 2, 6, false, true)]
-    [InlineData(true, false, 2, 6, false, true)]
-    [InlineData(false, true, 2, 6, false, true)]
-    [InlineData(false, false, 0, 6, false, true)]
-    [InlineData(true, false, 0, 6, false, false)]
-    [InlineData(false, true, 0, 6, false, false)]
-    [InlineData(true, false, 2, 4, false, false)]
-    [InlineData(false, true, 2, 4, false, false)]
-    [InlineData(true, false, 2, 6, true, false)]
-    [InlineData(false, true, 2, 6, true, false)]
+    [TestCase(false,false,(byte)(2),(byte)(6),false,true)]
+    [TestCase(true,false,(byte)(2),(byte)(6),false,true)]
+    [TestCase(false,true,(byte)(2),(byte)(6),false,true)]
+    [TestCase(false,false,(byte)(0),(byte)(6),false,true)]
+    [TestCase(true,false,(byte)(0),(byte)(6),false,false)]
+    [TestCase(false,true,(byte)(0),(byte)(6),false,false)]
+    [TestCase(true,false,(byte)(2),(byte)(4),false,false)]
+    [TestCase(false,true,(byte)(2),(byte)(4),false,false)]
+    [TestCase(true,false,(byte)(2),(byte)(6),true,false)]
+    [TestCase(false,true,(byte)(2),(byte)(6),true,false)]
     public void ChecksTypeOwnedStaticCall(bool packedTarget, bool expectedTarget,
         byte targetVisibility, byte ownerFlags, bool genericOwner, bool valid)
     {
@@ -538,7 +504,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
                 secondBody: !expectedTarget, expectedTarget: expectedTarget,
                 targetVisibility: targetVisibility, ownerFlags: ownerFlags,
                 genericOwner: genericOwner);
-            Assert.Equal(2, index.ValueCount);
+            Assert.That(index.ValueCount, Is.EqualTo(2));
         }
         else
         {
@@ -549,14 +515,12 @@ public sealed class TrRmCompactLinearBodyReaderTests
                 genericOwner: genericOwner));
         }
     }
-
-    [Theory]
-    [InlineData(true, 1, 0, 0, true)]
-    [InlineData(true, 0, 1, 0, false)]
-    [InlineData(true, 1, 0, 1, false)]
-    [InlineData(false, 1, 0, 0, true)]
-    [InlineData(false, 0, 1, 0, false)]
-    [InlineData(false, 1, 0, 1, false)]
+    [TestCase(true,(byte)(1),(byte)(0),(byte)(0),true)]
+    [TestCase(true,(byte)(0),(byte)(1),(byte)(0),false)]
+    [TestCase(true,(byte)(1),(byte)(0),(byte)(1),false)]
+    [TestCase(false,(byte)(1),(byte)(0),(byte)(0),true)]
+    [TestCase(false,(byte)(0),(byte)(1),(byte)(0),false)]
+    [TestCase(false,(byte)(1),(byte)(0),(byte)(1),false)]
     public void ChecksTypeOwnedExternalCallRequirements(bool packedTarget,
         byte callerRequirement, byte targetRequirement, byte targetPolicy, bool valid)
     {
@@ -566,11 +530,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
             : [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
         if (valid)
         {
-            Assert.Equal(2, Inspect(row, 1, secondMethod: true,
+            Assert.That(Inspect(row, 1, secondMethod: true,
                 packedTarget: packedTarget, expectedTarget: !packedTarget,
                 secondBody: packedTarget, ownerFlags: 6,
                 callerRequirement: callerRequirement, targetRequirement: targetRequirement,
-                targetPolicy: targetPolicy).ValueCount);
+                targetPolicy: targetPolicy).ValueCount, Is.EqualTo(2));
         }
         else
         {

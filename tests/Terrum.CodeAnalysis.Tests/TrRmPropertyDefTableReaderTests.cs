@@ -4,30 +4,28 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmPropertyDefTableReaderTests
 {
-    [Fact]
+    [Test]
     public void GetterResultAndDeclaringTypeMatchWithoutNameInference()
     {
-        Assert.Equal("Value", ReadName(Property(), 1));
+        Assert.That(ReadName(Property(), 1), Is.EqualTo("Value"));
         Assert.Throws<InvalidDataException>(() => ReadName(Property(), 0));
         Assert.Throws<InvalidDataException>(() => ReadName(Property(), 2));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, 2)]
-    [InlineData(4, 0)]
-    [InlineData(8, 0)]
-    [InlineData(8, 2)]
-    [InlineData(12, 0)]
-    [InlineData(12, 2)]
-    [InlineData(16, 3)]
-    [InlineData(16, 4)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(0,(byte)(2))]
+    [TestCase(4,(byte)(0))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(2))]
+    [TestCase(12,(byte)(0))]
+    [TestCase(12,(byte)(2))]
+    [TestCase(16,(byte)(3))]
+    [TestCase(16,(byte)(4))]
     public void RejectsBadPropertyReferencesAndFlags(int offset, byte replacement)
     {
         var bytes = Property();
@@ -35,7 +33,7 @@ public sealed class TrRmPropertyDefTableReaderTests
         Assert.Throws<InvalidDataException>(() => ReadName(bytes, 1));
     }
 
-    [Fact]
+    [Test]
     public void RejectsGetterWithDifferentOwnerOrResult()
     {
         var moduleLevel = Method();

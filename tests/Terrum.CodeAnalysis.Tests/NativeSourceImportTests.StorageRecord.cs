@@ -5,7 +5,7 @@ using System.Collections.Immutable;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -71,7 +71,7 @@ public sealed partial class NativeSourceImportTests
             CreateStorageRecordCatalog(paired), BoundRuntimePolicy.FailFast);
     }
 
-    [Fact]
+    [Test]
     public void CataloguedStorageRecordUsesExactLayoutAndReadonlyBackingLoan()
     {
         var compilation = CompileStorageRecord("""
@@ -79,17 +79,16 @@ public sealed partial class NativeSourceImportTests
             StorageRecord record = storageRecord(&backing[0], 16);
             return ObserveStorageRecord(&record);
             """);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var function = program.Functions[program.EntryPoint];
-        var record = Assert.IsType<BoundLocal>(((BoundBlock)function.Body).Statements[1]);
-        Assert.Equal(16, function.Variables[record.Variable].NativeStorageRecordLayout?.ByteExtent);
-        Assert.Equal(new NativeStorageLoan(0, PrimitiveType.NativeFixedArray, PrimitiveType.UInt32, true, 16),
-            function.Variables[record.Variable].NativeStorageRecordFacts?.Loan);
+        var record = ((global::System.Func<BoundLocal>)(() => { var __nunitActual1 = ((BoundBlock)function.Body).Statements[1]; Assert.That(__nunitActual1, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual1!; }))();
+        Assert.That(function.Variables[record.Variable].NativeStorageRecordLayout?.ByteExtent, Is.EqualTo(16));
+        Assert.That(function.Variables[record.Variable].NativeStorageRecordFacts?.Loan, Is.EqualTo(new NativeStorageLoan(0, PrimitiveType.NativeFixedArray, PrimitiveType.UInt32, true, 16)));
         _ = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
     }
 
-    [Fact]
+    [Test]
     public void CataloguedStorageRecordRejectsInvalidExtentAndEscapes()
     {
         var invalidExtent = CompileStorageRecord("""
@@ -97,14 +96,14 @@ public sealed partial class NativeSourceImportTests
             StorageRecord record = storageRecord(&backing[0], 17);
             return ObserveStorageRecord(&record);
             """);
-        Assert.True(invalidExtent.HasErrors);
+        Assert.That(invalidExtent.HasErrors, Is.True);
 
         var mutable = CompileStorageRecord("""
             InlineArray<uint32, 4> backing = [1, 2, 3, 4];
             mut StorageRecord record = storageRecord(&backing[0], 16);
             return ObserveStorageRecord(&record);
             """);
-        Assert.True(mutable.HasErrors);
+        Assert.That(mutable.HasErrors, Is.True);
 
         var byValue = CompileStorageRecord("""
             InlineArray<uint32, 4> backing = [1, 2, 3, 4];
@@ -112,10 +111,10 @@ public sealed partial class NativeSourceImportTests
             StorageRecord copy = record;
             return ObserveStorageRecord(&copy);
             """);
-        Assert.True(byValue.HasErrors);
+        Assert.That(byValue.HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void CataloguedStorageRecordCatalogRejectsInvalidLayoutsAndLoanContracts()
     {
         foreach (var layout in new[] {
@@ -142,13 +141,13 @@ public sealed partial class NativeSourceImportTests
             },
         })
         {
-            _ = Assert.Throws<ArgumentException>(() => CreateStorageRecordCatalog(layout: layout));
+            _ = Assert.Throws<ArgumentException>(() => CreateStorageRecordCatalog(layout: layout))!;
         }
-        _ = Assert.Throws<ArgumentException>(() => CreateStorageRecordCatalog(isReadonly: false));
-        _ = Assert.Throws<ArgumentException>(() => CreateStorageRecordCatalog(loanGroup: "singleton"));
+        _ = Assert.Throws<ArgumentException>(() => CreateStorageRecordCatalog(isReadonly: false))!;
+        _ = Assert.Throws<ArgumentException>(() => CreateStorageRecordCatalog(loanGroup: "singleton"))!;
     }
 
-    [Fact]
+    [Test]
     public void CataloguedStorageRecordLoanGroupsRequireTheSameBacking()
     {
         const string prefix = """
@@ -160,15 +159,15 @@ public sealed partial class NativeSourceImportTests
             """;
         var sharedBacking = CompileStorageRecord(prefix.Replace("SECOND", "first", StringComparison.Ordinal),
             paired: true);
-        Assert.False(sharedBacking.HasErrors, string.Join(Environment.NewLine, sharedBacking.Diagnostics));
+        Assert.That(sharedBacking.HasErrors, Is.False, string.Join(Environment.NewLine, sharedBacking.Diagnostics));
         _ = NativeEmitter.EmitWithNativeImportsForTesting(
-            Assert.IsType<BoundProgram>(sharedBacking.Program), NativeRuntimePolicy.FailFast);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = sharedBacking.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), NativeRuntimePolicy.FailFast);
 
         var distinctBacking = CompileStorageRecord(prefix, paired: true);
-        Assert.True(distinctBacking.HasErrors);
+        Assert.That(distinctBacking.HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void SemanticVerifierRederivesCataloguedStorageRecordFacts()
     {
         var compilation = CompileStorageRecord("""
@@ -176,11 +175,11 @@ public sealed partial class NativeSourceImportTests
             StorageRecord record = storageRecord(&backing[0], 16);
             return ObserveStorageRecord(&record);
             """);
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         var function = program.Functions[program.EntryPoint];
-        var body = Assert.IsType<BoundBlock>(function.Body);
-        var local = Assert.IsType<BoundLocal>(body.Statements[1]);
-        var initializer = Assert.IsType<BoundNativeStorageRecordInitialization>(local.Initializer);
+        var body = ((global::System.Func<BoundBlock>)(() => { var __nunitActual4 = function.Body; Assert.That(__nunitActual4, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual4!; }))();
+        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual5 = body.Statements[1]; Assert.That(__nunitActual5, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual5!; }))();
+        var initializer = ((global::System.Func<BoundNativeStorageRecordInitialization>)(() => { var __nunitActual6 = local.Initializer; Assert.That(__nunitActual6, Is.TypeOf<BoundNativeStorageRecordInitialization>()); return (BoundNativeStorageRecordInitialization)__nunitActual6!; }))();
         var forgedInitializer = initializer with {
             Fields = initializer.Fields.SetItem(0, (BoundConstant)initializer.Fields[0] with { Value = 17 }),
         };
@@ -192,6 +191,6 @@ public sealed partial class NativeSourceImportTests
             Functions = program.Functions.SetItem(program.EntryPoint, forgedFunction),
         };
         _ = Assert.Throws<ArgumentException>(() =>
-            NativeEmitter.EmitWithNativeImportsForTesting(forgedProgram, NativeRuntimePolicy.FailFast));
+            NativeEmitter.EmitWithNativeImportsForTesting(forgedProgram, NativeRuntimePolicy.FailFast))!;
     }
 }

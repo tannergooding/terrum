@@ -13,7 +13,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -74,8 +74,8 @@ public sealed class NativeModuleTests
         BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = result.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
 
     private static byte[] Producer(string source = Provider, string identity = "Example", string[]? exports = null) =>
@@ -84,8 +84,8 @@ public sealed class NativeModuleTests
     private static BoundProgram CompileConsumer(string source, byte[] producer)
     {
         var result = Compilation.Create(SyntaxTree.Parse(source), NativeModuleCompiler.CreateReference(producer));
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = result.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
     private static byte[] ConsumerPackage(byte[] producer, string source = Consumer) =>
@@ -96,8 +96,8 @@ public sealed class NativeModuleTests
         var boundPolicy = policy == NativeRuntimePolicy.CheckedExceptions
             ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), boundPolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Run"], identity, policy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Run"], identity, policy);
     }
 
     private static int PackageContractOffset(byte[] artifact)
@@ -119,7 +119,7 @@ public sealed class NativeModuleTests
         var contractOffset = PackageContractOffset(result);
         var profileLength = BinaryPrimitives.ReadInt32LittleEndian(result.AsSpan(contractOffset + 8, 4));
         var requirementOffset = checked(contractOffset + 8 + 4 + profileLength + 2);
-        Assert.Equal(0, result[requirementOffset]);
+        Assert.That(result[requirementOffset], Is.EqualTo(0));
         result[requirementOffset] = 1;
         RehashArtifact(result);
         return result;
@@ -131,7 +131,7 @@ public sealed class NativeModuleTests
     private static byte[] ReplacePackageImageSymbol(byte[] artifact, ReadOnlySpan<byte> oldSymbol,
         ReadOnlySpan<byte> newSymbol)
     {
-        Assert.Equal(oldSymbol.Length, newSymbol.Length);
+        Assert.That(newSymbol.Length, Is.EqualTo(oldSymbol.Length));
         var result = (byte[])artifact.Clone();
         var imageOffset = PackageContractOffset(result);
         var imageLength = BinaryPrimitives.ReadInt32LittleEndian(result.AsSpan(14, 4));
@@ -144,7 +144,7 @@ public sealed class NativeModuleTests
             replacement = newSymbol[..^1];
             symbolOffset = result.AsSpan(imageOffset, imageLength).IndexOf(oldSymbol);
         }
-        Assert.True(symbolOffset >= 0);
+        Assert.That(symbolOffset >= 0, Is.True);
         replacement.CopyTo(result.AsSpan(imageOffset + symbolOffset, replacement.Length));
         RehashArtifact(result);
         return result;
@@ -155,13 +155,13 @@ public sealed class NativeModuleTests
         SHA256.HashData(artifact.AsSpan(0, artifact.Length - 32)).CopyTo(artifact, artifact.Length - 32);
     }
 
-    [Fact]
+    [Test]
     public void NativePackagesUseCurrentVersionAndRejectPreviousVersion()
     {
         var producer = Producer();
         var consumer = ConsumerPackage(producer);
-        Assert.Equal(2, producer[4]);
-        Assert.Equal(2, consumer[4]);
+        Assert.That(producer[4], Is.EqualTo(2));
+        Assert.That(consumer[4], Is.EqualTo(2));
 
         foreach (var artifact in new[] { producer, consumer })
         {
@@ -169,11 +169,11 @@ public sealed class NativeModuleTests
             previousVersion[4] = 1;
             SHA256.HashData(previousVersion.AsSpan(0, previousVersion.Length - 32))
                 .CopyTo(previousVersion, previousVersion.Length - 32);
-            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(previousVersion));
+            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(previousVersion))!;
         }
     }
 
-    [Fact]
+    [Test]
     public void NativeModuleIngressRejectsSourceGrantContracts()
     {
         var producer = Producer("public int32 Run() { return 42; }", "SourceGrant", ["Run"]);
@@ -181,13 +181,13 @@ public sealed class NativeModuleTests
         var sourceRequiredProducer = WithSourceGrantRequirement(producer);
         var sourceRequiredConsumer = WithSourceGrantRequirement(consumer);
 
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateReference(sourceRequiredProducer));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(sourceRequiredProducer));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(sourceRequiredConsumer));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(sourceRequiredConsumer, producer));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateReference(sourceRequiredProducer))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(sourceRequiredProducer))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(sourceRequiredConsumer))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(sourceRequiredConsumer, producer))!;
     }
 
-    [Fact]
+    [Test]
     public async Task SamePersistedConsumerExecutesCompatibleProvidersWithoutReemissionAsync()
     {
         var original = Producer();
@@ -198,25 +198,24 @@ public sealed class NativeModuleTests
         var originalInfo = NativeModuleCompiler.Inspect(original);
         var replacementInfo = NativeModuleCompiler.Inspect(replacement);
         var consumerInfo = NativeModuleCompiler.Inspect(consumer);
-        Assert.Equal("Example", originalInfo.Identity);
-        Assert.False(originalInfo.IsConsumer);
-        Assert.True(consumerInfo.IsConsumer);
-        Assert.Equal(originalInfo.ContractLength, replacementInfo.ContractLength);
-        Assert.NotEqual(originalInfo.ImageSha256, replacementInfo.ImageSha256);
+        Assert.That(originalInfo.Identity, Is.EqualTo("Example"));
+        Assert.That(originalInfo.IsConsumer, Is.False);
+        Assert.That(consumerInfo.IsConsumer, Is.True);
+        Assert.That(replacementInfo.ContractLength, Is.EqualTo(originalInfo.ContractLength));
+        Assert.That(replacementInfo.ImageSha256, Is.Not.EqualTo(originalInfo.ImageSha256));
         NativeModuleCompiler.Validate(consumer, original);
         NativeModuleCompiler.Validate(consumer, replacement);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(before, consumer);
-        Assert.Equal(consumerInfo.ImageSha256, NativeModuleCompiler.Inspect(consumer).ImageSha256);
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(43));
+        Assert.That(consumer, Is.EqualTo(before));
+        Assert.That(NativeModuleCompiler.Inspect(consumer).ImageSha256, Is.EqualTo(consumerInfo.ImageSha256));
         var failed = ConsumerPackage(original, Consumer.Replace("return Recurse(3);",
             "return Evaluate(MakeTwelve(10, 11, 12), MakeWide(0, 0), 2147483648, 1, 2);",
             StringComparison.Ordinal));
-        Assert.Equal(unchecked((int)0xE0540003),
-            await NativeModuleCompiler.RunAsync(failed, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(failed, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
 
-    [Fact]
+    [Test]
     public async Task NativeConsumerAcceptsCompatibleProviderWithReorderedTypesAsync()
     {
         const string typeA = "public struct A { public int32 Value; public A() { Value = 5; } }";
@@ -229,13 +228,11 @@ public sealed class NativeModuleTests
             ["Read"], "Reordered", NativeRuntimePolicy.FailFast);
 
         NativeModuleCompiler.Validate(consumer, replacement);
-        Assert.Equal(5, await NativeModuleCompiler.RunAsync(consumer, replacement,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(5));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PersistedConsumerExecutesReplacementCleanupFuncletsAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -255,20 +252,19 @@ public sealed class NativeModuleTests
         var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse("int32 Main() { require Take(out var value); return value; }"),
             NativeModuleCompiler.CreateReference(original), boundPolicy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), original, policy);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = consumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), original, policy);
         NativeModuleCompiler.Validate(consumer, original);
         NativeModuleCompiler.Validate(consumer, replacement);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)));
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)), Is.EqualTo(43));
 
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(
-            RedirectFirstExport(original, lastRange: true)));
+            RedirectFirstExport(original, lastRange: true)))!;
     }
 
-    [Fact]
+    [Test]
     public async Task CurrentNativeConsumerRunsSavedFrameProducerAsync()
     {
         const string Original = """
@@ -292,22 +288,22 @@ public sealed class NativeModuleTests
         var updated = Producer(Replacement, identity: "Cleanup", exports: ["Read"]);
         NativeModuleCompiler.Validate(consumer, original);
         NativeModuleCompiler.Validate(consumer, updated);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10))
-            .ConfigureAwait(true));
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, updated, TimeSpan.FromSeconds(10))
-            .ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10))
+            .ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, updated, TimeSpan.FromSeconds(10))
+            .ConfigureAwait(true), Is.EqualTo(43));
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(
-            RedirectFirstExport(original, lastRange: false)));
+            RedirectFirstExport(original, lastRange: false)))!;
         var shortSource = (byte[])original.Clone();
         var image = PackageImageOffset(shortSource);
         using var reader = new PEReader(new MemoryStream(shortSource, image,
             BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(14, 4))));
-        var pdata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
+        var pdata = global::System.Linq.Enumerable.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
         var entry = image + pdata.PointerToRawData;
         var begin = BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(entry, 4));
         BinaryPrimitives.WriteInt32LittleEndian(shortSource.AsSpan(entry + 4, 4), begin + 6);
         SHA256.HashData(shortSource.AsSpan(0, shortSource.Length - 32)).CopyTo(shortSource, shortSource.Length - 32);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortSource));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortSource))!;
     }
 
     private static byte[] RedirectFirstExport(byte[] original, bool lastRange)
@@ -316,9 +312,9 @@ public sealed class NativeModuleTests
         var image = PackageImageOffset(changed);
         using var reader = new PEReader(new MemoryStream(changed, image,
             BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(14, 4))));
-        var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
-        var pdata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
-        var edata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".edata");
+        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual4 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual4, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual4!; }))();
+        var pdata = global::System.Linq.Enumerable.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
+        var edata = global::System.Linq.Enumerable.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".edata");
         var at = image + pdata.PointerToRawData + (lastRange ? header.ExceptionTableDirectory.Size - 12 : 0);
         var targetRva = BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(at, 4));
         var exportDirectory = image + edata.PointerToRawData;
@@ -329,7 +325,7 @@ public sealed class NativeModuleTests
         return changed;
     }
 
-    [Fact]
+    [Test]
     public async Task AddedExportMayShareConsumerLocalNameWithoutChangingNativeImportsAsync()
     {
         var originalSource = Provider + " public int32 Unused() { return 100; }";
@@ -342,16 +338,14 @@ public sealed class NativeModuleTests
 
         NativeModuleCompiler.Validate(consumer, original);
         NativeModuleCompiler.Validate(consumer, replacement);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(snapshot, consumer);
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(43));
+        Assert.That(consumer, Is.EqualTo(snapshot));
     }
-
-    [Theory]
-    [InlineData("public int32 First;", "public mut int32 First;")]
-    [InlineData("public int32 Third;", "public int32 Third; public int32 Fourth;")]
-    [InlineData("public int32 Evaluate(", "public bool Evaluate(")]
-    [InlineData("public bool TryWide(bool success, out Wide result)", "public bool TryWide(bool success, Wide result)")]
+    [TestCase("public int32 First;","public mut int32 First;")]
+    [TestCase("public int32 Third;","public int32 Third; public int32 Fourth;")]
+    [TestCase("public int32 Evaluate(","public bool Evaluate(")]
+    [TestCase("public bool TryWide(bool success, out Wide result)","public bool TryWide(bool success, Wide result)")]
     public void IncompatibleProducerCannotLaunch(string existing, string replacement)
     {
         var original = Producer();
@@ -374,58 +368,52 @@ public sealed class NativeModuleTests
                 "require result.Signed == int64.MinValue;", StringComparison.Ordinal);
         }
         var mismatched = Producer(incompatibleSource);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, mismatched));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, mismatched))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.RunAsync(consumer, mismatched,
-            TimeSpan.FromSeconds(2)).GetAwaiter().GetResult());
+            TimeSpan.FromSeconds(2)).GetAwaiter().GetResult())!;
     }
 
-    [Fact]
+    [Test]
     public void IdentityAndPackageKindsRejectBeforeLaunch()
     {
         var original = Producer();
         var consumer = ConsumerPackage(original);
         var other = Producer(identity: "Other");
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, other));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(original, consumer));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateReference(consumer));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, other))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(original, consumer))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateReference(consumer))!;
         _ = Assert.Throws<ModuleContractException>(() => Producer(Provider.Replace("public int32 Evaluate(",
-            "int32 Evaluate(", StringComparison.Ordinal)));
+            "int32 Evaluate(", StringComparison.Ordinal)))!;
         foreach (var identity in new[] { "", "_Bad", "With.Dots", "../escape", new string('A', 65) })
         {
-            _ = Assert.Throws<ArgumentException>(() => Producer(identity: identity));
+            _ = Assert.Throws<ArgumentException>(() => Producer(identity: identity))!;
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NativeImageAcceptsPolicySpecificSystemImports(NativeRuntimePolicy policy)
     {
         var producer = ProducerForPolicy("public int32 Run() { return 42; }", policy);
         _ = NativeModuleCompiler.Inspect(producer);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NativeImageAcceptsOwnedBufferImportsForEachFailurePolicy(NativeRuntimePolicy policy)
     {
         var producer = ProducerForPolicy(OwnedBufferImportSource, policy, "OwnedImport");
         _ = NativeModuleCompiler.Inspect(producer);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NativeImageRejectsUnsupportedOwnedBufferKernelSymbols(NativeRuntimePolicy policy)
     {
         var producer = ProducerForPolicy(OwnedBufferImportSource, policy, "OwnedImport");
         var damaged = ReplacePackageImageSymbol(producer, "GetProcessHeap\0"u8, "GetProcessHxxx\0"u8);
 
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(damaged));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(damaged))!;
     }
 
-    [Fact]
+    [Test]
     public void MalformedPackagesAndMismatchedPeHeadersAreRejected()
     {
         var original = Producer();
@@ -435,44 +423,44 @@ public sealed class NativeModuleTests
         {
             var mutated = (byte[])original.Clone();
             mutated[at] ^= 0x7F;
-            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, mutated));
+            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, mutated))!;
         }
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(original[..^1]));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect([.. original, 0]));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(original[..^1]))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect([.. original, 0]))!;
         var wrongProfile = (byte[])original.Clone();
         wrongProfile[18 + wrongProfile[7]] ^= 1;
         Rehash(wrongProfile);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongProfile));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongProfile))!;
         var wrongContract = (byte[])original.Clone();
         wrongContract[PackageContractOffset(wrongContract)] ^= 1;
         Rehash(wrongContract);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongContract));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongContract))!;
         var wrongImage = (byte[])original.Clone();
         var image = PackageImageOffset(wrongImage);
         var pe = BinaryPrimitives.ReadInt32LittleEndian(wrongImage.AsSpan(image + 0x3C, 4));
         wrongImage[image + pe + 24 + 16] = 1; // DLL must have no entry point
         Rehash(wrongImage);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongImage));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongImage));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongImage))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongImage))!;
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateConsumer(boundConsumer, wrongImage,
-            (NativeRuntimePolicy)255));
+            (NativeRuntimePolicy)255))!;
         var wrongExport = (byte[])original.Clone();
         var exportName = wrongExport.AsSpan(image, BinaryPrimitives.ReadInt32LittleEndian(wrongExport.AsSpan(14, 4)))
             .IndexOf("Evaluate\0"u8);
-        Assert.True(exportName >= 0);
+        Assert.That(exportName >= 0, Is.True);
         wrongExport[image + exportName] = (byte)'X';
         Rehash(wrongExport);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongExport));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(consumer, wrongExport))!;
         var wrongImport = (byte[])consumer.Clone();
         var importImage = PackageImageOffset(wrongImport);
         var importName = wrongImport.AsSpan(importImage,
             BinaryPrimitives.ReadInt32LittleEndian(wrongImport.AsSpan(14, 4))).IndexOf("terrum-Example.dll\0"u8);
-        Assert.True(importName >= 0);
+        Assert.That(importName >= 0, Is.True);
         wrongImport[importImage + importName + 7] = (byte)'X';
         Rehash(wrongImport);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(wrongImport, original));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(wrongImport, original))!;
         var wrongImportSymbol = ReplacePackageImageSymbol(consumer, "Evaluate\0"u8, "Evalueee\0"u8);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(wrongImportSymbol, original));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(wrongImportSymbol, original))!;
         var wrongUnwind = (byte[])original.Clone();
         var xdata = -1;
         var pdata = -1;
@@ -503,42 +491,42 @@ public sealed class NativeModuleTests
                 edata = BinaryPrimitives.ReadInt32LittleEndian(wrongUnwind.AsSpan(at + 20, 4));
             }
         }
-        Assert.True(xdata >= 0 && pdata >= 0 && text >= 0 && edata >= 0);
+        Assert.That(xdata >= 0 && pdata >= 0 && text >= 0 && edata >= 0, Is.True);
         var savedFrameInfo = image + xdata + (4 * 8); // Four process-failure helpers precede DLL source functions.
-        Assert.Equal(3, wrongUnwind[savedFrameInfo + 2]);
+        Assert.That(wrongUnwind[savedFrameInfo + 2], Is.EqualTo(3));
         wrongUnwind[savedFrameInfo + 9] ^= 1; // Corrupt the saved-RBP unwind operation.
         Rehash(wrongUnwind);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongUnwind));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongUnwind))!;
         var wrongBasicUnwind = (byte[])original.Clone();
         wrongBasicUnwind[image + xdata + 5] ^= 1;
         Rehash(wrongBasicUnwind);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongBasicUnwind));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongBasicUnwind))!;
         var wrongRange = (byte[])original.Clone();
         wrongRange[image + pdata + 8] ^= 1; // The first .pdata record no longer points into .xdata.
         Rehash(wrongRange);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongRange));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongRange))!;
         var wrongProlog = (byte[])original.Clone();
         var sourceRva = BinaryPrimitives.ReadInt32LittleEndian(wrongProlog.AsSpan(image + pdata + (4 * 12), 4));
-        Assert.Equal((byte)0x55, wrongProlog[image + text + sourceRva - textRva]);
+        Assert.That(wrongProlog[image + text + sourceRva - textRva], Is.EqualTo((byte)0x55));
         wrongProlog[image + text + sourceRva - textRva] = 0x90;
         Rehash(wrongProlog);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongProlog));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongProlog))!;
         var shortBasic = (byte[])original.Clone();
         var helperRva = BinaryPrimitives.ReadInt32LittleEndian(shortBasic.AsSpan(image + pdata, 4));
         BinaryPrimitives.WriteInt32LittleEndian(shortBasic.AsSpan(image + pdata + 4, 4), helperRva + 6);
         Rehash(shortBasic);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortBasic));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortBasic))!;
         var shortSaved = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(shortSaved.AsSpan(image + pdata + (4 * 12) + 4, 4), sourceRva + 10);
         Rehash(shortSaved);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortSaved));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortSaved))!;
         var helperExport = (byte[])original.Clone();
         var directory = image + edata;
         var exportTableRva = BinaryPrimitives.ReadInt32LittleEndian(helperExport.AsSpan(directory + 28, 4));
         BinaryPrimitives.WriteInt32LittleEndian(helperExport.AsSpan(
             directory + exportTableRva - edataRva, 4), helperRva);
         Rehash(helperExport);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(helperExport));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(helperExport))!;
 
         static void Rehash(byte[] artifact)
         {
@@ -546,7 +534,7 @@ public sealed class NativeModuleTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task TimeoutAndCancellationTerminateOnlyOwnedChildAsync()
     {
         var identity = "Timeout" + Guid.NewGuid().ToString("N");
@@ -558,14 +546,14 @@ public sealed class NativeModuleTests
         _ = await Assert.ThrowsAsync<TimeoutException>(() => NativeModuleCompiler.RunAsync(consumer, provider,
             TimeSpan.FromMilliseconds(200))).ConfigureAwait(true);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => NativeModuleCompiler.RunAsync(consumer, provider,
+        _ = await Assert.CatchAsync<OperationCanceledException>(() => NativeModuleCompiler.RunAsync(consumer, provider,
             TimeSpan.FromSeconds(10), cancellation.Token)).ConfigureAwait(true);
         var after = Directory.GetDirectories(Path.GetTempPath(), "terrum-native-" + identity + "-*")
             .Order(StringComparer.Ordinal).ToArray();
-        Assert.Equal(before, after);
+        Assert.That(after, Is.EqualTo(before));
     }
 
-    [Fact]
+    [Test]
     public async Task CleanupWaitsForTransientImageSharingWithoutHidingTimeoutAsync()
     {
         var identity = "Sharing" + Guid.NewGuid().ToString("N");
@@ -596,7 +584,7 @@ public sealed class NativeModuleTests
             }
         }
         _ = await Assert.ThrowsAsync<TimeoutException>(() => execution).ConfigureAwait(true);
-        Assert.True(heldLock);
-        Assert.Empty(Directory.GetDirectories(Path.GetTempPath(), "terrum-native-" + identity + "-*"));
+        Assert.That(heldLock, Is.True);
+        Assert.That(Directory.GetDirectories(Path.GetTempPath(), "terrum-native-" + identity + "-*"), Is.Empty);
     }
 }

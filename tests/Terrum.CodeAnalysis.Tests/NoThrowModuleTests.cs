@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -19,8 +19,8 @@ public sealed class NoThrowModuleTests
     private static BoundProgram CompileLibrary(string source)
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = result.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
 
     private static byte[] Producer(string source) =>
@@ -29,11 +29,11 @@ public sealed class NoThrowModuleTests
     private static BoundProgram CompileConsumer(string source, byte[] producer)
     {
         var result = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer));
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = result.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
-    [Fact]
+    [Test]
     public async Task NoThrowConstructorAndImportedFunctionRemainDeclaredThroughRemappingAsync()
     {
         const string Source = """
@@ -46,10 +46,15 @@ public sealed class NoThrowModuleTests
         var original = CompileLibrary(Source);
         var producer = ModuleCompiler.CreateProducer(original, ["Value.#ctor", "Value.Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
-        Assert.All(reference.Functions, static function => {
-            Assert.True(function.IsExternal);
-            Assert.True(function.IsNoThrow);
-        });
+        {var __nunitItems0 = reference.Functions;        Assert.Multiple(() => {
+            foreach (var __nunitItem2 in __nunitItems0)
+            {
+                {
+                    Assert.That(__nunitItem2.IsExternal, Is.True);
+                    Assert.That(__nunitItem2.IsNoThrow, Is.True);
+                }
+            }
+        });}
         var consumerSource = """
             [NoThrow] int32 Main() {
                 Value value = new Value(42);
@@ -57,21 +62,20 @@ public sealed class NoThrowModuleTests
             }
             """;
         var consumer = CompileConsumer(consumerSource, producer);
-        Assert.True(consumer.Functions[consumer.EntryPoint].IsNoThrow);
+        Assert.That(consumer.Functions[consumer.EntryPoint].IsNoThrow, Is.True);
         var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
         var linked = ModuleCompiler.Link(artifact, producer);
-        Assert.All(linked.Functions.Where(static function => function.Name is "Value.#ctor" or "Value.Read"),
-            static function => Assert.True(function.IsNoThrow));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+        {var __nunitItems1 = linked.Functions.Where(static function => function.Name is "Value.#ctor" or "Value.Read");        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems1) { Assert.That(__nunitItem3.IsNoThrow, Is.True); } });}
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task StrengtheningPromiseAllowsSameSemanticAndNativeConsumerWithNewBodyAsync()
     {
         var mayThrow = Producer("public int32 Compute() { return 42; }");
         var noThrow = Producer("[NoThrow] public int32 Compute() { return 43; }");
         var reference = ModuleCompiler.CreateReference(mayThrow);
-        Assert.False(Assert.Single(reference.Functions).IsNoThrow);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).IsNoThrow, Is.False);
         var consumer = CompileConsumer("int32 Main() { return Compute(); }", mayThrow);
         var semantic = ModuleCompiler.CreateConsumer(consumer, mayThrow);
         var originalSemantic = (byte[])semantic.Clone();
@@ -84,18 +88,18 @@ public sealed class NoThrowModuleTests
         var imageHash = NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256;
         foreach (var (module, package, result) in new[] { (mayThrow, nativeProducer, 42), (noThrow, nativeReplacement, 43) })
         {
-            Assert.Equal(result, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(semantic, module),
-                NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
-            Assert.Equal(originalSemantic, semantic);
+            Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(semantic, module),
+                NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(result));
+            Assert.That(semantic, Is.EqualTo(originalSemantic));
             NativeModuleCompiler.Validate(nativeConsumer, package);
-            Assert.Equal(result, await NativeModuleCompiler.RunAsync(nativeConsumer, package,
-                TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-            Assert.Equal(unchanged, nativeConsumer);
-            Assert.Equal(imageHash, NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256);
+            Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, package,
+                TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(result));
+            Assert.That(nativeConsumer, Is.EqualTo(unchanged));
+            Assert.That(NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256, Is.EqualTo(imageHash));
         }
     }
 
-    [Fact]
+    [Test]
     public void ConsumerCreationChecksDeclaredPromiseBeforeNormalizingImports()
     {
         var noThrow = Producer("[NoThrow] public int32 Compute() { return 42; }");
@@ -106,11 +110,11 @@ public sealed class NoThrowModuleTests
             Functions = consumer.Functions.SetItem(index, consumer.Functions[index] with { IsNoThrow = false }),
         };
         var normalized = ModuleCompiler.CreateConsumer(weakenedDeclaration, noThrow);
-        Assert.True(ModuleCompiler.Link(normalized, noThrow).Functions[index].IsNoThrow);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(consumer, mayThrow));
+        Assert.That(ModuleCompiler.Link(normalized, noThrow).Functions[index].IsNoThrow, Is.True);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(consumer, mayThrow))!;
     }
 
-    [Fact]
+    [Test]
     public void WeakeningNoThrowPromiseRejectsSafeUnmarkedBodyBeforeExecution()
     {
         var noThrow = Producer("[NoThrow] public int32 Compute() { return 42; }");
@@ -118,39 +122,39 @@ public sealed class NoThrowModuleTests
         var consumer = CompileConsumer("[NoThrow] int32 Forward() { return Compute(); } "
             + "int32 Main() { return Forward(); }", noThrow);
         var semantic = ModuleCompiler.CreateConsumer(consumer, noThrow);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semantic, mayThrow));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semantic, mayThrow))!;
         var nativeProducer = NativeModuleCompiler.CreateProducer(CompileLibrary("[NoThrow] public int32 Compute() { return 42; }"),
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(CompileLibrary("public int32 Compute() { return 43; }"),
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, nativeProducer, NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
-            TimeSpan.FromSeconds(10)).GetAwaiter().GetResult());
+            TimeSpan.FromSeconds(10)).GetAwaiter().GetResult())!;
     }
 
-    [Fact]
+    [Test]
     public void ProducerBodyCannotForgeNoThrowOrOldModuleVersion()
     {
         var unsafeProgram = CompileLibrary("public int32 Compute(int32 value) { return value + 1; }");
         var forged = unsafeProgram with {
             Functions = unsafeProgram.Functions.SetItem(0, unsafeProgram.Functions[0] with { IsNoThrow = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]));
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]))!;
         _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(forged,
-            ["Compute"], "Effects", NativeRuntimePolicy.FailFast));
+            ["Compute"], "Effects", NativeRuntimePolicy.FailFast))!;
         var artifact = Producer("[NoThrow] public int32 Compute() { return 42; }");
         artifact[4] = 7;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(artifact));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(artifact))!;
     }
 
-    [Fact]
+    [Test]
     public void PureUnfoldedCheckedArithmeticCannotForgeNoThrowInPersistedProducer()
     {
         var folded = CompileLibrary("[NoThrow] public int32 Compute() { return 1 + 2; }");
-        var function = Assert.Single(folded.Functions);
-        var statement = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
-        var constant = Assert.IsType<BoundConstant>(statement.Value);
+        var function = global::System.Linq.Enumerable.Single(folded.Functions);
+        var statement = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
+        var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = statement.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))();
         var arithmetic = new BoundBinary(TokenKind.Plus,
             new BoundConstant(1, PrimitiveType.Int32, constant.Span),
             new BoundConstant(2, PrimitiveType.Int32, constant.Span),
@@ -162,10 +166,10 @@ public sealed class NoThrowModuleTests
                 },
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged));
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]))!;
         _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(forged,
-            ["Compute"], "Effects", NativeRuntimePolicy.FailFast));
+            ["Compute"], "Effects", NativeRuntimePolicy.FailFast))!;
     }
 
     private static async Task<int> ExecuteAsync(byte[] image)
@@ -190,7 +194,7 @@ public sealed class NoThrowModuleTests
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

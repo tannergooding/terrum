@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -101,10 +101,8 @@ public sealed class StringRowModuleTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringRowModuleMatchesAllFormatsAcrossFreshSourceGrants(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -117,7 +115,7 @@ public sealed class StringRowModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
         trees[^1] = SyntaxTree.Parse(VerificationSource, "string-row-module.terrum");
 
@@ -127,8 +125,7 @@ public sealed class StringRowModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] {
             "VerifyNameAscii",
@@ -141,7 +138,7 @@ public sealed class StringRowModuleTests
             "VerifyNamespaceUtf32Le",
             "VerifyMaximumUtf8Name",
         };
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
@@ -150,10 +147,9 @@ public sealed class StringRowModuleTests
                 $"namespace Terrum.CodeAnalysis; int32 Main() {{ return {exports[index]}(); }}",
                 "string-row-consumer.terrum");
             var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
             consumers[index] = ModuleCompiler.Link(consumer, producer);
         }
 
@@ -201,8 +197,7 @@ public sealed class StringRowModuleTests
             var consumerIndex = (fixture.IsName ? 0 : 4) + fixture.Encoding;
             var result = NativeJit.ExecuteWithSourceGrant(consumers[consumerIndex], [grant],
                 (NativeRuntimePolicy)policy);
-            Assert.True(result == 0,
-                $"{exports[consumerIndex]} failed for {fixture.Spelling}: verification returned {result}.");
+            Assert.That(result == 0, Is.True, $"{exports[consumerIndex]} failed for {fixture.Spelling}: verification returned {result}.");
         }
 
         foreach (var fixture in fixtures)
@@ -218,7 +213,7 @@ public sealed class StringRowModuleTests
         {
             var text = textBuilder.ToString();
             var spelling = $"\"{spellingBuilder}\"";
-            Assert.True(scalarCount * 14 + 13 <= 16_384);
+            Assert.That(scalarCount * 14 + 13 <= 16_384, Is.True);
             for (var encoding = 0; encoding < 4; encoding++)
             {
                 var valid = encoding != 0 || text.All(static unit => unit <= 0x7F);
@@ -256,13 +251,13 @@ public sealed class StringRowModuleTests
 
         var maximumText = new string('\u0800', 16_382);
         var maximumSpelling = "\"" + maximumText + "\"";
-        Assert.Equal(16_384, maximumSpelling.Length);
+        Assert.That(maximumSpelling.Length, Is.EqualTo(16_384));
         var maximumGrant = new HostBuffer("Source", PrimitiveType.Char16,
             [.. maximumSpelling.Select(static unit => (int)unit)], false) {
             IsInvocationScoped = true,
         };
-        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumGrant],
-            (NativeRuntimePolicy)policy));
+        Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumGrant],
+            (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
     private static int[] GetExpectedRow(RowFixture fixture)
@@ -286,7 +281,7 @@ public sealed class StringRowModuleTests
             values.AddRange(expectedBytes);
         }
         values.AddRange(fixture.Spelling.Select(static unit => (int)unit));
-        Assert.True(values.Count <= 16_384);
+        Assert.That(values.Count <= 16_384, Is.True);
         return new HostBuffer("Source", PrimitiveType.Char16, values.ToImmutable(), false) {
             IsInvocationScoped = true,
         };

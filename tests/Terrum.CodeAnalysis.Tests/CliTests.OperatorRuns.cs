@@ -6,15 +6,14 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task OperatorRunsPreserveHostedScannerAndNativeParityAndRetainedOutputsAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -31,9 +30,9 @@ public sealed partial class CliTests
             })
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
-                Assert.Equal(42, exit);
-                Assert.Empty(output);
-                Assert.Empty(error);
+                Assert.That(exit, Is.EqualTo(42));
+                Assert.That(output, Is.Empty);
+                Assert.That(error, Is.Empty);
             }
             var builds = new[] {
                 new[] { "build", "-", "-o", paths[0], "--runtime", policy, "--json" },
@@ -43,26 +42,26 @@ public sealed partial class CliTests
             for (var index = 0; index < builds.Length; index++)
             {
                 var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(source), builds[index]);
-                Assert.Equal(0, exit);
-                Assert.Empty(error);
-                Assert.Equal(42, await ExecuteNativeImageAsync(paths[index]));
+                Assert.That(exit, Is.EqualTo(0));
+                Assert.That(error, Is.Empty);
+                Assert.That(await ExecuteNativeImageAsync(paths[index]), Is.EqualTo(42));
             }
             var expected = await File.ReadAllBytesAsync(paths[0]);
-            Assert.Equal(expected, await File.ReadAllBytesAsync(paths[1]));
-            Assert.Equal(expected, await File.ReadAllBytesAsync(paths[2]));
+            Assert.That(await File.ReadAllBytesAsync(paths[1]), Is.EqualTo(expected));
+            Assert.That(await File.ReadAllBytesAsync(paths[2]), Is.EqualTo(expected));
             foreach (var run in new[] { "+++", "!!", "+-", "===", ">>+", ">?>", "..", "..^", "?.", "..." })
             {
                 var invalid = "int32 Main() { return 1 " + run + " 2; }";
                 foreach (var arguments in builds)
                 {
                     var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(invalid), arguments);
-                    Assert.Equal(1, exit);
-                    Assert.Empty(error);
-                    Assert.NotEmpty(output);
+                    Assert.That(exit, Is.EqualTo(1));
+                    Assert.That(error, Is.Empty);
+                    Assert.That(output, Is.Not.Empty);
                 }
                 foreach (var path in paths)
                 {
-                    Assert.Equal(expected, await File.ReadAllBytesAsync(path));
+                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(expected));
                 }
             }
             foreach (var run in new[] { "!!", ">?>" })
@@ -70,32 +69,32 @@ public sealed partial class CliTests
                 var invalid = "int32 Main() { return " + run + "1; }";
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(invalid),
                     "build-component", scanner, "-", "-o", paths[1], "--runtime", policy, "--json");
-                Assert.Equal(1, exit);
-                Assert.Empty(error);
+                Assert.That(exit, Is.EqualTo(1));
+                Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
                 var found = false;
                 foreach (var diagnostic in document.RootElement.GetProperty("diagnostics").EnumerateArray())
                 {
                     if (diagnostic.GetProperty("code").GetString() == "TRM0011")
                     {
-                        Assert.Equal(invalid.IndexOf(run, StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());
-                        Assert.Equal(run.Length, diagnostic.GetProperty("span").GetProperty("length").GetInt32());
+                        Assert.That(diagnostic.GetProperty("span").GetProperty("start").GetInt32(), Is.EqualTo(invalid.IndexOf(run, StringComparison.Ordinal)));
+                        Assert.That(diagnostic.GetProperty("span").GetProperty("length").GetInt32(), Is.EqualTo(run.Length));
                         found = true;
                     }
                 }
-                Assert.True(found);
+                Assert.That(found, Is.True);
                 if (run != ">?>")
                 {
                     var (nativeExit, nativeOutput, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(invalid),
                         "frontend-build", frontend, "-", "-o", paths[2], "--runtime", policy, "--json");
-                    Assert.Equal(1, nativeExit);
-                    Assert.Empty(nativeError);
+                    Assert.That(nativeExit, Is.EqualTo(1));
+                    Assert.That(nativeError, Is.Empty);
                     using var failure = JsonDocument.Parse(nativeOutput);
-                    var diagnostic = Assert.Single(failure.RootElement.GetProperty("diagnostics").EnumerateArray());
-                    Assert.Equal("TRM0011", diagnostic.GetProperty("code").GetString());
-                    Assert.Equal(invalid.IndexOf(run, StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());
-                    Assert.Equal(run.Length, diagnostic.GetProperty("span").GetProperty("length").GetInt32());
-                    Assert.Equal(expected, await File.ReadAllBytesAsync(paths[2]));
+                    var diagnostic = global::System.Linq.Enumerable.Single(failure.RootElement.GetProperty("diagnostics").EnumerateArray());
+                    Assert.That(diagnostic.GetProperty("code").GetString(), Is.EqualTo("TRM0011"));
+                    Assert.That(diagnostic.GetProperty("span").GetProperty("start").GetInt32(), Is.EqualTo(invalid.IndexOf(run, StringComparison.Ordinal)));
+                    Assert.That(diagnostic.GetProperty("span").GetProperty("length").GetInt32(), Is.EqualTo(run.Length));
+                    Assert.That(await File.ReadAllBytesAsync(paths[2]), Is.EqualTo(expected));
                 }
             }
         }
@@ -107,10 +106,8 @@ public sealed partial class CliTests
             }
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task GroupedOperatorRunsPreserveNativeLibraryBytesAndExportsAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -124,16 +121,16 @@ public sealed partial class CliTests
                 "build-library", "-", "--export", "Value", "-o", hosted, "--runtime", policy, "--json");
             var (nativeExit, _, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
-            Assert.Equal(0, hostedExit);
-            Assert.Equal(0, nativeExit);
-            Assert.Empty(hostedError);
-            Assert.Empty(nativeError);
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+            Assert.That(hostedExit, Is.EqualTo(0));
+            Assert.That(nativeExit, Is.EqualTo(0));
+            Assert.That(hostedError, Is.Empty);
+            Assert.That(nativeError, Is.Empty);
+            Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             var handle = NativeLibrary.Load(native);
             try
             {
                 var invoke = Marshal.GetDelegateForFunctionPointer<OperatorUnary>(NativeLibrary.GetExport(handle, "Value"));
-                Assert.Equal(42, invoke(22));
+                Assert.That(invoke(22), Is.EqualTo(42));
             }
             finally
             {

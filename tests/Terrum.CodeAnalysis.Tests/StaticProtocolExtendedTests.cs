@@ -4,7 +4,7 @@ using System;
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -29,32 +29,28 @@ public sealed class StaticProtocolExtendedTests
         }
         int32 Main() { return Apply(new Value(40), new Value(2)).Number; }
         """;
-
-    [Theory]
-    [InlineData("struct Value : BitMask<Value, Value, Value>", "struct Value", "TRM3007")]
-    [InlineData("struct Value : BitMask<Value, Value, Value>", "struct Value : BitMask<Value, Other, Value>", "TRM3007")]
-    [InlineData("public static Value operator &(Value left, Value right)", "public static Value operator &(Value left, Other right)", "TRM3007")]
-    [InlineData("public static Value operator &(Value left, Value right)", "private static Value operator &(Value left, Value right)", "TRM3007")]
-    [InlineData("static C operator &(A left, B right)", "static B operator &(A left, B right)", "TRM3001")]
-    [InlineData("static C operator &(A left, B right)", "[NoThrow] static C operator &(A left, B right)", "TRM3007")]
-    [InlineData("where T : BitMask<T, T, T>, [Copy]", "where T : [Copy]", "TRM3007")]
-    [InlineData("where T : BitMask<T, T, T>, [Copy]", "where T : BitMask<T, T, T>, OtherBitMask<T, T, T>, [Copy]", "TRM3007")]
-    [InlineData("return left & right;", "return left ^ right;", "TRM3007")]
-    [InlineData("return Apply(new Value(40), new Value(2)).Number;", "Apply(new Value(40), new Other(2)); return 0;", "TRM3007")]
-    [InlineData("return Apply(new Value(40), new Value(2)).Number;", "Apply<int32>(40, 2); return 0;", "TRM3007")]
-    [InlineData("T Apply<T>", "[NoThrow] T Apply<T>", "TRM3007")]
+    [TestCase("struct Value : BitMask<Value, Value, Value>","struct Value","TRM3007")]
+    [TestCase("struct Value : BitMask<Value, Value, Value>","struct Value : BitMask<Value, Other, Value>","TRM3007")]
+    [TestCase("public static Value operator &(Value left, Value right)","public static Value operator &(Value left, Other right)","TRM3007")]
+    [TestCase("public static Value operator &(Value left, Value right)","private static Value operator &(Value left, Value right)","TRM3007")]
+    [TestCase("static C operator &(A left, B right)","static B operator &(A left, B right)","TRM3001")]
+    [TestCase("static C operator &(A left, B right)","[NoThrow] static C operator &(A left, B right)","TRM3007")]
+    [TestCase("where T : BitMask<T, T, T>, [Copy]","where T : [Copy]","TRM3007")]
+    [TestCase("where T : BitMask<T, T, T>, [Copy]","where T : BitMask<T, T, T>, OtherBitMask<T, T, T>, [Copy]","TRM3007")]
+    [TestCase("return left & right;","return left ^ right;","TRM3007")]
+    [TestCase("return Apply(new Value(40), new Value(2)).Number;","Apply(new Value(40), new Other(2)); return 0;","TRM3007")]
+    [TestCase("return Apply(new Value(40), new Value(2)).Number;","Apply<int32>(40, 2); return 0;","TRM3007")]
+    [TestCase("T Apply<T>","[NoThrow] T Apply<T>","TRM3007")]
     public void FalseExtendedOperatorContractsDoNotBorrowConcreteCapabilities(
         string before, string after, string expected)
     {
-        Assert.Contains(before, Source, StringComparison.Ordinal);
+        Assert.That(Source, Does.Contain(before));
         var compilation = Compilation.Create(SyntaxTree.Parse(Source.Replace(before, after, StringComparison.Ordinal)));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == expected);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == expected),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void InferredNestedHelpersUseOnlyDeclaredMatchingWitnesses(bool instantiate)
     {
         var source = Source.Replace(
@@ -71,17 +67,15 @@ public sealed class StaticProtocolExtendedTests
                 "int32 Main() { return 0; }", StringComparison.Ordinal);
         }
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(instantiate ? 2 : 0, program.Functions.Count(function =>
-            function.Name.Contains('<', StringComparison.Ordinal)));
-        Assert.DoesNotContain(program.Functions, function => function.IsExternal
-            || function.Name.Contains('$', StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(program.Functions.Count(function =>
+            function.Name.Contains('<', StringComparison.Ordinal)), Is.EqualTo(instantiate ? 2 : 0));
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
     }
-
-    [Theory]
-    [InlineData("where U : [Copy]")]
-    [InlineData("where U : OtherBitMask<U, U, U>, [Copy]")]
+    [TestCase("where U : [Copy]")]
+    [TestCase("where U : OtherBitMask<U, U, U>, [Copy]")]
     public void CallerCannotBorrowMissingHelperWitnessFromConcreteStruct(string constraint)
     {
         var source = Source.Replace(
@@ -94,11 +88,11 @@ public sealed class StaticProtocolExtendedTests
                 "struct Value : BitMask<Value, Value, Value>, OtherBitMask<Value, Value, Value>",
                 StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void NoThrowWitnessCannotClaimCheckedDivisionIsInfallible()
     {
         var source = """
@@ -118,7 +112,7 @@ public sealed class StaticProtocolExtendedTests
             int32 Main() { return Apply(new Value(40), new Value(2)).Number; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 }

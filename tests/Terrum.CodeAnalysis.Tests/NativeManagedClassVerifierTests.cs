@@ -5,7 +5,7 @@ using System.Linq;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -23,7 +23,7 @@ public sealed class NativeManagedClassVerifierTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void RejectsForgedClassLayouts()
     {
         var program = Compile();
@@ -32,37 +32,37 @@ public sealed class NativeManagedClassVerifierTests
         var malformed = program with {
             Classes = [@class with { Fields = [field with { Offset = 8 }] }],
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         malformed = program with {
             Classes = [@class with { Fields = [field with { Type = (PrimitiveType)4096 }] }],
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         malformed = program with { Classes = [] };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         malformed = program with {
             Classes = [@class with { Fields = [field with { Type = (PrimitiveType)1280 }] }],
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         var main = program.Functions[program.EntryPoint];
         malformed = program with {
             Functions = program.Functions.SetItem(program.EntryPoint, main with {
                 Variables = main.Variables.SetItem(0, main.Variables[0] with { Type = (PrimitiveType)1280 }),
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
     }
 
-    [Fact]
+    [Test]
     public void ClassOnlySourceReportsNative19()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal("native-19", Compilation.GetNativeProfileVersion(program));
-        Assert.Equal("native-19", compilation.NativeProfileVersion);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(Compilation.GetNativeProfileVersion(program), Is.EqualTo("native-19"));
+        Assert.That(compilation.NativeProfileVersion, Is.EqualTo("native-19"));
     }
 
-    [Fact]
+    [Test]
     public void RejectsForgedFactoryAndConstructorMetadata()
     {
         var program = Compile();
@@ -71,17 +71,17 @@ public sealed class NativeManagedClassVerifierTests
         var malformed = program with {
             Functions = program.Functions.SetItem(factoryIndex, factory with { ClassConstructor = 4096 }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         malformed = program with {
             Functions = program.Functions.SetItem(factoryIndex, factory with { ClassConstructor = factoryIndex }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         malformed = program with {
             Functions = program.Functions.SetItem(factoryIndex, factory with {
                 Variables = [],
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         var constructorIndex = factory.ClassConstructor;
         var constructor = program.Functions[constructorIndex];
         malformed = program with {
@@ -89,28 +89,27 @@ public sealed class NativeManagedClassVerifierTests
                 IsClassConstructor = false,
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         malformed = program with {
             Functions = program.Functions.SetItem(factoryIndex, factory with { Intrinsic = BoundIntrinsic.None }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         malformed = program with {
             Functions = program.Functions.SetItem(constructorIndex, constructor with {
                 DeclaringStruct = "Other",
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
     }
 
-    [Fact]
+    [Test]
     public void ManagedProofExternalsCannotEnterPersistedConsumer()
     {
         var producerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Export() { return 42; }"));
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program), ["Export"]);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = producerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Export"]);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             class Leaf {
                 public int32 Value;
@@ -118,37 +117,36 @@ public sealed class NativeManagedClassVerifierTests
             }
             int32 Main() { return Export(); }
             """), ModuleCompiler.CreateReference(producer));
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = Assert.IsType<BoundProgram>(consumerCompilation.Program);
-        Assert.NotEmpty(ModuleCompiler.CreateConsumer(consumer, producer));
-        var imported = Assert.Single(consumer.Functions, static function => function.IsExternal);
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = consumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(ModuleCompiler.CreateConsumer(consumer, producer), Is.Not.Empty);
+        var imported = global::System.Linq.Enumerable.Single(consumer.Functions, static function => function.IsExternal);
         var malformed = consumer with {
             Functions = consumer.Functions.Add(imported with {
                 Name = "UnusedManaged",
                 ReturnType = (PrimitiveType)ManagedClassTypes.First,
             }),
         };
-        var normalError = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
-        Assert.Equal("Ownership", normalError.Data["Terrum.InvalidEffect"]);
+        var normalError = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
+        Assert.That(normalError.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
         var persistedError = Assert.Throws<ArgumentException>(() =>
-            ModuleCompiler.CreateConsumer(malformed, producer));
-        Assert.Equal("Ownership", persistedError.Data["Terrum.InvalidEffect"]);
+            ModuleCompiler.CreateConsumer(malformed, producer))!;
+        Assert.That(persistedError.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
         var factoryIndex = FindFactory(consumer);
         var factory = consumer.Functions[factoryIndex];
         malformed = consumer with {
             Functions = consumer.Functions.SetItem(factoryIndex, factory with { ClassConstructor = 4096 }),
         };
         _ = Assert.Throws<ArgumentException>(() =>
-            ModuleCompiler.CreateConsumer(malformed, producer));
+            ModuleCompiler.CreateConsumer(malformed, producer))!;
         malformed = consumer with {
             Functions = consumer.Functions.SetItem(factoryIndex, factory with { Intrinsic = BoundIntrinsic.None }),
         };
         _ = Assert.Throws<ArgumentException>(() =>
-            ModuleCompiler.CreateConsumer(malformed, producer));
+            ModuleCompiler.CreateConsumer(malformed, producer))!;
     }
 
-    [Fact]
+    [Test]
     public void ClassDescriptorWithoutConstructionPairCannotEnterLibraryOrProducer()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -162,24 +160,22 @@ public sealed class NativeManagedClassVerifierTests
             }
             public int32 Export() { return 42; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         SemanticVerifier.VerifyLibrary(program);
-        Assert.NotEmpty(ModuleCompiler.CreateProducer(program, ["Export"]));
+        Assert.That(ModuleCompiler.CreateProducer(program, ["Export"]), Is.Not.Empty);
         var descriptorOnly = program with {
-            Functions = [Assert.Single(program.Functions, static function => function.Name == "Export")],
+            Functions = [global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Export")],
         };
-        Assert.Equal(2, descriptorOnly.Classes.Length);
-        Assert.Equal(-1, descriptorOnly.EntryPoint);
-        Assert.Equal("Export", Assert.Single(descriptorOnly.Functions).Name);
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(descriptorOnly));
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(descriptorOnly, ["Export"]));
+        Assert.That(descriptorOnly.Classes.Length, Is.EqualTo(2));
+        Assert.That(descriptorOnly.EntryPoint, Is.EqualTo(-1));
+        Assert.That(global::System.Linq.Enumerable.Single(descriptorOnly.Functions).Name, Is.EqualTo("Export"));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(descriptorOnly))!;
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(descriptorOnly, ["Export"]))!;
     }
-
-    [Theory]
-    [InlineData("struct Copy { public int64 Value; public Copy(int64 value) { Value = value; } }", true)]
-    [InlineData("struct Copy { public int64 First; public int64 Second; public Copy(int64 value) { First = value; Second = value; } }", true)]
-    [InlineData("unique struct Copy { public int32 Value; public Copy(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} }", false)]
+    [TestCase("struct Copy { public int64 Value; public Copy(int64 value) { Value = value; } }",true)]
+    [TestCase("struct Copy { public int64 First; public int64 Second; public Copy(int64 value) { First = value; Second = value; } }",true)]
+    [TestCase("unique struct Copy { public int32 Value; public Copy(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} }",false)]
     public void ClassConstructorArgumentsRequireCopyRatherThanOwningValues(string declaration, bool allowed)
     {
         var source = declaration + Environment.NewLine + """
@@ -192,17 +188,17 @@ public sealed class NativeManagedClassVerifierTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         if (allowed)
         {
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))());
         }
         else
         {
-            Assert.Null(compilation.Program);
-            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
         }
     }
 
-    [Fact]
+    [Test]
     public void RejectsForgedFactoryParameterLayoutsAndMetadataBeforeEmission()
     {
         var source = """
@@ -216,8 +212,8 @@ public sealed class NativeManagedClassVerifierTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
         var factoryIndex = FindFactory(program);
         var factory = program.Functions[factoryIndex];
         var constructorIndex = factory.ClassConstructor;
@@ -246,7 +242,7 @@ public sealed class NativeManagedClassVerifierTests
                 Functions = program.Functions.SetItem(factoryIndex, forgedFactory)
                     .SetItem(constructorIndex, forgedConstructor),
             };
-            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         }
 
         var invalid = program with {
@@ -254,27 +250,27 @@ public sealed class NativeManagedClassVerifierTests
                 Variables = factory.Variables.SetItem(0, null!),
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid))!;
         invalid = program with {
             Functions = program.Functions.SetItem(factoryIndex, factory with {
                 Variables = factory.Variables.SetItem(0, factory.Variables[0] with { Type = (PrimitiveType)4096 }),
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid))!;
         invalid = program with {
             Functions = program.Functions.SetItem(constructorIndex, constructor with { Variables = default }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid))!;
         invalid = program with {
             Functions = program.Functions.SetItem(factoryIndex, factory with {
                 IsPrivate = true,
                 IsInternal = false,
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid))!;
     }
 
-    [Fact]
+    [Test]
     public void PrivateClassConstructorOnlyExposesFactoryToItsOwnMembers()
     {
         const string Declaration = """
@@ -292,11 +288,11 @@ public sealed class NativeManagedClassVerifierTests
                 return leaf.Value;
             }
             """));
-        Assert.False(allowed.HasErrors, string.Join(Environment.NewLine, allowed.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(allowed.Program);
+        Assert.That(allowed.HasErrors, Is.False, string.Join(Environment.NewLine, allowed.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = allowed.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
         var factory = program.Functions[FindFactory(program)];
-        Assert.True(factory.IsPrivate);
-        Assert.False(factory.IsInternal);
+        Assert.That(factory.IsPrivate, Is.True);
+        Assert.That(factory.IsInternal, Is.False);
 
         var forbidden = Compilation.Create(SyntaxTree.Parse(Declaration + """
             int32 Main() {
@@ -304,12 +300,12 @@ public sealed class NativeManagedClassVerifierTests
                 return leaf.Value;
             }
             """));
-        Assert.Null(forbidden.Program);
-        Assert.Contains(forbidden.Diagnostics, diagnostic => diagnostic.Code == "TRM3011"
-            && diagnostic.Message.Contains("private", StringComparison.Ordinal));
+        Assert.That(forbidden.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(forbidden.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"
+            && diagnostic.Message.Contains("private", StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void MutableClassMethodsCanWriteFieldsThroughWritableReceivers()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -327,13 +323,11 @@ public sealed class NativeManagedClassVerifierTests
                 return leaf.Value;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        _ = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        _ = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
     }
-
-    [Theory]
-    [InlineData("Value = 0;")]
-    [InlineData("this.Value = 0;")]
+    [TestCase("Value = 0;")]
+    [TestCase("this.Value = 0;")]
     public void ClassMethodsCannotWriteReadonlyFields(string write)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -346,11 +340,11 @@ public sealed class NativeManagedClassVerifierTests
             }
             int32 Main() { return 0; }
             """));
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3008");
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3008"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void RejectsDirectConstructorCallsAndMalformedFieldPaths()
     {
         var program = Compile();
@@ -370,9 +364,9 @@ public sealed class NativeManagedClassVerifierTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, direct),
-        }));
+        }))!;
 
-        var assignment = Assert.Single(main.Body.Statements.OfType<BoundFieldAssignment>());
+        var assignment = global::System.Linq.Enumerable.Single(main.Body.Statements.OfType<BoundFieldAssignment>());
         var index = main.Body.Statements.IndexOf(assignment);
         var forged = main with {
             Body = main.Body with {
@@ -381,10 +375,10 @@ public sealed class NativeManagedClassVerifierTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }));
+        }))!;
     }
 
-    [Fact]
+    [Test]
     public void PermitsWritesThroughExplicitlyWritableManagedEdges()
     {
         var source = """
@@ -404,11 +398,11 @@ public sealed class NativeManagedClassVerifierTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))());
     }
 
-    [Fact]
+    [Test]
     public void ForgedReadonlyProjectionAndReadonlyFieldWriteCannotManufactureAuthority()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -424,16 +418,16 @@ public sealed class NativeManagedClassVerifierTests
                 return Observe(leaf);
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
         var main = program.Functions[program.EntryPoint];
         var view = Array.FindIndex(main.Variables.ToArray(),
             static variable => variable.Name == "view");
         var projection = new BoundReadonlyProjection(
             new BoundRead(view, (PrimitiveType)ManagedClassTypes.First, main.Span),
             (PrimitiveType)ManagedClassTypes.First, main.Span);
-        var returned = Assert.IsType<BoundReturn>(main.Body.Statements[^1]);
-        var call = Assert.IsType<BoundCall>(returned.Value);
+        var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual10 = main.Body.Statements[^1]; Assert.That(__nunitActual10, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual10!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual11 = returned.Value; Assert.That(__nunitActual11, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual11!; }))();
         var forged = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(main.Body.Statements.Length - 1,
@@ -442,9 +436,9 @@ public sealed class NativeManagedClassVerifierTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }));
+        }))!;
 
-        var assignment = Assert.Single(main.Body.Statements.OfType<BoundFieldAssignment>());
+        var assignment = global::System.Linq.Enumerable.Single(main.Body.Statements.OfType<BoundFieldAssignment>());
         var index = main.Body.Statements.IndexOf(assignment);
         forged = main with {
             Body = main.Body with {
@@ -453,14 +447,14 @@ public sealed class NativeManagedClassVerifierTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }));
+        }))!;
     }
 
     private static BoundProgram Compile()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
     }
 
     private static int FindFactory(BoundProgram program) =>

@@ -5,13 +5,13 @@ using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class DoForFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReaderRejectsObsoleteLoopTagForOrdinaryReturn()
     {
         const string text = "public int32 Value() { return 42; }";
@@ -41,15 +41,13 @@ public sealed class DoForFrontendProjectionTests
         }
         var source = SourceText.From(text);
         Encode();
-        Assert.True(ScalarFrontendHost.ReadResult(source, bytes).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).IsValid, Is.True);
         words[0] = 51;
         Encode();
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void IndependentLoopProjectionRejectsForgedRolesAndOlderVersions(bool isFor)
     {
         var text = isFor
@@ -92,7 +90,7 @@ public sealed class DoForFrontendProjectionTests
 
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
-            Assert.Single(ScalarFrontendHost.BindLibrary(source, Bytes(), policy).Functions);
+            Assert.That(ScalarFrontendHost.BindLibrary(source, Bytes(), policy).Functions, Has.Exactly(1).Items);
         }
         Reject(0, 50);
         Reject(335, keyword + 1);

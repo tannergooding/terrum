@@ -5,31 +5,31 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmImportExportTableReaderTests
 {
-    [Fact]
+    [Test]
     public void RetainedExpectationsAndPublishedDefinitionsUseDistinctModules()
     {
-        Assert.True(Read(Import(), Export(0x1600_0001)));
-        Assert.True(Read(Import(), Export(0x1300_0001)));
-        Assert.True(Read(Import(), Export(0x1300_0001, 0x1300_0002)));
+        Assert.That(Read(Import(), Export(0x1600_0001)), Is.True);
+        Assert.That(Read(Import(), Export(0x1300_0001)), Is.True);
+        Assert.That(Read(Import(), Export(0x1300_0001, 0x1300_0002)), Is.True);
         var sharedModuleRef = new byte[24];
         Import(0x1300_0002).CopyTo(sharedModuleRef, 0);
         Import().CopyTo(sharedModuleRef, 12);
         Write(sharedModuleRef, 16, 8);
-        Assert.True(Read(sharedModuleRef, [], additionalExpected: 0x1300_0002));
+        Assert.That(Read(sharedModuleRef, [], additionalExpected: 0x1300_0002), Is.True);
         var twoProducers = Export(0x1300_0001, 0x1300_0002);
         Write(twoProducers, 12, 8);
-        Assert.True(Read(Import(), twoProducers));
-        Assert.False(Read(Import(0x1300_0002), Export(0x1300_0001)));
-        Assert.False(Read([], Export(0x1600_0001)));
+        Assert.That(Read(Import(), twoProducers), Is.True);
+        Assert.That(Read(Import(0x1300_0002), Export(0x1300_0001)), Is.False);
+        Assert.That(Read([], Export(0x1600_0001)), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidImportedExpectationsAndDuplicateExpectedDefinitions()
     {
         foreach (var reference in new uint[] { 0, 1, 0x1400_0001, 0x1600_0001, 0x1600_0003 })
@@ -54,7 +54,7 @@ public sealed class TrRmImportExportTableReaderTests
         Assert.Throws<InvalidDataException>(() => Read(missingKey, []));
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnpublishedVisibilityImportedExportsAndDuplicateKeys()
     {
         Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0002)));
@@ -64,7 +64,7 @@ public sealed class TrRmImportExportTableReaderTests
             producerTypeVisibility: 1));
         Assert.Throws<InvalidDataException>(() => Read(Import(), Export(0x1600_0001),
             producerTypeVisibility: 1, producerMethodOwned: true));
-        Assert.True(Read(Import(), Export(0x1600_0001), producerMethodOwned: true));
+        Assert.That(Read(Import(), Export(0x1600_0001), producerMethodOwned: true), Is.True);
         Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1300_0001, 0x1600_0001)));
         var sameTextDifferentEncoding = Export(0x1300_0001, 0x1600_0001);
@@ -78,10 +78,10 @@ public sealed class TrRmImportExportTableReaderTests
         Assert.Throws<InvalidDataException>(() => Read(Import()[..^1], []));
     }
 
-    [Fact]
+    [Test]
     public void PropertyExportRequiresPublicPropertyAndOwner()
     {
-        Assert.True(Read(Import(), Export(0x1E00_0001), propertyFlags: 2));
+        Assert.That(Read(Import(), Export(0x1E00_0001), propertyFlags: 2), Is.True);
         Assert.Throws<InvalidDataException>(() =>
             Read(Import(), Export(0x1E00_0001), propertyFlags: 1));
         Assert.Throws<InvalidDataException>(() =>
@@ -89,21 +89,21 @@ public sealed class TrRmImportExportTableReaderTests
                 producerTypeVisibility: 1));
     }
 
-    [Fact]
+    [Test]
     public void PackedImportAndExportTablesComposeThroughTheArtifactValidator()
     {
-        Assert.True(Read(Import(), Export(0x1600_0001), frameArtifact: true));
-        Assert.True(Read(Import(), Export(0x1E00_0001),
-            propertyFlags: 2, frameArtifact: true));
+        Assert.That(Read(Import(), Export(0x1600_0001), frameArtifact: true), Is.True);
+        Assert.That(Read(Import(), Export(0x1E00_0001),
+            propertyFlags: 2, frameArtifact: true), Is.True);
     }
 
-    [Fact]
+    [Test]
     public void WrittenRetainedImportAndPublicExportComposeThroughTheArtifactValidator()
     {
-        Assert.True(Read(Import(), Export(0x1600_0001),
-            frameArtifact: true, writeRows: true));
-        Assert.True(Read(Import(), Export(0x1E00_0001),
-            propertyFlags: 2, frameArtifact: true, writeRows: true));
+        Assert.That(Read(Import(), Export(0x1600_0001),
+            frameArtifact: true, writeRows: true), Is.True);
+        Assert.That(Read(Import(), Export(0x1E00_0001),
+            propertyFlags: 2, frameArtifact: true, writeRows: true), Is.True);
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             Read(Import(), [], writeRows: true));
         Assert.Throws<InvalidDataException>(() =>

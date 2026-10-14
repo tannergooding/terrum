@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -16,74 +16,70 @@ public sealed class RequireFrontendProjectionTests
 {
     private const string Source = "public int32 Value() { require true; return 42; }";
 
-    [Fact]
+    [Test]
     public void IndependentRequireCertifiesExactStatementAndHostedLoweringWithoutHiddenIdentity()
     {
         var bytes = Bytes(Projection(Source));
         var result = ScalarFrontendHost.ReadResult(SourceText.From(Source), bytes);
-        Assert.True(result.IsValid);
-        Assert.Empty(result.Locals);
-        Assert.Equal(21, result.Statements[0].Kind);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(result.Locals, Is.Empty);
+        Assert.That(result.Statements[0].Kind, Is.EqualTo(21));
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(Source), bytes, policy);
             var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(Source), policy);
-            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-            Assert.Empty(actual.Functions[0].Variables);
-            var requirement = Assert.IsType<BoundRequire>(actual.Functions[0].Body.Statements[0]);
-            Assert.Equal(result.Statements[0].Span, requirement.Span);
-            Assert.Equal(PrimitiveType.Bool, requirement.Condition.Type);
-            Assert.Equal(NativeEmitter.EmitLibrary(Assert.IsType<BoundProgram>(hosted.Program), ["Value"],
-                (NativeRuntimePolicy)policy), NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy));
+            Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+            Assert.That(actual.Functions[0].Variables, Is.Empty);
+            var requirement = ((global::System.Func<BoundRequire>)(() => { var __nunitActual0 = actual.Functions[0].Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundRequire>()); return (BoundRequire)__nunitActual0!; }))();
+            Assert.That(requirement.Span, Is.EqualTo(result.Statements[0].Span));
+            Assert.That(requirement.Condition.Type, Is.EqualTo(PrimitiveType.Bool));
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = hosted.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Value"],
+                (NativeRuntimePolicy)policy)));
         }
     }
-
-    [Theory]
-    [InlineData(0, 54)]
-    [InlineData(0, 53)]
-    [InlineData(0, 52)]
-    [InlineData(0, 51)]
-    [InlineData(0, 48)]
-    [InlineData(0, 21)]
-    [InlineData(0, 56)]
-    [InlineData(43, 1)]
-    [InlineData(42, 3)]
-    [InlineData(37, 3)]
-    [InlineData(298, 13)]
-    [InlineData(299, 9)]
-    [InlineData(332, 8)]
-    [InlineData(332, 10)]
-    [InlineData(332, 15)]
-    [InlineData(332, 22)]
-    [InlineData(333, -1)]
-    [InlineData(333, 1)]
-    [InlineData(334, -1)]
-    [InlineData(334, 1)]
-    [InlineData(335, 0)]
-    [InlineData(336, 1)]
-    [InlineData(339, 0)]
-    [InlineData(391, 1)]
+    [TestCase(0,54)]
+    [TestCase(0,53)]
+    [TestCase(0,52)]
+    [TestCase(0,51)]
+    [TestCase(0,48)]
+    [TestCase(0,21)]
+    [TestCase(0,56)]
+    [TestCase(43,1)]
+    [TestCase(42,3)]
+    [TestCase(37,3)]
+    [TestCase(298,13)]
+    [TestCase(299,9)]
+    [TestCase(332,8)]
+    [TestCase(332,10)]
+    [TestCase(332,15)]
+    [TestCase(332,22)]
+    [TestCase(333,-1)]
+    [TestCase(333,1)]
+    [TestCase(334,-1)]
+    [TestCase(334,1)]
+    [TestCase(335,0)]
+    [TestCase(336,1)]
+    [TestCase(339,0)]
+    [TestCase(391,1)]
     public void IndependentRequireRejectsForgedHistoricalKindTypeSlotRootSpanAndCoverage(int index, int value)
     {
         var words = Projection(Source);
         words[index] = value;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData("require", "@require")]
-    [InlineData("require true", "require 1")]
-    [InlineData("require true", "require false")]
-    [InlineData("require true;", "require true")]
-    [InlineData("require true", "static require true")]
-    [InlineData("require true", "ensure true")]
+    [TestCase("require","@require")]
+    [TestCase("require true","require 1")]
+    [TestCase("require true","require false")]
+    [TestCase("require true;","require true")]
+    [TestCase("require true","static require true")]
+    [TestCase("require true","ensure true")]
     public void IndependentRequireRejectsContradictingKeywordExpressionAndExtent(string before, string after)
     {
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(Source.Replace(before, after, StringComparison.Ordinal)), Bytes(Projection(Source))));
     }
 
-    [Fact]
+    [Test]
     public void IndependentRequireCannotClaimALocalOrReuseAConditionRoot()
     {
         var words = Projection(Source);
@@ -101,31 +97,27 @@ public sealed class RequireFrontendProjectionTests
         Statement(words, 1, 21, 0, 1, text.IndexOf("require false", StringComparison.Ordinal),
             text.IndexOf("false;", StringComparison.Ordinal) + 6);
         Statement(words, 2, 8, 0, 2, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';') + 1);
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[339] = 0;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData(16384, true)]
-    [InlineData(16385, false)]
+    [TestCase(16384,true)]
+    [TestCase(16385,false)]
     public void IndependentRequireEnforcesUtf16SourceLimit(int length, bool valid)
     {
         var source = Source + " /*" + new string('x', length - Source.Length - 5) + "*/";
-        Assert.Equal(length, source.Length);
+        Assert.That(source.Length, Is.EqualTo(length));
         if (valid)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(source), Bytes(Projection(Source))).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(source), Bytes(Projection(Source))).IsValid, Is.True);
         }
         else
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(source), Bytes(Projection(Source))));
         }
     }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestCase(true)]
+    [TestCase(false)]
     public void IndependentRequireAuditsActualLocalMembership(bool visible)
     {
         var text = visible
@@ -151,17 +143,15 @@ public sealed class RequireFrontendProjectionTests
         Statement(words, 3, 8, 0, 2, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';') + 1);
         if (visible)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         }
         else
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
+    [TestCase(1)]
+    [TestCase(2)]
     public void IndependentRequireCannotOccupyEitherForHeaderRecord(int clause)
     {
         const string text = "public int32 Value() { for (;;) { require true; return 42; } }";
@@ -176,15 +166,13 @@ public sealed class RequireFrontendProjectionTests
         var require = text.IndexOf("require", StringComparison.Ordinal);
         Statement(words, 3, 21, 0, 0, require, text.IndexOf(';', require) + 1);
         Statement(words, 4, 8, 0, 1, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';') + 1);
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[332 + clause * 5] = 21;
         words[334 + clause * 5] = 0;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData(15, true)]
-    [InlineData(16, false)]
+    [TestCase(15,true)]
+    [TestCase(16,false)]
     public void IndependentRequireEnforcesNativeExpressionRecursion(int groups, bool valid)
     {
         var text = "public int32 Value() { require " + new string('(', groups)
@@ -203,17 +191,15 @@ public sealed class RequireFrontendProjectionTests
         words[339] = groups + 1;
         if (valid)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         }
         else
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestCase(true)]
+    [TestCase(false)]
     public void RequireUsesExistingNoThrowVerification(bool accepted)
     {
         var text = accepted ? Source : Source.Replace("true", "false", StringComparison.Ordinal);
@@ -241,7 +227,8 @@ public sealed class RequireFrontendProjectionTests
         words[38] = words[39] = words[40] = -1;
         var literal = text.IndexOf("true", StringComparison.Ordinal);
         var isTrue = literal >= 0;
-        if (!isTrue) { literal = text.IndexOf("false", StringComparison.Ordinal); }
+        if (!isTrue)
+        { literal = text.IndexOf("false", StringComparison.Ordinal); }
         Node(words, 0, isTrue ? 20 : 21, 5, literal, isTrue ? 4 : 5, -1, 0);
         Node(words, 1, 3, 1, text.IndexOf("42", StringComparison.Ordinal), 2, -1, 42);
         Statement(words, 0, 21, 0, 0, text.IndexOf("require", StringComparison.Ordinal), text.IndexOf(';') + 1);

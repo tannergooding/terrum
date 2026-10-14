@@ -10,44 +10,42 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CoalescingTests
 {
-    [Fact]
+    [Test]
     public void LexerAndParserRetainLongestMatchesAndTypeErrors()
     {
         const string source = "int32 Main() { ManagedNode?? invalid = null; return 1; }";
         var invalid = SyntaxTree.Parse(source);
-        Assert.Equal(source, invalid.Root.ToFullString());
-        Assert.Contains(invalid.Diagnostics, diagnostic => diagnostic.Code == "TRM1005");
+        Assert.That(invalid.Root.ToFullString(), Is.EqualTo(source));
+        Assert.That(global::System.Linq.Enumerable.Any(invalid.Diagnostics,diagnostic => diagnostic.Code == "TRM1005"),Is.True);
 
         const string valid = "int32 Main() { ManagedNode? value = null; value ??= null; return 1; }";
         var lexed = Lexer.Lex(SourceText.From(valid));
-        Assert.Equal(valid, SyntaxTree.Parse(lexed).Root.ToFullString());
-        Assert.Contains(lexed.Tokens, token => token.Kind == TokenKind.QuestionQuestionEquals);
+        Assert.That(SyntaxTree.Parse(lexed).Root.ToFullString(), Is.EqualTo(valid));
+        Assert.That(global::System.Linq.Enumerable.Any(lexed.Tokens,token => token.Kind == TokenKind.QuestionQuestionEquals),Is.True);
         var table = ScannerHost.CreateBuffers(SourceText.From(valid))
             .Single(buffer => buffer.Name == "Operators").Values;
-        Assert.Contains((int)TokenKind.QuestionQuestionEquals, table);
+        Assert.That(table, Does.Contain((int)TokenKind.QuestionQuestionEquals));
     }
-
-    [Theory]
-    [InlineData("Leaf?? value = null;")]
-    [InlineData("Leaf??? value = null;")]
-    [InlineData("Leaf? /* gap */ ? value = null;")]
-    [InlineData("Namespace.Box<Leaf?>?? value = null;")]
+    [TestCase("Leaf?? value = null;")]
+    [TestCase("Leaf??? value = null;")]
+    [TestCase("Leaf? /* gap */ ? value = null;")]
+    [TestCase("Namespace.Box<Leaf?>?? value = null;")]
     public void RepeatedOptionalModifiersRetainFollowingStatement(string declaration)
     {
         var source = "int32 Main() { " + declaration + " return 42; }";
         var tree = SyntaxTree.Parse(source);
-        Assert.Equal(source, tree.Root.ToFullString());
-        Assert.True(tree.HasErrors);
-        Assert.Equal(1, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ReturnStatement));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ReturnStatement), Is.EqualTo(1));
     }
 
-    [Fact]
+    [Test]
     public void CoalescingGroupsBelowOrAndAboveConditionalAndAssociatesRight()
     {
         const string source = """
@@ -59,17 +57,14 @@ public sealed class CoalescingTests
             }
             """;
         var tree = SyntaxTree.Parse(source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        var choice = Assert.Single(tree.Root.DescendantNodes(),
-            node => node.Kind == SyntaxKind.ConditionalExpression);
-        var outer = Assert.IsType<SyntaxNode>(choice.Children[0]);
-        Assert.Equal(SyntaxKind.BinaryExpression, outer.Kind);
-        Assert.Equal(SyntaxKind.BinaryExpression, Assert.IsType<SyntaxNode>(outer.Children[2]).Kind);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        var choice = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ConditionalExpression);
+        var outer = ((global::System.Func<SyntaxNode>)(() => { var __nunitActual0 = choice.Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual0!; }))();
+        Assert.That(outer.Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
+        Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual1 = outer.Children[2]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual1!; }))().Kind, Is.EqualTo(SyntaxKind.BinaryExpression));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void OptionalValuesAndWritableFieldPlacesEvaluateLazily(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -102,12 +97,10 @@ public sealed class CoalescingTests
                 return inferred.Value;
             }
             """;
-        Assert.Equal(40, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(40));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void CoalescingAssignmentRootsComputedReceiverThroughFallback(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -133,12 +126,10 @@ public sealed class CoalescingTests
                 return 42;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownCoalescePresencePreservesNestedOutputState(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -169,12 +160,10 @@ public sealed class CoalescingTests
                 return 0;
             }
             """;
-        Assert.Equal(168, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(168));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownCoalescePresenceSkipsInfeasibleBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -205,15 +194,13 @@ public sealed class CoalescingTests
                 return 0;
             }
             """;
-        Assert.Equal(126, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(126));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownPresentCoalesceMakesNullArmInfeasible(NativeRuntimePolicy policy)
     {
-            const string source = """
+        const string source = """
                 [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
                     value = 42;
                     return null;
@@ -241,12 +228,10 @@ public sealed class CoalescingTests
                     return vacant + dead;
                 }
                 """;
-            Assert.Equal(84, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(84));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownInitializationSelectsPresentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -271,15 +256,13 @@ public sealed class CoalescingTests
                 return 0;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownConstantSelectsPresentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
-            const string source = """
+        const string source = """
                 [NoThrow] bool Fill(init ref<int32> value) {
                     value = 42;
                     return true;
@@ -299,12 +282,10 @@ public sealed class CoalescingTests
                     return 0;
                 }
                 """;
-            Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownUninitializedSelectsAbsentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -323,12 +304,10 @@ public sealed class CoalescingTests
                 return result;
             }
             """;
-        Assert.Equal(21, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(21));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NestedKnownPresentCoalesceKeepsFallbackOutputVacant(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -350,12 +329,10 @@ public sealed class CoalescingTests
                 return 0;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownInitializationPrunesInfeasibleSomeBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -389,12 +366,10 @@ public sealed class CoalescingTests
                 return 0;
             }
             """;
-        Assert.Equal(126, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(126));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void KnownInitializationPrunesInfeasibleNullBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -428,15 +403,13 @@ public sealed class CoalescingTests
                 return 84;
             }
             """;
-        Assert.Equal(84, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(84));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ChainedKnownPresentCoalesceKeepsFallbackOutputVacant(NativeRuntimePolicy policy)
     {
-            const string source = """
+        const string source = """
                 [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
                     value = 42;
                     return null;
@@ -455,12 +428,10 @@ public sealed class CoalescingTests
                     return 0;
                 }
                 """;
-            Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ComputedFieldReceiverRunsOnceAndPresentValueSkipsFallback(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -492,12 +463,10 @@ public sealed class CoalescingTests
                 return 42;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ConditionalKnownPresentCoalesceSkipsInfeasibleBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -521,12 +490,10 @@ public sealed class CoalescingTests
                 return 0;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void CoalescingPreservesQualifiedWriteCapability(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -542,12 +509,10 @@ public sealed class CoalescingTests
                 return leaf.Value;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void OptionalFallbacksAndReadonlyTargetPreserveNullabilityAndAccess(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -578,10 +543,10 @@ public sealed class CoalescingTests
                 return readonlyLeaf.Value;
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, policy), policy));
+        Assert.That(NativeJit.Execute(Compile(source, policy), policy), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void GetterOnlyOptionalResultIsNotAnAssignmentPlace()
     {
         const string source = """
@@ -599,12 +564,10 @@ public sealed class CoalescingTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3008");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3008"),Is.True);
     }
-
-    [Theory]
-    [InlineData("Leaf? optional = null; optional ??= leaf;")]
-    [InlineData("readOnly.Item ??= leaf;")]
+    [TestCase("Leaf? optional = null; optional ??= leaf;")]
+    [TestCase("readOnly.Item ??= leaf;")]
     public void CoalescingAssignmentDoesNotStrengthenPlaceAccess(string statement)
     {
         var source = """
@@ -621,10 +584,10 @@ public sealed class CoalescingTests
             int32 Main() { return 42; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3008");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3008"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void FailedFallbackLeavesOptionalFieldNullAndUnwindsStagedReceiverRoot()
     {
         const string source = """
@@ -658,25 +621,23 @@ public sealed class CoalescingTests
                 }
             }
             """;
-        Assert.Equal(42, NativeJit.Execute(Compile(source, NativeRuntimePolicy.CheckedExceptions),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(Compile(source, NativeRuntimePolicy.CheckedExceptions),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("mut ManagedNode? value = null; value ??= 42;", "TRM3014")]
-    [InlineData("ManagedNode? value = null; init ManagedNode? vacant; vacant ??= value;", "TRM")]
-    [InlineData("mut ManagedNode? value = null; value = value ?? 42;", "TRM3014")]
-    [InlineData("mut ManagedNode? value = null; write ManagedNode? wrong = value ?? null;", "TRM3007")]
-    [InlineData("mut ManagedNode? value = null; ManagedNode? wrong = value ?? true;", "TRM3007")]
+    [TestCase("mut ManagedNode? value = null; value ??= 42;","TRM3014")]
+    [TestCase("ManagedNode? value = null; init ManagedNode? vacant; vacant ??= value;","TRM")]
+    [TestCase("mut ManagedNode? value = null; value = value ?? 42;","TRM3014")]
+    [TestCase("mut ManagedNode? value = null; write ManagedNode? wrong = value ?? null;","TRM3007")]
+    [TestCase("mut ManagedNode? value = null; ManagedNode? wrong = value ?? true;","TRM3007")]
     public void RejectsUnsupportedFallbacksAndVacantOptionalPlaces(string statement, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { " + statement + " return 42; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, item => item.Code.StartsWith(diagnostic, StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code.StartsWith(diagnostic, StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ConstEvalDoesNotTreatManagedCoalescingAsAConstant()
     {
         const string source = """
@@ -687,10 +648,10 @@ public sealed class CoalescingTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3027");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3027"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NoThrowChecksPotentiallyActiveFallbackButAllowsTotalOptionalFallback()
     {
         const string safe = """
@@ -699,7 +660,7 @@ public sealed class CoalescingTests
             }
             int32 Main() { return 42; }
             """;
-        Assert.False(Compilation.Create(SyntaxTree.Parse(safe)).HasErrors);
+        Assert.That(Compilation.Create(SyntaxTree.Parse(safe)).HasErrors, Is.False);
 
         const string unsafeSource = """
             ManagedNode? Fail() { require false; return null; }
@@ -709,10 +670,10 @@ public sealed class CoalescingTests
             int32 Main() { return 42; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(unsafeSource));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void VerifierRejectsMalformedOptionalAssignmentAndCoalesce()
     {
         var program = Compile("""
@@ -725,9 +686,11 @@ public sealed class CoalescingTests
         var invalid = new BoundOptionalAssignment(
             new BoundNull(PrimitiveType.OptionalManagedNode, function.Span),
             new BoundNull(PrimitiveType.OptionalManagedNode, function.Span), function.Span);
-        var changed = function with { Body = function.Body with {
-            Statements = function.Body.Statements.Insert(0, invalid),
-        } };
+        var changed = function with {
+            Body = function.Body with {
+                Statements = function.Body.Statements.Insert(0, invalid),
+            }
+        };
         Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, changed),
         }));
@@ -736,9 +699,11 @@ public sealed class CoalescingTests
         var forgedAssignment = validAssignment with {
             Value = new BoundNull(PrimitiveType.OptionalWriteManagedNode, function.Span),
         };
-        var invalidAssignment = function with { Body = function.Body with {
-            Statements = function.Body.Statements.Insert(1, forgedAssignment),
-        } };
+        var invalidAssignment = function with {
+            Body = function.Body with {
+                Statements = function.Body.Statements.Insert(1, forgedAssignment),
+            }
+        };
         Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, invalidAssignment),
         }));
@@ -751,8 +716,8 @@ public sealed class CoalescingTests
             }
             """, NativeRuntimePolicy.FailFast);
         var entry = valid.Functions[valid.EntryPoint];
-        var local = Assert.IsType<BoundLocal>(entry.Body.Statements[1]);
-        var coalesce = Assert.IsType<BoundCoalesce>(local.Initializer);
+        var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = entry.Body.Statements[1]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))();
+        var coalesce = ((global::System.Func<BoundCoalesce>)(() => { var __nunitActual3 = local.Initializer; Assert.That(__nunitActual3, Is.TypeOf<BoundCoalesce>()); return (BoundCoalesce)__nunitActual3!; }))();
         foreach (var forged in new[] {
             coalesce with { Type = PrimitiveType.WriteManagedNode },
             coalesce with { Type = PrimitiveType.OptionalWriteManagedNode,
@@ -760,18 +725,18 @@ public sealed class CoalescingTests
             coalesce with { Fallback = new BoundNull(PrimitiveType.OptionalWriteManagedNode, coalesce.Span) },
         })
         {
-            var invalidEntry = entry with { Body = entry.Body with {
-                Statements = entry.Body.Statements.SetItem(1, local with { Initializer = forged }),
-            } };
+            var invalidEntry = entry with {
+                Body = entry.Body with {
+                    Statements = entry.Body.Statements.SetItem(1, local with { Initializer = forged }),
+                }
+            };
             Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(valid with {
                 Functions = valid.Functions.SetItem(valid.EntryPoint, invalidEntry),
             }));
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void FeatureVersionRejectsOldHeaderAndLinkedConsumerStillRuns(NativeRuntimePolicy policy)
     {
         const string library = """
@@ -818,26 +783,24 @@ public sealed class CoalescingTests
             }
             """;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(library), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Select"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), ["Select"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 47);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Select(); }"),
             reference, runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.NotEmpty(NativeEmitter.Emit(linked, policy));
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task IndependentlyCompiledNativeConsumerCallsCoalescingProducerAsync(NativeRuntimePolicy policy)
     {
         const string library = """
@@ -851,22 +814,19 @@ public sealed class CoalescingTests
             """;
         var producerProgram = Compilation.CreateLibrary(SyntaxTree.Parse(library),
             (BoundRuntimePolicy)policy);
-        Assert.False(producerProgram.HasErrors, string.Join(Environment.NewLine, producerProgram.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerProgram.Program),
+        Assert.That(producerProgram.HasErrors, Is.False, string.Join(Environment.NewLine, producerProgram.Diagnostics));
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = producerProgram.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(),
             ["Select"], "Coalescing", policy);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Select(); }"),
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), [producer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = consumerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), [producer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedGraphCanReplaceCoalescingDependencyAsync(NativeRuntimePolicy policy)
     {
         const string library = """
@@ -882,30 +842,30 @@ public sealed class CoalescingTests
             "Coalescing", policy);
         var consumerProgram = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Select(); }"),
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(consumerProgram.HasErrors, string.Join(Environment.NewLine, consumerProgram.Diagnostics));
+        Assert.That(consumerProgram.HasErrors, Is.False, string.Join(Environment.NewLine, consumerProgram.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(consumerProgram.Program), [producer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = consumerProgram.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), [producer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(
             CompileLibrary(library.Replace("TryCreate(42", "TryCreate(43", StringComparison.Ordinal), policy),
             ["Select"], "Coalescing", policy);
         NativeModuleCompiler.ValidateGraph(consumer, [replacement]);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
     }
 
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
     }
 
     private static BoundProgram Compile(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
     }
 }

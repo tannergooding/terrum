@@ -2,57 +2,53 @@
 
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmStringTableReaderTests
 {
-    [Fact]
+    [Test]
     public void IndexesNamesByOneBasedRowWithoutScanningPreviousRows()
     {
         var table = new TrRmStringTableReader(TwoRowSection(), 2);
-        Assert.Equal("Example", table.DecodeName(2));
-        Assert.Equal("Answer", table.DecodeName(1));
+        Assert.That(table.DecodeName(2), Is.EqualTo("Example"));
+        Assert.That(table.DecodeName(1), Is.EqualTo("Answer"));
         Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 0));
         Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 3));
     }
-
-    [Theory]
-    [InlineData(0, 1)]
-    [InlineData(4, 0)]
-    [InlineData(4, 11)]
-    [InlineData(4, 20)]
-    [InlineData(8, 20)]
-    [InlineData(8, 28)]
+    [TestCase(0,(byte)(1))]
+    [TestCase(4,(byte)(0))]
+    [TestCase(4,(byte)(11))]
+    [TestCase(4,(byte)(20))]
+    [TestCase(8,(byte)(20))]
+    [TestCase(8,(byte)(28))]
     public void RejectsMalformedOffsets(int byteIndex, byte replacement)
     {
         var bytes = TwoRowSection();
         bytes[byteIndex] = replacement;
         Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(bytes, 2));
     }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(3)]
-    [InlineData(0x1_000000)]
+    [TestCase(0)]
+    [TestCase(-1)]
+    [TestCase(3)]
+    [TestCase(0x1_000000)]
     public void RejectsInvalidRecordCounts(int recordCount)
     {
         Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(TwoRowSection(), recordCount));
     }
 
-    [Fact]
+    [Test]
     public void ValidatesSelectedRowAfterTheIndex()
     {
         var bytes = TwoRowSection();
         bytes[24] = 4;
         var table = new TrRmStringTableReader(bytes, 2);
-        Assert.Equal("Answer", table.DecodeName(1));
+        Assert.That(table.DecodeName(1), Is.EqualTo("Answer"));
         Assert.Throws<InvalidDataException>(() => DecodeName(bytes, 2, 2));
     }
 
-    [Fact]
+    [Test]
     public void RejectsAnIndexDamagedAfterConstruction()
     {
         var bytes = TwoRowSection();

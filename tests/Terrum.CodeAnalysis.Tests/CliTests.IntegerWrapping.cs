@@ -4,7 +4,7 @@ using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -179,10 +179,10 @@ public sealed partial class CliTests
         for (var value = 0; value <= ushort.MaxValue; value++)
         {
             var codeUnit = (ushort)value;
-            Assert.Equal(value, char16ToInt32(codeUnit));
-            Assert.Equal((uint)value, char16ToUInt32(codeUnit));
-            Assert.Equal((long)value, char16ToInt64(codeUnit));
-            Assert.Equal((ulong)value, char16ToUInt64(codeUnit));
+            Assert.That(char16ToInt32(codeUnit), Is.EqualTo(value));
+            Assert.That(char16ToUInt32(codeUnit), Is.EqualTo((uint)value));
+            Assert.That(char16ToInt64(codeUnit), Is.EqualTo((long)value));
+            Assert.That(char16ToUInt64(codeUnit), Is.EqualTo((ulong)value));
         }
     }
 
@@ -210,7 +210,7 @@ public sealed partial class CliTests
             }
 
             var actual = resultValue(invoke(input));
-            Assert.True(actual == expected, $"{name} returned {actual} for input {input}; expected {expected}.");
+            Assert.That(actual == expected, Is.True, $"{name} returned {actual} for input {input}; expected {expected}.");
         }
     }
 

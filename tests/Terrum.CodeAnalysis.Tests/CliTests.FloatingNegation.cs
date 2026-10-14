@@ -2,7 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -49,14 +49,14 @@ public sealed partial class CliTests
         foreach (var bits in float32Inputs)
         {
             var result = negateFloat32(bits);
-            Assert.Equal(bits ^ 0x80000000, result);
-            Assert.Equal(bits, negateFloat32(result));
+            Assert.That(result, Is.EqualTo(bits ^ 0x80000000));
+            Assert.That(negateFloat32(result), Is.EqualTo(bits));
         }
         foreach (var bits in float64Inputs)
         {
             var result = negateFloat64(bits);
-            Assert.Equal(bits ^ 0x8000000000000000, result);
-            Assert.Equal(bits, negateFloat64(result));
+            Assert.That(result, Is.EqualTo(bits ^ 0x8000000000000000));
+            Assert.That(negateFloat64(result), Is.EqualTo(bits));
         }
     }
 }

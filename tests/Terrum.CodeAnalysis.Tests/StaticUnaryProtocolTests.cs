@@ -6,7 +6,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -46,7 +46,7 @@ public sealed class StaticUnaryProtocolTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void UnsafeProtocolOperatorRemainsUnsafeInsideGenericProofBodies()
     {
         const string protocol = """
@@ -61,17 +61,17 @@ public sealed class StaticUnaryProtocolTests
         var unauthorized = Compilation.CreateLibrary(SyntaxTree.Parse(protocol + """
             T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] { return +value; }
             """));
-        Assert.Null(unauthorized.Program);
-        Assert.Contains(unauthorized.Diagnostics, static diagnostic => diagnostic.Code == "TRM3028");
+        Assert.That(unauthorized.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(unauthorized.Diagnostics,static diagnostic => diagnostic.Code == "TRM3028"),Is.True);
 
         var authorized = Compilation.Create(SyntaxTree.Parse(protocol + """
             T Plus<T>(T value) where T : UnaryPlus<T, T>, [Copy] { return unsafe(+value); }
             int32 Main() { return Plus<Value>(new Value(42)).Number; }
             """));
-        Assert.False(authorized.HasErrors, string.Join(Environment.NewLine, authorized.Diagnostics));
+        Assert.That(authorized.HasErrors, Is.False, string.Join(Environment.NewLine, authorized.Diagnostics));
     }
 
-    [Fact]
+    [Test]
     public void DistinctArityAndIndependentResultsBindDirectAndClosedCalls()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source + """
@@ -85,30 +85,28 @@ public sealed class StaticUnaryProtocolTests
                 return Compose(combined).Number;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Contains(program.Functions, function => function.Name == "Negate<Value, int32>");
-        Assert.Contains(program.Functions, function => function.Name == "Plus<Value>");
-        Assert.Contains(program.Functions, function => function.Name == "Compose<Value>");
-        Assert.DoesNotContain(program.Functions, function => function.IsExternal
-            || function.Name.Contains('$', StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Negate<Value, int32>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Plus<Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.Name == "Compose<Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
     }
-
-    [Theory]
-    [InlineData("operator !(Value value)", "operator !(Value first, Value second)", "TRM3007")]
-    [InlineData("operator !(Value value)", "operator !(int32 value)", "TRM3007")]
-    [InlineData("static R operator !(T value)", "static R operator !(T first, T second)", "TRM3001")]
-    [InlineData("UnaryNot<Value, int32>", "UnaryNot<Value, bool>", "TRM3007")]
-    [InlineData("UnaryNot<Value, int32>", "UnaryNot<Value, int32>, UnaryNot<Value, bool>", "TRM3007")]
-    [InlineData("interface UnaryNot<T, R>", "interface UnaryNot<T, R, Extra>", "TRM3001")]
+    [TestCase("operator !(Value value)","operator !(Value first, Value second)","TRM3007")]
+    [TestCase("operator !(Value value)","operator !(int32 value)","TRM3007")]
+    [TestCase("static R operator !(T value)","static R operator !(T first, T second)","TRM3001")]
+    [TestCase("UnaryNot<Value, int32>","UnaryNot<Value, bool>","TRM3007")]
+    [TestCase("UnaryNot<Value, int32>","UnaryNot<Value, int32>, UnaryNot<Value, bool>","TRM3007")]
+    [TestCase("interface UnaryNot<T, R>","interface UnaryNot<T, R, Extra>","TRM3001")]
     public void SignatureAndResultMismatchesReject(string before, string after, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source.Replace(before, after, StringComparison.Ordinal)
             + "int32 Main() { return 42; }"));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ResultOnlyOverloadIsRejectedRatherThanSelectedByContext()
     {
         var source = Source.Replace(
@@ -118,50 +116,44 @@ public sealed class StaticUnaryProtocolTests
             [NoThrow] public static bool operator !(Value value) { return true; }
             """, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source + "int32 Main() { return 42; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3003");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3003"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("where T : UnaryPlus<T, T>, [Copy]", "where T : UnaryMinus<T, T>, [Copy]")]
-    [InlineData("where T : UnaryPlus<T, T>, [Copy]", "where T : [Copy]")]
+    [TestCase("where T : UnaryPlus<T, T>, [Copy]","where T : UnaryMinus<T, T>, [Copy]")]
+    [TestCase("where T : UnaryPlus<T, T>, [Copy]","where T : [Copy]")]
     public void DefinitionSiteProofCannotBorrowConcreteOrOtherWitnesses(string before, string after)
     {
         var source = Source.Replace(before, after, StringComparison.Ordinal) + "int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("UnaryPlus<Value, Value>", "UnaryMinus<Value, Value>")]
-    [InlineData("public static Value operator +(Value value)", "private static Value operator +(Value value)")]
+    [TestCase("UnaryPlus<Value, Value>","UnaryMinus<Value, Value>")]
+    [TestCase("public static Value operator +(Value value)","private static Value operator +(Value value)")]
     public void MissingOrInaccessibleUnaryWitnessRejects(string before, string after)
     {
         var source = Source.Replace(before, after, StringComparison.Ordinal)
             + "int32 Main() { return Compose(new Value(42)).Number; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void NoThrowUnaryProtocolRequiresNoThrowImplementationAndPreservesEffects()
     {
         var missing = Source.Replace("[NoThrow] public static int32 operator !(Value value)",
             "public static int32 operator !(Value value)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(missing + "int32 Main() { return 42; }"));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3007"),Is.True);
         var nonNoThrow = Source.Replace("[NoThrow] static R operator !(T value)",
             "static R operator !(T value)", StringComparison.Ordinal);
         nonNoThrow += "[NoThrow] int32 Check(Value value) { return Negate<Value, int32>(value); } int32 Main() { return 42; }";
         var checkedCompilation = Compilation.Create(SyntaxTree.Parse(nonNoThrow));
-        Assert.Contains(checkedCompilation.Diagnostics, item => item.Code == "TRM3017");
+        Assert.That(global::System.Linq.Enumerable.Any(checkedCompilation.Diagnostics,item => item.Code == "TRM3017"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ClosedUnaryCallsUseExistingPrivateConsumerEncoding(NativeRuntimePolicy policy)
     {
         var sourcePolicy = policy == NativeRuntimePolicy.FailFast
@@ -171,26 +163,24 @@ public sealed class StaticUnaryProtocolTests
                 return Negate<Value, int32>(new Value(number));
             }
             """), runtimePolicy: sourcePolicy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Read"]);
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = library.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(42); }"),
             reference, runtimePolicy: sourcePolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Contains(linked.Functions, function =>
-            function.Name.EndsWith(".Negate<Value, int32>", StringComparison.Ordinal));
-        Assert.Contains(linked.Functions, function => function.Name == "Main");
-        Assert.DoesNotContain(linked.Functions, function =>
-            function.Name.Contains("$T", StringComparison.Ordinal));
-        Assert.NotEmpty(NativeEmitter.Emit(linked, policy));
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function =>
+            function.Name.EndsWith(".Negate<Value, int32>", StringComparison.Ordinal)),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "Main"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function =>
+            function.Name.Contains("$T", StringComparison.Ordinal)),Is.False);
+        Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task UnarySpecializationServesNativeGraphConsumerAsync(NativeRuntimePolicy policy)
     {
         var sourcePolicy = policy == NativeRuntimePolicy.FailFast
@@ -200,24 +190,22 @@ public sealed class StaticUnaryProtocolTests
                 return Negate<Value, int32>(new Value(number));
             }
             """), runtimePolicy: sourcePolicy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = NativeModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(library.Program), ["Read"], "NodeB", policy);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = library.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), ["Read"], "NodeB", policy);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Read(42); }"),
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: sourcePolicy);
-        Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), [producer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = consumerCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), [producer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(false, NativeRuntimePolicy.FailFast)]
-    [InlineData(false, NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData(true, NativeRuntimePolicy.FailFast)]
-    [InlineData(true, NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(false,NativeRuntimePolicy.FailFast)]
+    [TestCase(false,NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(true,NativeRuntimePolicy.FailFast)]
+    [TestCase(true,NativeRuntimePolicy.CheckedExceptions)]
     public void FixedCopyStructResultUsesDistinctProofTypeAndInference(bool self, NativeRuntimePolicy policy)
     {
         var source = """
@@ -249,11 +237,9 @@ public sealed class StaticUnaryProtocolTests
                 .Replace("Wrap<T, Result>", "Wrap<Result>", StringComparison.Ordinal);
         }
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name == "Apply<Input, Result>");
-        Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name == "Fixed<Input>");
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))().Functions,function => function.Name == "Apply<Input, Result>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions,function => function.Name == "Fixed<Input>"),Is.True);
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), policy), Is.EqualTo(42));
     }
 }

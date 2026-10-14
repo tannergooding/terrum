@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -142,10 +142,8 @@ public sealed class StringTableTextComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringTableTextMatchesSelectedHostedRowDecoding(BoundRuntimePolicy policy)
     {
         const int recordCount = 5;
@@ -182,7 +180,7 @@ public sealed class StringTableTextComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         var entry = SyntaxTree.Parse(VerificationSource, "string-table-text-component.terrum");
@@ -193,15 +191,13 @@ public sealed class StringTableTextComponentTests
             new HostBuffer("Rows", PrimitiveType.Int32, [.. table.Select(static value => (int)value)], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. cases.SelectMany(static item => item)], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ValidatedStringTableIndexSupportsBatchTextReadsAsync(BoundRuntimePolicy policy)
     {
         var rows = Enumerable.Range(1, 512)
@@ -219,8 +215,8 @@ public sealed class StringTableTextComponentTests
         var program = await CompileAsync(table, [.. expected], BatchVerificationSource, policy)
             .ConfigureAwait(true);
 
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static void AddValidRow(List<int[]> cases, byte[] table, int recordCount, int row, bool isName,
@@ -229,7 +225,7 @@ public sealed class StringTableTextComponentTests
         var decoded = isName
             ? DecodeName(table, recordCount, row)
             : DecodeNamespace(table, recordCount, row);
-        Assert.Equal(expectedText, decoded);
+        Assert.That(decoded, Is.EqualTo(expectedText));
         var scalars = new List<int>();
         foreach (var rune in decoded.EnumerateRunes())
         {
@@ -247,8 +243,7 @@ public sealed class StringTableTextComponentTests
 
     private static void AddInvalidRow(List<int[]> cases, byte[] table, int recordCount, int row, bool isName)
     {
-        Assert.Throws<InvalidDataException>(() =>
-        {
+        Assert.Throws<InvalidDataException>(() => {
             if (isName)
             {
                 DecodeName(table, recordCount, row);
@@ -288,7 +283,7 @@ public sealed class StringTableTextComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(source, "string-table-text-batch-component.terrum"));
@@ -298,8 +293,8 @@ public sealed class StringTableTextComponentTests
             new HostBuffer("Rows", PrimitiveType.Int32, [.. table.Select(static value => (int)value)], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)

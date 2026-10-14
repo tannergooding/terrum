@@ -11,15 +11,14 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CharacterLiteralModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CharacterLiteralModuleUsesFreshSourceGrantsAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -33,7 +32,7 @@ public sealed class CharacterLiteralModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -98,9 +97,8 @@ public sealed class CharacterLiteralModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.DecodeWholeSource", "Terrum.CodeAnalysis.VerifyCharacterLiteralRecords"]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -108,9 +106,8 @@ public sealed class CharacterLiteralModuleTests
             int32 Main() { return DecodeWholeSource(); }
             """, "character-literal-consumer.terrum");
         var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         var recordConsumerTree = SyntaxTree.Parse("""
@@ -119,10 +116,9 @@ public sealed class CharacterLiteralModuleTests
             """, "character-literal-record-consumer.terrum");
         var recordConsumerCompilation = Compilation.Create(
             recordConsumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(recordConsumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
+        Assert.That(recordConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, recordConsumerCompilation.Diagnostics));
         var recordConsumer = ModuleCompiler.Link(
-            ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(recordConsumerCompilation.Program), producer),
+            ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = recordConsumerCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer),
             producer);
 
         foreach (var (text, scalar) in new (string Text, int? Scalar)[] {
@@ -139,16 +135,16 @@ public sealed class CharacterLiteralModuleTests
         })
         {
             var lexed = Lexer.Lex(SourceText.From(text));
-            var expected = scalar ?? ExpectedInvalidResult(Assert.Single(lexed.Diagnostics));
+            var expected = scalar ?? ExpectedInvalidResult(global::System.Linq.Enumerable.Single(lexed.Diagnostics));
             if (scalar.HasValue)
             {
-                Assert.Empty(lexed.Diagnostics);
+                Assert.That(lexed.Diagnostics, Is.Empty);
             }
             var grant = new HostBuffer("Source", PrimitiveType.Char16,
                 [.. text.Select(static unit => (int)unit)], false) {
                 IsInvocationScoped = true,
             };
-            Assert.Equal(expected, NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy));
+            Assert.That(NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy), Is.EqualTo(expected));
         }
 
         const int maximumGrantLength = 16_384;
@@ -161,16 +157,16 @@ public sealed class CharacterLiteralModuleTests
             }
             var grant = new HostBuffer("Source", PrimitiveType.Char16,
                 [.. records], false) { IsInvocationScoped = true };
-            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
-                recordConsumer, [grant], (NativeRuntimePolicy)policy));
+            Assert.That(NativeJit.ExecuteWithSourceGrant(
+                recordConsumer, [grant], (NativeRuntimePolicy)policy), Is.EqualTo(0));
             records.Clear();
         }
 
         var emptyRecords = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         };
-        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
-            recordConsumer, [emptyRecords], (NativeRuntimePolicy)policy));
+        Assert.That(NativeJit.ExecuteWithSourceGrant(
+            recordConsumer, [emptyRecords], (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         for (var value = (int)char.MinValue; value <= char.MaxValue; value++)
         {
@@ -190,15 +186,15 @@ public sealed class CharacterLiteralModuleTests
                 {
                     continue;
                 }
-                var diagnostic = Assert.Single(lexed.Diagnostics);
-                Assert.Equal("TRM0001", diagnostic.Code);
+                var diagnostic = global::System.Linq.Enumerable.Single(lexed.Diagnostics);
+                Assert.That(diagnostic.Code, Is.EqualTo("TRM0001"));
                 errorCode = 1;
                 errorStart = diagnostic.Span.Start;
                 errorLength = diagnostic.Span.Length;
             }
-            Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[0].Kind);
-            Assert.Equal(spelling, lexed.Tokens[0].Text);
-            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[1].Kind);
+            Assert.That(lexed.Tokens[0].Kind, Is.EqualTo(TokenKind.CharacterLiteral));
+            Assert.That(lexed.Tokens[0].Text, Is.EqualTo(spelling));
+            Assert.That(lexed.Tokens[1].Kind, Is.EqualTo(TokenKind.EndOfFile));
             var recordLength = 6 + spelling.Length;
             if (records.Count + recordLength > maximumGrantLength)
             {
@@ -244,24 +240,24 @@ public sealed class CharacterLiteralModuleTests
             }
 
             var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
-            Assert.Equal(invalidScalarCount, lexed.Diagnostics.Length);
-            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            Assert.That(lexed.Diagnostics.Length, Is.EqualTo(invalidScalarCount));
+            Assert.That(lexed.Tokens.Length, Is.EqualTo(scalarCount + 1));
             var diagnosticIndex = 0;
             for (var index = 0; index < scalarCount; index++)
             {
                 var scalar = scalarStart + index;
                 var spelling = $"'\\u{scalar:X4}'";
-                Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[index].Kind);
-                Assert.Equal(spelling, lexed.Tokens[index].Text);
+                Assert.That(lexed.Tokens[index].Kind, Is.EqualTo(TokenKind.CharacterLiteral));
+                Assert.That(lexed.Tokens[index].Text, Is.EqualTo(spelling));
                 if (char.IsSurrogate((char)scalar))
                 {
-                    Assert.Equal("TRM0005", lexed.Diagnostics[diagnosticIndex].Code);
-                    Assert.Equal(index * 9 + 1, lexed.Diagnostics[diagnosticIndex].Span.Start);
-                    Assert.Equal(6, lexed.Diagnostics[diagnosticIndex].Span.Length);
+                    Assert.That(lexed.Diagnostics[diagnosticIndex].Code, Is.EqualTo("TRM0005"));
+                    Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Start, Is.EqualTo(index * 9 + 1));
+                    Assert.That(lexed.Diagnostics[diagnosticIndex].Span.Length, Is.EqualTo(6));
                     diagnosticIndex++;
                 }
             }
-            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            Assert.That(lexed.Tokens[^1].Kind, Is.EqualTo(TokenKind.EndOfFile));
             ExecuteRecords();
         }
 
@@ -290,15 +286,14 @@ public sealed class CharacterLiteralModuleTests
             }
 
             var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
-            Assert.Empty(lexed.Diagnostics);
-            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            Assert.That(lexed.Diagnostics, Is.Empty);
+            Assert.That(lexed.Tokens.Length, Is.EqualTo(scalarCount + 1));
             for (var index = 0; index < scalarCount; index++)
             {
-                Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[index].Kind);
-                Assert.Equal($"'{char.ConvertFromUtf32(scalarStart + index)}'",
-                    lexed.Tokens[index].Text);
+                Assert.That(lexed.Tokens[index].Kind, Is.EqualTo(TokenKind.CharacterLiteral));
+                Assert.That(lexed.Tokens[index].Text, Is.EqualTo($"'{char.ConvertFromUtf32(scalarStart + index)}'"));
             }
-            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            Assert.That(lexed.Tokens[^1].Kind, Is.EqualTo(TokenKind.EndOfFile));
             ExecuteRecords();
         }
         ExecuteRecords();
@@ -326,15 +321,14 @@ public sealed class CharacterLiteralModuleTests
             }
 
             var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
-            Assert.Empty(lexed.Diagnostics);
-            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            Assert.That(lexed.Diagnostics, Is.Empty);
+            Assert.That(lexed.Tokens.Length, Is.EqualTo(scalarCount + 1));
             for (var index = 0; index < scalarCount; index++)
             {
-                Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[index].Kind);
-                Assert.Equal($"'\\U{scalarStart + index:X8}'",
-                    lexed.Tokens[index].Text);
+                Assert.That(lexed.Tokens[index].Kind, Is.EqualTo(TokenKind.CharacterLiteral));
+                Assert.That(lexed.Tokens[index].Text, Is.EqualTo($"'\\U{scalarStart + index:X8}'"));
             }
-            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            Assert.That(lexed.Tokens[^1].Kind, Is.EqualTo(TokenKind.EndOfFile));
             ExecuteRecords();
         }
         ExecuteRecords();
@@ -363,17 +357,17 @@ public sealed class CharacterLiteralModuleTests
             }
 
             var lexed = Lexer.Lex(SourceText.From(batchText.ToString()));
-            Assert.Equal(scalarCount, lexed.Diagnostics.Length);
-            Assert.Equal(scalarCount + 1, lexed.Tokens.Length);
+            Assert.That(lexed.Diagnostics.Length, Is.EqualTo(scalarCount));
+            Assert.That(lexed.Tokens.Length, Is.EqualTo(scalarCount + 1));
             for (var index = 0; index < scalarCount; index++)
             {
-                Assert.Equal("TRM0005", lexed.Diagnostics[index].Code);
-                Assert.Equal(index * 13 + 1, lexed.Diagnostics[index].Span.Start);
-                Assert.Equal(10, lexed.Diagnostics[index].Span.Length);
-                Assert.Equal(TokenKind.CharacterLiteral, lexed.Tokens[index].Kind);
-                Assert.Equal($"'\\U{scalarStart + index:X8}'", lexed.Tokens[index].Text);
+                Assert.That(lexed.Diagnostics[index].Code, Is.EqualTo("TRM0005"));
+                Assert.That(lexed.Diagnostics[index].Span.Start, Is.EqualTo(index * 13 + 1));
+                Assert.That(lexed.Diagnostics[index].Span.Length, Is.EqualTo(10));
+                Assert.That(lexed.Tokens[index].Kind, Is.EqualTo(TokenKind.CharacterLiteral));
+                Assert.That(lexed.Tokens[index].Text, Is.EqualTo($"'\\U{scalarStart + index:X8}'"));
             }
-            Assert.Equal(TokenKind.EndOfFile, lexed.Tokens[^1].Kind);
+            Assert.That(lexed.Tokens[^1].Kind, Is.EqualTo(TokenKind.EndOfFile));
             ExecuteRecords();
         }
     }

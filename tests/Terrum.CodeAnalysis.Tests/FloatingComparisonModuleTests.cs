@@ -7,15 +7,14 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class FloatingComparisonModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task FloatingComparisonMatchesHostedIeeeOperatorsAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -25,16 +24,16 @@ public sealed class FloatingComparisonModuleTests
             await File.ReadAllTextAsync(comparisonPath).ConfigureAwait(true), comparisonPath);
         var componentTests = SyntaxTree.Parse(
             await File.ReadAllTextAsync(componentTestsPath).ConfigureAwait(true), componentTestsPath);
-        Assert.False(comparison.HasErrors, string.Join(Environment.NewLine, comparison.Diagnostics));
-        Assert.False(componentTests.HasErrors, string.Join(Environment.NewLine, componentTests.Diagnostics));
+        Assert.That(comparison.HasErrors, Is.False, string.Join(Environment.NewLine, comparison.Diagnostics));
+        Assert.That(componentTests.HasErrors, Is.False, string.Join(Environment.NewLine, componentTests.Diagnostics));
 
         var verification = SyntaxTree.Parse(CreateVerificationSource(), "floating-comparison-oracle.terrum");
-        Assert.False(verification.HasErrors, string.Join(Environment.NewLine, verification.Diagnostics));
+        Assert.That(verification.HasErrors, Is.False, string.Join(Environment.NewLine, verification.Diagnostics));
         var compilation = Compilation.Create([comparison, componentTests, verification], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
     private static string CreateVerificationSource()

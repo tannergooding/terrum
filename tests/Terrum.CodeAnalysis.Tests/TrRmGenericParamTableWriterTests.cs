@@ -4,7 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -14,7 +14,7 @@ public sealed class TrRmGenericParamTableWriterTests
     private static readonly TrRmGenericParamRow MethodFormal = new(0x1600_0001, 0, 6, 0, 0);
     private static readonly TrRmConstraintRow Constraint = new(1, ushort.MaxValue, 1, 0x1600_0001);
 
-    [Fact]
+    [Test]
     public void EmitsDistinctTypeAndMethodFormalsWithOwnedConstraint()
     {
         var names = Names();
@@ -37,16 +37,16 @@ public sealed class TrRmGenericParamTableWriterTests
             strings, types, methods, signatures, 1);
         var constraintRows = new[] { Constraint };
         var constraintBytes = TrRmConstraintTableWriter.Encode(constraintRows, formals, specs);
-        Assert.Equal(40, formalBytes.Length);
-        Assert.Equal(16, constraintBytes.Length);
-        Assert.Equal(1, formals.GetConstraintOwner(1));
-        Assert.Equal(ushort.MaxValue, BinaryPrimitives.ReadUInt16LittleEndian(constraintBytes.AsSpan(4)));
-        Assert.Equal(Constraint.WitnessRef, BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(12)));
+        Assert.That(formalBytes.Length, Is.EqualTo(40));
+        Assert.That(constraintBytes.Length, Is.EqualTo(16));
+        Assert.That(formals.GetConstraintOwner(1), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(constraintBytes.AsSpan(4)), Is.EqualTo(ushort.MaxValue));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(12)), Is.EqualTo(Constraint.WitnessRef));
 
         formalRows[0] = TypeFormal with { NameStringRow = 0 };
         constraintRows[0] = Constraint with { TargetTypeSpecRow = 0 };
-        Assert.Equal(5u, BinaryPrimitives.ReadUInt32LittleEndian(formalBytes.AsSpan(8)));
-        Assert.Equal(1u, BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(8)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(formalBytes.AsSpan(8)), Is.EqualTo(5u));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(8)), Is.EqualTo(1u));
 
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleBytes),
@@ -61,7 +61,7 @@ public sealed class TrRmGenericParamTableWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnownedOrMalformedFormalsAndConstraints()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => EncodeFormals([]));

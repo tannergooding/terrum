@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -23,7 +23,7 @@ public sealed partial class NativeSourceImportTests
     private const string Utf16ZFixtureKey = "test.application.native-import-abi.NativeFfiUtf16Z";
     private const string MessageBoxFixtureKey = "test.application.native-import-abi.NativeFfiMessageBox";
 
-    [Fact]
+    [Test]
     public void SourceImportRequiresItsExactCatalogSignatureAndCompilerAttribute()
     {
         foreach (var source in new[] {
@@ -34,13 +34,13 @@ public sealed partial class NativeSourceImportTests
         })
         {
             var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
-            Assert.Null(compilation.Program);
-            Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3030"
-                || diagnostic.Code == "TRM3001");
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3030"
+                || diagnostic.Code == "TRM3001"),Is.True);
         }
     }
 
-    [Fact]
+    [Test]
     public void SourceImportSleepMatchesExactFixedWidthSystemSignature()
     {
         var source = $$"""
@@ -54,20 +54,20 @@ public sealed partial class NativeSourceImportTests
             }
             """;
         var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var sleep = Assert.Single(program.Functions, static function => function.IsExternal);
-        Assert.Equal(SleepImportKey, sleep.NativeImportKey);
-        Assert.Equal(PrimitiveType.Void, sleep.ReturnType);
-        Assert.Equal(PrimitiveType.UInt32, Assert.Single(sleep.Variables).Type);
-        Assert.True(sleep.IsNoThrow);
-        Assert.False(sleep.RequiresUnsafeCaller);
-        Assert.False(sleep.DoesNotReturn);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var sleep = global::System.Linq.Enumerable.Single(program.Functions, static function => function.IsExternal);
+        Assert.That(sleep.NativeImportKey, Is.EqualTo(SleepImportKey));
+        Assert.That(sleep.ReturnType, Is.EqualTo(PrimitiveType.Void));
+        Assert.That(global::System.Linq.Enumerable.Single(sleep.Variables).Type, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(sleep.IsNoThrow, Is.True);
+        Assert.That(sleep.RequiresUnsafeCaller, Is.False);
+        Assert.That(sleep.DoesNotReturn, Is.False);
 
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
-        Assert.True(image.AsSpan().IndexOf("KERNEL32.dll\0"u8) >= 0);
-        Assert.True(image.AsSpan().IndexOf("Sleep\0"u8) >= 0);
+        Assert.That(image.AsSpan().IndexOf("KERNEL32.dll\0"u8) >= 0, Is.True);
+        Assert.That(image.AsSpan().IndexOf("Sleep\0"u8) >= 0, Is.True);
 
         foreach (var declaration in new[] {
             $"[NoThrow] extern void Sleep(int32 milliseconds);",
@@ -81,13 +81,13 @@ public sealed partial class NativeSourceImportTests
                 int32 Main() { Sleep(16); return 0; }
                 """;
             var invalidCompilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(invalidSource));
-            Assert.Null(invalidCompilation.Program);
-            Assert.Contains(invalidCompilation.Diagnostics, static diagnostic =>
-                diagnostic.Code == "TRM3030" || diagnostic.Code == "TRM3001");
+            Assert.That(invalidCompilation.Program, Is.Null);
+            Assert.That(global::System.Linq.Enumerable.Any(invalidCompilation.Diagnostics,static diagnostic =>
+                diagnostic.Code == "TRM3030" || diagnostic.Code == "TRM3001"),Is.True);
         }
     }
 
-    [Fact]
+    [Test]
     public void SourceCannotShadowCompilerOwnedImportAttribute()
     {
         var source = $$"""
@@ -99,11 +99,11 @@ public sealed partial class NativeSourceImportTests
             void Main() {}
             """;
         var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3003");
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3003"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void Utf16ZRequiresAValidLiteralAndCataloguedNoEscapeArgument()
     {
         var catalog = NativeImportCatalog.CreateForTesting("test-native-utf16z-v1",
@@ -155,30 +155,30 @@ public sealed partial class NativeSourceImportTests
         {
             var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
                 BoundRuntimePolicy.FailFast);
-            Assert.Null(compilation.Program);
-            Assert.NotEmpty(compilation.Diagnostics);
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
         }
 
         var withoutNoEscape = new NativeImportDefinition(Utf16ZFixtureKey, "native-import-abi-probe.dll",
             "NativeFfiUtf16Z", [PrimitiveType.NativeUtf16ZPointer], PrimitiveType.Int32,
             true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-            "test-native-utf16z-without-contract-v1", [withoutNoEscape]));
+            "test-native-utf16z-without-contract-v1", [withoutNoEscape]))!;
     }
 
-    [Fact]
+    [Test]
     public void Utf16ZLiteralPoolValidatesEncodingTerminationAndSize()
     {
         var maximum = new string('x', (NativeUtf16ZContract.MaximumStorageBytes / sizeof(char)) - 1);
-        Assert.True(NativeUtf16ZContract.IsValidLiteral(maximum));
-        Assert.False(NativeUtf16ZContract.IsValidLiteral(maximum + "x"));
-        Assert.False(NativeUtf16ZContract.IsValidLiteral("before\0after"));
-        Assert.True(NativeUtf16ZContract.IsValidLiteral("supplementary \U0001F642"));
-        Assert.False(NativeUtf16ZContract.IsValidLiteral(new string('\uD83D', 1)));
-        Assert.False(NativeUtf16ZContract.IsValidPool([maximum, "extra"]));
+        Assert.That(NativeUtf16ZContract.IsValidLiteral(maximum), Is.True);
+        Assert.That(NativeUtf16ZContract.IsValidLiteral(maximum + "x"), Is.False);
+        Assert.That(NativeUtf16ZContract.IsValidLiteral("before\0after"), Is.False);
+        Assert.That(NativeUtf16ZContract.IsValidLiteral("supplementary \U0001F642"), Is.True);
+        Assert.That(NativeUtf16ZContract.IsValidLiteral(new string('\uD83D', 1)), Is.False);
+        Assert.That(NativeUtf16ZContract.IsValidPool([maximum, "extra"]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeHwndNoOwnerIsRestrictedToItsCataloguedArgument()
     {
         var catalog = NativeImportCatalog.CreateForTesting("test-native-hwnd-v1",
@@ -233,8 +233,8 @@ public sealed partial class NativeSourceImportTests
             var compilation = Compilation.CreateWithNativeImports(
                 [SyntaxTree.Parse(external + Environment.NewLine + body)], catalog,
                 BoundRuntimePolicy.FailFast);
-            Assert.Null(compilation.Program);
-            Assert.NotEmpty(compilation.Diagnostics);
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
         }
 
         var spoofed = $$"""
@@ -251,8 +251,8 @@ public sealed partial class NativeSourceImportTests
             """;
         var spoofedCompilation = Compilation.CreateWithNativeImports(
             [SyntaxTree.Parse(spoofed)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.Null(spoofedCompilation.Program);
-        Assert.Contains(spoofedCompilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3003");
+        Assert.That(spoofedCompilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(spoofedCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3003"),Is.True);
 
         var validSource = $$"""
             [Terrum.Interop.NativeImport("{{MessageBoxFixtureKey}}")]
@@ -266,17 +266,17 @@ public sealed partial class NativeSourceImportTests
             """;
         var validCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(validSource)], catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.False(validCompilation.HasErrors, string.Join(Environment.NewLine, validCompilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(validCompilation.Program);
+        Assert.That(validCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, validCompilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = validCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         var mainIndex = Array.FindIndex(program.Functions.ToArray(), static function => function.Name == "Main");
         var main = program.Functions[mainIndex];
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImports(
-            program, NativeRuntimePolicy.FailFast));
-        var boundReturn = Assert.IsType<BoundReturn>(main.Body.Statements[0]);
-        var call = Assert.IsType<BoundCall>(boundReturn.Value);
+            program, NativeRuntimePolicy.FailFast))!;
+        var boundReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual2 = main.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual2!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual3 = boundReturn.Value; Assert.That(__nunitActual3, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual3!; }))();
         var ownerArgumentIndex = Enumerable.Range(0, call.Arguments.Length)
             .Single(index => call.ParameterIndex(index) == 0);
-        Assert.IsType<BoundNativeNoOwner>(call.Arguments[ownerArgumentIndex]);
+        Assert.That(call.Arguments[ownerArgumentIndex], Is.TypeOf<BoundNativeNoOwner>());
 
         var forgedCall = call with {
             Arguments = call.Arguments.SetItem(ownerArgumentIndex,
@@ -292,7 +292,7 @@ public sealed partial class NativeSourceImportTests
             Functions = program.Functions.SetItem(mainIndex, forgedMain),
         };
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImportsForTesting(
-            forgedProgram, NativeRuntimePolicy.FailFast));
+            forgedProgram, NativeRuntimePolicy.FailFast))!;
 
         var externalIndex = Array.FindIndex(program.Functions.ToArray(),
             static function => function.IsExternal);
@@ -304,19 +304,19 @@ public sealed partial class NativeSourceImportTests
             NativeUtf16ZLiterals = [],
         };
         _ = Assert.Throws<NotSupportedException>(() =>
-            SemanticVerifier.RejectSourceNativeImports(strippedProgram, "JIT"));
+            SemanticVerifier.RejectSourceNativeImports(strippedProgram, "JIT"))!;
         _ = Assert.Throws<ArgumentException>(() =>
-            NativeEmitter.EmitCode(strippedProgram, NativeRuntimePolicy.FailFast));
+            NativeEmitter.EmitCode(strippedProgram, NativeRuntimePolicy.FailFast))!;
 
         var withoutNoOwner = new NativeImportDefinition(MessageBoxFixtureKey,
             "native-import-abi-probe.dll", "NativeFfiMessageBox",
             [PrimitiveType.NativeWindowHandle], PrimitiveType.Int32,
             true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-            "test-native-hwnd-without-contract-v1", [withoutNoOwner]));
+            "test-native-hwnd-without-contract-v1", [withoutNoOwner]))!;
     }
 
-    [Fact]
+    [Test]
     public void Utf16ZLiteralIndexIsRecheckedBeforeNativeEmission()
     {
         var catalog = NativeImportCatalog.CreateForTesting("test-native-utf16z-v1",
@@ -333,25 +333,25 @@ public sealed partial class NativeSourceImportTests
             """;
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
             BoundRuntimePolicy.FailFast);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
 
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImportsForTesting(
-            program with { NativeUtf16ZLiterals = [] }, NativeRuntimePolicy.FailFast));
+            program with { NativeUtf16ZLiterals = [] }, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void BodylessCallableRequiresExtern()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("uint32 CurrentThreadId(); void Main() {}"));
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3030");
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3030"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public async Task SourceImportCallsReviewedSystemFunctionAsync()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var source = $$"""
             [Terrum.Interop.NativeImport("{{ImportKey}}")]
             [NoThrow]
@@ -372,25 +372,25 @@ public sealed partial class NativeSourceImportTests
             int32 Helper() { return 7; }
             """;
         var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(NativeImportCatalog.WindowsX64.Identity, program.NativeImportCatalogId);
-        Assert.Equal(2, program.Functions.Count(static function => function.IsExternal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        Assert.That(program.NativeImportCatalogId, Is.EqualTo(NativeImportCatalog.WindowsX64.Identity));
+        Assert.That(program.Functions.Count(static function => function.IsExternal), Is.EqualTo(2));
 
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program,
             [new NativeImportBinding("CurrentThreadId", "kernel32.dll", "GetCurrentThreadId")],
-            NativeRuntimePolicy.FailFast));
+            NativeRuntimePolicy.FailFast))!;
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitCode(program,
-            NativeRuntimePolicy.FailFast));
+            NativeRuntimePolicy.FailFast))!;
         _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(
-            program with { EntryPoint = -1 }, ["Helper"]));
+            program with { EntryPoint = -1 }, ["Helper"]))!;
         _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(
-            program with { EntryPoint = -1 }, "native-import-test"));
+            program with { EntryPoint = -1 }, "native-import-test"))!;
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibraryWithImports(
             program with { EntryPoint = -1 }, ["Helper"],
             [new NativeImportBinding("CurrentThreadId", "unreviewed.dll", "UnreviewedTarget")],
-            NativeRuntimePolicy.FailFast));
+            NativeRuntimePolicy.FailFast))!;
 
         var directory = Directory.CreateTempSubdirectory("terrum-source-import-").FullName;
         var executablePath = Path.Combine(directory, "source-import.exe");
@@ -415,22 +415,22 @@ public sealed partial class NativeSourceImportTests
                 }
                 throw;
             }
-            Assert.Equal(0, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(0));
         }
         finally
         {
-            File.Delete(executablePath);
+            await TestFileCleanup.DeleteWithRetryAsync(executablePath).ConfigureAwait(true);
             Directory.Delete(directory);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task SourceImportsMatchIndependentCAbiAndDx11SdkLayoutsAsync()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Microsoft Visual Studio", "Installer", "vswhere.exe");
-        Assert.True(File.Exists(vswhere), "Visual Studio discovery is required to build the C ABI fixture.");
+        Assert.That(File.Exists(vswhere), Is.True, "Visual Studio discovery is required to build the C ABI fixture.");
         var repositoryRoot = FindRepositoryRoot();
         var discover = new ProcessStartInfo(vswhere);
         discover.WorkingDirectory = repositoryRoot;
@@ -443,7 +443,7 @@ public sealed partial class NativeSourceImportTests
         }
         var installation = (await RunAsync(discover, TimeSpan.FromSeconds(10)).ConfigureAwait(false)).Trim();
         var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
-        Assert.True(File.Exists(environment), "Visual Studio x64 C++ build tools are required for the C ABI fixture.");
+        Assert.That(File.Exists(environment), Is.True, "Visual Studio x64 C++ build tools are required for the C ABI fixture.");
 
         var directory = Directory.CreateTempSubdirectory("terrum-native-import-abi-").FullName;
         var libraryPath = Path.Combine(directory, "native-import-abi-probe.dll");
@@ -523,8 +523,8 @@ public sealed partial class NativeSourceImportTests
                 """;
             var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
                 BoundRuntimePolicy.FailFast);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
             var image = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
             await File.WriteAllBytesAsync(executablePath, image).ConfigureAwait(false);
 
@@ -546,7 +546,7 @@ public sealed partial class NativeSourceImportTests
                 }
                 throw;
             }
-            Assert.Equal(0, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(0));
 
             var fakeUser32BuildDirectory = Path.Combine(directory, "fake-user32");
             Directory.CreateDirectory(fakeUser32BuildDirectory);
@@ -599,7 +599,7 @@ public sealed partial class NativeSourceImportTests
                 }
                 throw;
             }
-            Assert.Equal(0, loaderProcess.ExitCode);
+            Assert.That(loaderProcess.ExitCode, Is.EqualTo(0));
         }
         finally
         {

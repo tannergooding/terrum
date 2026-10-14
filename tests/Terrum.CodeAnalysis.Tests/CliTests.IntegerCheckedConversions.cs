@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -261,18 +261,14 @@ public sealed partial class CliTests
                 After = upperCanary,
             };
             var status = invoke(input, ref guarded.Value);
-            Assert.True(status == (expectedSuccess ? 1 : 0),
-                $"{name} returned status {status} for input {input}.");
-            Assert.True(resultValue(guarded.Value) == (expectedSuccess ? source : resultValue(sentinel)),
-                $"{name} returned an unexpected output for input {input}.");
+            Assert.That(status == (expectedSuccess ? 1 : 0), Is.True, $"{name} returned status {status} for input {input}.");
+            Assert.That(resultValue(guarded.Value) == (expectedSuccess ? source : resultValue(sentinel)), Is.True, $"{name} returned an unexpected output for input {input}.");
             if (!expectedSuccess)
             {
-                Assert.Equal(sentinel, guarded.Value);
+                Assert.That(guarded.Value, Is.EqualTo(sentinel));
             }
-            Assert.True(EqualityComparer<TResult>.Default.Equals(lowerCanary, guarded.Before),
-                $"{name} changed the lower canary for input {input}.");
-            Assert.True(EqualityComparer<TResult>.Default.Equals(upperCanary, guarded.After),
-                $"{name} changed the upper canary for input {input}.");
+            Assert.That(EqualityComparer<TResult>.Default.Equals(lowerCanary, guarded.Before), Is.True, $"{name} changed the lower canary for input {input}.");
+            Assert.That(EqualityComparer<TResult>.Default.Equals(upperCanary, guarded.After), Is.True, $"{name} changed the upper canary for input {input}.");
         }
     }
 

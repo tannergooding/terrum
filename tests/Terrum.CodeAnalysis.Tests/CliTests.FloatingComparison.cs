@@ -2,7 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -108,12 +108,12 @@ public sealed partial class CliTests
     {
         var left = BitConverter.UInt32BitsToSingle(leftBits);
         var right = BitConverter.UInt32BitsToSingle(rightBits);
-        Assert.Equal(left == right ? 1 : 0, equal(leftBits, rightBits));
-        Assert.Equal(left != right ? 1 : 0, notEqual(leftBits, rightBits));
-        Assert.Equal(left < right ? 1 : 0, lessThan(leftBits, rightBits));
-        Assert.Equal(left <= right ? 1 : 0, lessThanOrEqual(leftBits, rightBits));
-        Assert.Equal(left > right ? 1 : 0, greaterThan(leftBits, rightBits));
-        Assert.Equal(left >= right ? 1 : 0, greaterThanOrEqual(leftBits, rightBits));
+        Assert.That(equal(leftBits, rightBits), Is.EqualTo(left == right ? 1 : 0));
+        Assert.That(notEqual(leftBits, rightBits), Is.EqualTo(left != right ? 1 : 0));
+        Assert.That(lessThan(leftBits, rightBits), Is.EqualTo(left < right ? 1 : 0));
+        Assert.That(lessThanOrEqual(leftBits, rightBits), Is.EqualTo(left <= right ? 1 : 0));
+        Assert.That(greaterThan(leftBits, rightBits), Is.EqualTo(left > right ? 1 : 0));
+        Assert.That(greaterThanOrEqual(leftBits, rightBits), Is.EqualTo(left >= right ? 1 : 0));
     }
 
     private static void AssertFloat64Comparison(
@@ -128,11 +128,11 @@ public sealed partial class CliTests
     {
         var left = BitConverter.UInt64BitsToDouble(leftBits);
         var right = BitConverter.UInt64BitsToDouble(rightBits);
-        Assert.Equal(left == right ? 1 : 0, equal(leftBits, rightBits));
-        Assert.Equal(left != right ? 1 : 0, notEqual(leftBits, rightBits));
-        Assert.Equal(left < right ? 1 : 0, lessThan(leftBits, rightBits));
-        Assert.Equal(left <= right ? 1 : 0, lessThanOrEqual(leftBits, rightBits));
-        Assert.Equal(left > right ? 1 : 0, greaterThan(leftBits, rightBits));
-        Assert.Equal(left >= right ? 1 : 0, greaterThanOrEqual(leftBits, rightBits));
+        Assert.That(equal(leftBits, rightBits), Is.EqualTo(left == right ? 1 : 0));
+        Assert.That(notEqual(leftBits, rightBits), Is.EqualTo(left != right ? 1 : 0));
+        Assert.That(lessThan(leftBits, rightBits), Is.EqualTo(left < right ? 1 : 0));
+        Assert.That(lessThanOrEqual(leftBits, rightBits), Is.EqualTo(left <= right ? 1 : 0));
+        Assert.That(greaterThan(leftBits, rightBits), Is.EqualTo(left > right ? 1 : 0));
+        Assert.That(greaterThanOrEqual(leftBits, rightBits), Is.EqualTo(left >= right ? 1 : 0));
     }
 }

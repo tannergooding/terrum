@@ -4,23 +4,21 @@ using System.IO;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Fact]
+    [Test]
     public async Task UniqueOwnerSampleAgreesBetweenAotAndJitAsync()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
             "unique-owner.terrum")).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task NestedStructReceiverSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -34,10 +32,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task UniqueMutableReceiverUpdatesNamedOwnerAndForwardedThisAsync(bool checkedFailures)
     {
         const string Source = """
@@ -70,7 +66,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedFailureRetainsUniqueOwnerMutationAsync()
     {
         const string Source = """
@@ -94,10 +90,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NestedMutableReceiverThroughUniqueOwnerUpdatesOriginalAsync(bool checkedFailures)
     {
         const string Source = """
@@ -126,10 +120,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NestedUniqueChildReceiverUpdatesOriginalAsync(bool checkedFailures)
     {
         const string Source = """
@@ -160,10 +152,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NestedMutableLoanPermitsReadonlyArgumentQueryAsync(bool checkedFailures)
     {
         const string Source = """
@@ -188,19 +178,14 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(1, "bool", "false", "true", "if (Value) { return 42; } return 0;", "")]
-    [InlineData(2, "char16", "char16(0)", "char16(42)", "return int32(Value);", "")]
-    [InlineData(3, "bool", "false", "true", "if (Value) { return 42; } return 0;",
-        "public bool Second; public bool Third;")]
-    [InlineData(4, "int32", "0", "42", "return Value;", "")]
-    [InlineData(6, "char16", "char16(0)", "char16(42)", "return int32(Value);",
-        "public char16 Second; public char16 Third;")]
-    [InlineData(8, "int64", "0", "42", "return int32(Value);", "")]
-    [InlineData(12, "int32", "0", "42", "return Value;",
-        "public int32 Second; public int32 Third;")]
-    [InlineData(16, "int64", "0", "42", "return int32(Value);", "public int64 Second;")]
+    [TestCase(1,"bool","false","true","if (Value) { return 42; } return 0;","")]
+    [TestCase(2,"char16","char16(0)","char16(42)","return int32(Value);","")]
+    [TestCase(3,"bool","false","true","if (Value) { return 42; } return 0;",        "public bool Second; public bool Third;")]
+    [TestCase(4,"int32","0","42","return Value;","")]
+    [TestCase(6,"char16","char16(0)","char16(42)","return int32(Value);",        "public char16 Second; public char16 Third;")]
+    [TestCase(8,"int64","0","42","return int32(Value);","")]
+    [TestCase(12,"int32","0","42","return Value;",        "public int32 Second; public int32 Third;")]
+    [TestCase(16,"int64","0","42","return int32(Value);","public int64 Second;")]
     public async Task MutableReceiverPreservesEveryDirectAndIndirectCopyWidthAsync(
         int size, string type, string initial, string updated, string read, string additionalFields)
     {
@@ -223,15 +208,13 @@ public sealed partial class JitTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(System.Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(size, Assert.IsType<BoundProgram>(compilation.Program).Structures[0].Size);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(System.Environment.NewLine, compilation.Diagnostics));
+        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Structures[0].Size, Is.EqualTo(size));
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task MutableStructReceiverWritesOriginalAcrossNestedCallsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -257,10 +240,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task MutableIndirectStructReceiverWritesOriginalAcrossCallsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -280,10 +261,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task MutableReceiverWritesNestedFieldWithoutOverwritingAdjacentBytesAsync(bool checkedFailures)
     {
         const string Source = """
@@ -315,7 +294,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedFailureRetainsWritesThroughBorrowedReceiverAsync()
     {
         const string Source = """
@@ -338,10 +317,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NestedMutableReceiverWritesOriginalAcrossForwardingAsync(bool checkedFailures)
     {
         const string Source = """
@@ -372,7 +349,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedFailureRetainsWritesThroughNestedMutableReceiverAsync()
     {
         const string Source = """
@@ -396,10 +373,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task NestedReceiverAllowsReadonlyArgumentFromReservedRootAsync(bool checkedFailures)
     {
         const string Source = """

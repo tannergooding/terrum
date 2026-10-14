@@ -4,13 +4,13 @@ using System;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class StaticProofTests
 {
-    [Fact]
+    [Test]
     public void ProvenBodyChecksEraseWhileOrdinaryRequireRemainsExecutable()
     {
         const string Source = """
@@ -24,25 +24,20 @@ public sealed class StaticProofTests
             }
             """;
         var tree = SyntaxTree.Parse(Source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(Source, tree.Root.ToFullString());
-        _ = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticRequireStatement);
-        _ = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticEnsureStatement);
-        var version = Assert.IsAssignableFrom<System.Reflection.FieldInfo>(
-            typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion)));
-        Assert.Equal("syntax-46", version.GetRawConstantValue());
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        _ = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticRequireStatement);
+        _ = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticEnsureStatement);
+        var version = ((global::System.Func<System.Reflection.FieldInfo>)(() => { var __nunitActual0 = typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion)); Assert.That(__nunitActual0, Is.InstanceOf<System.Reflection.FieldInfo>()); return (System.Reflection.FieldInfo)__nunitActual0!; }))();
+        Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-46"));
 
         var compilation = Compilation.Create(tree);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name == "Main");
-        Assert.Collection(main.Body.Statements,
-            statement => Assert.IsType<BoundLocal>(statement),
-            statement => Assert.IsType<BoundRequire>(statement),
-            statement => Assert.IsType<BoundReturn>(statement));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().Functions, function => function.Name == "Main");
+        { var __nunitItems5 = global::System.Linq.Enumerable.ToArray(main.Body.Statements); Assert.That(__nunitItems5, Has.Length.EqualTo(3)); ((global::System.Func<BoundLocal>)(() => { var __nunitActual2 = __nunitItems5[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual2!; }))(); ((global::System.Func<BoundRequire>)(() => { var __nunitActual3 = __nunitItems5[1]; Assert.That(__nunitActual3, Is.TypeOf<BoundRequire>()); return (BoundRequire)__nunitActual3!; }))(); ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = __nunitItems5[2]; Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))(); }
     }
 
-    [Fact]
+    [Test]
     public void OuterEnsureIsIndependentOfEarlierNormalReturnPaths()
     {
         const string Source = """
@@ -53,13 +48,12 @@ public sealed class StaticProofTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);
-        Assert.DoesNotContain(main.Body.Statements,
-            statement => statement.GetType().Name.Contains("Static", StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var main = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions);
+        Assert.That(global::System.Linq.Enumerable.Any(main.Body.Statements,statement => statement.GetType().Name.Contains("Static", StringComparison.Ordinal)),Is.False);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireUsesExactLocalPredicatesOnConditionalEdges()
     {
         const string Source = """
@@ -108,10 +102,10 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireUsesKnownOperandsToDisambiguateShortCircuitEdges()
     {
         const string Source = """
@@ -160,12 +154,10 @@ public sealed class StaticProofTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void StaticRequireRefinesRecursiveShortCircuitOperands(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -221,15 +213,13 @@ public sealed class StaticProofTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(210, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(210));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void StaticRequireUsesExactFloatingPredicatesWithoutOrderingComplements(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -319,13 +309,13 @@ public sealed class StaticProofTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(336, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(336));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireDoesNotInferFloatOrderingComplements()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -338,12 +328,11 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(float32(0) / float32(0)); }
             """));
 
-        Assert.Contains(compilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026"
-                && diagnostic.Message.Contains("not established", StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"
+                && diagnostic.Message.Contains("not established", StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireNormalizesReversedScalarComparisons()
     {
         const string Source = """
@@ -410,12 +399,10 @@ public sealed class StaticProofTests
             int32 Main() { return 42; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void StaticRequireDerivesIntegerComparisonRangesFromBranchConditions(NativeRuntimePolicy policy)
     {
         const string Source = """
@@ -447,13 +434,13 @@ public sealed class StaticProofTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(84, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireUsesIntegerExclusionsWithBranchBounds()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -469,10 +456,10 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(1); }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireReusesExactLocalToLocalComparisons()
     {
         const string Source = """
@@ -500,13 +487,13 @@ public sealed class StaticProofTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(126, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(126));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireTracksOrdinaryScalarValueParametersButNotOutputParameters()
     {
         const string Source = """
@@ -523,9 +510,9 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1, true); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var outputCompilation = Compilation.Create(SyntaxTree.Parse("""
             bool Verify(out int32 value) {
@@ -537,12 +524,11 @@ public sealed class StaticProofTests
             }
             int32 Main() { return 0; }
             """));
-        Assert.Contains(outputCompilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026"
-                && diagnostic.Message.Contains("not established", StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(outputCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"
+                && diagnostic.Message.Contains("not established", StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireRefinesEagerBooleanOperatorEdges()
     {
         const string Source = """
@@ -589,9 +575,9 @@ public sealed class StaticProofTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(168, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(168));
 
         var reachableMiddle = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 input) {
@@ -604,11 +590,10 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(0); }
             """));
-        Assert.Contains(reachableMiddle.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(reachableMiddle.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireTracksExactBooleanInitializersAssignmentsAndJoins()
     {
         const string Source = """
@@ -632,12 +617,12 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(false) + Verify(true); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(84, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(84));
     }
 
-    [Fact]
+    [Test]
     public void StaticProofAssignmentInvalidatesOnlyFactsAboutTheAssignedLocal()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -652,9 +637,9 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1); }
             """));
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(1, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(1));
 
         var staleCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -666,11 +651,10 @@ public sealed class StaticProofTests
                 return 0;
             }
             """));
-        Assert.Contains(staleCompilation.Diagnostics,
-                static diagnostic => diagnostic.Code == "TRM3025");
+        Assert.That(global::System.Linq.Enumerable.Any(staleCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3025"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticProofJoinsCommonIntegerConsequencesFromReachableEdges()
     {
         const string Source = """
@@ -726,12 +710,12 @@ public sealed class StaticProofTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(168, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(168));
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireTransfersRepresentableIntegerIntervalsToLocals()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -748,9 +732,9 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(9); }
             """));
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var possibleOverflow = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 input) {
@@ -761,11 +745,10 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(0); }
             """));
-        Assert.Contains(possibleOverflow.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(possibleOverflow.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticProofTransfersCheckedIntegerRangesAndRejectsPossibleOverflow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -863,9 +846,9 @@ public sealed class StaticProofTests
                     + VerifyBitwise(-1) + VerifyUnsignedBitwise(uint32(0x80000000));
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(546, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(546));
 
         var divisionOverflow = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 value) {
@@ -876,8 +859,7 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(int32.MinValue); }
             """));
-        Assert.Contains(divisionOverflow.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(divisionOverflow.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
 
         var zeroDivisor = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 divisor) {
@@ -886,7 +868,7 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(1); }
             """));
-        Assert.Contains(zeroDivisor.Diagnostics, static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(zeroDivisor.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
 
         var uncheckedShiftCount = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 value, int32 count) {
@@ -895,8 +877,7 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(1, 2); }
             """));
-        Assert.Contains(uncheckedShiftCount.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(uncheckedShiftCount.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
 
         var potentiallyWideShiftCount = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 value, int32 count) {
@@ -907,8 +888,7 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(1, 2); }
             """));
-        Assert.Contains(potentiallyWideShiftCount.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(potentiallyWideShiftCount.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
 
         var overflow = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 value) {
@@ -919,10 +899,10 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(int32.MaxValue); }
             """));
-        Assert.Contains(overflow.Diagnostics, static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(overflow.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticProofPreservesUnchangedLocalsAcrossCallsAndInvalidatesOutputs()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -947,10 +927,10 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1); }
             """));
 
-        Assert.Equal("TRM3026", Assert.Single(compilation.Diagnostics).Code);
+        Assert.That(global::System.Linq.Enumerable.Single(compilation.Diagnostics).Code, Is.EqualTo("TRM3026"));
     }
 
-    [Fact]
+    [Test]
     public void SavedBooleanAndDirectCopiesRestoreCurrentPredicateFacts()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -977,9 +957,9 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1, true) + Verify(-1, false); }
             """));
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(84, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(84));
 
         var copiedValueCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -995,8 +975,7 @@ public sealed class StaticProofTests
                 return 0;
             }
             """));
-        Assert.False(copiedValueCompilation.HasErrors,
-            string.Join(Environment.NewLine, copiedValueCompilation.Diagnostics));
+        Assert.That(copiedValueCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, copiedValueCompilation.Diagnostics));
 
         var invalidatedCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -1009,8 +988,7 @@ public sealed class StaticProofTests
                 return 0;
             }
             """));
-        Assert.Contains(invalidatedCompilation.Diagnostics,
-                static diagnostic => diagnostic.Code == "TRM3025");
+        Assert.That(global::System.Linq.Enumerable.Any(invalidatedCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3025"),Is.True);
 
         var differentPredicatesCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(int32 first, int32 second, bool choose) {
@@ -1027,11 +1005,10 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(1, 2, true); }
             """));
-        Assert.Contains(differentPredicatesCompilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(differentPredicatesCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireUsesStableWhileConditionOnTheBodyEdge()
     {
         const string Source = """
@@ -1046,12 +1023,12 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1) + Verify(0); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(84, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(84));
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireDoesNotCheckUnreachablePointObligations()
     {
         const string Source = """
@@ -1076,9 +1053,9 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = compilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
         var effectfulCompilation = Compilation.Create(SyntaxTree.Parse("""
             bool Runtime() { return true; }
@@ -1089,11 +1066,10 @@ public sealed class StaticProofTests
                 return 42;
             }
             """));
-        Assert.Contains(effectfulCompilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3027");
+        Assert.That(global::System.Linq.Enumerable.Any(effectfulCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3027"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireUsesTheSuccessfulEdgeOfAnOrdinaryRequire()
     {
         const string Source = """
@@ -1106,12 +1082,12 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = compilation.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireDoesNotUseFactsInvalidatedByAnEffectfulRequireCondition()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1129,12 +1105,11 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(1); }
             """));
-        Assert.Contains(compilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026"
-                && diagnostic.Message.Contains("not established", StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"
+                && diagnostic.Message.Contains("not established", StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequirePreservesExactLocalComparisonsAcrossIndependentCalls()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1151,10 +1126,10 @@ public sealed class StaticProofTests
             int32 Main() { return Compare(1, 2); }
             """));
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireUsesBooleanAssignmentsAfterIndependentCalls()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1168,10 +1143,10 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(); }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireUsesReflexiveEqualityOnlyForNonFloatingScalars()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -1183,7 +1158,7 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(1); }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var floatingCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Verify(float32 input) {
@@ -1193,12 +1168,11 @@ public sealed class StaticProofTests
             }
             int32 Main() { return Verify(float32(1)); }
             """));
-        Assert.Contains(floatingCompilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3026"
-                && diagnostic.Message.Contains("not established", StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(floatingCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3026"
+                && diagnostic.Message.Contains("not established", StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticRequireRejectsFloatingPointOrderingComplements()
     {
         const string Source = """
@@ -1214,22 +1188,20 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(float32(0)); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.Equal(1, compilation.Diagnostics.Length);
-        Assert.All(compilation.Diagnostics, diagnostic => Assert.Equal("TRM3026", diagnostic.Code));
+        Assert.That(compilation.Diagnostics.Length, Is.EqualTo(1));
+        {var __nunitItems0 = compilation.Diagnostics;        Assert.Multiple(() => { foreach (var __nunitItem22 in __nunitItems0) { Assert.That(__nunitItem22.Code, Is.EqualTo("TRM3026")); } });}
     }
-
-    [Theory]
-    [InlineData("if (value > 0) { static require value <= 0; }", "TRM3025")]
-    [InlineData("if (value > 0) { static require value < 0; }", "TRM3025")]
-    [InlineData("if (value > 0) { static require value > 1; }", "TRM3026")]
-    [InlineData("if (value > 0) {} static require value > 0;", "TRM3026")]
-    [InlineData("if (value > 0) { value = 0; static require value > 0; }", "TRM3025")]
-    [InlineData("static require input > 0;", "TRM3026")]
-    [InlineData("if (NoThrowPredicate(value)) { static require value > 0; }", "TRM3026")]
-    [InlineData("if (value > 0 || value < 10) { static require value > 0; }", "TRM3026")]
-    [InlineData("if (value > 0 && value < 10) {} else { static require value <= 0; }", "TRM3026")]
-    [InlineData("mut bool enabled = true; if (value > 0 && enabled) {} else { static require !enabled; }", "TRM3025")]
-    [InlineData("mut bool enabled = true; if (enabled || value > 0) { static require value > 0; }", "TRM3026")]
+    [TestCase("if (value > 0) { static require value <= 0; }","TRM3025")]
+    [TestCase("if (value > 0) { static require value < 0; }","TRM3025")]
+    [TestCase("if (value > 0) { static require value > 1; }","TRM3026")]
+    [TestCase("if (value > 0) {} static require value > 0;","TRM3026")]
+    [TestCase("if (value > 0) { value = 0; static require value > 0; }","TRM3025")]
+    [TestCase("static require input > 0;","TRM3026")]
+    [TestCase("if (NoThrowPredicate(value)) { static require value > 0; }","TRM3026")]
+    [TestCase("if (value > 0 || value < 10) { static require value > 0; }","TRM3026")]
+    [TestCase("if (value > 0 && value < 10) {} else { static require value <= 0; }","TRM3026")]
+    [TestCase("mut bool enabled = true; if (value > 0 && enabled) {} else { static require !enabled; }","TRM3025")]
+    [TestCase("mut bool enabled = true; if (enabled || value > 0) { static require value > 0; }","TRM3026")]
     public void StaticRequireDoesNotUseContradictedOrUnstableFacts(string statements, string code)
     {
         var source = """
@@ -1243,19 +1215,17 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(1); }
             """.Replace("STATEMENTS", statements, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
-
-    [Theory]
-    [InlineData("static require false;", "TRM3025", "evaluates to false")]
-    [InlineData("static ensure false;", "TRM3025", "evaluates to false")]
-    [InlineData("static require input == 42;", "TRM3026", "not established")]
-    [InlineData("static ensure input == 42;", "TRM3026", "not established")]
-    [InlineData("static require int32(1) / int32(0) == 0;", "TRM3026", "checked arithmetic")]
-    [InlineData("static require Recurse(100) == 0;", "TRM3026", "call depth")]
-    [InlineData("static require Runtime();", "TRM3027", "unsupported effects")]
-    [InlineData("static ensure Runtime();", "TRM3027", "unsupported effects")]
-    [InlineData("const bool known = true; static ensure known;", "TRM3026", "not established")]
+    [TestCase("static require false;","TRM3025","evaluates to false")]
+    [TestCase("static ensure false;","TRM3025","evaluates to false")]
+    [TestCase("static require input == 42;","TRM3026","not established")]
+    [TestCase("static ensure input == 42;","TRM3026","not established")]
+    [TestCase("static require int32(1) / int32(0) == 0;","TRM3026","checked arithmetic")]
+    [TestCase("static require Recurse(100) == 0;","TRM3026","call depth")]
+    [TestCase("static require Runtime();","TRM3027","unsupported effects")]
+    [TestCase("static ensure Runtime();","TRM3027","unsupported effects")]
+    [TestCase("const bool known = true; static ensure known;","TRM3026","not established")]
     public void FalseUnknownAndUnsupportedProofsHaveDistinctDiagnostics(string statement, string code, string text)
     {
         var source = """
@@ -1268,13 +1238,11 @@ public sealed class StaticProofTests
             int32 Main() { return Verify(42); }
             """.Replace("STATEMENT", statement, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code
-            && diagnostic.Message.Contains(text, StringComparison.Ordinal));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code
+            && diagnostic.Message.Contains(text, StringComparison.Ordinal)),Is.True);
     }
-
-    [Theory]
-    [InlineData("if (true) { static ensure true; }", "TRM3026")]
-    [InlineData("static ensure true;", "TRM3026")]
+    [TestCase("if (true) { static ensure true; }","TRM3026")]
+    [TestCase("static ensure true;","TRM3026")]
     public void NestedEnsureAndConstructorEnsureAreNotPointChecks(string statement, string code)
     {
         ArgumentNullException.ThrowIfNull(statement);
@@ -1283,17 +1251,17 @@ public sealed class StaticProofTests
             : "struct Box { public int32 Value; public Box(int32 value) { "
                 + statement + " Value = value; } } int32 Main() { return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void StaticProofsCannotBePublishedAsTopLevelClauses()
     {
         var tree = SyntaxTree.Parse("static require true; int32 Main() { return 42; }");
-        Assert.True(tree.HasErrors);
+        Assert.That(tree.HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void RuntimeParametersInGenericTemplatesDoNotBecomeProofs()
     {
         const string Source = """
@@ -1304,6 +1272,6 @@ public sealed class StaticProofTests
             int32 Main() { return Forward(int32(42)); }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3026");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3026"),Is.True);
     }
 }

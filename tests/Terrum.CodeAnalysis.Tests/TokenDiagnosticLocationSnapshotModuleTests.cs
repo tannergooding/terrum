@@ -8,15 +8,14 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TokenDiagnosticLocationSnapshotModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task PersistedDiagnosticLocationsRebindFreshScannerGrantsAsync(BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -33,8 +32,7 @@ public sealed class TokenDiagnosticLocationSnapshotModuleTests
         {
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             trees[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(trees[index].HasErrors,
-                string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -65,10 +63,9 @@ public sealed class TokenDiagnosticLocationSnapshotModuleTests
         var seed = SourceText.From("seed");
         var producerCompilation = Compilation.Create(trees,
             ScannerHost.CreateInvocationProfileBuffers(seed), policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.VerifyDiagnosticLocations"]);
 
         var consumerCompilation = Compilation.Create(
@@ -77,12 +74,11 @@ public sealed class TokenDiagnosticLocationSnapshotModuleTests
                 int32 Main() { return VerifyDiagnosticLocations(); }
                 """, "token-diagnostic-location-consumer.terrum"),
             ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.True(linked.RequiresSourceGrant);
+        Assert.That(linked.RequiresSourceGrant, Is.True);
 
         var fixtures = new[] {
             "",
@@ -99,10 +95,8 @@ public sealed class TokenDiagnosticLocationSnapshotModuleTests
             var source = SourceText.From(fixture);
             var expected = Lexer.Lex(source);
             var actual = NativeJit.ExecuteWithScannerProfile(linked, source, (NativeRuntimePolicy)policy);
-            Assert.Equal(expected.Tokens.Select(static token => (token.Kind, token.Span)),
-                actual.LexResult.Tokens.Select(static token => (token.Kind, token.Span)));
-            Assert.Equal(expected.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)),
-                actual.LexResult.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)));
+            Assert.That(actual.LexResult.Tokens.Select(static token => (token.Kind, token.Span)), Is.EqualTo(expected.Tokens.Select(static token => (token.Kind, token.Span))));
+            Assert.That(actual.LexResult.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)), Is.EqualTo(expected.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span))));
         }
     }
 }

@@ -4,23 +4,21 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmLayoutTableReaderTests
 {
-    [Fact]
+    [Test]
     public void LinksPublishedLayoutToExactlyOneType()
     {
         Create(Layout());
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, 2)]
-    [InlineData(4, 2)]
-    [InlineData(20, 1)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(0,(byte)(2))]
+    [TestCase(4,(byte)(2))]
+    [TestCase(20,(byte)(1))]
     public void RejectsMismatchedOwnerTargetAndReservedFlags(int offset, byte value)
     {
         var bytes = Layout();
@@ -28,7 +26,7 @@ public sealed class TrRmLayoutTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOrphanSharedAndTruncatedLayouts()
     {
         Assert.Throws<InvalidDataException>(() => Create(Layout()[..^1]));

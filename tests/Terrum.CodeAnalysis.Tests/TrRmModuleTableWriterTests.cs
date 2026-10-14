@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmModuleTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EmitsOwnedMultiModulePartitionsAndValidatesFraming()
     {
         var names = TrRmStringTableWriter.EncodeNames([("A", 0), ("B", 2)]);
@@ -21,19 +21,19 @@ public sealed class TrRmModuleTableWriterTests
         var strings = new TrRmStringTableReader(names, 2);
         var bytes = TrRmModuleTableWriter.Encode(rows, strings, 2, 0, 1, 0);
         var modules = new TrRmModuleTableReader(bytes, 2, strings, 2, 0, 1, 0);
-        Assert.Equal(88, bytes.Length);
-        Assert.Equal("A", modules.GetIdentity(1));
-        Assert.Equal("B", modules.GetIdentity(2));
-        Assert.Equal((1, 2), modules.GetModuleRefRange(1));
-        Assert.Equal((2, 3), modules.GetModuleRefRange(2));
-        Assert.Equal((1, 2), modules.GetMethodDefRange(1));
-        Assert.Equal((2, 2), modules.GetMethodDefRange(2));
-        Assert.Equal((1, 1), modules.GetTypeDefRange(2));
-        Assert.Equal((1u, 0u), modules.GetRequirements(1));
-        Assert.Equal((0u, 1u), modules.GetRequirements(2));
+        Assert.That(bytes.Length, Is.EqualTo(88));
+        Assert.That(modules.GetIdentity(1), Is.EqualTo("A"));
+        Assert.That(modules.GetIdentity(2), Is.EqualTo("B"));
+        Assert.That(modules.GetModuleRefRange(1), Is.EqualTo((1, 2)));
+        Assert.That(modules.GetModuleRefRange(2), Is.EqualTo((2, 3)));
+        Assert.That(modules.GetMethodDefRange(1), Is.EqualTo((1, 2)));
+        Assert.That(modules.GetMethodDefRange(2), Is.EqualTo((2, 2)));
+        Assert.That(modules.GetTypeDefRange(2), Is.EqualTo((1, 1)));
+        Assert.That(modules.GetRequirements(1), Is.EqualTo((1u, 0u)));
+        Assert.That(modules.GetRequirements(2), Is.EqualTo((0u, 1u)));
 
         rows[0] = rows[0] with { IdentityStringRow = 2 };
-        Assert.Equal("A", modules.GetIdentity(1));
+        Assert.That(modules.GetIdentity(1), Is.EqualTo("A"));
 
         var minimalNames = TrRmStringTableWriter.EncodeNames([("Only", 0)]);
         var featureRow = new TrRmModuleRow(1, 0, 0, 0, 1, 1, 1, 1,
@@ -42,7 +42,7 @@ public sealed class TrRmModuleTableWriterTests
             new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1);
         var featureModules = new TrRmModuleTableReader(featureBytes, 1,
             new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1);
-        Assert.Equal((1, 1), featureModules.GetFeatureRange(1));
+        Assert.That(featureModules.GetFeatureRange(1), Is.EqualTo((1, 1)));
         Assert.Throws<InvalidDataException>(() => TrRmModuleTableWriter.Encode(
             [featureRow with { FeatureFirst = 2 }],
             new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1));
@@ -57,7 +57,7 @@ public sealed class TrRmModuleTableWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidIdentitiesRangesPoliciesAndEntryOwnership()
     {
         var first = new TrRmModuleRow(1, 0, 0, 1, 1, 1, 1, 1);

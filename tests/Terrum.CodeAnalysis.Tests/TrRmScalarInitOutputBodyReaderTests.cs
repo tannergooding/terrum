@@ -7,7 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -25,43 +25,41 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         ?? throw new InvalidOperationException("The provisional Body reader API was not found."))
         .CreateDelegate<ReadBody>();
 
-    [Fact]
+    [Test]
     public void RetirementPreservesFormalPublication()
     {
         var fixture = InitializedOutput();
         var body = Inspect(fixture.Bytes, [2]);
         var place = Items(body, "Places").Single();
-        Assert.True(Property<bool>(place, "Initialized"));
-        Assert.Equal(0, Property<int>(place, "ParameterOrdinal"));
-        Assert.Equal(3, Property<int>(place, "LastUseOrdinal"));
+        Assert.That(Property<bool>(place, "Initialized"), Is.True);
+        Assert.That(Property<int>(place, "ParameterOrdinal"), Is.EqualTo(0));
+        Assert.That(Property<int>(place, "LastUseOrdinal"), Is.EqualTo(3));
         var values = Items(body, "Values");
-        Assert.Equal(1, Property<byte>(values[0], "Kind"));
-        Assert.Equal(1, Property<int>(values[0], "PlaceId"));
-        Assert.Equal(0, Property<int>(values[1], "PlaceId"));
-        Assert.Equal(3, Items(body, "Operations").Length);
+        Assert.That(Property<byte>(values[0], "Kind"), Is.EqualTo(1));
+        Assert.That(Property<int>(values[0], "PlaceId"), Is.EqualTo(1));
+        Assert.That(Property<int>(values[1], "PlaceId"), Is.EqualTo(0));
+        Assert.That(Items(body, "Operations").Length, Is.EqualTo(3));
     }
 
-    [Fact]
+    [Test]
     public void RetiringVacantFormalDoesNotDischargePublication()
     {
         var fixture = Encode([[0x0B, 1, 1]], [1], [-1], [1], terminator: [0x83, 0]);
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void FailHasNoFormalPublicationGuarantee()
     {
         var fixture = Encode([[0x0B, 1, 1]], [1], [-1], [0],
             ending: [], terminator: [0x87, 1]);
         var place = Items(Inspect(fixture.Bytes, [2]), "Places").Single();
-        Assert.False(Property<bool>(place, "Initialized"));
-        Assert.Equal(0, Property<int>(place, "LastUseOrdinal"));
+        Assert.That(Property<bool>(place, "Initialized"), Is.False);
+        Assert.That(Property<int>(place, "LastUseOrdinal"), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
+    [TestCase((byte)(2))]
+    [TestCase((byte)(3))]
+    [TestCase((byte)(4))]
     public void FailureReasonsWithoutFaithfulNativeLoweringReject(byte reason)
     {
         var fixture = Encode([[0x0B, 1, 1]], [1], [-1], [0],
@@ -69,33 +67,33 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void EntryOnlyPlaceHasOrdinalZeroOnZeroOperationFail()
     {
         var fixture = Encode([], [], [], [0], ending: [], terminator: [0x87, 1]);
         var body = Inspect(fixture.Bytes, [2]);
         var place = Items(body, "Places").Single();
-        Assert.Equal(0, Property<int>(place, "LastUseOrdinal"));
-        Assert.False(Property<bool>(place, "Initialized"));
-        Assert.Equal(1, fixture.Bytes[fixture.PlaceUses]);
-        Assert.Empty(Items(body, "Operations"));
-        Assert.Empty(Items(body, "EndingPlaces"));
+        Assert.That(Property<int>(place, "LastUseOrdinal"), Is.EqualTo(0));
+        Assert.That(Property<bool>(place, "Initialized"), Is.False);
+        Assert.That(fixture.Bytes[fixture.PlaceUses], Is.EqualTo(1));
+        Assert.That(Items(body, "Operations"), Is.Empty);
+        Assert.That(Items(body, "EndingPlaces"), Is.Empty);
 
         fixture.Bytes[fixture.PlaceUses] = 0;
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void ZeroOperationReturnStillRequiresFormalPublicationAfterRetirement()
     {
         var fixture = Encode([], [], [], [0], terminator: [0x83, 0]);
         var local = Items(Inspect(fixture.Bytes, []), "Places").Single();
-        Assert.Equal(0, Property<int>(local, "LastUseOrdinal"));
-        Assert.False(Property<bool>(local, "Initialized"));
+        Assert.That(Property<int>(local, "LastUseOrdinal"), Is.EqualTo(0));
+        Assert.That(Property<bool>(local, "Initialized"), Is.False);
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void ValueAndPlaceFreeFailUsesEmptyTypeMap()
     {
         byte[] body =
@@ -105,25 +103,25 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x87, 1,
         ];
         var decoded = Inspect(body, []);
-        Assert.Empty(Items(decoded, "Types"));
-        Assert.Empty(Items(decoded, "Places"));
-        Assert.Empty(Items(decoded, "Values"));
+        Assert.That(Items(decoded, "Types"), Is.Empty);
+        Assert.That(Items(decoded, "Places"), Is.Empty);
+        Assert.That(Items(decoded, "Values"), Is.Empty);
         Assert.Throws<InvalidDataException>(() => Inspect(
             Encode([], [], [], [], terminator: [0x87, 1]).Bytes, []));
     }
 
-    [Fact]
+    [Test]
     public void ByValueAndOutputFormalsUseSeparateOrdinalSpaces()
     {
         var fixture = Encode([[0x0B, 2, 1], [0x0E, 2, 1]], [0, 1], [1, 1], [2],
             entry: [1], terminator: [0x83, 0]);
         var body = Inspect(fixture.Bytes, [0, 2]);
-        Assert.Equal(0, Property<int>(Items(body, "Values")[0], "ParameterOrdinal"));
-        Assert.Equal(1, Property<int>(Items(body, "Places")[0], "ParameterOrdinal"));
-        Assert.Equal(-1, Property<int>(Items(body, "Values")[0], "DefinitionOffset"));
+        Assert.That(Property<int>(Items(body, "Values")[0], "ParameterOrdinal"), Is.EqualTo(0));
+        Assert.That(Property<int>(Items(body, "Places")[0], "ParameterOrdinal"), Is.EqualTo(1));
+        Assert.That(Property<int>(Items(body, "Values")[0], "DefinitionOffset"), Is.EqualTo(-1));
     }
 
-    [Fact]
+    [Test]
     public void FormalPlaceTypeMustMatchItsDescriptor()
     {
         var fixture = Encode(
@@ -134,7 +132,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void WidenedResultsRequireAnOutputFormalEvenAtRuleRevisionThree()
     {
         var fixture = InitializedOutput();
@@ -142,7 +140,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             resultTypeSpecRow: 4));
     }
 
-    [Fact]
+    [Test]
     public void BooleanOutputCallDoesNotDefinitelyInitializeItsDestination()
     {
         var fixture = Encode(
@@ -154,7 +152,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             voidResult: false, targetModes: [2], targetResultTypeSpecRow: 3));
     }
 
-    [Fact]
+    [Test]
     public void InitializeValueTypeMustMatchItsPlace()
     {
         var fixture = Encode(
@@ -165,38 +163,33 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void CheckedDivRemAccountsForBothDefinitionsIncludingUnusedQuotient()
     {
         var fixture = Encode([[0x18, 3, 4, 1, 2]], [0, 0, 0, 0], [0, 0, -1, 1], [],
             entry: [1, 2], terminator: [0x83, 4]);
         var values = Items(Inspect(fixture.Bytes, [0, 0], voidResult: false), "Values");
-        Assert.Equal(Property<int>(values[2], "DefinitionOffset"),
-            Property<int>(values[3], "DefinitionOffset"));
-        Assert.Equal(-1, Property<int>(values[2], "LastUseOrdinal"));
+        Assert.That(Property<int>(values[3], "DefinitionOffset"), Is.EqualTo(Property<int>(values[2], "DefinitionOffset")));
+        Assert.That(Property<int>(values[2], "LastUseOrdinal"), Is.EqualTo(-1));
     }
 
-    [Fact]
+    [Test]
     public void SignedConstantDataIsNormalizedWithoutNeedingOriginalEnvelopeWidth()
     {
         var fixture = Encode([[0x02, 1, 1, 0xFF]], [0], [1], [], terminator: [0x83, 1]);
         var operation = Items(Inspect(fixture.Bytes, [], voidResult: false), "Operations").Single();
-        Assert.Equal(ulong.MaxValue, Property<ulong>(operation, "Data"));
+        Assert.That(Property<ulong>(operation, "Data"), Is.EqualTo(ulong.MaxValue));
     }
-
-    [Theory]
-    [InlineData(2)]
-    [InlineData(4)]
+    [TestCase(2)]
+    [TestCase(4)]
     public void NonminimalStructuralWidthsReject(int width)
     {
         var fixture = Encode([[0x02, 1, 1, 42]], [0], [1], [],
             terminator: [0x83, 1], width: width);
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], voidResult: false));
     }
-
-    [Theory]
-    [InlineData(255, 1)]
-    [InlineData(256, 2)]
+    [TestCase(255,1)]
+    [TestCase(256,2)]
     public void DescriptorAndOperationCountsSelectMinimalWidth(int count, int width)
     {
         var operations = Enumerable.Range(1, count).Select(value => value <= 255
@@ -206,48 +199,44 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var fixture = Encode(operations, new byte[count], Enumerable.Repeat(-1, count).ToArray(),
             [], terminator: [0x83, 0], width: width);
         var body = Inspect(fixture.Bytes, []);
-        Assert.Equal(count, Items(body, "Values").Length);
-        Assert.Equal(count, Items(body, "Operations").Length);
+        Assert.That(Items(body, "Values").Length, Is.EqualTo(count));
+        Assert.That(Items(body, "Operations").Length, Is.EqualTo(count));
     }
 
-    [Fact]
+    [Test]
     public void ExistingEffectsClauseIsPreservedForSemanticVerification()
-        => Assert.Equal(1u, Property<uint>(Inspect(InitializedOutput().Bytes, [2],
-            contractKind: 1), "Effects"));
-
-    [Theory]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(5)]
+        => Assert.That(Property<uint>(Inspect(InitializedOutput().Bytes, [2],
+            contractKind: 1), "Effects"), Is.EqualTo(1u));
+    [TestCase((byte)(2))]
+    [TestCase((byte)(3))]
+    [TestCase((byte)(4))]
+    [TestCase((byte)(5))]
     public void NonEffectsContractsReject(byte kind)
         => Assert.Throws<InvalidDataException>(() => Inspect(InitializedOutput().Bytes, [2],
             contractKind: kind));
 
-    [Fact]
+    [Test]
     public void NormalCallInitializesVacantLocalBeforeLoad()
     {
         var fixture = Encode([[0x0B, 1, 1], [0x12, 0, 2, 1, 1], [0x0D, 2, 1]],
             [1, 0], [2, 3], [3], terminator: [0x83, 2]);
         var body = Inspect(fixture.Bytes, [], voidResult: false, targetModes: [2]);
-        Assert.True(Property<bool>(Items(body, "Places")[0], "Initialized"));
-        Assert.Equal(-1, Property<int>(Items(body, "Places")[0], "ParameterOrdinal"));
-        Assert.Equal(2, Property<int>(Items(body, "Operations")[1], "MethodRow"));
+        Assert.That(Property<bool>(Items(body, "Places")[0], "Initialized"), Is.True);
+        Assert.That(Property<int>(Items(body, "Places")[0], "ParameterOrdinal"), Is.EqualTo(-1));
+        Assert.That(Property<int>(Items(body, "Operations")[1], "MethodRow"), Is.EqualTo(2));
     }
 
-    [Fact]
+    [Test]
     public void CallCanPublishMultipleDistinctLocals()
     {
         var fixture = Encode([[0x0B, 1, 1], [0x0B, 2, 2], [0x12, 0, 2, 2, 1, 2]],
             [1, 1], [2, 2], [3, 3], terminator: [0x83, 0]);
         var places = Items(Inspect(fixture.Bytes, [], targetModes: [2, 2]), "Places");
-        Assert.All(places, place => Assert.True(Property<bool>(place, "Initialized")));
+        {var __nunitItems0 = places;        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(Property<bool>(__nunitItem0, "Initialized"), Is.True); } });}
     }
-
-    [Theory]
-    [InlineData(1, false)]
-    [InlineData(2, true)]
-    [InlineData(3, false)]
+    [TestCase((byte)(1),false)]
+    [TestCase((byte)(2),true)]
+    [TestCase((byte)(3),false)]
     public void OutputCallUsesHandleValueIdRatherThanPlaceDescriptorId(byte argument, bool valid)
     {
         var fixture = Encode([[0x02, 1, 1, 42], [0x0B, 2, 1], [0x12, 0, 2, 1, argument]],
@@ -260,14 +249,12 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
 
         var body = Inspect(fixture.Bytes, [], targetModes: [2]);
         var handle = Items(body, "Values")[1];
-        Assert.Equal(1, Property<int>(handle, "PlaceId"));
-        Assert.Equal(new[] { 2 }, Items(Items(body, "Operations")[2], "Operands").Cast<int>());
-        Assert.True(Property<bool>(Items(body, "Places").Single(), "Initialized"));
+        Assert.That(Property<int>(handle, "PlaceId"), Is.EqualTo(1));
+        Assert.That(Items(Items(body, "Operations")[2], "Operands").Cast<int>(), Is.EqualTo(new[] { 2 }));
+        Assert.That(Property<bool>(Items(body, "Places").Single(), "Initialized"), Is.True);
     }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [TestCase(true)]
+    [TestCase(false)]
     public void CallArgumentsFollowOrderedParameterModes(bool valueFirst)
     {
         byte[] arguments = valueFirst ? [1, 2] : [2, 1];
@@ -276,17 +263,15 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             [0, 1], [1, 1], [2], entry: [1], terminator: [0x83, 0]);
         var body = Inspect(fixture.Bytes, [0], targetModes: targetModes);
         var call = Items(body, "Operations")[1];
-        Assert.Equal(arguments.Select(id => (int)id), Items(call, "Operands").Cast<int>());
-        Assert.True(Property<bool>(Items(body, "Places").Single(), "Initialized"));
+        Assert.That(Items(call, "Operands").Cast<int>(), Is.EqualTo(arguments.Select(id => (int)id)));
+        Assert.That(Property<bool>(Items(body, "Places").Single(), "Initialized"), Is.True);
     }
-
-    [Theory]
-    [InlineData(true, 0, 2)]
-    [InlineData(true, 1, 0)]
-    [InlineData(true, 2, 1)]
-    [InlineData(false, 0, 1)]
-    [InlineData(false, 2, 0)]
-    [InlineData(false, 1, 2)]
+    [TestCase(true,(byte)(0),(byte)(2))]
+    [TestCase(true,(byte)(1),(byte)(0))]
+    [TestCase(true,(byte)(2),(byte)(1))]
+    [TestCase(false,(byte)(0),(byte)(1))]
+    [TestCase(false,(byte)(2),(byte)(0))]
+    [TestCase(false,(byte)(1),(byte)(2))]
     public void CallRejectsZeroAndWrongDescriptorKindAtEachModePosition(
         bool valueFirst, byte firstArgument, byte secondArgument)
     {
@@ -296,10 +281,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
             targetModes: targetModes));
     }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(3)]
+    [TestCase((byte)(1))]
+    [TestCase((byte)(3))]
     public void CallRequiresExactSignatureArgumentCount(byte argumentCount)
     {
         var fixture = Encode([[0x0B, 2, 1], [0x12, 0, 2, argumentCount, 1, 2]],
@@ -307,10 +290,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [0],
             targetModes: [0, 2]));
     }
-
-    [Theory]
-    [InlineData(0x04)]
-    [InlineData(0x08)]
+    [TestCase((byte)(0x04))]
+    [TestCase((byte)(0x08))]
     public void OutputBearingCallsCannotUseCompactLayouts(byte layout)
     {
         var fixture = Encode([[0x0B, 2, 1], [0x12, 0, 2, 2, 1, 2]],
@@ -320,7 +301,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             targetModes: [0, 2]));
     }
 
-    [Fact]
+    [Test]
     public void DuplicateDestinationsRejectEvenWithDifferentHandleIds()
     {
         var fixture = Encode([[0x0B, 1, 1], [0x0B, 2, 1], [0x12, 0, 2, 2, 1, 2]],
@@ -328,17 +309,15 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2, 2]));
     }
 
-    [Fact]
+    [Test]
     public void OutputFormalCannotBeForwarded()
     {
         var fixture = Encode([[0x0B, 1, 1], [0x12, 0, 2, 1, 1]],
             [1], [1], [2], terminator: [0x83, 0]);
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2], targetModes: [2]));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void InitializedDestinationCannotBeInitializedAgain(bool throughCall)
     {
         byte[] repeated = throughCall ? [0x12, 0, 2, 1, 1] : [0x0E, 1, 2];
@@ -346,46 +325,37 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             [1, 0], [3, throughCall ? 2 : 3], [4], terminator: [0x83, 0]);
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [], targetModes: [2]));
     }
-
-    [Theory]
-    [InlineData(0x03)]
-    [InlineData(0x0D)]
+    [TestCase((byte)(0x03))]
+    [TestCase((byte)(0x0D))]
     public void HandleCopyAndVacantLoadReject(byte opcode)
     {
         var fixture = Encode([[0x0B, 1, 1], [opcode, 2, 1]], [1, 0],
             [1, -1], [2], terminator: [0x83, 0]);
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, []));
     }
-
-    [Theory]
-    [InlineData(0x0C)]
-    [InlineData(0x0F)]
-    [InlineData(0x10)]
-    [InlineData(0x11)]
-    [InlineData(0x13)]
-    [InlineData(0x14)]
+    [TestCase((byte)(0x0C))]
+    [TestCase((byte)(0x0F))]
+    [TestCase((byte)(0x10))]
+    [TestCase((byte)(0x11))]
+    [TestCase((byte)(0x13))]
+    [TestCase((byte)(0x14))]
     public void UnsupportedPlaceAndAggregateOperationsReject(byte opcode)
     {
         var fixture = InitializedOutput();
         fixture.Bytes[fixture.OperationStart] = opcode;
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(3)]
-    [InlineData(4)]
+    [TestCase((byte)(1))]
+    [TestCase((byte)(3))]
+    [TestCase((byte)(4))]
     public void OtherParameterModesReject(byte mode)
         => Assert.Throws<InvalidDataException>(() => Inspect(InitializedOutput().Bytes, [mode]));
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
+    [TestCase((byte)(0))]
+    [TestCase((byte)(1))]
+    [TestCase((byte)(2))]
     public void CallModeAndArityMismatchesReject(byte variant)
     {
-        byte[] call = variant switch
-        {
+        byte[] call = variant switch {
             0 => [0x12, 0, 2, 1, 1],
             1 => [0x12, 0, 2, 0],
             _ => [0x12, 0, 0, 1, 1],
@@ -394,25 +364,21 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
             targetModes: variant == 0 ? [0] : [2]));
     }
-
-    [Theory]
-    [InlineData(0x04)]
-    [InlineData(0x08)]
-    [InlineData(0x03)]
-    [InlineData(0x10)]
+    [TestCase((byte)(0x04))]
+    [TestCase((byte)(0x08))]
+    [TestCase((byte)(0x03))]
+    [TestCase((byte)(0x10))]
     public void OtherBodyLayoutsReject(byte layout)
     {
         var fixture = InitializedOutput();
         fixture.Bytes[0] = layout;
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
-
-    [Theory]
-    [InlineData(1, 2)]
-    [InlineData(2, 255)]
-    [InlineData(3, 255)]
-    [InlineData(4, 1)]
-    [InlineData(5, 255)]
+    [TestCase(1,(byte)(2))]
+    [TestCase(2,(byte)(255))]
+    [TestCase(3,(byte)(255))]
+    [TestCase(4,(byte)(1))]
+    [TestCase(5,(byte)(255))]
     public void UnsupportedAndUnboundedHeaderCountsReject(int offset, byte value)
     {
         var fixture = InitializedOutput();
@@ -420,7 +386,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void IndexesCannotPointIntoOperandsOrHideSuccessors()
     {
         var fixture = InitializedOutput();
@@ -436,7 +402,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void OutputCallTargetCannotUseCompactBodyOrPublicVisibility()
     {
         var fixture = Encode([[0x0B, 1, 1], [0x12, 0, 2, 1, 1]],
@@ -446,18 +412,16 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [],
             targetModes: [2], targetFlags: 2));
     }
-
-    [Theory]
-    [InlineData("PlaceFlags", 0)]
-    [InlineData("PlaceFlags", 5)]
-    [InlineData("PlaceRegion", 1)]
-    [InlineData("PlaceUses", 0)]
-    [InlineData("ValueKind", 0)]
-    [InlineData("ValueUses", 0)]
-    [InlineData("ValueLastUse", 1)]
-    [InlineData("PlaceLastUse", 2)]
-    [InlineData("Definition", 0)]
-    [InlineData("TerminatorOffset", 0)]
+    [TestCase("PlaceFlags",(byte)(0))]
+    [TestCase("PlaceFlags",(byte)(5))]
+    [TestCase("PlaceRegion",(byte)(1))]
+    [TestCase("PlaceUses",(byte)(0))]
+    [TestCase("ValueKind",(byte)(0))]
+    [TestCase("ValueUses",(byte)(0))]
+    [TestCase("ValueLastUse",(byte)(1))]
+    [TestCase("PlaceLastUse",(byte)(2))]
+    [TestCase("Definition",(byte)(0))]
+    [TestCase("TerminatorOffset",(byte)(0))]
     public void ForgedInventoriesAndIndexesReject(string field, byte value)
     {
         var fixture = InitializedOutput();
@@ -465,7 +429,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(fixture.Bytes, [2]));
     }
 
-    [Fact]
+    [Test]
     public void EveryTruncatedExtentAndTrailingDataReject()
     {
         var fixture = InitializedOutput();
@@ -478,7 +442,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect([.. fixture.Bytes, 0], [2]));
     }
 
-    [Fact]
+    [Test]
     public void ReturnRequiresRetirementAndExactResultType()
     {
         var fixture = Encode([[0x0B, 1, 1], [0x02, 2, 1, 42], [0x0E, 1, 2]],
@@ -488,7 +452,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             voidResult: false));
     }
 
-    [Fact]
+    [Test]
     public void GeneralPlaceBodyWithoutOutputFormalsStillRequiresVoidOrInt32Result()
     {
         var fixture = Encode([[0x0B, 2, 1]], [0, 1], [1, -1], [1],

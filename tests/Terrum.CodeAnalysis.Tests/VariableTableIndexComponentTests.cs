@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -80,10 +80,8 @@ public sealed class VariableTableIndexComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task VariableTableIndexMatchesHostedBlobAndBodyReaders(BoundRuntimePolicy policy)
     {
         var cases = new List<TableCase>();
@@ -142,7 +140,7 @@ public sealed class VariableTableIndexComponentTests
         var root = RepositoryRoot();
         var componentPath = Path.Combine(root, "self-host", "VariableTableIndex.terrum");
         var component = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
-        Assert.False(component.HasErrors, string.Join(Environment.NewLine, component.Diagnostics));
+        Assert.That(component.HasErrors, Is.False, string.Join(Environment.NewLine, component.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "variable-table-index-component.terrum");
 
         foreach (var testCase in cases)
@@ -152,10 +150,10 @@ public sealed class VariableTableIndexComponentTests
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Section], false),
                 new HostBuffer("Expected", PrimitiveType.Int32, [.. testCase.Expected.SelectMany(static item => item)], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-            Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
     }
 
@@ -194,7 +192,7 @@ public sealed class VariableTableIndexComponentTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

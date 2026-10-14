@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -33,60 +33,43 @@ public sealed class FixedLayoutProfileCandidateTests
         public struct MissingNested { public Inner Value; }
         """;
 
-    [Fact]
+    [Test]
     public async Task CandidateLayoutsMatchIndependentWindowsX64StorageAsync()
     {
         var program = Compile(Declarations);
         var claims = Claims("Inner", "Outer", "Padded", "Over16", "BooleanField", "FloatingField",
             "Float32Field", "FloatingInner", "FloatingOuter", "UniqueValue", "MissingNested");
 
-        var inner = Assert.IsType<CandidateDescriptor>(Describe(program, "Inner", claims));
-        Assert.Equal((8, 4), (inner.Layout.Size, inner.Layout.Alignment));
-        Assert.Collection(inner.Layout.Fields,
-            field => Assert.Equal((0, 4), (field.Offset, field.Size)),
-            field => Assert.Equal((4, 2), (field.Offset, field.Size)));
+        var inner = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual0 = Describe(program, "Inner", claims); Assert.That(__nunitActual0, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual0!; }))();
+        Assert.That((inner.Layout.Size, inner.Layout.Alignment), Is.EqualTo((8, 4)));
+        { var __nunitItems1 = global::System.Linq.Enumerable.ToArray(inner.Layout.Fields); Assert.That(__nunitItems1, Has.Length.EqualTo(2)); Assert.That((__nunitItems1[0].Offset, __nunitItems1[0].Size), Is.EqualTo((0, 4))); Assert.That((__nunitItems1[1].Offset, __nunitItems1[1].Size), Is.EqualTo((4, 2))); }
 
-        var outer = Assert.IsType<CandidateDescriptor>(Describe(program, "Outer", claims));
-        Assert.Equal((16, 4), (outer.Layout.Size, outer.Layout.Alignment));
-        Assert.Collection(outer.Layout.Fields,
-            field => Assert.Equal((0, 2), (field.Offset, field.Size)),
-            field => Assert.Equal((4, 8), (field.Offset, field.Size)),
-            field => Assert.Equal((12, 4), (field.Offset, field.Size)));
+        var outer = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual2 = Describe(program, "Outer", claims); Assert.That(__nunitActual2, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual2!; }))();
+        Assert.That((outer.Layout.Size, outer.Layout.Alignment), Is.EqualTo((16, 4)));
+        { var __nunitItems3 = global::System.Linq.Enumerable.ToArray(outer.Layout.Fields); Assert.That(__nunitItems3, Has.Length.EqualTo(3)); Assert.That((__nunitItems3[0].Offset, __nunitItems3[0].Size), Is.EqualTo((0, 2))); Assert.That((__nunitItems3[1].Offset, __nunitItems3[1].Size), Is.EqualTo((4, 8))); Assert.That((__nunitItems3[2].Offset, __nunitItems3[2].Size), Is.EqualTo((12, 4))); }
 
-        var padded = Assert.IsType<CandidateDescriptor>(Describe(program, "Padded", claims));
-        Assert.Equal((12, 4), (padded.Layout.Size, padded.Layout.Alignment));
-        Assert.Collection(padded.Layout.Fields,
-            field => Assert.Equal((0, 2), (field.Offset, field.Size)),
-            field => Assert.Equal((4, 4), (field.Offset, field.Size)),
-            field => Assert.Equal((8, 2), (field.Offset, field.Size)));
+        var padded = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual4 = Describe(program, "Padded", claims); Assert.That(__nunitActual4, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual4!; }))();
+        Assert.That((padded.Layout.Size, padded.Layout.Alignment), Is.EqualTo((12, 4)));
+        { var __nunitItems5 = global::System.Linq.Enumerable.ToArray(padded.Layout.Fields); Assert.That(__nunitItems5, Has.Length.EqualTo(3)); Assert.That((__nunitItems5[0].Offset, __nunitItems5[0].Size), Is.EqualTo((0, 2))); Assert.That((__nunitItems5[1].Offset, __nunitItems5[1].Size), Is.EqualTo((4, 4))); Assert.That((__nunitItems5[2].Offset, __nunitItems5[2].Size), Is.EqualTo((8, 2))); }
 
-        var booleanLayout = Assert.IsType<CandidateDescriptor>(
-            Describe(program, "BooleanField", claims)).Layout;
-        Assert.Equal((1, 1), (booleanLayout.Size, booleanLayout.Alignment));
-        var float32Layout = Assert.IsType<CandidateDescriptor>(
-            Describe(program, "Float32Field", claims)).Layout;
-        Assert.Equal((4, 4), (float32Layout.Size, float32Layout.Alignment));
-        var float64Layout = Assert.IsType<CandidateDescriptor>(
-            Describe(program, "FloatingField", claims)).Layout;
-        Assert.Equal((8, 8), (float64Layout.Size, float64Layout.Alignment));
-        var floatingInner = Assert.IsType<CandidateDescriptor>(
-            Describe(program, "FloatingInner", claims)).Layout;
-        Assert.Equal((8, 4), (floatingInner.Size, floatingInner.Alignment));
-        Assert.Collection(floatingInner.Fields,
-            field => Assert.Equal((0, 4), (field.Offset, field.Size)),
-            field => Assert.Equal((4, 1), (field.Offset, field.Size)));
-        var floatingOuter = Assert.IsType<CandidateDescriptor>(
-            Describe(program, "FloatingOuter", claims)).Layout;
-        Assert.Equal((12, 4), (floatingOuter.Size, floatingOuter.Alignment));
-        Assert.Collection(floatingOuter.Fields,
-            field => Assert.Equal((0, 2), (field.Offset, field.Size)),
-            field => Assert.Equal((4, 8), (field.Offset, field.Size)));
-        Assert.Equal("FloatingInner", Assert.Single(floatingOuter.NestedLayouts).NominalName);
+        var booleanLayout = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual6 = Describe(program, "BooleanField", claims); Assert.That(__nunitActual6, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual6!; }))().Layout;
+        Assert.That((booleanLayout.Size, booleanLayout.Alignment), Is.EqualTo((1, 1)));
+        var float32Layout = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual7 = Describe(program, "Float32Field", claims); Assert.That(__nunitActual7, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual7!; }))().Layout;
+        Assert.That((float32Layout.Size, float32Layout.Alignment), Is.EqualTo((4, 4)));
+        var float64Layout = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual8 = Describe(program, "FloatingField", claims); Assert.That(__nunitActual8, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual8!; }))().Layout;
+        Assert.That((float64Layout.Size, float64Layout.Alignment), Is.EqualTo((8, 8)));
+        var floatingInner = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual9 = Describe(program, "FloatingInner", claims); Assert.That(__nunitActual9, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual9!; }))().Layout;
+        Assert.That((floatingInner.Size, floatingInner.Alignment), Is.EqualTo((8, 4)));
+        { var __nunitItems10 = global::System.Linq.Enumerable.ToArray(floatingInner.Fields); Assert.That(__nunitItems10, Has.Length.EqualTo(2)); Assert.That((__nunitItems10[0].Offset, __nunitItems10[0].Size), Is.EqualTo((0, 4))); Assert.That((__nunitItems10[1].Offset, __nunitItems10[1].Size), Is.EqualTo((4, 1))); }
+        var floatingOuter = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual11 = Describe(program, "FloatingOuter", claims); Assert.That(__nunitActual11, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual11!; }))().Layout;
+        Assert.That((floatingOuter.Size, floatingOuter.Alignment), Is.EqualTo((12, 4)));
+        { var __nunitItems12 = global::System.Linq.Enumerable.ToArray(floatingOuter.Fields); Assert.That(__nunitItems12, Has.Length.EqualTo(2)); Assert.That((__nunitItems12[0].Offset, __nunitItems12[0].Size), Is.EqualTo((0, 2))); Assert.That((__nunitItems12[1].Offset, __nunitItems12[1].Size), Is.EqualTo((4, 8))); }
+        Assert.That(global::System.Linq.Enumerable.Single(floatingOuter.NestedLayouts).NominalName, Is.EqualTo("FloatingInner"));
 
         await RunNativeStorageProbeAsync().ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public void IndependentCandidateDescriptorsUseNominalNamesAndRejectChangedContracts()
     {
         var producer = Compile("""
@@ -100,97 +83,96 @@ public sealed class FixedLayoutProfileCandidateTests
             public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
-        Assert.NotEqual((int)Find(producer, "Pair").Fields[0].Type,
-            (int)Find(replacement, "Pair").Fields[0].Type);
+        Assert.That((int)Find(replacement, "Pair").Fields[0].Type, Is.Not.EqualTo((int)Find(producer, "Pair").Fields[0].Type));
 
         var producerDescriptor = Describe(producer, "Pair", Claims("Leaf", "Pair"));
         var replacementDescriptor = Describe(replacement, "Pair", Claims("Leaf", "Pair"));
-        Assert.True(AreCompatible(producerDescriptor, replacementDescriptor));
+        Assert.That(AreCompatible(producerDescriptor, replacementDescriptor), Is.True);
 
         var changedType = Compile("""
             public struct Leaf { public uint32 Value; }
             public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
-        Assert.False(AreCompatible(producerDescriptor,
-            Describe(changedType, "Pair", Claims("Leaf", "Pair"))));
+        Assert.That(AreCompatible(producerDescriptor,
+            Describe(changedType, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedNominal = Compile("""
             public struct Leaf { public int32 Value; }
             public struct PairReplacement { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
-        Assert.False(AreCompatible(producerDescriptor,
-            Describe(changedNominal, "PairReplacement", Claims("Leaf", "PairReplacement"))));
+        Assert.That(AreCompatible(producerDescriptor,
+            Describe(changedNominal, "PairReplacement", Claims("Leaf", "PairReplacement"))), Is.False);
 
         var changedFieldName = Compile("""
             public struct Leaf { public int32 Data; }
             public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
-        Assert.False(AreCompatible(producerDescriptor,
-            Describe(changedFieldName, "Pair", Claims("Leaf", "Pair"))));
+        Assert.That(AreCompatible(producerDescriptor,
+            Describe(changedFieldName, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedOrder = Compile("""
             public struct Leaf { public int32 Value; }
             public struct Pair { public char16 Last; public Leaf First; }
             int32 Change() { return 2; }
             """);
-        Assert.False(AreCompatible(producerDescriptor,
-            Describe(changedOrder, "Pair", Claims("Leaf", "Pair"))));
+        Assert.That(AreCompatible(producerDescriptor,
+            Describe(changedOrder, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedAccess = Compile("""
             public struct Leaf { int32 Value; }
             public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
-        Assert.False(AreCompatible(producerDescriptor,
-            Describe(changedAccess, "Pair", Claims("Leaf", "Pair"))));
+        Assert.That(AreCompatible(producerDescriptor,
+            Describe(changedAccess, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedMutation = Compile("""
             public struct Leaf { public mut int32 Value; }
             public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
-        Assert.False(AreCompatible(producerDescriptor,
-            Describe(changedMutation, "Pair", Claims("Leaf", "Pair"))));
+        Assert.That(AreCompatible(producerDescriptor,
+            Describe(changedMutation, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var unsafeField = Find(producer, "Leaf").Fields[0] with { RequiresUnsafeCaller = true };
         var forgedUnsafe = producer with {
             Structures = producer.Structures.SetItem(0,
                 Find(producer, "Leaf") with { Fields = [unsafeField] }),
         };
-        Assert.False(AreCompatible(producerDescriptor,
-            Describe(forgedUnsafe, "Pair", Claims("Leaf", "Pair"))));
+        Assert.That(AreCompatible(producerDescriptor,
+            Describe(forgedUnsafe, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
-        Assert.False(AreCompatible(producerDescriptor, Describe(producer, "Leaf",
+        Assert.That(AreCompatible(producerDescriptor, Describe(producer, "Leaf",
             WithClaim(Claims("Leaf", "Pair"), "Leaf",
-                new CandidateClaim(false, "Sequential", Profile, Target)))));
-        Assert.False(AreCompatible(producerDescriptor, Describe(producer, "Pair",
+                new CandidateClaim(false, "Sequential", Profile, Target)))), Is.False);
+        Assert.That(AreCompatible(producerDescriptor, Describe(producer, "Pair",
             WithClaim(Claims("Leaf", "Pair"), "Pair",
-                new CandidateClaim(true, "Sequential", Profile, 2)))));
+                new CandidateClaim(true, "Sequential", Profile, 2)))), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void CandidateEvaluatorRejectsUnsupportedMembershipAndForgedLayouts()
     {
         var program = Compile(Declarations);
         var claims = Claims("Inner", "Outer", "Padded", "Over16", "BooleanField", "FloatingField",
             "Float32Field", "FloatingInner", "FloatingOuter", "UniqueValue", "MissingNested");
 
-        Assert.Null(Describe(program, "Outer", Claims("Outer")));
-        Assert.Null(Describe(program, "MissingNested", Claims("MissingNested")));
-        Assert.Null(Describe(program, "UniqueValue", claims));
-        Assert.Null(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
-            new CandidateClaim(true, "Sequential", Profile, Target, 8))));
-        Assert.Null(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
-            new CandidateClaim(true, "Sequential", "other-profile", Target))));
-        Assert.Null(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
-            new CandidateClaim(true, "Automatic", Profile, Target))));
-        Assert.Null(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
-            new CandidateClaim(true, "Sequential", Profile, Target, 4)), target: 2));
-        Assert.Null(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
-            new CandidateClaim(true, "Sequential", Profile, 2)), target: 2));
+        Assert.That(Describe(program, "Outer", Claims("Outer")), Is.Null);
+        Assert.That(Describe(program, "MissingNested", Claims("MissingNested")), Is.Null);
+        Assert.That(Describe(program, "UniqueValue", claims), Is.Null);
+        Assert.That(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
+            new CandidateClaim(true, "Sequential", Profile, Target, 8))), Is.Null);
+        Assert.That(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
+            new CandidateClaim(true, "Sequential", "other-profile", Target))), Is.Null);
+        Assert.That(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
+            new CandidateClaim(true, "Automatic", Profile, Target))), Is.Null);
+        Assert.That(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
+            new CandidateClaim(true, "Sequential", Profile, Target, 4)), target: 2), Is.Null);
+        Assert.That(Describe(program, "Outer", WithClaim(Claims("Inner", "Outer"), "Outer",
+            new CandidateClaim(true, "Sequential", Profile, 2)), target: 2), Is.Null);
 
         var over16 = Find(program, "Over16") with {
             Fields = [
@@ -200,14 +182,15 @@ public sealed class FixedLayoutProfileCandidateTests
             ],
             Size = 24,
         };
-        var largerDescriptor = Assert.IsType<CandidateDescriptor>(Describe(program with {
-            Structures = program.Structures.SetItem(IndexOf(program, "Over16"), over16),
-        }, "Over16", claims));
-        Assert.Equal((24, 8), (largerDescriptor.Layout.Size, largerDescriptor.Layout.Alignment));
-        Assert.Collection(largerDescriptor.Layout.Fields,
-            field => Assert.Equal((0, 2), (field.Offset, field.Size)),
-            field => Assert.Equal((8, 8), (field.Offset, field.Size)),
-            field => Assert.Equal((16, 2), (field.Offset, field.Size)));
+        var largerDescriptor = ((global::System.Func<CandidateDescriptor>)(() => {
+            var __nunitActual13 = Describe(program with {
+                Structures = program.Structures.SetItem(IndexOf(program, "Over16"), over16),
+            }, "Over16", claims);
+            Assert.That(__nunitActual13, Is.TypeOf<CandidateDescriptor>());
+            return (CandidateDescriptor)__nunitActual13!;
+        }))();
+        Assert.That((largerDescriptor.Layout.Size, largerDescriptor.Layout.Alignment), Is.EqualTo((24, 8)));
+        { var __nunitItems14 = global::System.Linq.Enumerable.ToArray(largerDescriptor.Layout.Fields); Assert.That(__nunitItems14, Has.Length.EqualTo(3)); Assert.That((__nunitItems14[0].Offset, __nunitItems14[0].Size), Is.EqualTo((0, 2))); Assert.That((__nunitItems14[1].Offset, __nunitItems14[1].Size), Is.EqualTo((8, 8))); Assert.That((__nunitItems14[2].Offset, __nunitItems14[2].Size), Is.EqualTo((16, 2))); }
         var largeAggregate = Find(program, "Over16") with {
             Fields = [
                 new BoundStructField("A", PrimitiveType.UInt64, 0, 8),
@@ -221,19 +204,17 @@ public sealed class FixedLayoutProfileCandidateTests
         var largeProgram = program with {
             Structures = program.Structures.SetItem(IndexOf(program, "Over16"), largeAggregate),
         };
-        var largeDescriptor = Assert.IsType<CandidateDescriptor>(
-            Describe(largeProgram, "Over16", claims));
-        Assert.Equal((40, 8), (largeDescriptor.Layout.Size, largeDescriptor.Layout.Alignment));
-        Assert.Equal(new[] { 0, 8, 16, 24, 32 },
-            largeDescriptor.Layout.Fields.Select(static field => field.Offset));
+        var largeDescriptor = ((global::System.Func<CandidateDescriptor>)(() => { var __nunitActual15 = Describe(largeProgram, "Over16", claims); Assert.That(__nunitActual15, Is.TypeOf<CandidateDescriptor>()); return (CandidateDescriptor)__nunitActual15!; }))();
+        Assert.That((largeDescriptor.Layout.Size, largeDescriptor.Layout.Alignment), Is.EqualTo((40, 8)));
+        Assert.That(largeDescriptor.Layout.Fields.Select(static field => field.Offset), Is.EqualTo(new[] { 0, 8, 16, 24, 32 }));
 
         var managed = Find(program, "Over16") with {
             Fields = [new BoundStructField("Value", PrimitiveType.ManagedNode, 0, 4)],
             Size = 4,
         };
-        Assert.Null(Describe(program with {
+        Assert.That(Describe(program with {
             Structures = program.Structures.SetItem(IndexOf(program, "Over16"), managed),
-        }, "Over16", claims));
+        }, "Over16", claims), Is.Null);
 
         var badOffset = Find(program, "Outer").Fields[1] with { Offset = 5 };
         var forgedOffset = program with {
@@ -242,7 +223,7 @@ public sealed class FixedLayoutProfileCandidateTests
                     Fields = Find(program, "Outer").Fields.SetItem(1, badOffset),
                 }),
         };
-        Assert.Null(Describe(forgedOffset, "Outer", claims));
+        Assert.That(Describe(forgedOffset, "Outer", claims), Is.Null);
 
         var badWidth = Find(program, "Inner").Fields[0] with { Size = 8 };
         var forgedWidth = program with {
@@ -251,17 +232,17 @@ public sealed class FixedLayoutProfileCandidateTests
                     Fields = Find(program, "Inner").Fields.SetItem(0, badWidth),
                 }),
         };
-        Assert.Null(Describe(forgedWidth, "Outer", claims));
+        Assert.That(Describe(forgedWidth, "Outer", claims), Is.Null);
 
         var badSize = Find(program, "Inner") with { Size = 16 };
         var forgedSize = program with {
             Structures = program.Structures.SetItem(IndexOf(program, "Inner"), badSize),
         };
-        Assert.Null(Describe(forgedSize, "Outer", claims));
+        Assert.That(Describe(forgedSize, "Outer", claims), Is.Null);
 
-        Assert.Null(Describe(CreateCyclicProgram(program), "Inner", claims));
-        Assert.Null(Describe(CreateTooDeepProgram(), "D0", Claims(
-            Enumerable.Range(0, MaximumDepth + 2).Select(static index => $"D{index}").ToArray())));
+        Assert.That(Describe(CreateCyclicProgram(program), "Inner", claims), Is.Null);
+        Assert.That(Describe(CreateTooDeepProgram(), "D0", Claims(
+            Enumerable.Range(0, MaximumDepth + 2).Select(static index => $"D{index}").ToArray())), Is.Null);
     }
 
     private static Dictionary<string, CandidateClaim> Claims(params string[] names) =>
@@ -472,19 +453,18 @@ public sealed class FixedLayoutProfileCandidateTests
     private static BoundProgram Compile(string declarations)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(declarations + " int32 Main() { return 0; }"));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))();
     }
 
     private static async Task RunNativeStorageProbeAsync()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "The fixed-layout storage fixture requires Windows x64.");
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True, "The fixed-layout storage fixture requires Windows x64.");
 
         var root = FindRepositoryRoot();
         var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             "Microsoft Visual Studio", "Installer", "vswhere.exe");
-        Assert.True(File.Exists(vswhere), "Visual Studio discovery is required to build the C storage fixture.");
+        Assert.That(File.Exists(vswhere), Is.True, "Visual Studio discovery is required to build the C storage fixture.");
 
         var discover = new ProcessStartInfo(vswhere) { WorkingDirectory = root };
         foreach (var argument in new[] {
@@ -496,7 +476,7 @@ public sealed class FixedLayoutProfileCandidateTests
         }
         var installation = (await RunAsync(discover, TimeSpan.FromSeconds(10)).ConfigureAwait(false)).Trim();
         var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
-        Assert.True(File.Exists(environment), "Visual Studio x64 C build tools are required for the C storage fixture.");
+        Assert.That(File.Exists(environment), Is.True, "Visual Studio x64 C build tools are required for the C storage fixture.");
 
         var directory = Directory.CreateTempSubdirectory("terrum-fixed-layout-").FullName;
         var executable = Path.Combine(directory, "fixed-layout-storage-probe.exe");
@@ -551,8 +531,7 @@ public sealed class FixedLayoutProfileCandidateTests
         }
         var standardOutput = await output.ConfigureAwait(false);
         var standardError = await error.ConfigureAwait(false);
-        Assert.True(process.ExitCode == 0,
-            $"Process exited with {process.ExitCode}.{Environment.NewLine}{standardOutput}{Environment.NewLine}{standardError}");
+        Assert.That(process.ExitCode == 0, Is.True, $"Process exited with {process.ExitCode}.{Environment.NewLine}{standardOutput}{Environment.NewLine}{standardError}");
         return standardOutput;
     }
 

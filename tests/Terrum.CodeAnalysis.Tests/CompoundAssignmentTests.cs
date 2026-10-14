@@ -11,42 +11,40 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CompoundAssignmentTests
 {
-    [Fact]
+    [Test]
     public void SpellingsAreAtomicAndNestedGenericClosersRemainUsable()
     {
         const string spellings = "+= -= *= /= %= &= |= ^= <<= >>= >>>= << >> >>>";
         var kinds = Lexer.Lex(SourceText.From(spellings)).Tokens.Select(token => token.Kind).ToArray();
-        Assert.Equal([
+        Assert.That(kinds, Is.EqualTo([
             TokenKind.PlusEquals, TokenKind.MinusEquals, TokenKind.StarEquals,
             TokenKind.SlashEquals, TokenKind.PercentEquals, TokenKind.AmpersandEquals,
             TokenKind.PipeEquals, TokenKind.CaretEquals, TokenKind.ShiftLeftEquals,
             TokenKind.ShiftRightEquals, TokenKind.ShiftRightUnsignedEquals,
             TokenKind.ShiftLeft, TokenKind.ShiftRight, TokenKind.ShiftRightUnsigned,
             TokenKind.EndOfFile,
-        ], kinds);
+        ]));
         var operators = ScannerHost.CreateBuffers(SourceText.From(spellings))
             .Single(buffer => buffer.Name == "Operators").Values;
         foreach (var kind in kinds[..^1])
         {
-            Assert.Contains((int)kind, operators);
+            Assert.That(operators, Does.Contain((int)kind));
         }
-        Assert.False(SyntaxTree.Parse("""
+        Assert.That(SyntaxTree.Parse("""
             interface I<T> { }
             void F(Box<Box<int32>> value) { }
             void G(Box<Box<Box<int32>>> value) { }
             int32 Main() { mut int32 value = 1; value <<= 2; return value; }
-            """).HasErrors);
+            """).HasErrors, Is.False);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void OperatorsAndForIteratorExecuteInOrder(NativeRuntimePolicy policy)
     {
         var program = Compile("""
@@ -59,19 +57,17 @@ public sealed class CompoundAssignmentTests
                 return value;
             }
             """, policy);
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
-        Assert.Equal(41, NativeJit.Execute(program, policy));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(41));
     }
-
-    [Theory]
-    [InlineData("int32", NativeRuntimePolicy.FailFast)]
-    [InlineData("uint32", NativeRuntimePolicy.FailFast)]
-    [InlineData("int64", NativeRuntimePolicy.FailFast)]
-    [InlineData("uint64", NativeRuntimePolicy.FailFast)]
-    [InlineData("int32", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("uint32", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("int64", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("uint64", NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("int32",NativeRuntimePolicy.FailFast)]
+    [TestCase("uint32",NativeRuntimePolicy.FailFast)]
+    [TestCase("int64",NativeRuntimePolicy.FailFast)]
+    [TestCase("uint64",NativeRuntimePolicy.FailFast)]
+    [TestCase("int32",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("uint32",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("int64",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("uint64",NativeRuntimePolicy.CheckedExceptions)]
     public async Task EveryOperatorExecutesForEveryIntegerWidth(string type, NativeRuntimePolicy policy)
     {
         var program = Compile($$"""
@@ -89,47 +85,43 @@ public sealed class CompoundAssignmentTests
                 return pair.Value == 1 && pair.Guard == 17 ? 42 : 1;
             }
             """, policy);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.Equal(42, await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, policy))
-            .ConfigureAwait(true));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(await StaticProtocolTests.RunAsync(NativeEmitter.Emit(program, policy))
+            .ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("<<", 21)]
-    [InlineData(">>", 84)]
-    [InlineData(">>>", 84)]
+    [TestCase("<<",21)]
+    [TestCase(">>",84)]
+    [TestCase(">>>",84)]
     public void OrdinaryShiftSelectsNewSemanticVersion(string operation, int operand)
     {
         var library = CompileLibrary(
             $"public int64 Shift(int64 value, int32 count) {{ return value {operation} count; }}",
             NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(library, ["Shift"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var stale = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 63);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));
         var client = Compilation.Create(SyntaxTree.Parse(
             $"int32 Main() {{ return int32(Shift(int64({operand}), 1)); }}"),
             ModuleCompiler.CreateReference(producer));
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = client.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("var value = 1 << 2;")]
-    [InlineData("mut int64 value = 1; value <<= int64(1);")]
-    [InlineData("mut int32 value = 1; value += uint32(1);")]
-    [InlineData("mut char16 value = 1; value += 1;")]
-    [InlineData("mut bool value = true; value &= false;")]
+    [TestCase("var value = 1 << 2;")]
+    [TestCase("mut int64 value = 1; value <<= int64(1);")]
+    [TestCase("mut int32 value = 1; value += uint32(1);")]
+    [TestCase("mut char16 value = 1; value += 1;")]
+    [TestCase("mut bool value = true; value &= false;")]
     public void CompoundsAndShiftsDoNotPromoteOrDefaultTypes(string statement)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { " + statement + " return 42; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void GenericDefinitionCannotAcquireCompoundCapabilityFromASpecialization()
     {
         var invalid = Compilation.Create(SyntaxTree.Parse("""
@@ -140,7 +132,7 @@ public sealed class CompoundAssignmentTests
             }
             int32 Main() { return Next(int32(21)); }
             """));
-        Assert.Contains(invalid.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(invalid.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
         var program = Compile("""
             T Next<T>(T initial) where T : [Copy] {
                 mut int32 count = 0;
@@ -154,14 +146,12 @@ public sealed class CompoundAssignmentTests
             }
             int32 Main() { return Next(Bits(42)); }
             """, NativeRuntimePolicy.CheckedExceptions);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData("int32", "int32.MaxValue", "int32.MinValue")]
-    [InlineData("uint32", "uint32.MaxValue", "uint32.MinValue")]
-    [InlineData("int64", "int64.MaxValue", "int64.MinValue")]
-    [InlineData("uint64", "uint64.MaxValue", "uint64.MinValue")]
+    [TestCase("int32","int32.MaxValue","int32.MinValue")]
+    [TestCase("uint32","uint32.MaxValue","uint32.MinValue")]
+    [TestCase("int64","int64.MaxValue","int64.MinValue")]
+    [TestCase("uint64","uint64.MaxValue","uint64.MinValue")]
     public void OverflowAndShiftCountsDoNotCommit(string type, string max, string min)
     {
         var source = $$"""
@@ -189,11 +179,11 @@ public sealed class CompoundAssignmentTests
             }
             """;
         var program = Compile(source, NativeRuntimePolicy.CheckedExceptions);
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions));
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void SignedShiftAndRemainderEdges()
     {
         var program = Compile("""
@@ -210,10 +200,10 @@ public sealed class CompoundAssignmentTests
                 return 42;
             }
             """, NativeRuntimePolicy.FailFast);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void ConstEvalUsesCheckedCompoundAndShiftOperations()
     {
         var program = Compile("""
@@ -226,8 +216,7 @@ public sealed class CompoundAssignmentTests
             int32 Main() { const int32 value = Calculate(); return value; }
             """, NativeRuntimePolicy.FailFast);
         var entry = program.Functions[program.EntryPoint];
-        Assert.Equal(42, Assert.IsType<BoundConstant>(
-            Assert.IsType<BoundLocal>(entry.Body.Statements[0]).Initializer).Value);
+        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual2 = ((global::System.Func<BoundLocal>)(() => { var __nunitActual1 = entry.Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual1!; }))().Initializer; Assert.That(__nunitActual2, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual2!; }))().Value, Is.EqualTo(42));
         var invalid = Compilation.Create(SyntaxTree.Parse("""
             [ConstEval] int32 Calculate() {
                 mut int32 value = 1;
@@ -236,10 +225,10 @@ public sealed class CompoundAssignmentTests
             }
             int32 Main() { const int32 value = Calculate(); return value; }
             """));
-        Assert.Contains(invalid.Diagnostics, diagnostic => diagnostic.Code == "TRM3024");
+        Assert.That(global::System.Linq.Enumerable.Any(invalid.Diagnostics,diagnostic => diagnostic.Code == "TRM3024"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void SignedMinimumDivisionFailsButRemainderSucceeds()
     {
         var program = Compile("""
@@ -253,10 +242,10 @@ public sealed class CompoundAssignmentTests
                 return value == 0 ? 42 : 3;
             }
             """, NativeRuntimePolicy.CheckedExceptions);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void CheckedFailurePreservesPriorRhsEffectsAndSnapshotsOldValue()
     {
         var program = Compile("""
@@ -277,10 +266,10 @@ public sealed class CompoundAssignmentTests
                 return value + counter.Visits + 38;
             }
             """, NativeRuntimePolicy.CheckedExceptions);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void ComputedClassReceiverIsEvaluatedOnceAndRetiredOnRhsFailure()
     {
         var program = Compile("""
@@ -309,12 +298,10 @@ public sealed class CompoundAssignmentTests
                 return box.Value;
             }
             """, NativeRuntimePolicy.CheckedExceptions);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void HostBufferIndexIsEvaluatedOnce(NativeRuntimePolicy policy)
     {
         const string source = """
@@ -335,11 +322,11 @@ public sealed class CompoundAssignmentTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [40], true)], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), policy), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void TemporaryManagedReceiverRootIsReleasedAfterFailure()
     {
         var program = Compile("""
@@ -361,10 +348,10 @@ public sealed class CompoundAssignmentTests
                 }
             }
             """, NativeRuntimePolicy.CheckedExceptions);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void OwningRootSurvivesCheckedCompoundFailureAndCleansOnExit()
     {
         const string source = """
@@ -388,12 +375,12 @@ public sealed class CompoundAssignmentTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)],
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void UnsupportedNominalAndImmutableOrVacantPlacesDiagnose()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -414,12 +401,12 @@ public sealed class CompoundAssignmentTests
                 return 0;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3008");
-        Assert.True(compilation.HasErrors);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3008"),Is.True);
+        Assert.That(compilation.HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ThrowingCompoundOperationIsNotAdmittedInNoThrowBody()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -429,10 +416,10 @@ public sealed class CompoundAssignmentTests
                 return value;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void WritableHandleCannotUpgradeReadonlyFieldAuthority()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -446,63 +433,73 @@ public sealed class CompoundAssignmentTests
                 return holder.Value;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3008");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3008"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void IrAndOldVersionRejectCompoundAssignment()
     {
         var library = CompileLibrary("""
             public int32 Next() { mut int32 value = 40; value += 2; return value; }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(library, ["Next"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 44);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
         var function = library.Functions[0];
-        var statement = Assert.IsType<BoundExpressionStatement>(function.Body.Statements[1]);
-        var compound = Assert.IsType<BoundCompoundAssignment>(statement.Expression);
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual5 = function.Body.Statements[1]; Assert.That(__nunitActual5, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual5!; }))();
+        var compound = ((global::System.Func<BoundCompoundAssignment>)(() => { var __nunitActual6 = statement.Expression; Assert.That(__nunitActual6, Is.TypeOf<BoundCompoundAssignment>()); return (BoundCompoundAssignment)__nunitActual6!; }))();
         foreach (var invalid in new[] {
             compound with { Operator = TokenKind.Plus },
             compound with { Place = new BoundConstant(40, PrimitiveType.Int32, compound.Span) },
             compound with { Right = new BoundConstant(2, PrimitiveType.UInt32, compound.Span) },
         })
         {
-            var forged = library with { Functions = library.Functions.SetItem(0,
-                function with { Body = function.Body with { Statements = function.Body.Statements.SetItem(1,
-                    statement with { Expression = invalid }) } }) };
+            var forged = library with {
+                Functions = library.Functions.SetItem(0,
+                function with {
+                    Body = function.Body with {
+                        Statements = function.Body.Statements.SetItem(1,
+                    statement with { Expression = invalid })
+                    }
+                })
+            };
             Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
         }
-        var result = Assert.IsType<BoundReturn>(function.Body.Statements[2]);
-        var nested = library with { Functions = library.Functions.SetItem(0,
-            function with { Body = function.Body with { Statements = function.Body.Statements.SetItem(2,
-                result with { Value = new BoundBinary(TokenKind.Plus, compound,
+        var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual7 = function.Body.Statements[2]; Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual7!; }))();
+        var nested = library with {
+            Functions = library.Functions.SetItem(0,
+            function with {
+                Body = function.Body with {
+                    Statements = function.Body.Statements.SetItem(2,
+                result with {
+                    Value = new BoundBinary(TokenKind.Plus, compound,
                     new BoundConstant(0, PrimitiveType.Int32, compound.Span),
-                    PrimitiveType.Int32, compound.Span) }) } }) };
+                    PrimitiveType.Int32, compound.Span)
+                })
+                }
+            })
+        };
         Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(nested));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void RetainedConsumerUsesCompatibleReplacement(NativeRuntimePolicy policy)
     {
         const string source = "public int32 Next() { mut int32 value = 40; value += 2; return value; }";
         var original = ModuleCompiler.CreateProducer(CompileLibrary(source, policy), ["Next"]);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Next(); }"),
             ModuleCompiler.CreateReference(original), (BoundRuntimePolicy)policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), original);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, original), policy));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = client.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), original);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, original), policy), Is.EqualTo(42));
         var replacement = ModuleCompiler.CreateProducer(CompileLibrary(
             source.Replace("= 40;", "= 41;", StringComparison.Ordinal), policy), ["Next"]);
-        Assert.Equal(43, NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy), Is.EqualTo(43));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NativeGraphRetainsAndReplacesCompoundBody(NativeRuntimePolicy policy)
     {
         const string source = "public int32 Next() { mut int32 value = 40; value += 2; return value; }";
@@ -512,11 +509,11 @@ public sealed class CompoundAssignmentTests
             int32 Main() { mut int32 value = 0; value += Next(); return value; }
             """),
             NativeModuleCompiler.CreateGraphReference([producer]), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(client.Program), [producer], policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = client.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), [producer], policy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [producer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
@@ -524,28 +521,28 @@ public sealed class CompoundAssignmentTests
             "..", "..", "..", "..", "..", ".."));
         var apphost = Path.Combine(root, "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(consumer, [producer],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(consumer, [producer],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(CompileLibrary(
             source.Replace("= 40;", "= 41;", StringComparison.Ordinal), policy), ["Next"], "Compounds", policy);
         NativeModuleCompiler.ValidateGraph(consumer, [replacement]);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphJitAsync(consumer, [replacement],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(consumer, [replacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(43));
     }
 
     private static BoundProgram Compile(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
     }
 
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
     }
 }

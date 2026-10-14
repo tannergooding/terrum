@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -249,82 +249,72 @@ public sealed class TrRmIndexedExecutionAuditTests
         0x15, 10, 1, 8, 4, 0x80, 2, 3, 7, 6, 10,
         0x12, 1, 11, 1, 11, 0, 0, 0x83, 11,
     ];
-
-    [Theory]
-    [InlineData(true, 20)]
-    [InlineData(false, 42)]
+    [TestCase(true,20)]
+    [TestCase(false,42)]
     public void HandwrittenMergeExecutesWithoutSourceOrProductionWriters(bool chooseFirst, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(MergeBody(chooseFirst));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(true, 20)]
-    [InlineData(false, 42)]
+    [TestCase(true,20)]
+    [TestCase(false,42)]
     public void HandwrittenSelectUsesAlreadyDefinedValues(bool chooseFirst, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(SelectBody(chooseFirst));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void HandwrittenCheckedDivRemDefinesTwoIndexedResultsTogether()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(CheckedDivRemBody);
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void HandwrittenWrappingBinaryUsesModularIntegerArithmetic()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(WrappingBinaryBody);
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
-        Assert.Equal(42, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData((ushort)0, 20)]
-    [InlineData((ushort)256, 42)]
-    [InlineData((ushort)257, 99)]
+    [TestCase((ushort)0,20)]
+    [TestCase((ushort)256,42)]
+    [TestCase((ushort)257,99)]
     public void HandwrittenSwitchExecutesMatchingAndDefaultEdges(ushort selector, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(SwitchBody(selector));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(0x1122334455667788UL, 20)]
-    [InlineData(0xFEDCBA9876543210UL, 42)]
-    [InlineData(0xFFFFFFFFFFFFFFFFUL, 99)]
+    [TestCase(0x1122334455667788UL,20)]
+    [TestCase(0xFEDCBA9876543210UL,42)]
+    [TestCase(0xFFFFFFFFFFFFFFFFUL,99)]
     public void HandwrittenWideSwitchComparesExact64BitPatterns(ulong selector, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(WideSwitchBody(selector));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData((byte)2, (byte)0, 20)]
-    [InlineData((byte)2, (byte)1, 42)]
-    [InlineData((byte)3, (byte)65, 20)]
-    [InlineData((byte)3, (byte)66, 42)]
-    [InlineData((byte)3, (byte)67, 99)]
+    [TestCase((byte)2,(byte)0,20)]
+    [TestCase((byte)2,(byte)1,42)]
+    [TestCase((byte)3,(byte)65,20)]
+    [TestCase((byte)3,(byte)66,42)]
+    [TestCase((byte)3,(byte)67,99)]
     public void HandwrittenBooleanAndChar16SwitchesCompareTheirExactValues(
         byte selectorTypeRow, byte selector, int expected)
     {
@@ -332,31 +322,29 @@ public sealed class TrRmIndexedExecutionAuditTests
             SmallScalarSwitchBody(selectorTypeRow, selector));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
 
-    [Fact]
+    [Test]
     public void HandwrittenSwitchWithoutCasesAlwaysTakesDefault()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(
             EmptySwitchBody);
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
-        Assert.Equal(42, NativeJit.Execute(
-            TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(
+            TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void NoThrowSwitchRemainsExecutable()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(SwitchBody(256), effect: 1);
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData((byte)0, (byte)0, (byte)0, (byte)0)]
-    [InlineData((byte)1, (byte)1, (byte)0, (byte)0)]
+    [TestCase((byte)0,(byte)0,(byte)0,(byte)0)]
+    [TestCase((byte)1,(byte)1,(byte)0,(byte)0)]
     public void IndexedSwitchRejectsDuplicateAndDescendingPatterns(
         byte firstLow, byte firstHigh, byte secondLow, byte secondHigh)
     {
@@ -370,7 +358,7 @@ public sealed class TrRmIndexedExecutionAuditTests
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void IndexedSwitchRejectsNonminimalPatternDataWidth()
     {
         var body = SwitchBody(0);
@@ -381,7 +369,7 @@ public sealed class TrRmIndexedExecutionAuditTests
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void IndexedOperationDefinitionOffsetCannotBeZero()
     {
         var body = SelectBody(true);
@@ -391,7 +379,7 @@ public sealed class TrRmIndexedExecutionAuditTests
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void BooleanSwitchRejectsPatternsOutsideItsValueDomain()
     {
         var body = SmallScalarSwitchBody(selectorTypeRow: 2, selector: 0);
@@ -401,7 +389,7 @@ public sealed class TrRmIndexedExecutionAuditTests
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void TruncatingAnIndexedSwitchTerminatorNeverLoads()
     {
         var body = SwitchBody(0);
@@ -413,41 +401,37 @@ public sealed class TrRmIndexedExecutionAuditTests
         }
     }
 
-    [Fact]
+    [Test]
     public void IndexedNoThrowAuditRejectsCheckedDivRem()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(CheckedDivRemBody, effect: 1);
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
-
-    [Theory]
-    [InlineData((byte)0, 1)]
-    [InlineData((byte)1, 2)]
-    [InlineData((byte)2, 1)]
-    [InlineData((byte)3, 2)]
+    [TestCase((byte)0,1)]
+    [TestCase((byte)1,2)]
+    [TestCase((byte)2,1)]
+    [TestCase((byte)3,2)]
     public void HandwrittenLoopUsesSimultaneousBackedgeCopies(byte iterations, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(LoopBody(iterations));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
-        Assert.Equal(expected, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
-
-    [Theory]
-    [InlineData(5, 8)]
-    [InlineData(9, 1)]
-    [InlineData(13, 1)]
-    [InlineData(14, 2)]
-    [InlineData(19, 2)]
-    [InlineData(22, 2)]
-    [InlineData(26, 9)]
-    [InlineData(29, 7)]
-    [InlineData(30, 1)]
-    [InlineData(34, 60)]
-    [InlineData(35, 21)]
-    [InlineData(41, 4)]
-    [InlineData(60, 2)]
-    [InlineData(77, 3)]
+    [TestCase(5,(byte)(8))]
+    [TestCase(9,(byte)(1))]
+    [TestCase(13,(byte)(1))]
+    [TestCase(14,(byte)(2))]
+    [TestCase(19,(byte)(2))]
+    [TestCase(22,(byte)(2))]
+    [TestCase(26,(byte)(9))]
+    [TestCase(29,(byte)(7))]
+    [TestCase(30,(byte)(1))]
+    [TestCase(34,(byte)(60))]
+    [TestCase(35,(byte)(21))]
+    [TestCase(41,(byte)(4))]
+    [TestCase(60,(byte)(2))]
+    [TestCase(77,(byte)(3))]
     public void RejectsForgedMapsDefinitionsOffsetsUsesLivenessAndBranchTypes(int offset, byte value)
     {
         var body = MergeBody(true);
@@ -455,13 +439,11 @@ public sealed class TrRmIndexedExecutionAuditTests
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
-
-    [Theory]
-    [InlineData(13, 2)]
-    [InlineData(14, 1)]
-    [InlineData(15, 3)]
-    [InlineData(16, 3)]
-    [InlineData(17, 1)]
+    [TestCase(13,(byte)(2))]
+    [TestCase(14,(byte)(1))]
+    [TestCase(15,(byte)(3))]
+    [TestCase(16,(byte)(3))]
+    [TestCase(17,(byte)(1))]
     public void RejectsInvalidLoopKindParentHeaderExitAndCleanup(int offset, byte value)
     {
         var body = LoopBody(3);
@@ -470,7 +452,7 @@ public sealed class TrRmIndexedExecutionAuditTests
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void NoThrowIsAuditedAcrossLoopBodies()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(LoopBody(0), effect: 1);
@@ -478,17 +460,17 @@ public sealed class TrRmIndexedExecutionAuditTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
-    [Fact]
+    [Test]
     public void VoidBranchDoesNotNeedAnInventedValueOrDefault()
     {
         byte[] body = [8, 2, 0, 0, 0, 0, 0, 0, 0, 5, 9, 2, 2,
             0, 0, 0x80, 2, 0, 0, 0, 0x83, 0];
         var artifact = TrRmExecutionAuditTests.Artifact(body, resultRow: 7, entry: false);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Empty(program.Functions[0].Variables);
+        Assert.That(program.Functions[0].Variables, Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public void TruncatingAnIndexedBodyNeverLoads()
     {
         var body = LoopBody(3);
@@ -500,7 +482,7 @@ public sealed class TrRmIndexedExecutionAuditTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ADefinitionOnOnlyOneArmCannotInitializeTheOtherArm()
     {
         byte[] body =

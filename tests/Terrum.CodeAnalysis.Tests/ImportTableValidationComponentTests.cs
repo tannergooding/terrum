@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -85,10 +85,8 @@ public sealed partial class ImportTableValidationComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ImportValidationMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var valid = CreateValidCase();
@@ -222,7 +220,7 @@ public sealed partial class ImportTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(VerificationSource, "import-table-validation.terrum"));
@@ -233,14 +231,14 @@ public sealed partial class ImportTableValidationComponentTests
             if (testCase.HasHostedOracle)
             {
                 var hosted = ValidateHosted(testCase);
-                Assert.Equal(testCase.ExpectedValid, hosted.Valid);
+                Assert.That(hosted.Valid, Is.EqualTo(testCase.ExpectedValid));
                 if (hosted.Valid)
                 {
-                    Assert.Equal(testCase.ExpectedFound, hosted.Found);
+                    Assert.That(hosted.Found, Is.EqualTo(testCase.ExpectedFound));
                     if (hosted.Found)
                     {
-                        Assert.Equal(testCase.ExpectedTarget, hosted.Target);
-                        Assert.Equal(testCase.ExpectedPolicy, hosted.Policy);
+                        Assert.That(hosted.Target, Is.EqualTo(testCase.ExpectedTarget));
+                        Assert.That(hosted.Policy, Is.EqualTo(testCase.ExpectedPolicy));
                     }
                 }
             }
@@ -295,15 +293,13 @@ public sealed partial class ImportTableValidationComponentTests
                     testCase.ExpectedFound ? 1 : 0,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
             int jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
-            Assert.True(jitResult == 0,
-                $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {jitResult}.");
+            Assert.That(jitResult == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {jitResult}.");
             int aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true);
-            Assert.True(aotResult == 0,
-                $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {aotResult}.");
+            Assert.That(aotResult == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}, returned {aotResult}.");
         }
     }
 

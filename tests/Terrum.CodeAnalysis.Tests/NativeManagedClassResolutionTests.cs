@@ -3,7 +3,7 @@
 using System;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -32,10 +32,8 @@ public sealed class NativeManagedClassResolutionTests
             public Leaf(int32 value) { Value = value; }
         }
         """;
-
-    [Theory]
-    [InlineData("using A; using B;")]
-    [InlineData("using B; using A;")]
+    [TestCase("using A; using B;")]
+    [TestCase("using B; using A;")]
     public void RejectsAmbiguousImportedClassTypesAndFactoriesRegardlessOfUsingOrder(string imports)
     {
         var compilation = Compile(ClassB, imports + """
@@ -45,14 +43,14 @@ public sealed class NativeManagedClassResolutionTests
                 return 0;
             }
             """);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3005"
-            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011"
-            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal));
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3005"
+            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal)),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"
+            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal)),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void RejectsClassVersusStructAndStructVersusStructShortNameAmbiguity()
     {
         var compilation = Compile(StructB, """
@@ -62,23 +60,21 @@ public sealed class NativeManagedClassResolutionTests
                 return value.Value;
             }
             """);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3005"
-            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal));
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3005"
+            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal)),Is.True);
 
         compilation = Compilation.Create([
             SyntaxTree.Parse("namespace A; struct Leaf { public int32 Value; public Leaf(int32 value) { Value = value; } }"),
             SyntaxTree.Parse(StructB),
             SyntaxTree.Parse("using A; using B; int32 Main() { Leaf value = new Leaf(42); return 0; }"),
         ]);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3005"
-            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal));
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3005"
+            && diagnostic.Message.Contains("ambiguous", StringComparison.Ordinal)),Is.True);
     }
-
-    [Theory]
-    [InlineData("using A; using B;")]
-    [InlineData("using B; using A;")]
+    [TestCase("using A; using B;")]
+    [TestCase("using B; using A;")]
     public void ExactQualifiedClassResolvesIndependentlyOfImports(string imports)
     {
         var compilation = Compile(ClassB, imports + """
@@ -89,11 +85,11 @@ public sealed class NativeManagedClassResolutionTests
                 return leaf.Value;
             }
             """);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        _ = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        _ = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
 
-    [Fact]
+    [Test]
     public void ExactClassAndStructNamesRemainDistinct()
     {
         var compilation = Compile(StructB, """
@@ -104,11 +100,11 @@ public sealed class NativeManagedClassResolutionTests
                 return leaf.Value + value.Value;
             }
             """);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        _ = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        _ = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
-    [Fact]
+    [Test]
     public void SameShortClassNameDoesNotGrantPrivateMethodAccess()
     {
         var compilation = Compilation.Create([
@@ -130,9 +126,9 @@ public sealed class NativeManagedClassResolutionTests
                 int32 Main() { return 0; }
                 """),
         ]);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011"
-            && diagnostic.Message.Contains("private", StringComparison.Ordinal));
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"
+            && diagnostic.Message.Contains("private", StringComparison.Ordinal)),Is.True);
     }
 
     private static Compilation Compile(string otherDeclaration, string consumer) =>

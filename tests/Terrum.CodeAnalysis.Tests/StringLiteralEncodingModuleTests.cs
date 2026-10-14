@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -166,10 +166,8 @@ public sealed class StringLiteralEncodingModuleTests
             return expectedLength;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringLiteralEncodingModuleMatchesHostEncodersAcrossFreshSourceGrants(
         BoundRuntimePolicy policy)
     {
@@ -185,7 +183,7 @@ public sealed class StringLiteralEncodingModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
         trees[^1] = SyntaxTree.Parse(VerificationSource, "string-literal-encoding-module.terrum");
 
@@ -195,8 +193,7 @@ public sealed class StringLiteralEncodingModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] {
             "VerifyUtf8",
@@ -210,7 +207,7 @@ public sealed class StringLiteralEncodingModuleTests
             "VerifyMaximumAsciiLiteral",
             "VerifyMaximumUtf8Literal",
         };
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
@@ -219,10 +216,9 @@ public sealed class StringLiteralEncodingModuleTests
                 $"namespace Terrum.CodeAnalysis; int32 Main() {{ return {exports[index]}(); }}",
                 "string-literal-encoding-consumer.terrum");
             var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
             consumers[index] = ModuleCompiler.Link(consumer, producer);
         }
 
@@ -252,8 +248,8 @@ public sealed class StringLiteralEncodingModuleTests
 
         void VerifyFixture(string text, string spelling, string context)
         {
-            Assert.True(spelling.Length + 2 <= 16_384);
-            Assert.Empty(Lexer.Lex(SourceText.From(spelling)).Diagnostics);
+            Assert.That(spelling.Length + 2 <= 16_384, Is.True);
+            Assert.That(Lexer.Lex(SourceText.From(spelling)).Diagnostics, Is.Empty);
 
             var expected = new int[]?[] {
                 strictUtf8.GetBytes(text).Select(static value => (int)value).ToArray(),
@@ -271,8 +267,7 @@ public sealed class StringLiteralEncodingModuleTests
                 var grant = CreateSourceGrant(encoding, expected[encoding], spelling);
                 var actual = NativeJit.ExecuteWithSourceGrant(consumers[encoding], [grant],
                     (NativeRuntimePolicy)policy);
-                Assert.True(actual == 0,
-                    $"{exports[encoding]} failed for {context}: verification returned {actual}.");
+                Assert.That(actual == 0, Is.True, $"{exports[encoding]} failed for {context}: verification returned {actual}.");
             }
         }
 
@@ -298,7 +293,7 @@ public sealed class StringLiteralEncodingModuleTests
 
             var text = textBuilder.ToString();
             var spelling = $"\"{text}\"";
-            Assert.True(scalarCount * 6 + 4 <= 16_384);
+            Assert.That(scalarCount * 6 + 4 <= 16_384, Is.True);
             VerifyFixture(text, spelling, $"supplementary scalar batch starting at U+{scalarStart:X}");
         }
 
@@ -311,7 +306,7 @@ public sealed class StringLiteralEncodingModuleTests
         {
             var text = bmpTextBuilder.ToString();
             var spelling = $"\"{bmpSpellingBuilder}\"";
-            Assert.True(bmpScalarCount * 10 + 4 <= 16_384);
+            Assert.That(bmpScalarCount * 10 + 4 <= 16_384, Is.True);
             VerifyFixture(text, spelling, $"BMP scalar batch starting at U+{scalarStart:X4}");
             bmpTextBuilder.Clear();
             bmpSpellingBuilder.Clear();
@@ -344,22 +339,20 @@ public sealed class StringLiteralEncodingModuleTests
         }
 
         var maximumAsciiSpelling = "\"" + new string('a', ScannerHost.MaximumSourceLength - 2) + "\"";
-        Assert.Equal(ScannerHost.MaximumSourceLength, maximumAsciiSpelling.Length);
+        Assert.That(maximumAsciiSpelling.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var maximumAsciiGrant = new HostBuffer("Source", PrimitiveType.Char16,
             [.. maximumAsciiSpelling.Select(static unit => (int)unit)], false) {
             IsInvocationScoped = true,
         };
-        Assert.Equal(ScannerHost.MaximumSourceLength - 2,
-            NativeJit.ExecuteWithSourceGrant(consumers[^2], [maximumAsciiGrant], (NativeRuntimePolicy)policy));
+        Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[^2], [maximumAsciiGrant], (NativeRuntimePolicy)policy), Is.EqualTo(ScannerHost.MaximumSourceLength - 2));
 
         var maximumUtf8Spelling = "\"" + new string('\u0800', ScannerHost.MaximumSourceLength - 2) + "\"";
-        Assert.Equal(ScannerHost.MaximumSourceLength, maximumUtf8Spelling.Length);
+        Assert.That(maximumUtf8Spelling.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var maximumUtf8Grant = new HostBuffer("Source", PrimitiveType.Char16,
             [.. maximumUtf8Spelling.Select(static unit => (int)unit)], false) {
             IsInvocationScoped = true,
         };
-        Assert.Equal(49_146,
-            NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumUtf8Grant], (NativeRuntimePolicy)policy));
+        Assert.That(NativeJit.ExecuteWithSourceGrant(consumers[^1], [maximumUtf8Grant], (NativeRuntimePolicy)policy), Is.EqualTo(49_146));
     }
 
     private static int[]? TryEncode(Encoding encoding, string value)
@@ -376,7 +369,7 @@ public sealed class StringLiteralEncodingModuleTests
 
     private static HostBuffer CreateSourceGrant(int encoding, int[]? expected, string spelling)
     {
-        Assert.True(expected is null || expected.Length < ushort.MaxValue);
+        Assert.That(expected is null || expected.Length < ushort.MaxValue, Is.True);
         var values = ImmutableArray.CreateBuilder<int>();
         values.Add(encoding);
         values.Add(expected?.Length ?? ushort.MaxValue);
@@ -385,7 +378,7 @@ public sealed class StringLiteralEncodingModuleTests
             values.AddRange(expected);
         }
         values.AddRange(spelling.Select(static unit => (int)unit));
-        Assert.True(values.Count <= 16_384);
+        Assert.That(values.Count <= 16_384, Is.True);
         return new HostBuffer("Source", PrimitiveType.Char16, values.ToImmutable(), false) {
             IsInvocationScoped = true,
         };

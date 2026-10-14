@@ -8,17 +8,16 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class FloatingFormatConversionModuleTests
 {
-    [Theory]
-    [InlineData(true, BoundRuntimePolicy.FailFast)]
-    [InlineData(true, BoundRuntimePolicy.CheckedExceptions)]
-    [InlineData(false, BoundRuntimePolicy.FailFast)]
-    [InlineData(false, BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(true,BoundRuntimePolicy.FailFast)]
+    [TestCase(true,BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(false,BoundRuntimePolicy.FailFast)]
+    [TestCase(false,BoundRuntimePolicy.CheckedExceptions)]
     public async Task FloatingFormatConversionMatchesHostedIeeeRoundingAsync(
         bool widen,
         BoundRuntimePolicy policy)
@@ -27,20 +26,20 @@ public sealed class FloatingFormatConversionModuleTests
         var path = Path.Combine(root, "self-host", "FloatingFormatConversion.terrum");
         var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var component = SyntaxTree.Parse(text, path);
-        Assert.False(component.HasErrors, string.Join(Environment.NewLine, component.Diagnostics));
+        Assert.That(component.HasErrors, Is.False, string.Join(Environment.NewLine, component.Diagnostics));
 
         var verificationSource = CreateVerificationSource(widen);
         var verification = SyntaxTree.Parse(verificationSource,
             widen ? "float32-to-float64-module.terrum" : "float64-to-float32-module.terrum");
-        Assert.False(verification.HasErrors, string.Join(Environment.NewLine,
+        Assert.That(verification.HasErrors, Is.False, string.Join(Environment.NewLine,
             verification.Diagnostics.Select(diagnostic =>
                 $"{diagnostic} near \"{GetContext(verificationSource, diagnostic.Span.Start)}\"")));
         var compilation = Compilation.Create([component, verification], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var result = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
-        Assert.True(result == 0, $"Floating conversion fixture {result} failed.");
+        Assert.That(result == 0, Is.True, $"Floating conversion fixture {result} failed.");
     }
 
     private static string CreateVerificationSource(bool widen)

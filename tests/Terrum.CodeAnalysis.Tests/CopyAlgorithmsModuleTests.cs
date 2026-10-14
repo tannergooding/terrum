@@ -5,15 +5,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CopyAlgorithmsModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CopyAlgorithmSpecializationsPersistAcrossSemanticModuleConsumersAsync(
         BoundRuntimePolicy policy)
     {
@@ -25,7 +24,7 @@ public sealed class CopyAlgorithmsModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -63,25 +62,23 @@ public sealed class CopyAlgorithmsModuleTests
 
             int32 Main() { return VerifyCopyAlgorithms(); }
             """, "copy-algorithms-module.terrum");
-        Assert.False(trees[^1].HasErrors, string.Join(Environment.NewLine, trees[^1].Diagnostics));
+        Assert.That(trees[^1].HasErrors, Is.False, string.Join(Environment.NewLine, trees[^1].Diagnostics));
 
         var producerCompilation = Compilation.Create(trees, policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program), ["VerifyCopyAlgorithms"]);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["VerifyCopyAlgorithms"]);
 
         var consumerTree = SyntaxTree.Parse("""
             int32 Main() { return VerifyCopyAlgorithms(); }
             """, "copy-algorithms-consumer.terrum");
         var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
-        Assert.Equal(0, NativeJit.Execute(linked, (NativeRuntimePolicy)policy));
+        Assert.That(NativeJit.Execute(linked, (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
     private static string RepositoryRoot() =>

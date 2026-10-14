@@ -13,15 +13,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class WideCandidateTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WideCompilerCandidatesExecuteFromIndependentModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateCandidateLibrary((BoundRuntimePolicy)policy);
@@ -30,15 +29,13 @@ public sealed class WideCandidateTests
         var tests = ReadTree(Path.Combine(root, "self-host", "WideIntegerTests.terrum"));
         var entry = ReadTree(Path.Combine(root, "samples", "native", "modules", "wide-entry.terrum"));
         var compilation = Compilation.Create([tests, entry], reference, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(0, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(0));
         await ExecuteBothAsync(consumer, producer, 0, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task RadixLengthsPublishOnlyForValidBasesAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateIntegerFormattingLibrary(policy,
@@ -65,13 +62,13 @@ public sealed class WideCandidateTests
             }
             """);
         var compilation = Compilation.Create(consumerSource, reference, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public void InvalidRadixLengthCannotBeReadAfterFailure()
     {
         var producer = CreateIntegerFormattingLibrary(NativeRuntimePolicy.FailFast,
@@ -83,41 +80,33 @@ public sealed class WideCandidateTests
                 return length;
             }
             """), ModuleCompiler.CreateReference(producer));
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task BitOperationsMatchHostedReferenceAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateBitOperationsLibrary(policy);
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildBitOperationsConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public Task BitOperationsUInt32MatchEveryBitPositionAcrossModulesAsync(NativeRuntimePolicy policy) =>
         ExecuteBitOperationsPositionConsumerAsync(policy, includeUInt64: false);
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public Task BitOperationsUInt64MatchEveryBitPositionAcrossModulesAsync(NativeRuntimePolicy policy) =>
         ExecuteBitOperationsPositionConsumerAsync(policy, includeUInt64: true);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "UInt32", "uint32.MaxValue")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "UInt32", "uint32.MaxValue")]
-    [InlineData(BoundRuntimePolicy.FailFast, "UInt64", "uint64.MaxValue")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "UInt64", "uint64.MaxValue")]
+    [TestCase(BoundRuntimePolicy.FailFast,"UInt32","uint32.MaxValue")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"UInt32","uint32.MaxValue")]
+    [TestCase(BoundRuntimePolicy.FailFast,"UInt64","uint64.MaxValue")]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions,"UInt64","uint64.MaxValue")]
     public void BitOperationsRoundUpCannotReadFailureOutput(
         BoundRuntimePolicy policy, string suffix, string input)
     {
@@ -133,13 +122,11 @@ public sealed class WideCandidateTests
             }
             """);
         var compilation = Compilation.Create(invalidConsumer, ModuleCompiler.CreateReference(producer), policy);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task Float32MathSelectionMatchesCandidateContractAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("Float32MathSelection.terrum", policy,
@@ -149,21 +136,19 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.ClampFloat32");
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildFloat32MathSelectionConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat32(0.0, 2.0, 1.0)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat32(0.0, 2.0, 1.0)")]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat32(0.0, notANumber, 1.0)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat32(0.0, notANumber, 1.0)")]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat32(0.0, -1.0, notANumber)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat32(0.0, -1.0, notANumber)")]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat32(notANumber, 1.0, -1.0)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat32(notANumber, 1.0, -1.0)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat32(0.0, 2.0, 1.0)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat32(0.0, 2.0, 1.0)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat32(0.0, notANumber, 1.0)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat32(0.0, notANumber, 1.0)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat32(0.0, -1.0, notANumber)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat32(0.0, -1.0, notANumber)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat32(notANumber, 1.0, -1.0)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat32(notANumber, 1.0, -1.0)")]
     public async Task Float32ClampRejectsInvalidBoundsBeforeSelectingNaNAsync(
         NativeRuntimePolicy policy, string expression)
     {
@@ -178,8 +163,8 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
         var program = ModuleCompiler.Link(consumer, producer);
         var image = Path.Combine(AppContext.BaseDirectory, $"float32-math-failure-{Guid.NewGuid():N}.exe");
         try
@@ -192,10 +177,8 @@ public sealed class WideCandidateTests
             await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task Float64MathSelectionMatchesCandidateContractAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("Float64MathSelection.terrum", policy,
@@ -205,21 +188,19 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.ClampFloat64");
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildFloat64MathSelectionConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(0.0, 2.0, 1.0)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(0.0, 2.0, 1.0)")]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(0.0, notANumber, 1.0)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(0.0, notANumber, 1.0)")]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(0.0, -1.0, notANumber)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(0.0, -1.0, notANumber)")]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampFloat64(notANumber, 1.0, -1.0)")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampFloat64(notANumber, 1.0, -1.0)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat64(0.0, 2.0, 1.0)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat64(0.0, 2.0, 1.0)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat64(0.0, notANumber, 1.0)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat64(0.0, notANumber, 1.0)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat64(0.0, -1.0, notANumber)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat64(0.0, -1.0, notANumber)")]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampFloat64(notANumber, 1.0, -1.0)")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampFloat64(notANumber, 1.0, -1.0)")]
     public async Task Float64ClampRejectsInvalidBoundsBeforeSelectingNaNAsync(
         NativeRuntimePolicy policy, string expression)
     {
@@ -234,8 +215,8 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
         var program = ModuleCompiler.Link(consumer, producer);
         var image = Path.Combine(AppContext.BaseDirectory, $"float64-math-failure-{Guid.NewGuid():N}.exe");
         try
@@ -245,13 +226,11 @@ public sealed class WideCandidateTests
         }
         finally
         {
-            File.Delete(image);
+            await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task IntegerMathCandidatesMatchHostedReferenceAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerMath.terrum", policy,
@@ -272,29 +251,27 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.GreatestCommonDivisorInt64");
         var compilation = Compilation.Create(SyntaxTree.Parse(BuildIntegerMathConsumer()),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "AbsInt32(int32.MinValue)", unchecked((int)0xE0540001))]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "AbsInt32(int32.MinValue)", unchecked((int)0xE0540001))]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32(AbsInt64(int64.MinValue))", unchecked((int)0xE0540001))]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32(AbsInt64(int64.MinValue))", unchecked((int)0xE0540001))]
-    [InlineData(NativeRuntimePolicy.FailFast, "ClampInt32(0, 2, 1)", unchecked((int)0xE0540003))]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "ClampInt32(0, 2, 1)", unchecked((int)0xE0540003))]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32(ClampInt64(0, 2, 1))", unchecked((int)0xE0540003))]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32(ClampInt64(0, 2, 1))", unchecked((int)0xE0540003))]
+    [TestCase(NativeRuntimePolicy.FailFast,"AbsInt32(int32.MinValue)",unchecked((int)0xE0540001))]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"AbsInt32(int32.MinValue)",unchecked((int)0xE0540001))]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32(AbsInt64(int64.MinValue))",unchecked((int)0xE0540001))]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32(AbsInt64(int64.MinValue))",unchecked((int)0xE0540001))]
+    [TestCase(NativeRuntimePolicy.FailFast,"ClampInt32(0, 2, 1)",unchecked((int)0xE0540003))]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"ClampInt32(0, 2, 1)",unchecked((int)0xE0540003))]
+    [TestCase(NativeRuntimePolicy.FailFast,"int32(ClampInt64(0, 2, 1))",unchecked((int)0xE0540003))]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"int32(ClampInt64(0, 2, 1))",unchecked((int)0xE0540003))]
     public async Task IntegerMathCandidatesPreserveCheckedFailureSemanticsAsync(
         NativeRuntimePolicy policy, string expression, int expected)
     {
         var component = File.ReadAllText(Path.Combine(RepositoryRoot(), "self-host", "IntegerMath.terrum"));
         var compilation = Compilation.Create(SyntaxTree.Parse(
             component + $"\nint32 Main() {{ return {expression}; }}"), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
         var image = Path.Combine(AppContext.BaseDirectory, $"integer-math-failure-{Guid.NewGuid():N}.exe");
         try
         {
@@ -303,15 +280,13 @@ public sealed class WideCandidateTests
         }
         finally
         {
-            File.Delete(image);
+            await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "Int32")]
-    [InlineData(NativeRuntimePolicy.FailFast, "Int64")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int32")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int64")]
+    [TestCase(NativeRuntimePolicy.FailFast,"Int32")]
+    [TestCase(NativeRuntimePolicy.FailFast,"Int64")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"Int32")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"Int64")]
     public async Task CheckedSignedMagnitudePublishesOnlyRepresentableResultsAcrossModulesAsync(
         NativeRuntimePolicy policy, string suffix)
     {
@@ -339,15 +314,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("Int32")]
-    [InlineData("Int64")]
+    [TestCase("Int32")]
+    [TestCase("Int64")]
     public void FailedSignedMagnitudeCannotPublishVacantResult(string suffix)
     {
         var library = suffix == "Int32" ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
@@ -361,15 +334,13 @@ public sealed class WideCandidateTests
                 return int32(result);
             }
             """), ModuleCompiler.CreateReference(producer));
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "Int32")]
-    [InlineData(NativeRuntimePolicy.FailFast, "Int64")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int32")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int64")]
+    [TestCase(NativeRuntimePolicy.FailFast,"Int32")]
+    [TestCase(NativeRuntimePolicy.FailFast,"Int64")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"Int32")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"Int64")]
     public async Task SignedMagnitudeIncludesMinimumAcrossModulesAsync(NativeRuntimePolicy policy, string suffix)
     {
         var library = suffix == "Int32" ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
@@ -393,15 +364,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedInt32ArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerCheckedArithmetic.terrum", policy,
@@ -433,15 +402,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedUInt32ArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerCheckedArithmetic.terrum", policy,
@@ -468,15 +435,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedWideArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("WideIntegerFacts.terrum", policy,
@@ -515,21 +480,19 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "Int32")]
-    [InlineData(NativeRuntimePolicy.FailFast, "UInt32")]
-    [InlineData(NativeRuntimePolicy.FailFast, "Int64")]
-    [InlineData(NativeRuntimePolicy.FailFast, "UInt64")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int32")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "UInt32")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int64")]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "UInt64")]
+    [TestCase(NativeRuntimePolicy.FailFast,"Int32")]
+    [TestCase(NativeRuntimePolicy.FailFast,"UInt32")]
+    [TestCase(NativeRuntimePolicy.FailFast,"Int64")]
+    [TestCase(NativeRuntimePolicy.FailFast,"UInt64")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"Int32")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"UInt32")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"Int64")]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,"UInt64")]
     public async Task CheckedDivisionAndRemainderPreserveBoundarySemanticsAcrossModulesAsync(
         NativeRuntimePolicy policy, string suffix)
     {
@@ -567,15 +530,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedConversionsPublishOnlyRepresentableValuesAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerCheckedConversions.terrum", policy,
@@ -634,15 +595,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedChar16ConversionsPreserveCodeUnitsAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerCheckedConversions.terrum", policy,
@@ -684,13 +643,13 @@ public sealed class WideCandidateTests
             """);
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(source, reference, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public void FailedCheckedChar16ConversionDoesNotPublishAnInitResult()
     {
         var producer = CreateNumericsLibrary("IntegerCheckedConversions.terrum", NativeRuntimePolicy.FailFast,
@@ -702,13 +661,11 @@ public sealed class WideCandidateTests
                 return int32(result);
             }
             """), ModuleCompiler.CreateReference(producer));
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
@@ -753,15 +710,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual17 = compilation.Program; Assert.That(__nunitActual17, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual17!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingChar16ConversionsClampOnlyOutsideCodeUnitRangeAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
@@ -799,15 +754,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(source, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WrappingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerWrapping.terrum", policy,
@@ -843,15 +796,13 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WrappingChar16ConversionsKeepLowSixteenBitsAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerWrapping.terrum", policy,
@@ -887,57 +838,55 @@ public sealed class WideCandidateTests
             """);
         var compilation = Compilation.Create(source, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual20 = compilation.Program; Assert.That(__nunitActual20, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual20!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("TryAddInt64(int64.MaxValue, 1, init var value); return int32(value);")]
-    [InlineData("if (!TryAddInt64(int64.MaxValue, 1, init var value)) { return int32(value); } return 0;")]
-    [InlineData("uint32 value = 1; require TryAddInt64(value, 2, init var sum); return int32(sum);")]
-    [InlineData("TryAccumulateDecimal(1, 10, uint64.MaxValue, init var value); return int32(value);")]
-    [InlineData("TryAccumulateBase(1, 2, 2, uint64.MaxValue, init var value); return int32(value);")]
+    [TestCase("TryAddInt64(int64.MaxValue, 1, init var value); return int32(value);")]
+    [TestCase("if (!TryAddInt64(int64.MaxValue, 1, init var value)) { return int32(value); } return 0;")]
+    [TestCase("uint32 value = 1; require TryAddInt64(value, 2, init var sum); return int32(sum);")]
+    [TestCase("TryAccumulateDecimal(1, 10, uint64.MaxValue, init var value); return int32(value);")]
+    [TestCase("TryAccumulateBase(1, 2, 2, uint64.MaxValue, init var value); return int32(value);")]
     public void WideCandidateContractsRejectInvalidUse(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "using Terrum.CodeAnalysis.Numerics64; int32 Main() { " + body + " }"),
             ModuleCompiler.CreateReference(CreateCandidateLibrary()));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public async Task WideModuleContractsPermitImplementationReplacementButNotSignednessChangesAsync()
     {
         var original = Compilation.CreateLibrary(SyntaxTree.Parse("public int64 Echo(int64 value) { return value; }"));
-        Assert.False(original.HasErrors, string.Join(Environment.NewLine, original.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(original.Program), ["Echo"]);
+        Assert.That(original.HasErrors, Is.False, string.Join(Environment.NewLine, original.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual21 = original.Program; Assert.That(__nunitActual21, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual21!; }))(), ["Echo"]);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return int32(Echo(42)); }"),
             ModuleCompiler.CreateReference(producer));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual22 = compilation.Program; Assert.That(__nunitActual22, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual22!; }))(), producer);
         var preserved = (byte[])consumer.Clone();
         await ExecuteBothAsync(consumer, producer, 42).ConfigureAwait(true);
         var changed = Compilation.CreateLibrary(SyntaxTree.Parse("public int64 Echo(int64 value) { return value + 1; }"));
-        Assert.False(changed.HasErrors, string.Join(Environment.NewLine, changed.Diagnostics));
-        var replacement = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(changed.Program), ["Echo"]);
+        Assert.That(changed.HasErrors, Is.False, string.Join(Environment.NewLine, changed.Diagnostics));
+        var replacement = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = changed.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))(), ["Echo"]);
         await ExecuteBothAsync(consumer, replacement, 43).ConfigureAwait(true);
-        Assert.Equal(preserved, consumer);
+        Assert.That(consumer, Is.EqualTo(preserved));
 
         var incompatible = Compilation.CreateLibrary(SyntaxTree.Parse("public uint64 Echo(uint64 value) { return value; }"));
-        Assert.False(incompatible.HasErrors, string.Join(Environment.NewLine, incompatible.Diagnostics));
+        Assert.That(incompatible.HasErrors, Is.False, string.Join(Environment.NewLine, incompatible.Diagnostics));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer,
-            ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(incompatible.Program), ["Echo"])));
+            ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = incompatible.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))(), ["Echo"])))!;
     }
 
     private static byte[] CreateCandidateLibrary(BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
         var path = Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum");
         var compilation = Compilation.CreateLibrary(ReadTree(path), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), [
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = compilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))(), [
             "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
             "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
             "Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64",
@@ -954,8 +903,8 @@ public sealed class WideCandidateTests
     {
         var source = ReadTree(Path.Combine(RepositoryRoot(), "self-host", name));
         var compilation = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), exports);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(), exports);
     }
 
     private static byte[] CreateIntegerFormattingLibrary(NativeRuntimePolicy policy, params string[] exports)
@@ -966,8 +915,8 @@ public sealed class WideCandidateTests
             ReadTree(Path.Combine(root, "self-host", "IntegerFormatting.terrum")),
         };
         var compilation = Compilation.CreateLibrary(trees, (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), exports);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual27 = compilation.Program; Assert.That(__nunitActual27, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual27!; }))(), exports);
     }
 
     private static byte[] CreateBitOperationsLibrary(NativeRuntimePolicy policy) =>
@@ -998,9 +947,9 @@ public sealed class WideCandidateTests
         var compilation = Compilation.Create(
             SyntaxTree.Parse(BuildBitOperationsPositionConsumer(includeUInt64)),
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = compilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))(), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
     }
 
@@ -1545,11 +1494,11 @@ public sealed class WideCandidateTests
             var cli = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc", configuration, framework.Name, "terrumc.dll");
             await RunAsync("dotnet", [cli, "run-module", consumerPath, producerPath, "--runtime",
                 policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions"], expected).ConfigureAwait(true);
-            Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
+            Assert.That(await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true), Is.EqualTo(consumer));
         }
         finally
         {
-            File.Delete(image);
+            await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
             File.Delete(consumerPath);
             File.Delete(producerPath);
         }
@@ -1581,7 +1530,7 @@ public sealed class WideCandidateTests
             }
             throw;
         }
-        Assert.Equal(expected, process.ExitCode);
-        Assert.Empty(await error.ConfigureAwait(true));
+        Assert.That(process.ExitCode, Is.EqualTo(expected));
+        Assert.That(await error.ConfigureAwait(true), Is.Empty);
     }
 }

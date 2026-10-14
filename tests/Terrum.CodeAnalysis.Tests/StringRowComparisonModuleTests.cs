@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -45,10 +45,8 @@ public sealed class StringRowComparisonModuleTests
         public int32 CompareStringNames() { return CompareStringText(false); }
         public int32 CompareStringNamespaces() { return CompareStringText(true); }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringRowComparisonsUseFreshSourceGrantsAcrossModuleJit(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -61,7 +59,7 @@ public sealed class StringRowComparisonModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
         trees[^1] = SyntaxTree.Parse(VerificationSource, "string-row-comparison-module.terrum");
 
@@ -69,11 +67,10 @@ public sealed class StringRowComparisonModuleTests
         [
             CreateSourceGrant("\"A\"", "\"A\""),
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
 
         var exports = new[] { "CompareStringNames", "CompareStringNamespaces" };
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             [.. exports.Select(static name => "Terrum.CodeAnalysis." + name)]);
         var consumers = new BoundProgram[exports.Length];
         for (var index = 0; index < exports.Length; index++)
@@ -83,10 +80,9 @@ public sealed class StringRowComparisonModuleTests
                 "string-row-comparison-consumer.terrum");
             var consumerCompilation = Compilation.Create(
                 consumerTree, ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
             consumers[index] = ModuleCompiler.Link(consumer, producer);
         }
 
@@ -118,8 +114,7 @@ public sealed class StringRowComparisonModuleTests
                 var expected = apiIndex == 0 ? fixture.NameEquality : fixture.NamespaceEquality;
                 if (expected is bool expectedEquality)
                 {
-                    Assert.Equal(expectedEquality,
-                        string.Equals(fixture.LeftText, fixture.RightText, StringComparison.Ordinal));
+                    Assert.That(string.Equals(fixture.LeftText, fixture.RightText, StringComparison.Ordinal), Is.EqualTo(expectedEquality));
                 }
 
                 var grant = CreateSourceGrant(fixture.LeftSpelling, fixture.RightSpelling);
@@ -129,7 +124,7 @@ public sealed class StringRowComparisonModuleTests
                     bool equality => equality ? 1 : 0,
                     null => InvalidComparison,
                 };
-                Assert.Equal(expectedStatus, result);
+                Assert.That(result, Is.EqualTo(expectedStatus));
             }
         }
 
@@ -149,14 +144,13 @@ public sealed class StringRowComparisonModuleTests
             var expectedLeft = expectedLeftBuilder.ToString();
             var expectedRight = expectedRightBuilder.ToString();
             var expectedEqual = string.Equals(expectedLeft, expectedRight, StringComparison.Ordinal);
-            Assert.True(scalarCount * 20 + 6 <= 16_384);
+            Assert.That(scalarCount * 20 + 6 <= 16_384, Is.True);
             var grant = CreateSourceGrant(leftSpelling, rightSpelling);
             for (var apiIndex = 0; apiIndex < exports.Length; apiIndex++)
             {
                 var result = NativeJit.ExecuteWithSourceGrant(consumers[apiIndex], [grant],
                     (NativeRuntimePolicy)policy);
-                Assert.True(result == (expectedEqual ? 1 : 0),
-                    $"{exports[apiIndex]} failed for batch starting at U+{batchStart:X}: {result}.");
+                Assert.That(result == (expectedEqual ? 1 : 0), Is.True, $"{exports[apiIndex]} failed for batch starting at U+{batchStart:X}: {result}.");
             }
 
             leftBuilder.Clear();
@@ -202,7 +196,7 @@ public sealed class StringRowComparisonModuleTests
         values.Add(rightSpelling.Length);
         values.AddRange(leftSpelling.Select(static unit => (int)unit));
         values.AddRange(rightSpelling.Select(static unit => (int)unit));
-        Assert.True(values.Count <= 16_384);
+        Assert.That(values.Count <= 16_384, Is.True);
         return new HostBuffer("Source", PrimitiveType.Char16, values.ToImmutable(), false) {
             IsInvocationScoped = true,
         };

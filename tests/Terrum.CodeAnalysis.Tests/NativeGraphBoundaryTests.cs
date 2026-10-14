@@ -6,15 +6,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeGraphBoundaryTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ExecutesSixteenProducerChainAndRejectsSeventeenthAsync(NativeRuntimePolicy policy)
     {
         var providers = new byte[16][];
@@ -29,15 +28,15 @@ public sealed class NativeGraphBoundaryTests
         }
         var root = Root("int32 Main() { return Value15(); }", [providers[^1]], policy);
         NativeModuleCompiler.ValidateGraph(root, providers);
-        Assert.Equal(16, await NativeModuleCompiler.RunGraphAsync(root, providers,
-            TimeSpan.FromSeconds(10), policy));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, providers,
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(16));
 
         var extra = Leaf("public int32 Extra() { return 0; }", "Extra", "Extra", policy);
         _ = Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ValidateGraph(root, [.. providers, extra]));
+            NativeModuleCompiler.ValidateGraph(root, [.. providers, extra]))!;
     }
 
-    [Fact]
+    [Test]
     public async Task DistinctLeafIdentitiesWithEqualExportNamesRemainIsolatedAsync()
     {
         const NativeRuntimePolicy Policy = NativeRuntimePolicy.FailFast;
@@ -52,22 +51,22 @@ public sealed class NativeGraphBoundaryTests
         var originalRoot = (byte[])root.Clone();
         var originalFirstReader = (byte[])firstReader.Clone();
         var originalSecondReader = (byte[])secondReader.Clone();
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root,
-            [second, firstReader, first, secondReader], TimeSpan.FromSeconds(10), Policy));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root,
+            [second, firstReader, first, secondReader], TimeSpan.FromSeconds(10), Policy), Is.EqualTo(42));
 
         var replacement = Leaf("public int32 GetVersion() { return 21; }", "GetVersion", "LeafV1", Policy);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root,
-            [firstReader, secondReader, second, replacement], TimeSpan.FromSeconds(10), Policy));
-        Assert.Equal(originalRoot, root);
-        Assert.Equal(originalFirstReader, firstReader);
-        Assert.Equal(originalSecondReader, secondReader);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root,
+            [firstReader, secondReader, second, replacement], TimeSpan.FromSeconds(10), Policy), Is.EqualTo(43));
+        Assert.That(root, Is.EqualTo(originalRoot));
+        Assert.That(firstReader, Is.EqualTo(originalFirstReader));
+        Assert.That(secondReader, Is.EqualTo(originalSecondReader));
     }
 
     private static byte[] Leaf(string source, string export, string identity, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             [export], identity, policy);
     }
 
@@ -76,8 +75,8 @@ public sealed class NativeGraphBoundaryTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeModuleCompiler.CreateGraphReference(dependencies), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
             [export], identity, dependencies, policy);
     }
 
@@ -85,8 +84,8 @@ public sealed class NativeGraphBoundaryTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             NativeModuleCompiler.CreateGraphReference(dependencies), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(compilation.Program),
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
             dependencies, policy);
     }
 }

@@ -4,7 +4,7 @@ using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -55,80 +55,72 @@ public sealed class TrRmDoForAuditTests
         0x15, 8, 1, 7, 2, 0x80, 2, 1, 8,
         0x12, 1, 9, 1, 9, 0, 0, 0x83, 9,
     ];
-
-    [Theory]
-    [InlineData((byte)0, 0)]
-    [InlineData((byte)3, 4)]
-    [InlineData((byte)4, 4)]
+    [TestCase((byte)0,0)]
+    [TestCase((byte)3,4)]
+    [TestCase((byte)4,4)]
     public void HandwrittenIteratorCarriesBodyAndIteratorReplacements(byte limit, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(IteratorBody(limit));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
-        Assert.Equal(expected, NativeJit.Execute(
-            TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(
+            TrRmExecutableCompiler.Load(artifact), NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
     }
-
-    [Theory]
-    [InlineData(13, 2)]
-    [InlineData(16, 4)]
-    [InlineData(84, 4)]
-    [InlineData(88, 0)]
-    [InlineData(170, 3)]
+    [TestCase(13,(byte)(2))]
+    [TestCase(16,(byte)(4))]
+    [TestCase(84,(byte)(4))]
+    [TestCase(88,(byte)(0))]
+    [TestCase(170,(byte)(3))]
     public void IteratorCannotBecomeASecondLoopEntryOrCycleHeader(int offset, byte value)
     {
         var body = IteratorBody(3);
-        Assert.NotEqual(body[offset], value);
+        Assert.That(value, Is.Not.EqualTo(body[offset]));
         body[offset] = value;
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
-
-    [Theory]
-    [InlineData((byte)0, 1)]
-    [InlineData((byte)1, 1)]
-    [InlineData((byte)3, 3)]
+    [TestCase((byte)0,1)]
+    [TestCase((byte)1,1)]
+    [TestCase((byte)3,3)]
     public void HandwrittenBodyHeaderExecutesBeforeCondition(byte limit, int expected)
     {
         var artifact = TrRmExecutionAuditTests.Artifact(PostTestBody(limit));
         TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
-        Assert.NotEmpty(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
+        Assert.That(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(9, 1)]
-    [InlineData(13, 2)]
-    [InlineData(14, 1)]
-    [InlineData(15, 3)]
-    [InlineData(16, 2)]
-    [InlineData(17, 1)]
-    [InlineData(27, 2)]
-    [InlineData(28, 1)]
-    [InlineData(34, 5)]
-    [InlineData(39, 0)]
-    [InlineData(40, 24)]
-    [InlineData(44, 24)]
-    [InlineData(48, 32)]
-    [InlineData(72, 3)]
-    [InlineData(76, 0)]
-    [InlineData(81, 4)]
-    [InlineData(85, 4)]
-    [InlineData(89, 0)]
-    [InlineData(109, 4)]
-    [InlineData(110, 3)]
-    [InlineData(112, 6)]
-    [InlineData(113, 1)]
+    [TestCase(9,(byte)(1))]
+    [TestCase(13,(byte)(2))]
+    [TestCase(14,(byte)(1))]
+    [TestCase(15,(byte)(3))]
+    [TestCase(16,(byte)(2))]
+    [TestCase(17,(byte)(1))]
+    [TestCase(27,(byte)(2))]
+    [TestCase(28,(byte)(1))]
+    [TestCase(34,(byte)(5))]
+    [TestCase(39,(byte)(0))]
+    [TestCase(40,(byte)(24))]
+    [TestCase(44,(byte)(24))]
+    [TestCase(48,(byte)(32))]
+    [TestCase(72,(byte)(3))]
+    [TestCase(76,(byte)(0))]
+    [TestCase(81,(byte)(4))]
+    [TestCase(85,(byte)(4))]
+    [TestCase(89,(byte)(0))]
+    [TestCase(109,(byte)(4))]
+    [TestCase(110,(byte)(3))]
+    [TestCase(112,(byte)(6))]
+    [TestCase(113,(byte)(1))]
     public void ForgedPostTestIndexesRegionsTypesAndInventoriesReject(int offset, byte value)
     {
         var body = PostTestBody(3);
-        Assert.NotEqual(body[offset], value);
+        Assert.That(value, Is.Not.EqualTo(body[offset]));
         body[offset] = value;
         Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void ExitParameterCannotDominateTheLoopEvenWithMatchingUseInventories()
     {
         var body = PostTestBody(3);
@@ -150,7 +142,7 @@ public sealed class TrRmDoForAuditTests
             TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body)));
     }
 
-    [Fact]
+    [Test]
     public void PostTestOperationsCannotAcquireNoThrowFromTheLoopCondition()
     {
         var artifact = TrRmExecutionAuditTests.Artifact(PostTestBody(0), effect: 1);
@@ -158,7 +150,7 @@ public sealed class TrRmDoForAuditTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
 
-    [Fact]
+    [Test]
     public void EveryTruncatedPostTestBodyRejects()
     {
         var body = PostTestBody(3);

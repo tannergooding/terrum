@@ -9,15 +9,14 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class SourceLineComponentTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceTextReadsEveryUtf16CodeUnitFromFreshGrantsAsync(BoundRuntimePolicy policy)
     {
         var trees = await ReadComponentsAsync(includeTests: false, includeLines: false).ConfigureAwait(true);
@@ -43,10 +42,9 @@ public sealed partial class SourceLineComponentTests
         var producerCompilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false) { IsInvocationScoped = true }],
             policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.VerifySourceCodeUnits"]);
 
         BoundProgram CreateConsumer(int expectedFirst)
@@ -57,17 +55,16 @@ public sealed partial class SourceLineComponentTests
                 """, "source-text-exhaustive-consumer.terrum");
             var consumerCompilation = Compilation.Create(
                 consumerTree, ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
             return ModuleCompiler.Link(consumer, producer);
         }
 
         var emptyConsumer = CreateConsumer(0);
-        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(emptyConsumer,
+        Assert.That(NativeJit.ExecuteWithSourceGrant(emptyConsumer,
             [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }],
-            (NativeRuntimePolicy)policy));
+            (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         const int batchSize = 16_384;
         for (var start = 0; start <= char.MaxValue; start += batchSize)
@@ -75,16 +72,14 @@ public sealed partial class SourceLineComponentTests
             var count = Math.Min(batchSize, char.MaxValue + 1 - start);
             var grant = new HostBuffer("Source", PrimitiveType.Char16,
                 [.. Enumerable.Range(start, count)], false) { IsInvocationScoped = true };
-            Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(
-                CreateConsumer(start), [grant], (NativeRuntimePolicy)policy));
+            Assert.That(NativeJit.ExecuteWithSourceGrant(
+                CreateConsumer(start), [grant], (NativeRuntimePolicy)policy), Is.EqualTo(0));
         }
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("plain")]
-    [InlineData("\r\n\u0085\u2028\u2029")]
-    [InlineData("\uD800\0\uDC00\uD800\uDC00")]
+    [TestCase("")]
+    [TestCase("plain")]
+    [TestCase("\r\n\u0085\u2028\u2029")]
+    [TestCase("\uD800\0\uDC00\uD800\uDC00")]
     public async Task SourceTextReadsExactUnitsAndValidatesRangesAsync(string text)
     {
         var trees = await ReadComponentsAsync(includeTests: false, includeLines: false).ConfigureAwait(true);
@@ -144,11 +139,11 @@ public sealed partial class SourceLineComponentTests
             [
                 new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
             ], (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine,
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine,
                 compilation.SourceDiagnostics.Select(diagnostic =>
                     $"{diagnostic.SyntaxTree.Source.Path}: {diagnostic.Diagnostic}")));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, policy));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+            Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
             await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
     }

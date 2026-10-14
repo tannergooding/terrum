@@ -7,13 +7,13 @@ using System.Linq;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeComCatalogTests
 {
-    [Fact]
+    [Test]
     public void NativeComCatalogCanBeTestedWithoutASeparateImport()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -28,14 +28,14 @@ public sealed class NativeComCatalogTests
         var catalog = NativeImportCatalog.CreateForTesting(
             "test.generic-com.no-import.v1", [], [interfaceDefinition], [], [methodDefinition], []);
 
-        Assert.True(catalog.TryGetComInterface("IFixture", out var selectedInterface));
-        Assert.Same(interfaceDefinition, selectedInterface);
-        Assert.True(catalog.TryGetComMethod(methodDefinition.Identity, out var selectedMethod));
-        Assert.Same(methodDefinition, selectedMethod);
-        Assert.False(NativeFixedArrayContract.MatchesCatalog(catalog));
+        Assert.That(catalog.TryGetComInterface("IFixture", out var selectedInterface), Is.True);
+        Assert.That(selectedInterface, Is.SameAs(interfaceDefinition));
+        Assert.That(catalog.TryGetComMethod(methodDefinition.Identity, out var selectedMethod), Is.True);
+        Assert.That(selectedMethod, Is.SameAs(methodDefinition));
+        Assert.That(NativeFixedArrayContract.MatchesCatalog(catalog), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogAcceptsAnUnrelatedInterfaceAndMethod()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -54,30 +54,30 @@ public sealed class NativeComCatalogTests
         var catalog = NativeImportCatalog.CreateForTesting(
             "test.generic-com.v1", [import], [interfaceDefinition], [], [methodDefinition], []);
 
-        Assert.True(catalog.TryGetComInterface("IFixture", out var selectedInterface));
-        Assert.Same(interfaceDefinition, selectedInterface);
-        Assert.True(catalog.TryGetComMethod("fixture.iface.run", out var selectedMethod));
-        Assert.Same(methodDefinition, selectedMethod);
+        Assert.That(catalog.TryGetComInterface("IFixture", out var selectedInterface), Is.True);
+        Assert.That(selectedInterface, Is.SameAs(interfaceDefinition));
+        Assert.That(catalog.TryGetComMethod("fixture.iface.run", out var selectedMethod), Is.True);
+        Assert.That(selectedMethod, Is.SameAs(methodDefinition));
         var unrelatedInterface = new NativeComInterfaceDefinition(
             "IUnrelated", Guid.Parse("0B1846F5-71B2-4517-89E8-EE29BCF7A41B"), null,
             ["IUnrelated::Run"], ["IUnrelated::Run"]);
-        Assert.False(NativeComCatalog.IsValid([interfaceDefinition, unrelatedInterface], [], [
+        Assert.That(NativeComCatalog.IsValid([interfaceDefinition, unrelatedInterface], [], [
             methodDefinition with {
                 Signature = "uint32(IUnrelated*)",
             },
-        ], [], [import]));
-        Assert.False(NativeComCatalog.IsValid([interfaceDefinition], [], [
+        ], [], [import]), Is.False);
+        Assert.That(NativeComCatalog.IsValid([interfaceDefinition], [], [
             methodDefinition with {
                 Signature = "void(IFixture*,IFixture*)",
                 Abi = "windows-x64-rcx-edx-void",
             },
-        ], [], [import]));
-        Assert.False(NativeComCatalog.IsValid([interfaceDefinition], [], [
+        ], [], [import]), Is.False);
+        Assert.That(NativeComCatalog.IsValid([interfaceDefinition], [], [
             methodDefinition with {
                 Signature = "double(IFixture*,double)",
                 Abi = "windows-x64-rcx-rdx-eax",
             },
-        ], [], [import]));
+        ], [], [import]), Is.False);
         Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
             "test.com-output-address-without-metadata.v1", [import with {
                 ParameterTypes = [PrimitiveType.NativeComInterfaceOutputAddress],
@@ -92,7 +92,7 @@ public sealed class NativeComCatalogTests
             }]));
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogRequiresExplicitSignatureAndInterfaceAliases()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -111,8 +111,8 @@ public sealed class NativeComCatalogTests
             "test.generic-com-aliases.v1", [CreateImport()], [interfaceDefinition], [], [method], [],
             [signatureType]);
 
-        Assert.True(catalog.TryGetComInterface("IFixture", out var selectedInterface));
-        Assert.Same(interfaceDefinition, selectedInterface);
+        Assert.That(catalog.TryGetComInterface("IFixture", out var selectedInterface), Is.True);
+        Assert.That(selectedInterface, Is.SameAs(interfaceDefinition));
 
         var outputMethod = new NativeComMethodDefinition(
             "fixture.iface.create", "IFixture", "IFixture", 0,
@@ -121,18 +121,18 @@ public sealed class NativeComCatalogTests
             IsCallable: true, OutputParameterIndex: 1, OutputInterfaceIdentity: "IFixture") {
             VTableMethodIdentity = "IFixture::Run",
         };
-        Assert.True(NativeComCatalog.IsValid(
-            [interfaceDefinition], [], [outputMethod], [], [CreateImport()], [], out _));
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition], [], [outputMethod], [], [CreateImport()], [], out _), Is.True);
         var otherInterface = new NativeComInterfaceDefinition(
             "IOther", Guid.Parse("8DE87BA7-BC92-49E3-B31D-8E3EA62F4B92"), null,
             ["IOther::Run"], ["IOther::Run"]);
-        Assert.False(NativeComCatalog.IsValid(
+        Assert.That(NativeComCatalog.IsValid(
             [interfaceDefinition, otherInterface], [], [outputMethod with {
                 OutputInterfaceIdentity = "IOther",
-            }], [], [CreateImport()], [], out _));
+            }], [], [CreateImport()], [], out _), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogClassifiesFloatingPointArgumentsAndReturns()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -145,19 +145,19 @@ public sealed class NativeComCatalogTests
             VTableMethodIdentity = "IFixture::Run",
         };
 
-        Assert.True(NativeComCatalog.IsValid(
-            [interfaceDefinition], [], [method], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition], [], [method], [], [CreateImport()]), Is.True);
+        Assert.That(NativeComCatalog.IsValid(
             [interfaceDefinition], [], [method with {
                 Abi = "windows-x64-rcx-rdx-r8-xmm0",
-            }], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
+            }], [], [CreateImport()]), Is.False);
+        Assert.That(NativeComCatalog.IsValid(
             [interfaceDefinition], [], [method with {
                 Abi = "windows-x64-rcx-xmm1-xmm2-eax",
-            }], [], [CreateImport()]));
+            }], [], [CreateImport()]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogRejectsInconsistentSlotsAndInterfaceInheritance()
     {
         var baseInterface = new NativeComInterfaceDefinition(
@@ -172,20 +172,20 @@ public sealed class NativeComCatalogTests
             VTableMethodIdentity = "IBase::Run",
         };
 
-        Assert.True(NativeComCatalog.IsValid([baseInterface, derivedInterface], [], [method], [],
-            [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid([baseInterface, derivedInterface], [], [
+        Assert.That(NativeComCatalog.IsValid([baseInterface, derivedInterface], [], [method], [],
+            [CreateImport()]), Is.True);
+        Assert.That(NativeComCatalog.IsValid([baseInterface, derivedInterface], [], [
             method with { Slot = 1 },
-        ], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid([baseInterface, derivedInterface with {
+        ], [], [CreateImport()]), Is.False);
+        Assert.That(NativeComCatalog.IsValid([baseInterface, derivedInterface with {
             FlattenedMethods = ["IDerived::Close", "IBase::Run"],
-        }], [], [method], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid([baseInterface, derivedInterface], [], [
+        }], [], [method], [], [CreateImport()]), Is.False);
+        Assert.That(NativeComCatalog.IsValid([baseInterface, derivedInterface], [], [
             method with { DeclaringInterfaceIdentity = "IDerived" },
-        ], [], [CreateImport()]));
+        ], [], [CreateImport()]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogRejectsConflictingSignaturesForOneVTableMethod()
     {
         var baseInterface = new NativeComInterfaceDefinition(
@@ -213,16 +213,16 @@ public sealed class NativeComCatalogTests
         var signatureType = new NativeComSignatureTypeDefinition(
             "FixtureCode", NativeComAbiValueKind.Unsigned32);
 
-        Assert.True(NativeComCatalog.IsValid(
-            [baseInterface, derivedInterface], [], [baseMethod, derivedMethod], [], [], [signatureType], out _));
-        Assert.False(NativeComCatalog.IsValid(
+        Assert.That(NativeComCatalog.IsValid(
+            [baseInterface, derivedInterface], [], [baseMethod, derivedMethod], [], [], [signatureType], out _), Is.True);
+        Assert.That(NativeComCatalog.IsValid(
             [baseInterface, derivedInterface], [], [
                 baseMethod,
                 derivedMethod with { Signature = "uint32(IDerivedAlias*,double)" },
-            ], [], [], [signatureType], out _));
+            ], [], [], [signatureType], out _), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogRequiresDirectlyPermittedPointerAdaptations()
     {
         var root = new NativeComInterfaceDefinition(
@@ -253,9 +253,9 @@ public sealed class NativeComCatalogTests
             BorrowedOwnerParameters = [1],
         };
 
-        Assert.True(NativeComCatalog.IsValid(
-            [root, baseInterface, derivedInterface], [owner], [method], [("IDerived", "IBase")], [import]));
-        Assert.False(NativeComCatalog.IsValid(
+        Assert.That(NativeComCatalog.IsValid(
+            [root, baseInterface, derivedInterface], [owner], [method], [("IDerived", "IBase")], [import]), Is.True);
+        Assert.That(NativeComCatalog.IsValid(
             [root, baseInterface, derivedInterface], [owner], [
                 method with {
                     ParameterAdaptations = [
@@ -263,14 +263,14 @@ public sealed class NativeComCatalogTests
                             NativeComParameterAdaptationKind.PointerPreservingBaseInterface),
                     ],
                 },
-            ], [("IDerived", "IBase"), ("IBase", "IRoot")], [import]));
-        Assert.False(NativeComCatalog.IsValid(
+            ], [("IDerived", "IBase"), ("IBase", "IRoot")], [import]), Is.False);
+        Assert.That(NativeComCatalog.IsValid(
             [root, baseInterface, derivedInterface], [owner], [
                 method with { BorrowedOwnerParameters = [] },
-            ], [("IDerived", "IBase")], [import]));
+            ], [("IDerived", "IBase")], [import]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogValidatesOutputOwnersAgainstTheirProducer()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -293,8 +293,8 @@ public sealed class NativeComCatalogTests
         var catalog = NativeImportCatalog.CreateForTesting(
             "test.generic-com-owner.v1", [import], [interfaceDefinition, otherInterface], [owner], [], []);
 
-        Assert.True(catalog.TryGetComOwner("fixture.owner", out var selectedOwner));
-        Assert.Same(owner, selectedOwner);
+        Assert.That(catalog.TryGetComOwner("fixture.owner", out var selectedOwner), Is.True);
+        Assert.That(selectedOwner, Is.SameAs(owner));
         Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
             "test.generic-com-owner-bad-index.v1", [import], [interfaceDefinition], [
                 owner with { OutputParameterIndex = 1 },
@@ -322,7 +322,7 @@ public sealed class NativeComCatalogTests
             }], [interfaceDefinition], [owner], [], []));
     }
 
-    [Fact]
+    [Test]
     public void NativeComOwnerCleanupUsesCataloguedReleaseMetadata()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -369,22 +369,22 @@ public sealed class NativeComCatalogTests
             NativeComMethod = release,
         };
 
-        Assert.True(NativeComCallContract.IsValidOwnerCloseFunction(close, program));
-        Assert.False(NativeComCallContract.IsValidOwnerCloseFunction(close with {
+        Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close with {
             NativeComMethod = release with { Effects = NativeComEffects.None },
-        }, program));
-        Assert.False(NativeComCallContract.IsValidOwnerCloseFunction(close with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close with {
             Name = "fixture.other.Close",
-        }, program));
-        Assert.False(NativeComCallContract.IsValidOwnerCloseFunction(close with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close with {
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
-        }, program));
-        Assert.False(NativeComCatalog.IsValid(
+        }, program), Is.False);
+        Assert.That(NativeComCatalog.IsValid(
             [interfaceDefinition], [owner with { ReleaseMethodIdentity = "fixture.missing.release" }],
-            [release], [], [import]));
+            [release], [], [import]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void GenericComImportOutputBindsSourceOwnerAndCleanup()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -428,24 +428,22 @@ public sealed class NativeComCatalogTests
 
         var compilation = Compilation.CreateWithNativeImports(
             [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var ownerStructure = Assert.Single(program.Structures,
-            structure => structure.Name == owner.BoundOwnerName);
-        Assert.True(ownerStructure.IsUnique);
-        Assert.Equal(owner.CellSize, ownerStructure.Size);
-        Assert.Equal(owner.BoundOwnerName + ".Close", ownerStructure.CleanupMethod);
-        var close = Assert.Single(program.Functions,
-            function => function.Name == owner.BoundOwnerName + ".Close");
-        Assert.True(NativeComCallContract.IsValidOwnerCloseFunction(close, program));
-        var main = Assert.Single(program.Functions, static function => function.Name == "Main");
-        Assert.Single(NativeComCallContract.Acquisitions(main, program)!);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var ownerStructure = global::System.Linq.Enumerable.Single(program.Structures, structure => structure.Name == owner.BoundOwnerName);
+        Assert.That(ownerStructure.IsUnique, Is.True);
+        Assert.That(ownerStructure.Size, Is.EqualTo(owner.CellSize));
+        Assert.That(ownerStructure.CleanupMethod, Is.EqualTo(owner.BoundOwnerName + ".Close"));
+        var close = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == owner.BoundOwnerName + ".Close");
+        Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close, program), Is.True);
+        var main = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Main");
+        Assert.That(NativeComCallContract.Acquisitions(main, program)!, Has.Exactly(1).Items);
 
         _ = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
     }
 
-    [Fact]
+    [Test]
     public void NativeComOwnerCleanupAcceptsEverySelectedWindowsOwner()
     {
         var owners = NativeImportCatalog.WindowsX64.ComOwners;
@@ -477,12 +475,11 @@ public sealed class NativeComCatalogTests
                     method => method.Identity == owner.ReleaseMethodIdentity),
             };
 
-            Assert.True(NativeComCallContract.IsValidOwnerCloseFunction(close, program),
-                owner.BoundOwnerName);
+            Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close, program), Is.True, owner.BoundOwnerName);
         }
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogValidatesBorrowedOwnerParameters()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -513,8 +510,8 @@ public sealed class NativeComCatalogTests
             "test.generic-com-borrowed-owner.v1", [import], [interfaceDefinition, otherInterface],
             [owner], [method], []);
 
-        Assert.True(catalog.TryGetComMethod(method.Identity, out var selectedMethod));
-        Assert.Same(method, selectedMethod);
+        Assert.That(catalog.TryGetComMethod(method.Identity, out var selectedMethod), Is.True);
+        Assert.That(selectedMethod, Is.SameAs(method));
         var program = new BoundProgram([], -1) {
             Structures = [
                 new BoundStruct("fixture.owner", [], 8) {
@@ -524,24 +521,24 @@ public sealed class NativeComCatalogTests
             ],
             NativeImportCatalog = catalog,
         };
-        Assert.Same(interfaceDefinition, NativeComCallContract.LoanInterface(method, 1, owner, program));
+        Assert.That(NativeComCallContract.LoanInterface(method, 1, owner, program), Is.SameAs(interfaceDefinition));
         Assert.Throws<ArgumentException>(() => NativeComCallContract.LoanInterface(
             method with { BorrowedOwnerParameters = [] }, 1, owner, program));
-        Assert.False(NativeComCatalog.IsValid([interfaceDefinition, otherInterface], [owner], [
+        Assert.That(NativeComCatalog.IsValid([interfaceDefinition, otherInterface], [owner], [
             method with { BorrowedOwnerParameters = [2] },
-        ], [], [import]));
-        Assert.False(NativeComCatalog.IsValid([interfaceDefinition, otherInterface], [owner], [
+        ], [], [import]), Is.False);
+        Assert.That(NativeComCatalog.IsValid([interfaceDefinition, otherInterface], [owner], [
             method with {
                 Signature = "void(IFixture*,IUnknown*)",
                 BorrowedOwnerParameters = [1],
             },
-        ], [], [import]));
-        Assert.False(NativeComCatalog.IsValid([interfaceDefinition, otherInterface], [owner], [
+        ], [], [import]), Is.False);
+        Assert.That(NativeComCatalog.IsValid([interfaceDefinition, otherInterface], [owner], [
             method with { Signature = "void(IFixture*,IFixture**)" },
-        ], [], [import]));
+        ], [], [import]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCallContractMapsUnrelatedCataloguedMethodSignatures()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -798,119 +795,112 @@ public sealed class NativeComCatalogTests
             NativeImportCatalogId = catalog.Identity,
         };
 
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(registerFunction, program));
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(stackFunction, program));
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(float32Function, program));
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(float64Function, program));
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction, program));
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(aggregateFunction, program));
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(registerFunction, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(stackFunction, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(float32Function, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(float64Function, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(aggregateFunction, program), Is.True);
         var aggregateOutputFunctions = NativeComCallContract.DirectMethodFunctions(catalog,
             program.Structures, new HashSet<string>(StringComparer.Ordinal) { "RunAggregateOutput" });
-        var aggregateOutputFunction = Assert.Single(aggregateOutputFunctions);
-        Assert.Equal(PrimitiveType.NativeStorageAddress,
-            aggregateOutputFunction.Variables[1].Type);
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(aggregateOutputFunction, program));
+        var aggregateOutputFunction = global::System.Linq.Enumerable.Single(aggregateOutputFunctions);
+        Assert.That(aggregateOutputFunction.Variables[1].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(aggregateOutputFunction, program), Is.True);
         var valueOutputFunctions = NativeComCallContract.DirectMethodFunctions(catalog,
             program.Structures, new HashSet<string>(StringComparer.Ordinal) { "RunValueOutputAddress" });
-        var valueOutputFunction = Assert.Single(valueOutputFunctions);
-        Assert.Equal(PrimitiveType.NativeStorageAddress, valueOutputFunction.Variables[1].Type);
-        Assert.False(valueOutputFunction.Variables[1].IsOut);
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(valueOutputFunction, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(valueOutputFunction with {
+        var valueOutputFunction = global::System.Linq.Enumerable.Single(valueOutputFunctions);
+        Assert.That(valueOutputFunction.Variables[1].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+        Assert.That(valueOutputFunction.Variables[1].IsOut, Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(valueOutputFunction, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(valueOutputFunction with {
             Variables = valueOutputFunction.Variables.SetItem(1,
                 valueOutputFunction.Variables[1] with { IsOut = true }),
-        }, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(valueOutputFunction with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(valueOutputFunction with {
             Variables = valueOutputFunction.Variables.SetItem(1,
                 valueOutputFunction.Variables[1] with { Type = PrimitiveType.UInt32 }),
-        }, program));
+        }, program), Is.False);
         var aggregateStorageAddress = new BoundNativeStorageAddress(0,
             new BoundConstant(0, PrimitiveType.Int32, default), aggregateType, aggregateType,
             PrimitiveType.NativeStorageAddress, 1, 12, 12, IsReadonly: false, default);
-        Assert.True(NativeStorageParameterContract.SupportsAggregateType(catalog, aggregateType,
-            program.Structures, isReadonly: false));
-        Assert.True(NativeStorageParameterContract.MatchesAggregateAddress(aggregateStorageAddress,
-            aggregateOutputMethod.ParameterAdaptations[0], program));
-        Assert.False(NativeStorageParameterContract.MatchesAggregateAddress(
+        Assert.That(NativeStorageParameterContract.SupportsAggregateType(catalog, aggregateType,
+            program.Structures, isReadonly: false), Is.True);
+        Assert.That(NativeStorageParameterContract.MatchesAggregateAddress(aggregateStorageAddress,
+            aggregateOutputMethod.ParameterAdaptations[0], program), Is.True);
+        Assert.That(NativeStorageParameterContract.MatchesAggregateAddress(
             aggregateStorageAddress with { ByteExtent = 8 }, aggregateOutputMethod.ParameterAdaptations[0],
-            program));
-        Assert.False(NativeStorageParameterContract.MatchesAggregateAddress(
+            program), Is.False);
+        Assert.That(NativeStorageParameterContract.MatchesAggregateAddress(
             aggregateStorageAddress with { IsReadonly = true }, aggregateOutputMethod.ParameterAdaptations[0],
-            program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(aggregateFunction, program with {
+            program), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(aggregateFunction, program with {
             Structures = program.Structures.SetItem(1, program.Structures[1] with { Size = 8 }),
-        }));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(aggregateFunction, program with {
+        }), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(aggregateFunction, program with {
             Structures = program.Structures.SetItem(1, program.Structures[1] with { IsUnique = true }),
-        }));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction with {
+        }), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction with {
             Variables = adaptedFunction.Variables.SetItem(2,
                 adaptedFunction.Variables[2] with { Type = PrimitiveType.Int32 }),
-        }, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction with {
             Variables = adaptedFunction.Variables.SetItem(3,
                 adaptedFunction.Variables[3] with { Type = PrimitiveType.Float64 }),
-        }, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(adaptedFunction with {
             NativeComParameterMappings = [
                 new(4, 4),
                 new(5, 4),
                 new(6, 4),
             ],
-        }, program));
-        Assert.Equal(8, ValueLayout.Alignment(ownerType, program.Structures, program.NativeImportCatalog));
+        }, program), Is.False);
+        Assert.That(ValueLayout.Alignment(ownerType, program.Structures, program.NativeImportCatalog), Is.EqualTo(8));
         SemanticVerifier.VerifyLibraryReferences(program);
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(stackFunction with {
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(stackFunction with {
             Variables = stackFunction.Variables.SetItem(4,
                 new BoundVariable("floatingStackArgument", PrimitiveType.Float64, false, default)),
-        }, program));
+        }, program), Is.False);
         var outputProgram = program with {
             Functions = program.Functions.Add(aggregateOutputFunction).Add(valueOutputFunction),
         };
         SemanticVerifier.VerifyLibraryReferences(outputProgram);
         var code = new PeCompiler(outputProgram, default, managedNodes: false, library: true).Compile();
-        var registerRange = Assert.Single(code.Functions,
-            range => range.Start == code.SourceFunctionOffsets[0]);
-        var stackRange = Assert.Single(code.Functions,
-            range => range.Start == code.SourceFunctionOffsets[1]);
-        Assert.Equal(registerRange.StackSize + 32, stackRange.StackSize);
-        Assert.True(code.Code.AsSpan(registerRange.Start, registerRange.End - registerRange.Start)
-            .IndexOf(new byte[] { 0x66, 0x0F, 0x6E, 0xC8 }) >= 0);
-        Assert.True(code.Code.AsSpan(registerRange.Start, registerRange.End - registerRange.Start)
-            .IndexOf(new byte[] { 0x66, 0x48, 0x0F, 0x6E, 0xD8 }) >= 0);
-        Assert.True(code.Code.AsSpan(stackRange.Start, stackRange.End - stackRange.Start)
-            .IndexOf(new byte[] { 0x48, 0x89, 0x84, 0x24, 0x20, 0, 0, 0 }) >= 0);
-        var adaptedRange = Assert.Single(code.Functions,
-            range => range.Start == code.SourceFunctionOffsets[4]);
+        var registerRange = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == code.SourceFunctionOffsets[0]);
+        var stackRange = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == code.SourceFunctionOffsets[1]);
+        Assert.That(stackRange.StackSize, Is.EqualTo(registerRange.StackSize + 32));
+        Assert.That(code.Code.AsSpan(registerRange.Start, registerRange.End - registerRange.Start)
+            .IndexOf(new byte[] { 0x66, 0x0F, 0x6E, 0xC8 }) >= 0, Is.True);
+        Assert.That(code.Code.AsSpan(registerRange.Start, registerRange.End - registerRange.Start)
+            .IndexOf(new byte[] { 0x66, 0x48, 0x0F, 0x6E, 0xD8 }) >= 0, Is.True);
+        Assert.That(code.Code.AsSpan(stackRange.Start, stackRange.End - stackRange.Start)
+            .IndexOf(new byte[] { 0x48, 0x89, 0x84, 0x24, 0x20, 0, 0, 0 }) >= 0, Is.True);
+        var adaptedRange = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == code.SourceFunctionOffsets[4]);
         var adaptedBytes = code.Code.AsSpan(adaptedRange.Start, adaptedRange.End - adaptedRange.Start);
-        Assert.True(adaptedBytes.IndexOf(new byte[] { 0x48, 0x89, 0xC2 }) >= 0);
-        var aggregateOutputRange = Assert.Single(code.Functions,
-            range => range.Start == code.SourceFunctionOffsets[^2]);
+        Assert.That(adaptedBytes.IndexOf(new byte[] { 0x48, 0x89, 0xC2 }) >= 0, Is.True);
+        var aggregateOutputRange = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == code.SourceFunctionOffsets[^2]);
         var aggregateOutputBytes = code.Code.AsSpan(aggregateOutputRange.Start,
             aggregateOutputRange.End - aggregateOutputRange.Start);
-        Assert.True(aggregateOutputBytes.IndexOf(
-            new byte[] { 0x48, 0x8B, 0x01, 0xFF, 0x50, 48 }) >= 0);
-        var valueOutputRange = Assert.Single(code.Functions,
-            range => range.Start == code.SourceFunctionOffsets[^1]);
+        Assert.That(aggregateOutputBytes.IndexOf(
+            new byte[] { 0x48, 0x8B, 0x01, 0xFF, 0x50, 48 }) >= 0, Is.True);
+        var valueOutputRange = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == code.SourceFunctionOffsets[^1]);
         var valueOutputBytes = code.Code.AsSpan(valueOutputRange.Start,
             valueOutputRange.End - valueOutputRange.Start);
-        Assert.True(valueOutputBytes.IndexOf(
-            new byte[] { 0x48, 0x8B, 0x01, 0xFF, 0x50, 56 }) >= 0);
-        Assert.True(valueOutputBytes.IndexOf(new byte[] { 0x48, 0x8B, 0x85 }) >= 0);
-        Assert.Equal(-1, valueOutputBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }));
-        Assert.True(adaptedBytes.IndexOf(new byte[] { 0x49, 0x89, 0xC0 }) >= 0);
-        Assert.True(adaptedBytes.IndexOf(new byte[] { 0x49, 0x89, 0xC1 }) >= 0);
-        Assert.True(adaptedBytes.IndexOf(new byte[] { 0xFF, 0x50, 0x20 }) >= 0);
-        Assert.True(adaptedBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }) >= 0);
-        var aggregateRange = Assert.Single(code.Functions,
-            range => range.Start == code.SourceFunctionOffsets[5]);
+        Assert.That(valueOutputBytes.IndexOf(
+            new byte[] { 0x48, 0x8B, 0x01, 0xFF, 0x50, 56 }) >= 0, Is.True);
+        Assert.That(valueOutputBytes.IndexOf(new byte[] { 0x48, 0x8B, 0x85 }) >= 0, Is.True);
+        Assert.That(valueOutputBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }), Is.EqualTo(-1));
+        Assert.That(adaptedBytes.IndexOf(new byte[] { 0x49, 0x89, 0xC0 }) >= 0, Is.True);
+        Assert.That(adaptedBytes.IndexOf(new byte[] { 0x49, 0x89, 0xC1 }) >= 0, Is.True);
+        Assert.That(adaptedBytes.IndexOf(new byte[] { 0xFF, 0x50, 0x20 }) >= 0, Is.True);
+        Assert.That(adaptedBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }) >= 0, Is.True);
+        var aggregateRange = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == code.SourceFunctionOffsets[5]);
         var aggregateBytes = code.Code.AsSpan(aggregateRange.Start, aggregateRange.End - aggregateRange.Start);
-        Assert.True(aggregateBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }) >= 0);
+        Assert.That(aggregateBytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }) >= 0, Is.True);
         AssertFloatingReturn(code, functionIndex: 2, vtableSlot: 2, wide: false);
         AssertFloatingReturn(code, functionIndex: 3, vtableSlot: 3, wide: true);
     }
 
-    [Fact]
+    [Test]
     public void NativeComCatalogBoundsOutputAndAdaptationMetadataBySignature()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -924,33 +914,33 @@ public sealed class NativeComCatalogTests
             VTableMethodIdentity = "IFixture::Create",
         };
 
-        Assert.True(NativeComCatalog.IsValid(
-            [interfaceDefinition], [], [method], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
-            [interfaceDefinition], [], [method with { OutputParameterIndex = 2 }], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
-            [interfaceDefinition], [], [method with { Abi = "windows-x64-rcx-eax" }], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
-            [interfaceDefinition], [], [method with { Abi = "windows-x64-rdx-rcx-eax" }], [], [CreateImport()]));
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition], [], [method], [], [CreateImport()]), Is.True);
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition], [], [method with { OutputParameterIndex = 2 }], [], [CreateImport()]), Is.False);
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition], [], [method with { Abi = "windows-x64-rcx-eax" }], [], [CreateImport()]), Is.False);
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition], [], [method with { Abi = "windows-x64-rdx-rcx-eax" }], [], [CreateImport()]), Is.False);
 
         var owner = new NativeComOwnerDefinition(
             "fixture.method-owner", "IFixture", NativeComOwnerAcquisitionKind.ComMethodOutput,
             method.Identity, 1, true, 8, 8);
         var otherInterface = new NativeComInterfaceDefinition(
             "IOther", Guid.Parse("E8FD8082-EE73-4D76-A06D-20F6C0E93A76"), null, ["IOther::Run"], ["IOther::Run"]);
-        Assert.True(NativeComCatalog.IsValid(
-            [interfaceDefinition, otherInterface], [owner], [method], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
-            [interfaceDefinition, otherInterface], [owner with { OutputParameterIndex = 0 }], [method], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
-            [interfaceDefinition, otherInterface], [owner with { InterfaceIdentity = "IOther" }], [method], [], [CreateImport()]));
-        Assert.False(NativeComCatalog.IsValid(
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition, otherInterface], [owner], [method], [], [CreateImport()]), Is.True);
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition, otherInterface], [owner with { OutputParameterIndex = 0 }], [method], [], [CreateImport()]), Is.False);
+        Assert.That(NativeComCatalog.IsValid(
+            [interfaceDefinition, otherInterface], [owner with { InterfaceIdentity = "IOther" }], [method], [], [CreateImport()]), Is.False);
+        Assert.That(NativeComCatalog.IsValid(
             [interfaceDefinition, otherInterface], [owner], [method with {
                 Effects = NativeComEffects.SignedHResult,
-            }], [], [CreateImport()]));
+            }], [], [CreateImport()]), Is.False);
     }
 
-    [Fact]
+    [Test]
     public void GenericComCatalogGeneratesDirectScalarMethodFunctions()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -989,118 +979,118 @@ public sealed class NativeComCatalogTests
         };
         var functions = NativeComCallContract.DirectMethodFunctions(catalog, [ownerStructure]);
 
-        var close = Assert.Single(functions, static candidate => candidate.IsCleanup);
-        Assert.True(NativeComCallContract.IsValidOwnerCloseFunction(close,
+        var close = global::System.Linq.Enumerable.Single(functions, static candidate => candidate.IsCleanup);
+        Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close,
             new BoundProgram(functions, -1) {
                 Structures = [ownerStructure],
                 NativeImportCatalogId = catalog.Identity,
                 NativeImportCatalog = catalog,
-            }));
-        var function = Assert.Single(functions, static candidate => !candidate.IsCleanup);
-        Assert.Equal(owner.BoundOwnerName + ".Resize", function.Name);
-        Assert.Equal(PrimitiveType.Bool, function.ReturnType);
-        Assert.Equal(PrimitiveType.UInt32, function.Variables[1].Type);
-        Assert.Equal(PrimitiveType.UInt32, function.Variables[2].Type);
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(function,
+            }), Is.True);
+        var function = global::System.Linq.Enumerable.Single(functions, static candidate => !candidate.IsCleanup);
+        Assert.That(function.Name, Is.EqualTo(owner.BoundOwnerName + ".Resize"));
+        Assert.That(function.ReturnType, Is.EqualTo(PrimitiveType.Bool));
+        Assert.That(function.Variables[1].Type, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(function.Variables[2].Type, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(function,
             new BoundProgram(functions, -1) {
                 Structures = [ownerStructure],
                 NativeImportCatalogId = catalog.Identity,
                 NativeImportCatalog = catalog,
-            }));
+            }), Is.True);
     }
 
-    [Fact]
+    [Test]
     public void GenericComCatalogMapsCataloguedStorageRecordLoans()
     {
-            const string recordType = "fixture.storage.Record";
-            const string loanGroup = "record-backing";
-            var interfaceDefinition = new NativeComInterfaceDefinition(
-                "IFixture", Guid.Parse("740BFE34-D3E8-4E81-BE60-BC3E30A6C2D1"), null,
-                ["IFixture::Release", "IFixture::Observe"], ["IFixture::Release", "IFixture::Observe"]);
-            var acquisitionImport = CreateImport() with {
-                Key = "test.fixture.storage-record-acquisition",
-                ParameterTypes = [PrimitiveType.NativeComInterfaceOutputAddress],
-                ParameterContracts = [NativeImportParameterContract.OwnedNativeComInterfaceOutput],
-                ComOutputs = [new(0, "IFixture", NativeComEffects.AcquiresReference)],
-            };
-            var owner = new NativeComOwnerDefinition(
-                "fixture.owner", "IFixture", NativeComOwnerAcquisitionKind.NativeImportOutput,
-                acquisitionImport.Key, 0, true, 8, 8) {
-                ReleaseMethodIdentity = "fixture.iface.release",
-            };
-            var releaseMethod = new NativeComMethodDefinition(
-                "fixture.iface.release", "IFixture", "IFixture", 0,
-                "ULONG(IFixture*)", "windows-x64-rcx-eax",
-                NativeComEffects.ReleasesReference, IsCallable: true) {
-                VTableMethodIdentity = "IFixture::Release",
-            };
-            var observeMethod = new NativeComMethodDefinition(
-                "fixture.iface.observe", "IFixture", "IFixture", 1,
-                "void(IFixture*,const FIXTURE_RECORD*,const FIXTURE_RECORD*)",
-                "windows-x64-rcx-rdx-r8-void", NativeComEffects.None, IsCallable: true) {
-                VTableMethodIdentity = "IFixture::Observe",
-                StorageRecordParameters = [
-                    new(1, recordType, true, loanGroup, NoEscape: true,
+        const string recordType = "fixture.storage.Record";
+        const string loanGroup = "record-backing";
+        var interfaceDefinition = new NativeComInterfaceDefinition(
+            "IFixture", Guid.Parse("740BFE34-D3E8-4E81-BE60-BC3E30A6C2D1"), null,
+            ["IFixture::Release", "IFixture::Observe"], ["IFixture::Release", "IFixture::Observe"]);
+        var acquisitionImport = CreateImport() with {
+            Key = "test.fixture.storage-record-acquisition",
+            ParameterTypes = [PrimitiveType.NativeComInterfaceOutputAddress],
+            ParameterContracts = [NativeImportParameterContract.OwnedNativeComInterfaceOutput],
+            ComOutputs = [new(0, "IFixture", NativeComEffects.AcquiresReference)],
+        };
+        var owner = new NativeComOwnerDefinition(
+            "fixture.owner", "IFixture", NativeComOwnerAcquisitionKind.NativeImportOutput,
+            acquisitionImport.Key, 0, true, 8, 8) {
+            ReleaseMethodIdentity = "fixture.iface.release",
+        };
+        var releaseMethod = new NativeComMethodDefinition(
+            "fixture.iface.release", "IFixture", "IFixture", 0,
+            "ULONG(IFixture*)", "windows-x64-rcx-eax",
+            NativeComEffects.ReleasesReference, IsCallable: true) {
+            VTableMethodIdentity = "IFixture::Release",
+        };
+        var observeMethod = new NativeComMethodDefinition(
+            "fixture.iface.observe", "IFixture", "IFixture", 1,
+            "void(IFixture*,const FIXTURE_RECORD*,const FIXTURE_RECORD*)",
+            "windows-x64-rcx-rdx-r8-void", NativeComEffects.None, IsCallable: true) {
+            VTableMethodIdentity = "IFixture::Observe",
+            StorageRecordParameters = [
+                new(1, recordType, true, loanGroup, NoEscape: true,
                         SignatureTypeName: "FIXTURE_RECORD"),
                     new(2, recordType, true, loanGroup, NoEscape: true,
                         SignatureTypeName: "FIXTURE_RECORD"),
                 ],
-            };
-            var layout = new NativeStorageRecordLayoutDefinition(
-                recordType, "fixture.record", 16, 8, [
-                    new("Data", PrimitiveType.NativeStorageAddress, 0, 8),
+        };
+        var layout = new NativeStorageRecordLayoutDefinition(
+            recordType, "fixture.record", 16, 8, [
+                new("Data", PrimitiveType.NativeStorageAddress, 0, 8),
                     new("ByteExtent", PrimitiveType.UInt32, 8, 4, MinimumValue: 1, MaximumValue: 16),
-                ], BackingPointerFieldIndex: 0, BackingExtentFieldIndex: 1);
-            var catalog = NativeImportCatalog.CreateForTesting(
-                "test.generic-com-storage-record.v1", [acquisitionImport], [interfaceDefinition], [owner],
-                [releaseMethod, observeMethod], [], storageRecordLayouts: [layout]);
-            var ownerStructure = new BoundStruct(owner.BoundOwnerName, [], 8) {
-                IsUnique = true,
-                CleanupMethod = owner.BoundOwnerName + ".Close",
-            };
-            var program = new BoundProgram([], -1) {
-                Structures = [ownerStructure],
-                NativeImportCatalogId = catalog.Identity,
-                NativeImportCatalog = catalog,
-            };
+            ], BackingPointerFieldIndex: 0, BackingExtentFieldIndex: 1);
+        var catalog = NativeImportCatalog.CreateForTesting(
+            "test.generic-com-storage-record.v1", [acquisitionImport], [interfaceDefinition], [owner],
+            [releaseMethod, observeMethod], [], storageRecordLayouts: [layout]);
+        var ownerStructure = new BoundStruct(owner.BoundOwnerName, [], 8) {
+            IsUnique = true,
+            CleanupMethod = owner.BoundOwnerName + ".Close",
+        };
+        var program = new BoundProgram([], -1) {
+            Structures = [ownerStructure],
+            NativeImportCatalogId = catalog.Identity,
+            NativeImportCatalog = catalog,
+        };
 
-            var observeFunction = Assert.Single(NativeComCallContract.DirectMethodFunctions(
-                catalog, [ownerStructure]), static function => !function.IsCleanup);
-            Assert.Equal(PrimitiveType.NativeStorageAddress, observeFunction.Variables[1].Type);
-            Assert.Equal(PrimitiveType.NativeStorageAddress, observeFunction.Variables[2].Type);
-            Assert.True(NativeComCallContract.IsValidVTableCallFunction(observeFunction, program));
-            Assert.True(NativeStorageRecordContract.TryGetParameter(observeMethod, 1,
-                out var firstStorageRecordParameter));
-            Assert.True(NativeStorageRecordContract.TryGetParameter(observeMethod, 2,
-                out var secondStorageRecordParameter));
-            Assert.NotNull(firstStorageRecordParameter);
-            Assert.NotNull(secondStorageRecordParameter);
-            Assert.Equal(loanGroup, firstStorageRecordParameter.LoanGroup);
-            Assert.Equal(loanGroup, secondStorageRecordParameter.LoanGroup);
-            Assert.True(NativeStorageRecordContract.IsValidComParameter(firstStorageRecordParameter,
-                observeMethod, catalog.StorageRecordLayouts));
-            Assert.True(NativeStorageRecordContract.IsValidComParameter(secondStorageRecordParameter,
-                observeMethod, catalog.StorageRecordLayouts));
-            var recordAddress = new BoundNativeStorageAddress(0,
-                new BoundConstant(0, PrimitiveType.Int32, default), PrimitiveType.NativeStorageRecord,
-                PrimitiveType.NativeStorageRecord, PrimitiveType.NativeStorageAddress, 1,
-                layout.ByteExtent, layout.ByteExtent, IsReadonly: true, Span: default);
-            Assert.True(NativeStorageRecordContract.MatchesAddress(
-                recordAddress, firstStorageRecordParameter, catalog));
-            Assert.False(NativeStorageRecordContract.MatchesAddress(
-                recordAddress with { ByteExtent = layout.ByteExtent - sizeof(uint) },
-                firstStorageRecordParameter, catalog));
-            Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-                "test.generic-com-storage-record.invalid-signature.v1", [acquisitionImport],
-                [interfaceDefinition], [owner], [
-                    releaseMethod,
+        var observeFunction = global::System.Linq.Enumerable.Single(NativeComCallContract.DirectMethodFunctions(
+            catalog, [ownerStructure]), static function => !function.IsCleanup);
+        Assert.That(observeFunction.Variables[1].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+        Assert.That(observeFunction.Variables[2].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(observeFunction, program), Is.True);
+        Assert.That(NativeStorageRecordContract.TryGetParameter(observeMethod, 1,
+            out var firstStorageRecordParameter), Is.True);
+        Assert.That(NativeStorageRecordContract.TryGetParameter(observeMethod, 2,
+            out var secondStorageRecordParameter), Is.True);
+        TestAssertions.NotNull(firstStorageRecordParameter);
+        TestAssertions.NotNull(secondStorageRecordParameter);
+        Assert.That(firstStorageRecordParameter.LoanGroup, Is.EqualTo(loanGroup));
+        Assert.That(secondStorageRecordParameter.LoanGroup, Is.EqualTo(loanGroup));
+        Assert.That(NativeStorageRecordContract.IsValidComParameter(firstStorageRecordParameter,
+            observeMethod, catalog.StorageRecordLayouts), Is.True);
+        Assert.That(NativeStorageRecordContract.IsValidComParameter(secondStorageRecordParameter,
+            observeMethod, catalog.StorageRecordLayouts), Is.True);
+        var recordAddress = new BoundNativeStorageAddress(0,
+            new BoundConstant(0, PrimitiveType.Int32, default), PrimitiveType.NativeStorageRecord,
+            PrimitiveType.NativeStorageRecord, PrimitiveType.NativeStorageAddress, 1,
+            layout.ByteExtent, layout.ByteExtent, IsReadonly: true, Span: default);
+        Assert.That(NativeStorageRecordContract.MatchesAddress(
+            recordAddress, firstStorageRecordParameter, catalog), Is.True);
+        Assert.That(NativeStorageRecordContract.MatchesAddress(
+            recordAddress with { ByteExtent = layout.ByteExtent - sizeof(uint) },
+            firstStorageRecordParameter, catalog), Is.False);
+        Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
+            "test.generic-com-storage-record.invalid-signature.v1", [acquisitionImport],
+            [interfaceDefinition], [owner], [
+                releaseMethod,
                     observeMethod with {
                         StorageRecordParameters = observeMethod.StorageRecordParameters.SetItem(0,
                             observeMethod.StorageRecordParameters[0] with {
                                 SignatureTypeName = "OTHER_RECORD",
                             }),
                     },
-                ], [], storageRecordLayouts: [layout]));
+            ], [], storageRecordLayouts: [layout]));
         Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
                 "test.generic-com-storage-record.invalid-noescape.v1", [acquisitionImport],
                 [interfaceDefinition], [owner], [
@@ -1112,7 +1102,7 @@ public sealed class NativeComCatalogTests
                 ], [], storageRecordLayouts: [layout]));
     }
 
-    [Fact]
+    [Test]
     public void NativeComOwnerTryCloneUsesCataloguedReferenceAcquisition()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -1187,14 +1177,14 @@ public sealed class NativeComCatalogTests
             NativeImportCatalogId = catalog.Identity,
         };
 
-        Assert.True(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction, program));
-        Assert.False(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction with {
+        Assert.That(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction with {
             NativeComMethod = releaseMethod,
-        }, program));
-        Assert.False(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction with {
             Variables = cloneFunction.Variables.SetItem(1,
                 cloneFunction.Variables[1] with { IsOut = false }),
-        }, program));
+        }, program), Is.False);
         var unapprovedCatalog = NativeImportCatalog.CreateForTesting(
             "test.generic-com-owner-no-clone.v1", [acquisitionImport, verificationImport],
             [interfaceDefinition], [owner with { AdditionalAcquisitionMethodIdentities = [] }],
@@ -1203,7 +1193,7 @@ public sealed class NativeComCatalogTests
             NativeImportCatalog = unapprovedCatalog,
             NativeImportCatalogId = unapprovedCatalog.Identity,
         };
-        Assert.False(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction, unapprovedProgram));
+        Assert.That(NativeComCallContract.IsValidOwnerCloneFunction(cloneFunction, unapprovedProgram), Is.False);
         SemanticVerifier.VerifyLibraryReferences(program);
 
         var cloneCall = new BoundCall(0, [
@@ -1218,23 +1208,22 @@ public sealed class NativeComCatalogTests
             Functions = [cloneFunction, caller, closeFunction, verificationFunction],
         };
         var acquisitions = NativeComCallContract.Acquisitions(caller, callerProgram);
-        Assert.NotNull(acquisitions);
-        Assert.Equal(0, acquisitions[1]);
+        TestAssertions.NotNull(acquisitions);
+        Assert.That(acquisitions[1], Is.EqualTo(0));
         var unapprovedAcquisitions = NativeComCallContract.Acquisitions(caller, callerProgram with {
             NativeImportCatalog = unapprovedCatalog,
             NativeImportCatalogId = unapprovedCatalog.Identity,
         });
-        Assert.NotNull(unapprovedAcquisitions);
-        Assert.Empty(unapprovedAcquisitions);
+        TestAssertions.NotNull(unapprovedAcquisitions);
+        Assert.That(unapprovedAcquisitions, Is.Empty);
 
         var code = new PeCompiler(program, default, managedNodes: false, library: true).Compile();
-        var range = Assert.Single(code.Functions,
-            candidate => candidate.Start == code.SourceFunctionOffsets[0]);
-        Assert.True(code.Code.AsSpan(range.Start, range.End - range.Start)
-            .IndexOf(new byte[] { 0xFF, 0x50, 0x00 }) >= 0);
+        var range = global::System.Linq.Enumerable.Single(code.Functions, candidate => candidate.Start == code.SourceFunctionOffsets[0]);
+        Assert.That(code.Code.AsSpan(range.Start, range.End - range.Start)
+            .IndexOf(new byte[] { 0xFF, 0x50, 0x00 }) >= 0, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NativeComVTableCallStagesAndValidatesOwnedOutputParameters()
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
@@ -1311,22 +1300,22 @@ public sealed class NativeComCatalogTests
             NativeImportCatalogId = catalog.Identity,
         };
 
-        Assert.True(NativeComCallContract.IsValidVTableCallFunction(createFunction, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(
-            createFunction with { ReturnType = PrimitiveType.Int32 }, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(createFunction with {
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(createFunction, program), Is.True);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(
+            createFunction with { ReturnType = PrimitiveType.Int32 }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(createFunction with {
             NativeComParameterMappings = [new(1, 4), new(2, 4)],
-        }, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(createFunction with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(createFunction with {
             NativeComHiddenParameters = [
                 new(1, NativeComHiddenParameterKind.NullPointer),
                 new(2, NativeComHiddenParameterKind.InterfaceIdAddress, InterfaceIdentity: "IFixture"),
                 new(3, NativeComHiddenParameterKind.NullPointer),
             ],
-        }, program));
-        Assert.False(NativeComCallContract.IsValidVTableCallFunction(createFunction with {
+        }, program), Is.False);
+        Assert.That(NativeComCallContract.IsValidVTableCallFunction(createFunction with {
             Variables = createFunction.Variables.SetItem(2, createFunction.Variables[2] with { IsOut = false }),
-        }, program));
+        }, program), Is.False);
         var outputCall = new BoundCall(0, [
             new BoundReceiverLoan(0, ownerType, default),
             new BoundConstant(1, PrimitiveType.UInt32, default),
@@ -1340,20 +1329,19 @@ public sealed class NativeComCatalogTests
             Functions = [createFunction, outputCaller, closeFunction, verificationImportFunction],
         };
         var acquisitions = NativeComCallContract.Acquisitions(outputCaller, outputProgram);
-        Assert.NotNull(acquisitions);
-        Assert.Equal(0, acquisitions[1]);
+        TestAssertions.NotNull(acquisitions);
+        Assert.That(acquisitions[1], Is.EqualTo(0));
         SemanticVerifier.VerifyLibraryReferences(program);
 
         var code = new PeCompiler(program, default, managedNodes: false, library: true).Compile();
-        var range = Assert.Single(code.Functions,
-            candidate => candidate.Start == code.SourceFunctionOffsets[0]);
+        var range = global::System.Linq.Enumerable.Single(code.Functions, candidate => candidate.Start == code.SourceFunctionOffsets[0]);
         var bytes = code.Code.AsSpan(range.Start, range.End - range.Start);
-        Assert.True(bytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }) >= 0
-            || bytes.IndexOf(new byte[] { 0x48, 0x8D, 0x84, 0x24 }) >= 0);
-        Assert.True(bytes.IndexOf(new byte[] { 0x48, 0x89, 0x84, 0x24, 0x28, 0, 0, 0 }) >= 0);
-        Assert.True(range.StackSize >= 160);
-        Assert.True(bytes.IndexOf(new byte[] { 0xFF, 0x50, 0x00 }) >= 0);
-        Assert.True(bytes.IndexOf(new byte[] { 0xFF, 0x50, 0x08 }) >= 0);
+        Assert.That(bytes.IndexOf(new byte[] { 0x48, 0x8D, 0x85 }) >= 0
+            || bytes.IndexOf(new byte[] { 0x48, 0x8D, 0x84, 0x24 }) >= 0, Is.True);
+        Assert.That(bytes.IndexOf(new byte[] { 0x48, 0x89, 0x84, 0x24, 0x28, 0, 0, 0 }) >= 0, Is.True);
+        Assert.That(range.StackSize >= 160, Is.True);
+        Assert.That(bytes.IndexOf(new byte[] { 0xFF, 0x50, 0x00 }) >= 0, Is.True);
+        Assert.That(bytes.IndexOf(new byte[] { 0xFF, 0x50, 0x08 }) >= 0, Is.True);
     }
 
     private static NativeImportDefinition CreateImport() =>
@@ -1363,8 +1351,7 @@ public sealed class NativeComCatalogTests
 
     private static void AssertFloatingReturn(NativeCode code, int functionIndex, int vtableSlot, bool wide)
     {
-        var range = Assert.Single(code.Functions,
-            candidate => candidate.Start == code.SourceFunctionOffsets[functionIndex]);
+        var range = global::System.Linq.Enumerable.Single(code.Functions, candidate => candidate.Start == code.SourceFunctionOffsets[functionIndex]);
         var bytes = code.Code.AsSpan(range.Start, range.End - range.Start);
         var call = bytes.IndexOf(new byte[] {
             0xFF, 0x50, checked((byte)(vtableSlot * NativeTargetProfile.PointerSize)),
@@ -1372,6 +1359,6 @@ public sealed class NativeComCatalogTests
         var resultTransfer = wide
             ? bytes.IndexOf(new byte[] { 0x66, 0x48, 0x0F, 0x7E, 0xC0 })
             : bytes.IndexOf(new byte[] { 0x66, 0x0F, 0x7E, 0xC0 });
-        Assert.True(call >= 0 && resultTransfer > call);
+        Assert.That(call >= 0 && resultTransfer > call, Is.True);
     }
 }

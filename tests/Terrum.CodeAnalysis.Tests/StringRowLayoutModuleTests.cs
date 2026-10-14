@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -40,10 +40,8 @@ public sealed class StringRowLayoutModuleTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StringRowLayoutMatchesHostedStructuralValidation(BoundRuntimePolicy policy)
     {
         var fixtures = new[] {
@@ -73,13 +71,13 @@ public sealed class StringRowLayoutModuleTests
         {
             var start = rowValues.Count;
             rowValues.AddRange(fixture.Values);
-            Assert.Equal(fixture.IsShapeValid, IsValidShape(fixture.Values));
+            Assert.That(IsValidShape(fixture.Values), Is.EqualTo(fixture.IsShapeValid));
             if (fixture.Values.All(static value => value is >= 0 and <= byte.MaxValue))
             {
                 var hostedRow = fixture.Values.Select(static value => (byte)value).ToArray();
                 if (fixture.ExpectedDecodedText is string expectedText)
                 {
-                    Assert.Equal(expectedText, TrRmStringRowReader.DecodeName(hostedRow));
+                    Assert.That(TrRmStringRowReader.DecodeName(hostedRow), Is.EqualTo(expectedText));
                 }
                 else
                 {
@@ -104,17 +102,17 @@ public sealed class StringRowLayoutModuleTests
         var root = RepositoryRoot();
         var componentPath = Path.Combine(root, "self-host", "StringRowLayout.terrum");
         var component = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
-        Assert.False(component.HasErrors, string.Join(System.Environment.NewLine, component.Diagnostics));
+        Assert.That(component.HasErrors, Is.False, string.Join(System.Environment.NewLine, component.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "string-row-layout-module.terrum");
         var compilation = Compilation.Create([component, entry],
         [
             new HostBuffer("Rows", PrimitiveType.Int32, [.. rowValues], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(System.Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(System.Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static string RepositoryRoot() =>
@@ -137,7 +135,7 @@ public sealed class StringRowLayoutModuleTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

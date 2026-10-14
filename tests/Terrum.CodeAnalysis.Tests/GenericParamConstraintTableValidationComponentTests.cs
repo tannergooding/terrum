@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -33,10 +33,8 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             return valid == (Host.Expected[16] != 0) ? 0 : 1;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task GenericParamAndConstraintValidationMatchesHostedReaders(
         BoundRuntimePolicy policy)
     {
@@ -97,7 +95,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(VerificationSource,
@@ -108,8 +106,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                Assert.True(testCase.ExpectedValid == ValidateHosted(testCase),
-                    $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
+                Assert.That(testCase.ExpectedValid == ValidateHosted(testCase), Is.True, $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
             }
 
             var compilation = Compilation.Create(components,
@@ -155,11 +152,11 @@ public sealed class GenericParamConstraintTableValidationComponentTests
                     testCase.ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-            Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-                .ConfigureAwait(true));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+                .ConfigureAwait(true), Is.EqualTo(0));
         }
     }
 
@@ -177,7 +174,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             [.. GenericParams().Select(static value => (int)value)],
             [.. Constraints().Select(static value => (int)value)],
             1, 6, 1, 1, 1, 2, 2, 1, true, true);
-        Assert.True(ValidateHosted(testCase));
+        Assert.That(ValidateHosted(testCase), Is.True);
         return testCase;
     }
 
@@ -224,7 +221,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             Constraints = [],
             ConstraintCount = 0,
         };
-        Assert.True(ValidateHosted(groupedCase));
+        Assert.That(ValidateHosted(groupedCase), Is.True);
         return groupedCase;
     }
 
@@ -400,7 +397,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

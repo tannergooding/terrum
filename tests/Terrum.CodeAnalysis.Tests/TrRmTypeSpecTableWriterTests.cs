@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmTypeSpecTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EncodesDependentRowsAndOwnsTheirInput()
     {
         byte[] primitive = [1, 0, 8];
@@ -21,12 +21,12 @@ public sealed class TrRmTypeSpecTableWriterTests
         primitive[2] = 9;
 
         var reader = new TrRmTypeSpecTableReader(bytes, 3, 1, 0, 0, 1);
-        Assert.Equal(new byte[] { 1, 0, 8 }, reader.GetRow(1).ToArray());
-        Assert.Equal((byte)5, reader.GetRow(3)[0]);
-        Assert.Equal(39, bytes.Length);
+        Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(new byte[] { 1, 0, 8 }));
+        Assert.That(reader.GetRow(3)[0], Is.EqualTo((byte)5));
+        Assert.That(bytes.Length, Is.EqualTo(39));
     }
 
-    [Fact]
+    [Test]
     public void RejectsMalformedRowsAndMissingReferencedTables()
     {
         Assert.Throws<ArgumentNullException>(() =>
@@ -43,7 +43,7 @@ public sealed class TrRmTypeSpecTableWriterTests
             TrRmTypeSpecTableWriter.Encode([new byte[] { 7, 0, 1, 0, 0, 0 }], 0, 0, 0, 0));
     }
 
-    [Fact]
+    [Test]
     public void TypedConstructorsCoverAssignedTypeSpecForms()
     {
         ReadOnlyMemory<byte>[] rows = [
@@ -65,7 +65,7 @@ public sealed class TrRmTypeSpecTableWriterTests
         var reader = new TrRmTypeSpecTableReader(bytes, rows.Length, 1, 1, 1, 1);
         for (var index = 0; index < rows.Length; index++)
         {
-            Assert.Equal(rows[index].ToArray(), reader.GetRow(index + 1).ToArray());
+            Assert.That(reader.GetRow(index + 1).ToArray(), Is.EqualTo(rows[index].ToArray()));
         }
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -85,20 +85,16 @@ public sealed class TrRmTypeSpecTableWriterTests
         ], 1, 0, 0, 1));
     }
 
-    [Fact]
+    [Test]
     public void TypedPayloadsUseTheSpecifiedLittleEndianFieldOrder()
     {
-        Assert.Equal(new byte[] { 1, 1, 8 }, TrRmTypeSpecTableWriter.Builtin(8, 1));
-        Assert.Equal(new byte[] { 1, 0, 0x80, 8 },
-            TrRmTypeSpecTableWriter.InlineFamily(0x80, 8));
-        Assert.Equal(new byte[] { 2, 1, 0xC3, 0xB2, 0xA1, 0 },
-            TrRmTypeSpecTableWriter.Reference(2, 0x00A1_B2C3, 1));
-        Assert.Equal(new byte[] {
+        Assert.That(TrRmTypeSpecTableWriter.Builtin(8, 1), Is.EqualTo(new byte[] { 1, 1, 8 }));
+        Assert.That(TrRmTypeSpecTableWriter.InlineFamily(0x80, 8), Is.EqualTo(new byte[] { 1, 0, 0x80, 8 }));
+        Assert.That(TrRmTypeSpecTableWriter.Reference(2, 0x00A1_B2C3, 1), Is.EqualTo(new byte[] { 2, 1, 0xC3, 0xB2, 0xA1, 0 }));
+        Assert.That(TrRmTypeSpecTableWriter.Constructed(3, 1, 2), Is.EqualTo(new byte[] {
             5, 0, 3, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0,
-        }, TrRmTypeSpecTableWriter.Constructed(3, 1, 2));
-        Assert.Equal(new byte[] { 6, 0, 1, 0, 0, 0 },
-            TrRmTypeSpecTableWriter.Wrapped(6, 1));
-        Assert.Equal(new byte[] { 12, 0, 0x80, 1, 0, 0, 0 },
-            TrRmTypeSpecTableWriter.IndexedFamily(0x80, 1));
+        }));
+        Assert.That(TrRmTypeSpecTableWriter.Wrapped(6, 1), Is.EqualTo(new byte[] { 6, 0, 1, 0, 0, 0 }));
+        Assert.That(TrRmTypeSpecTableWriter.IndexedFamily(0x80, 1), Is.EqualTo(new byte[] { 12, 0, 0x80, 1, 0, 0, 0 }));
     }
 }

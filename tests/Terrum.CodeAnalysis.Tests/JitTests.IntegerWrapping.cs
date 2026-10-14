@@ -6,13 +6,13 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Fact]
+    [Test]
     public async Task WrappingIntegerConversionsMatchLowBitsAcrossAotAndJitAsync()
     {
         var checks = new List<string>();

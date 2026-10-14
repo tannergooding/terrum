@@ -19,10 +19,12 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
+[FixtureLifeCycle(LifeCycle.InstancePerTestCase)]
+[Parallelizable(ParallelScope.Children)]
 public sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -189,10 +191,8 @@ public sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint MagnitudeInt32Export(int value);
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task LibraryBuildPublishesSelectedExportsWithoutAnEntryPointAsync(bool multipleSources)
     {
         const string Entry = "public int32 Value() { return Helper(); }";
@@ -211,24 +211,24 @@ public sealed partial class CliTests
             arguments.Add("--json");
             var input = multipleSources ? Entry : Entry + Helper;
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(input), [.. arguments]);
-            Assert.Equal(0, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal(multipleSources ? 2 : 1, document.RootElement.GetProperty("schemaVersion").GetInt32());
-            Assert.Equal("dynamic-library", document.RootElement.GetProperty("artifact").GetProperty("kind").GetString());
+            Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(multipleSources ? 2 : 1));
+            Assert.That(document.RootElement.GetProperty("artifact").GetProperty("kind").GetString(), Is.EqualTo("dynamic-library"));
             var bytes = await File.ReadAllBytesAsync(outputPath);
             var compilation = multipleSources
                 ? Compilation.CreateLibrary([SyntaxTree.Parse(Entry, "<stdin>"), SyntaxTree.Parse(Helper, helperPath)])
                 : Compilation.CreateLibrary(SyntaxTree.Parse(input, "<stdin>"));
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.Equal(NativeEmitter.EmitLibrary(Assert.IsType<BoundProgram>(compilation.Program),
-                ["Value"], NativeRuntimePolicy.FailFast), bytes);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(bytes, Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+                ["Value"], NativeRuntimePolicy.FailFast)));
             using var stream = new MemoryStream(bytes);
             using var reader = new PEReader(stream);
-            var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
-            Assert.Equal(0, header.AddressOfEntryPoint);
-            Assert.True(reader.PEHeaders.IsDll);
-            Assert.NotEqual(0, header.ExportTableDirectory.Size);
+            var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual1 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual1, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual1!; }))();
+            Assert.That(header.AddressOfEntryPoint, Is.EqualTo(0));
+            Assert.That(reader.PEHeaders.IsDll, Is.True);
+            Assert.That(header.ExportTableDirectory.Size, Is.Not.EqualTo(0));
         }
         finally
         {
@@ -242,10 +242,10 @@ public sealed partial class CliTests
         const ulong lowerCanary = 0x13579BDF2468ACE0UL;
         const ulong outputSentinel = 0xFEDCBA9876543210UL;
         const ulong upperCanary = 0x0ECA86425A5A5A5AUL;
-        Assert.Equal(24, Marshal.SizeOf<GuardedUInt64>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Before)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Value)).ToInt32());
-        Assert.Equal(16, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.After)).ToInt32());
+        Assert.That(Marshal.SizeOf<GuardedUInt64>(), Is.EqualTo(24));
+        Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Value)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.After)).ToInt32(), Is.EqualTo(16));
 
         var decimalAccumulator = Marshal.GetDelegateForFunctionPointer<TryAccumulateDecimalExport>(
             NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal"));
@@ -259,10 +259,10 @@ public sealed partial class CliTests
 
         void AssertResult(bool expectedSuccess, ulong expected, int actual, GuardedUInt64 guarded)
         {
-            Assert.Equal(expectedSuccess ? 1 : 0, actual);
-            Assert.Equal(expectedSuccess ? expected : outputSentinel, guarded.Value);
-            Assert.Equal(lowerCanary, guarded.Before);
-            Assert.Equal(upperCanary, guarded.After);
+            Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? expected : outputSentinel));
+            Assert.That(guarded.Before, Is.EqualTo(lowerCanary));
+            Assert.That(guarded.After, Is.EqualTo(upperCanary));
         }
 
         bool TryGetExpected(ulong value, uint digit, uint radix, ulong maximum, out ulong expected)
@@ -365,10 +365,10 @@ public sealed partial class CliTests
         const ulong upperUnsignedCanary = 0x0ECA86425A5A5A5AUL;
         const string ExportPrefix = "Terrum.CodeAnalysis.Numerics64.";
 
-        Assert.Equal(24, Marshal.SizeOf<GuardedInt64>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Before)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32());
-        Assert.Equal(16, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32());
+        Assert.That(Marshal.SizeOf<GuardedInt64>(), Is.EqualTo(24));
+        Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32(), Is.EqualTo(16));
 
         SignedInt64BinaryExport GetSignedBinary(string name) =>
             Marshal.GetDelegateForFunctionPointer<SignedInt64BinaryExport>(
@@ -514,10 +514,10 @@ public sealed partial class CliTests
                         After = upperSignedCanary,
                     };
                     var actual = function(left, right, ref guarded.Value);
-                    Assert.Equal(expectedSuccess ? 1 : 0, actual);
-                    Assert.Equal(expectedSuccess ? expected : signedOutputSentinel, guarded.Value);
-                    Assert.Equal(lowerSignedCanary, guarded.Before);
-                    Assert.Equal(upperSignedCanary, guarded.After);
+                    Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+                    Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? expected : signedOutputSentinel));
+                    Assert.That(guarded.Before, Is.EqualTo(lowerSignedCanary));
+                    Assert.That(guarded.After, Is.EqualTo(upperSignedCanary));
                 }
             }
         }
@@ -535,10 +535,10 @@ public sealed partial class CliTests
                         After = upperUnsignedCanary,
                     };
                     var actual = function(left, right, ref guarded.Value);
-                    Assert.Equal(expectedSuccess ? 1 : 0, actual);
-                    Assert.Equal(expectedSuccess ? expected : unsignedOutputSentinel, guarded.Value);
-                    Assert.Equal(lowerUnsignedCanary, guarded.Before);
-                    Assert.Equal(upperUnsignedCanary, guarded.After);
+                    Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+                    Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? expected : unsignedOutputSentinel));
+                    Assert.That(guarded.Before, Is.EqualTo(lowerUnsignedCanary));
+                    Assert.That(guarded.After, Is.EqualTo(upperUnsignedCanary));
                 }
             }
         }
@@ -554,10 +554,10 @@ public sealed partial class CliTests
                 After = upperSignedCanary,
             };
             var negateResult = negate(value, ref negateGuard.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, negateResult);
-            Assert.Equal(expectedSuccess ? expectedNegation : signedOutputSentinel, negateGuard.Value);
-            Assert.Equal(lowerSignedCanary, negateGuard.Before);
-            Assert.Equal(upperSignedCanary, negateGuard.After);
+            Assert.That(negateResult, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(negateGuard.Value, Is.EqualTo(expectedSuccess ? expectedNegation : signedOutputSentinel));
+            Assert.That(negateGuard.Before, Is.EqualTo(lowerSignedCanary));
+            Assert.That(negateGuard.After, Is.EqualTo(upperSignedCanary));
 
             var expectedAbsolute = value == long.MinValue ? 0 : (long)BigInteger.Abs(bigValue);
             var absoluteGuard = new GuardedInt64 {
@@ -566,10 +566,10 @@ public sealed partial class CliTests
                 After = upperSignedCanary,
             };
             var absoluteResult = absolute(value, ref absoluteGuard.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, absoluteResult);
-            Assert.Equal(expectedSuccess ? expectedAbsolute : signedOutputSentinel, absoluteGuard.Value);
-            Assert.Equal(lowerSignedCanary, absoluteGuard.Before);
-            Assert.Equal(upperSignedCanary, absoluteGuard.After);
+            Assert.That(absoluteResult, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(absoluteGuard.Value, Is.EqualTo(expectedSuccess ? expectedAbsolute : signedOutputSentinel));
+            Assert.That(absoluteGuard.Before, Is.EqualTo(lowerSignedCanary));
+            Assert.That(absoluteGuard.After, Is.EqualTo(upperSignedCanary));
         }
     }
 
@@ -583,14 +583,14 @@ public sealed partial class CliTests
         const uint UpperUnsignedCanary = 0x0ECA8642;
         const string ExportPrefix = "Terrum.CodeAnalysis.Numerics64.";
 
-        Assert.Equal(12, Marshal.SizeOf<GuardedInt32>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Before)).ToInt32());
-        Assert.Equal(4, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Value)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.After)).ToInt32());
-        Assert.Equal(12, Marshal.SizeOf<GuardedUInt32>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Before)).ToInt32());
-        Assert.Equal(4, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Value)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.After)).ToInt32());
+        Assert.That(Marshal.SizeOf<GuardedInt32>(), Is.EqualTo(12));
+        Assert.That(Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Value)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.After)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.SizeOf<GuardedUInt32>(), Is.EqualTo(12));
+        Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Value)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.After)).ToInt32(), Is.EqualTo(8));
 
         Int32CheckedBinaryExport GetSignedBinary(string name) =>
             Marshal.GetDelegateForFunctionPointer<Int32CheckedBinaryExport>(
@@ -734,10 +734,10 @@ public sealed partial class CliTests
                         After = UpperSignedCanary,
                     };
                     var actual = function(left, right, ref guarded.Value);
-                    Assert.Equal(expectedSuccess ? 1 : 0, actual);
-                    Assert.Equal(expectedSuccess ? expected : SignedOutputSentinel, guarded.Value);
-                    Assert.Equal(LowerSignedCanary, guarded.Before);
-                    Assert.Equal(UpperSignedCanary, guarded.After);
+                    Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+                    Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? expected : SignedOutputSentinel));
+                    Assert.That(guarded.Before, Is.EqualTo(LowerSignedCanary));
+                    Assert.That(guarded.After, Is.EqualTo(UpperSignedCanary));
                 }
             }
         }
@@ -755,10 +755,10 @@ public sealed partial class CliTests
                         After = UpperUnsignedCanary,
                     };
                     var actual = function(left, right, ref guarded.Value);
-                    Assert.Equal(expectedSuccess ? 1 : 0, actual);
-                    Assert.Equal(expectedSuccess ? expected : UnsignedOutputSentinel, guarded.Value);
-                    Assert.Equal(LowerUnsignedCanary, guarded.Before);
-                    Assert.Equal(UpperUnsignedCanary, guarded.After);
+                    Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+                    Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? expected : UnsignedOutputSentinel));
+                    Assert.That(guarded.Before, Is.EqualTo(LowerUnsignedCanary));
+                    Assert.That(guarded.After, Is.EqualTo(UpperUnsignedCanary));
                 }
             }
         }
@@ -767,7 +767,7 @@ public sealed partial class CliTests
         {
             var expectedSuccess = value != int.MinValue;
             var expectedMagnitude = (uint)BigInteger.Abs(new BigInteger(value));
-            Assert.Equal(expectedMagnitude, magnitude(value));
+            Assert.That(magnitude(value), Is.EqualTo(expectedMagnitude));
             var expectedNegation = expectedSuccess ? -value : 0;
             var negateGuard = new GuardedInt32 {
                 Before = LowerSignedCanary,
@@ -775,10 +775,10 @@ public sealed partial class CliTests
                 After = UpperSignedCanary,
             };
             var negateResult = negate(value, ref negateGuard.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, negateResult);
-            Assert.Equal(expectedSuccess ? expectedNegation : SignedOutputSentinel, negateGuard.Value);
-            Assert.Equal(LowerSignedCanary, negateGuard.Before);
-            Assert.Equal(UpperSignedCanary, negateGuard.After);
+            Assert.That(negateResult, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(negateGuard.Value, Is.EqualTo(expectedSuccess ? expectedNegation : SignedOutputSentinel));
+            Assert.That(negateGuard.Before, Is.EqualTo(LowerSignedCanary));
+            Assert.That(negateGuard.After, Is.EqualTo(UpperSignedCanary));
 
             var absoluteGuard = new GuardedInt32 {
                 Before = LowerSignedCanary,
@@ -786,10 +786,10 @@ public sealed partial class CliTests
                 After = UpperSignedCanary,
             };
             var absoluteResult = absolute(value, ref absoluteGuard.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, absoluteResult);
-            Assert.Equal(expectedSuccess ? (int)expectedMagnitude : SignedOutputSentinel, absoluteGuard.Value);
-            Assert.Equal(LowerSignedCanary, absoluteGuard.Before);
-            Assert.Equal(UpperSignedCanary, absoluteGuard.After);
+            Assert.That(absoluteResult, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(absoluteGuard.Value, Is.EqualTo(expectedSuccess ? (int)expectedMagnitude : SignedOutputSentinel));
+            Assert.That(absoluteGuard.Before, Is.EqualTo(LowerSignedCanary));
+            Assert.That(absoluteGuard.After, Is.EqualTo(UpperSignedCanary));
         }
     }
 
@@ -803,14 +803,14 @@ public sealed partial class CliTests
         const ulong Upper64Canary = 0x0ECA86425A5A5A5AUL;
         const string ExportPrefix = "Terrum.CodeAnalysis.Numerics64.";
 
-        Assert.Equal(12, Marshal.SizeOf<GuardedUInt32>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Before)).ToInt32());
-        Assert.Equal(4, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Value)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.After)).ToInt32());
-        Assert.Equal(24, Marshal.SizeOf<GuardedUInt64>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Before)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Value)).ToInt32());
-        Assert.Equal(16, Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.After)).ToInt32());
+        Assert.That(Marshal.SizeOf<GuardedUInt32>(), Is.EqualTo(12));
+        Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.Value)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.OffsetOf<GuardedUInt32>(nameof(GuardedUInt32.After)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.SizeOf<GuardedUInt64>(), Is.EqualTo(24));
+        Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.Value)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.OffsetOf<GuardedUInt64>(nameof(GuardedUInt64.After)).ToInt32(), Is.EqualTo(16));
 
         UInt32IntUnaryExport GetUInt32Int(string name) =>
             Marshal.GetDelegateForFunctionPointer<UInt32IntUnaryExport>(
@@ -882,31 +882,31 @@ public sealed partial class CliTests
         int[] rotationCounts = [int.MinValue, -65, -64, -33, -32, -1, 0, 1, 31, 32, 33, 63, 64, 65, int.MaxValue];
         foreach (var value in values32)
         {
-            Assert.Equal(BitOperations.LeadingZeroCount(value), leadingZeroCount32(value));
-            Assert.Equal(BitOperations.TrailingZeroCount(value), trailingZeroCount32(value));
-            Assert.Equal(BitOperations.PopCount(value), popCount32(value));
-            Assert.Equal(ReverseBits32(value), reverseBits32(value));
-            Assert.Equal(BinaryPrimitives.ReverseEndianness(value), reverseEndianness32(value));
-            Assert.Equal(BitOperations.IsPow2(value) ? 1 : 0, isPow232(value));
+            Assert.That(leadingZeroCount32(value), Is.EqualTo(BitOperations.LeadingZeroCount(value)));
+            Assert.That(trailingZeroCount32(value), Is.EqualTo(BitOperations.TrailingZeroCount(value)));
+            Assert.That(popCount32(value), Is.EqualTo(BitOperations.PopCount(value)));
+            Assert.That(reverseBits32(value), Is.EqualTo(ReverseBits32(value)));
+            Assert.That(reverseEndianness32(value), Is.EqualTo(BinaryPrimitives.ReverseEndianness(value)));
+            Assert.That(isPow232(value), Is.EqualTo(BitOperations.IsPow2(value) ? 1 : 0));
             foreach (var count in rotationCounts)
             {
-                Assert.Equal(BitOperations.RotateLeft(value, count), rotateLeft32(value, count));
-                Assert.Equal(BitOperations.RotateRight(value, count), rotateRight32(value, count));
+                Assert.That(rotateLeft32(value, count), Is.EqualTo(BitOperations.RotateLeft(value, count)));
+                Assert.That(rotateRight32(value, count), Is.EqualTo(BitOperations.RotateRight(value, count)));
             }
         }
 
         foreach (var value in values64)
         {
-            Assert.Equal(BitOperations.LeadingZeroCount(value), leadingZeroCount64(value));
-            Assert.Equal(BitOperations.TrailingZeroCount(value), trailingZeroCount64(value));
-            Assert.Equal(BitOperations.PopCount(value), popCount64(value));
-            Assert.Equal(ReverseBits64(value), reverseBits64(value));
-            Assert.Equal(BinaryPrimitives.ReverseEndianness(value), reverseEndianness64(value));
-            Assert.Equal(BitOperations.IsPow2(value) ? 1 : 0, isPow264(value));
+            Assert.That(leadingZeroCount64(value), Is.EqualTo(BitOperations.LeadingZeroCount(value)));
+            Assert.That(trailingZeroCount64(value), Is.EqualTo(BitOperations.TrailingZeroCount(value)));
+            Assert.That(popCount64(value), Is.EqualTo(BitOperations.PopCount(value)));
+            Assert.That(reverseBits64(value), Is.EqualTo(ReverseBits64(value)));
+            Assert.That(reverseEndianness64(value), Is.EqualTo(BinaryPrimitives.ReverseEndianness(value)));
+            Assert.That(isPow264(value), Is.EqualTo(BitOperations.IsPow2(value) ? 1 : 0));
             foreach (var count in rotationCounts)
             {
-                Assert.Equal(BitOperations.RotateLeft(value, count), rotateLeft64(value, count));
-                Assert.Equal(BitOperations.RotateRight(value, count), rotateRight64(value, count));
+                Assert.That(rotateLeft64(value, count), Is.EqualTo(BitOperations.RotateLeft(value, count)));
+                Assert.That(rotateRight64(value, count), Is.EqualTo(BitOperations.RotateRight(value, count)));
             }
         }
 
@@ -928,10 +928,10 @@ public sealed partial class CliTests
                 After = Upper32Canary,
             };
             var actual = roundUp32(value, ref guarded.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, actual);
-            Assert.Equal(expectedSuccess ? expected : UInt32OutputSentinel, guarded.Value);
-            Assert.Equal(Lower32Canary, guarded.Before);
-            Assert.Equal(Upper32Canary, guarded.After);
+            Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? expected : UInt32OutputSentinel));
+            Assert.That(guarded.Before, Is.EqualTo(Lower32Canary));
+            Assert.That(guarded.After, Is.EqualTo(Upper32Canary));
         }
 
         var roundUpValues64 = new List<ulong> { 0, 1, ulong.MaxValue };
@@ -952,10 +952,10 @@ public sealed partial class CliTests
                 After = Upper64Canary,
             };
             var actual = roundUp64(value, ref guarded.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, actual);
-            Assert.Equal(expectedSuccess ? expected : UInt64OutputSentinel, guarded.Value);
-            Assert.Equal(Lower64Canary, guarded.Before);
-            Assert.Equal(Upper64Canary, guarded.After);
+            Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? expected : UInt64OutputSentinel));
+            Assert.That(guarded.Before, Is.EqualTo(Lower64Canary));
+            Assert.That(guarded.After, Is.EqualTo(Upper64Canary));
         }
 
         static uint ReverseBits32(uint value)
@@ -991,14 +991,14 @@ public sealed partial class CliTests
         const long UpperInt64Canary = 0x0ECA86425A5A5A5AL;
         const string ExportPrefix = "Terrum.CodeAnalysis.Numerics64.";
 
-        Assert.Equal(12, Marshal.SizeOf<GuardedInt32>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Before)).ToInt32());
-        Assert.Equal(4, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Value)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.After)).ToInt32());
-        Assert.Equal(24, Marshal.SizeOf<GuardedInt64>());
-        Assert.Equal(0, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Before)).ToInt32());
-        Assert.Equal(8, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32());
-        Assert.Equal(16, Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32());
+        Assert.That(Marshal.SizeOf<GuardedInt32>(), Is.EqualTo(12));
+        Assert.That(Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.Value)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.OffsetOf<GuardedInt32>(nameof(GuardedInt32.After)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.SizeOf<GuardedInt64>(), Is.EqualTo(24));
+        Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Before)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.Value)).ToInt32(), Is.EqualTo(8));
+        Assert.That(Marshal.OffsetOf<GuardedInt64>(nameof(GuardedInt64.After)).ToInt32(), Is.EqualTo(16));
 
         Int32UnaryMathExport GetInt32Unary(string name) =>
             Marshal.GetDelegateForFunctionPointer<Int32UnaryMathExport>(
@@ -1067,9 +1067,9 @@ public sealed partial class CliTests
         {
             if (value != int.MinValue)
             {
-                Assert.Equal(Math.Abs(value), abs32(value));
+                Assert.That(abs32(value), Is.EqualTo(Math.Abs(value)));
             }
-            Assert.Equal(Math.Sign(value), sign32(value));
+            Assert.That(sign32(value), Is.EqualTo(Math.Sign(value)));
 
             var expectedSuccess = value != int.MinValue;
             var guarded = new GuardedInt32 {
@@ -1078,22 +1078,22 @@ public sealed partial class CliTests
                 After = UpperInt32Canary,
             };
             var actual = tryAbs32(value, ref guarded.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, actual);
-            Assert.Equal(expectedSuccess ? Math.Abs(value) : Int32OutputSentinel, guarded.Value);
-            Assert.Equal(LowerInt32Canary, guarded.Before);
-            Assert.Equal(UpperInt32Canary, guarded.After);
+            Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? Math.Abs(value) : Int32OutputSentinel));
+            Assert.That(guarded.Before, Is.EqualTo(LowerInt32Canary));
+            Assert.That(guarded.After, Is.EqualTo(UpperInt32Canary));
         }
 
         foreach (var left in values32)
         {
             foreach (var right in values32)
             {
-                Assert.Equal(Math.Min(left, right), min32(left, right));
-                Assert.Equal(Math.Max(left, right), max32(left, right));
-                Assert.Equal((long)left * right, multiply32(left, right));
+                Assert.That(min32(left, right), Is.EqualTo(Math.Min(left, right)));
+                Assert.That(max32(left, right), Is.EqualTo(Math.Max(left, right)));
+                Assert.That(multiply32(left, right), Is.EqualTo((long)left * right));
                 var expectedGcd = BigInteger.GreatestCommonDivisor(
                     BigInteger.Abs(new BigInteger(left)), BigInteger.Abs(new BigInteger(right)));
-                Assert.Equal((uint)expectedGcd, gcd32(left, right));
+                Assert.That(gcd32(left, right), Is.EqualTo((uint)expectedGcd));
             }
         }
 
@@ -1104,7 +1104,7 @@ public sealed partial class CliTests
         {
             foreach (var (minimum, maximum) in clampRanges32)
             {
-                Assert.Equal(Math.Clamp(value, minimum, maximum), clamp32(value, minimum, maximum));
+                Assert.That(clamp32(value, minimum, maximum), Is.EqualTo(Math.Clamp(value, minimum, maximum)));
             }
         }
 
@@ -1112,9 +1112,9 @@ public sealed partial class CliTests
         {
             if (value != long.MinValue)
             {
-                Assert.Equal(Math.Abs(value), abs64(value));
+                Assert.That(abs64(value), Is.EqualTo(Math.Abs(value)));
             }
-            Assert.Equal(Math.Sign(value), sign64(value));
+            Assert.That(sign64(value), Is.EqualTo(Math.Sign(value)));
 
             var expectedSuccess = value != long.MinValue;
             var guarded = new GuardedInt64 {
@@ -1123,21 +1123,21 @@ public sealed partial class CliTests
                 After = UpperInt64Canary,
             };
             var actual = tryAbs64(value, ref guarded.Value);
-            Assert.Equal(expectedSuccess ? 1 : 0, actual);
-            Assert.Equal(expectedSuccess ? Math.Abs(value) : Int64OutputSentinel, guarded.Value);
-            Assert.Equal(LowerInt64Canary, guarded.Before);
-            Assert.Equal(UpperInt64Canary, guarded.After);
+            Assert.That(actual, Is.EqualTo(expectedSuccess ? 1 : 0));
+            Assert.That(guarded.Value, Is.EqualTo(expectedSuccess ? Math.Abs(value) : Int64OutputSentinel));
+            Assert.That(guarded.Before, Is.EqualTo(LowerInt64Canary));
+            Assert.That(guarded.After, Is.EqualTo(UpperInt64Canary));
         }
 
         foreach (var left in values64)
         {
             foreach (var right in values64)
             {
-                Assert.Equal(Math.Min(left, right), min64(left, right));
-                Assert.Equal(Math.Max(left, right), max64(left, right));
+                Assert.That(min64(left, right), Is.EqualTo(Math.Min(left, right)));
+                Assert.That(max64(left, right), Is.EqualTo(Math.Max(left, right)));
                 var expectedGcd = BigInteger.GreatestCommonDivisor(
                     BigInteger.Abs(new BigInteger(left)), BigInteger.Abs(new BigInteger(right)));
-                Assert.Equal((ulong)expectedGcd, gcd64(left, right));
+                Assert.That(gcd64(left, right), Is.EqualTo((ulong)expectedGcd));
             }
         }
 
@@ -1148,15 +1148,13 @@ public sealed partial class CliTests
         {
             foreach (var (minimum, maximum) in clampRanges64)
             {
-                Assert.Equal(Math.Clamp(value, minimum, maximum), clamp64(value, minimum, maximum));
+                Assert.That(clamp64(value, minimum, maximum), Is.EqualTo(Math.Clamp(value, minimum, maximum)));
             }
         }
     }
-
-    [Theory]
-    [InlineData("Unknown")]
-    [InlineData("Hidden")]
-    [InlineData("\u03B1")]
+    [TestCase("Unknown")]
+    [TestCase("Hidden")]
+    [TestCase("\u03B1")]
     public async Task InvalidLibraryExportsPreservePriorArtifactsAsync(string export)
     {
         var path = Path.Combine(Path.GetTempPath(), $"terrum-library-export-{Guid.NewGuid():N}.dll");
@@ -1165,27 +1163,25 @@ public sealed partial class CliTests
         {
             var (exit, _, _) = await RunAsync(Encoding.UTF8.GetBytes(Source), "build-library", "-", "--export", "Value",
                 "-o", path, "--runtime", "fail-fast", "--json");
-            Assert.Equal(0, exit);
+            Assert.That(exit, Is.EqualTo(0));
             var original = await File.ReadAllBytesAsync(path);
             var (failed, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "build-library", "-", "--export", export,
                 "-o", path, "--runtime", "fail-fast", "--json");
-            Assert.Equal(1, failed);
-            Assert.Empty(error);
+            Assert.That(failed, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("TRM4002", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-            Assert.False(document.RootElement.TryGetProperty("artifact", out _));
-            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM4002"));
+            Assert.That(document.RootElement.TryGetProperty("artifact", out _), Is.False);
+            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
         }
         finally
         {
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData("analyze")]
-    [InlineData("build")]
-    [InlineData("jit")]
+    [TestCase("analyze")]
+    [TestCase("build")]
+    [TestCase("jit")]
     public async Task SourceSetsResolveNamespacesAndValueMembersAcrossFilesAsync(string command)
     {
         const string Entry = "using Parts; int32 Main() { Box value = new Box(10); return value.Total(32); }";
@@ -1207,30 +1203,29 @@ public sealed partial class CliTests
             }
             arguments.Add("--json");
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Entry), [.. arguments]);
-            Assert.Empty(error);
-            Assert.Equal(command == "jit" ? 42 : 0, exit);
+            Assert.That(error, Is.Empty);
+            Assert.That(exit, Is.EqualTo(command == "jit" ? 42 : 0));
             if (command == "jit")
             {
-                Assert.Empty(output);
+                Assert.That(output, Is.Empty);
                 return;
             }
 
             using var json = JsonDocument.Parse(output);
-            Assert.Equal(2, json.RootElement.GetProperty("schemaVersion").GetInt32());
-            Assert.True(json.RootElement.GetProperty("success").GetBoolean());
-            Assert.Equal(command, json.RootElement.GetProperty("command").GetString());
+            Assert.That(json.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(2));
+            Assert.That(json.RootElement.GetProperty("success").GetBoolean(), Is.True);
+            Assert.That(json.RootElement.GetProperty("command").GetString(), Is.EqualTo(command));
             var sources = json.RootElement.GetProperty("sources");
-            Assert.Equal(2, sources.GetArrayLength());
-            Assert.Equal("<stdin>", sources[0].GetProperty("path").GetString());
-            Assert.Equal(library, sources[1].GetProperty("path").GetString());
-            Assert.Equal(Entry.Length, sources[0].GetProperty("sourceLength").GetInt32());
-            Assert.Equal(Library.Length, sources[1].GetProperty("sourceLength").GetInt32());
-            Assert.False(json.RootElement.TryGetProperty("contentId", out _));
+            Assert.That(sources.GetArrayLength(), Is.EqualTo(2));
+            Assert.That(sources[0].GetProperty("path").GetString(), Is.EqualTo("<stdin>"));
+            Assert.That(sources[1].GetProperty("path").GetString(), Is.EqualTo(library));
+            Assert.That(sources[0].GetProperty("sourceLength").GetInt32(), Is.EqualTo(Entry.Length));
+            Assert.That(sources[1].GetProperty("sourceLength").GetInt32(), Is.EqualTo(Library.Length));
+            Assert.That(json.RootElement.TryGetProperty("contentId", out _), Is.False);
             if (command == "build")
             {
                 var bytes = await File.ReadAllBytesAsync(image);
-                Assert.Equal(Convert.ToHexString(SHA256.HashData(bytes)),
-                    json.RootElement.GetProperty("artifact").GetProperty("sha256").GetString());
+                Assert.That(json.RootElement.GetProperty("artifact").GetProperty("sha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(bytes))));
                 using var process = Process.Start(new ProcessStartInfo(image) { UseShellExecute = false, CreateNoWindow = true })
                     ?? throw new InvalidOperationException("Could not start source-set artifact.");
                 try
@@ -1243,21 +1238,19 @@ public sealed partial class CliTests
                     await process.WaitForExitAsync();
                     throw;
                 }
-                Assert.Equal(42, process.ExitCode);
+                Assert.That(process.ExitCode, Is.EqualTo(42));
             }
         }
         finally
         {
             File.Delete(library);
-            File.Delete(image);
+            await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("analyze", true)]
-    [InlineData("build", true)]
-    [InlineData("jit", true)]
-    [InlineData("analyze", false)]
+    [TestCase("analyze",true)]
+    [TestCase("build",true)]
+    [TestCase("jit",true)]
+    [TestCase("analyze",false)]
     public async Task SourceSetErrorsKeepTheirOwningSnapshotAndPreserveOutputAsync(string command, bool json)
     {
         const string Invalid = "int32 Helper() { return missing; }";
@@ -1283,26 +1276,25 @@ public sealed partial class CliTests
                 arguments.Add("--json");
             }
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return Helper(); }"), [.. arguments]);
-            Assert.Equal(1, exit);
-            Assert.Equal(original, await File.ReadAllBytesAsync(image));
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(await File.ReadAllBytesAsync(image), Is.EqualTo(original));
             if (json)
             {
-                Assert.Empty(error);
+                Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
-                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-                Assert.Equal(helper, document.RootElement.GetProperty("sources")[1].GetProperty("path").GetString());
-                var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
-                Assert.Equal(1, diagnostic.GetProperty("sourceIndex").GetInt32());
-                Assert.Equal(Invalid.IndexOf("missing", StringComparison.Ordinal),
-                    diagnostic.GetProperty("span").GetProperty("start").GetInt32());
-                Assert.False(document.RootElement.TryGetProperty("artifact", out _));
+                Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(2));
+                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+                Assert.That(document.RootElement.GetProperty("sources")[1].GetProperty("path").GetString(), Is.EqualTo(helper));
+                var diagnostic = global::System.Linq.Enumerable.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+                Assert.That(diagnostic.GetProperty("sourceIndex").GetInt32(), Is.EqualTo(1));
+                Assert.That(diagnostic.GetProperty("span").GetProperty("start").GetInt32(), Is.EqualTo(Invalid.IndexOf("missing", StringComparison.Ordinal)));
+                Assert.That(document.RootElement.TryGetProperty("artifact", out _), Is.False);
             }
             else
             {
-                Assert.Empty(output);
-                Assert.Contains(helper + "(1,", error, StringComparison.Ordinal);
-                Assert.Contains("missing", error, StringComparison.Ordinal);
+                Assert.That(output, Is.Empty);
+                Assert.That(error, Does.Contain(helper + "(1,"));
+                Assert.That(error, Does.Contain("missing"));
             }
         }
         finally
@@ -1312,7 +1304,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task MultiSourceJsonDiagnosticsKeepTheirSourceIndexesAsync()
     {
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-index-{Guid.NewGuid():N}");
@@ -1328,14 +1320,14 @@ public sealed partial class CliTests
             var (exit, output, error) = await RunAsync([], "analyze", entry,
                 "--source", first, "--source", second, "--json");
 
-            Assert.Equal(1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(2));
             var sourceIndexes = document.RootElement.GetProperty("diagnostics").EnumerateArray()
                 .Select(static diagnostic => diagnostic.GetProperty("sourceIndex").GetInt32())
                 .OrderBy(static index => index);
-            Assert.Equal([0, 1, 2], sourceIndexes);
+            Assert.That(sourceIndexes, Is.EqualTo([0, 1, 2]));
         }
         finally
         {
@@ -1344,10 +1336,8 @@ public sealed partial class CliTests
             File.Delete(second);
         }
     }
-
-    [Theory]
-    [InlineData("build", ".exe")]
-    [InlineData("build-library", ".dll")]
+    [TestCase("build",".exe")]
+    [TestCase("build-library",".dll")]
     public async Task SourceSetOptionsRejectDuplicatesAndProtectEveryInputAsync(string command, string extension)
     {
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-input-{Guid.NewGuid():N}");
@@ -1365,16 +1355,16 @@ public sealed partial class CliTests
             }
             arguments.Add("--json");
             var (exit, output, _) = await RunAsync([], [.. arguments]);
-            Assert.Equal(2, exit);
-            Assert.Equal(Helper, await File.ReadAllTextAsync(helper));
+            Assert.That(exit, Is.EqualTo(2));
+            Assert.That(await File.ReadAllTextAsync(helper), Is.EqualTo(Helper));
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("TRM2002", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
 
             var alias = Path.Combine(Path.GetDirectoryName(entry) ?? throw new InvalidOperationException(), ".", Path.GetFileName(entry));
             var (duplicate, duplicateOutput, _) = await RunAsync([], "analyze", entry, "--source", alias, "--json");
-            Assert.Equal(2, duplicate);
+            Assert.That(duplicate, Is.EqualTo(2));
             using var duplicateDocument = JsonDocument.Parse(duplicateOutput);
-            Assert.Equal("TRM2000", duplicateDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            Assert.That(duplicateDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
         }
         finally
         {
@@ -1382,32 +1372,30 @@ public sealed partial class CliTests
             File.Delete(helper);
         }
     }
-
-    [Theory]
-    [InlineData("analyze - --source - --json")]
-    [InlineData("analyze - --source --json")]
-    [InlineData("analyze - --json --json")]
-    [InlineData("analyze - --runtime unknown --json")]
-    [InlineData("jit - --source another.terrum --json")]
-    [InlineData("jit - -o output.exe --runtime fail-fast --json")]
-    [InlineData("build - --runtime fail-fast --json")]
-    [InlineData("build - -o output.exe --runtime fail-fast --runtime fail-fast --json")]
-    [InlineData("build-library - --export Value --runtime fail-fast --json")]
-    [InlineData("build-library - -o output.dll --runtime fail-fast --json")]
-    [InlineData("build-library - -o output.dll --export Value --json")]
-    [InlineData("build-library - -o output.dll --export Value --export Value --runtime fail-fast --json")]
-    [InlineData("build - -o output.exe --export Value --runtime fail-fast --json")]
+    [TestCase("analyze - --source - --json")]
+    [TestCase("analyze - --source --json")]
+    [TestCase("analyze - --json --json")]
+    [TestCase("analyze - --runtime unknown --json")]
+    [TestCase("jit - --source another.terrum --json")]
+    [TestCase("jit - -o output.exe --runtime fail-fast --json")]
+    [TestCase("build - --runtime fail-fast --json")]
+    [TestCase("build - -o output.exe --runtime fail-fast --runtime fail-fast --json")]
+    [TestCase("build-library - --export Value --runtime fail-fast --json")]
+    [TestCase("build-library - -o output.dll --runtime fail-fast --json")]
+    [TestCase("build-library - -o output.dll --export Value --json")]
+    [TestCase("build-library - -o output.dll --export Value --export Value --runtime fail-fast --json")]
+    [TestCase("build - -o output.exe --export Value --runtime fail-fast --json")]
     public async Task SourceSetCommandsRejectMalformedOptionsBeforeReadingInputsAsync(string arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var (exit, output, error) = await RunAsync([], arguments.Split(' '));
-        Assert.Equal(2, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(2));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("TRM2000", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+        Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
     }
 
-    [Fact]
+    [Test]
     public async Task SourceSetsBoundInputCountBeforeReadingFilesAsync()
     {
         List<string> arguments = ["analyze", "-"];
@@ -1417,72 +1405,70 @@ public sealed partial class CliTests
         }
         arguments.Add("--json");
         var (exit, output, _) = await RunAsync([], [.. arguments]);
-        Assert.Equal(2, exit);
+        Assert.That(exit, Is.EqualTo(2));
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("TRM2000", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+        Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
     }
 
-    [Fact]
+    [Test]
     public async Task ScannerPublishesExactIntegerMagnitudesWithoutDefaultTypesOrPrecisionLossAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "0 9223372036854775808 18446744073709551615 18446744073709551616 256 1.0 2e3 3.0";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
             Path.Combine(root, "self-host"), "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(0, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(0));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(10, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-10", document.RootElement.GetProperty("component").GetString());
+        Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(10));
+        Assert.That(document.RootElement.GetProperty("component").GetString(), Is.EqualTo("scanner-10"));
         var integers = document.RootElement.GetProperty("integerValues");
-        Assert.Equal(5, integers.GetArrayLength());
+        Assert.That(integers.GetArrayLength(), Is.EqualTo(5));
         string[] tags = ["", "", "", "", ""];
         string?[] magnitudes = ["0", "9223372036854775808", "18446744073709551615", null, "256"];
         for (var index = 0; index < tags.Length; index++)
         {
-            Assert.Equal(index, integers[index].GetProperty("tokenIndex").GetInt32());
-            Assert.Equal(tags[index], integers[index].GetProperty("tag").GetString());
-            Assert.Equal(magnitudes[index] is null ? "overflow" : "exact", integers[index].GetProperty("status").GetString());
+            Assert.That(integers[index].GetProperty("tokenIndex").GetInt32(), Is.EqualTo(index));
+            Assert.That(integers[index].GetProperty("tag").GetString(), Is.EqualTo(tags[index]));
+            Assert.That(integers[index].GetProperty("status").GetString(), Is.EqualTo(magnitudes[index] is null ? "overflow" : "exact"));
             if (magnitudes[index] is string magnitude)
             {
-                Assert.Equal(JsonValueKind.String, integers[index].GetProperty("magnitude").ValueKind);
-                Assert.Equal(magnitude, integers[index].GetProperty("magnitude").GetString());
+                Assert.That(integers[index].GetProperty("magnitude").ValueKind, Is.EqualTo(JsonValueKind.String));
+                Assert.That(integers[index].GetProperty("magnitude").GetString(), Is.EqualTo(magnitude));
             }
             else
             {
-                Assert.False(integers[index].TryGetProperty("magnitude", out _));
+                Assert.That(integers[index].TryGetProperty("magnitude", out _), Is.False);
             }
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ScannerWorkerPublishesCompiledTokenRecordsAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("\u03B12 + 42 \U00010400 \U0001F600"),
             "scan-component", Path.Combine(root, "self-host"), "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(1, exit);
-        Assert.Equal("", error);
+        Assert.That(exit, Is.EqualTo(1));
+        Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(10, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-10", document.RootElement.GetProperty("component").GetString());
-        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-        var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
-        Assert.Equal("TRM0001", diagnostic.GetProperty("code").GetString());
-        Assert.Equal(11, diagnostic.GetProperty("start").GetInt32());
-        Assert.Equal(2, diagnostic.GetProperty("length").GetInt32());
+        Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(10));
+        Assert.That(document.RootElement.GetProperty("component").GetString(), Is.EqualTo("scanner-10"));
+        Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+        var diagnostic = global::System.Linq.Enumerable.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+        Assert.That(diagnostic.GetProperty("code").GetString(), Is.EqualTo("TRM0001"));
+        Assert.That(diagnostic.GetProperty("start").GetInt32(), Is.EqualTo(11));
+        Assert.That(diagnostic.GetProperty("length").GetInt32(), Is.EqualTo(2));
         var tokens = document.RootElement.GetProperty("tokens").EnumerateArray().ToArray();
         string[] kinds = ["Identifier", "Plus", "NumericLiteral", "Identifier", "Bad", "EndOfFile"];
         int[] starts = [0, 3, 5, 8, 11, 13];
         int[] lengths = [2, 1, 2, 2, 2, 0];
-        Assert.Equal(kinds, tokens.Select(static token => token.GetProperty("kind").GetString()));
-        Assert.Equal(starts, tokens.Select(static token => token.GetProperty("start").GetInt32()));
-        Assert.Equal(lengths, tokens.Select(static token => token.GetProperty("length").GetInt32()));
+        Assert.That(tokens.Select(static token => token.GetProperty("kind").GetString()), Is.EqualTo(kinds));
+        Assert.That(tokens.Select(static token => token.GetProperty("start").GetInt32()), Is.EqualTo(starts));
+        Assert.That(tokens.Select(static token => token.GetProperty("length").GetInt32()), Is.EqualTo(lengths));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task BuildPublishesNativeArtifactAndFailedCompilationPreservesItAsync(bool nativeScanner)
     {
         var path = Path.Combine(Path.GetTempPath(), $"terrum-cli-{Guid.NewGuid():N}.exe");
@@ -1495,33 +1481,33 @@ public sealed partial class CliTests
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { require true; return 23; }"),
                 arguments);
-            Assert.Equal(0, exit);
-            Assert.Equal("", error);
+            Assert.That(exit, Is.EqualTo(0));
+            Assert.That(error, Is.EqualTo(""));
             using var document = JsonDocument.Parse(output);
             var artifact = document.RootElement.GetProperty("artifact");
-            Assert.Equal("windows-x64", artifact.GetProperty("target").GetString());
-            Assert.Equal("fail-fast", artifact.GetProperty("runtimePolicy").GetString());
+            Assert.That(artifact.GetProperty("target").GetString(), Is.EqualTo("windows-x64"));
+            Assert.That(artifact.GetProperty("runtimePolicy").GetString(), Is.EqualTo("fail-fast"));
             var original = await File.ReadAllBytesAsync(path);
-            Assert.Equal(original.Length, artifact.GetProperty("length").GetInt32());
-            Assert.Equal(Convert.ToHexString(SHA256.HashData(original)), artifact.GetProperty("sha256").GetString());
+            Assert.That(artifact.GetProperty("length").GetInt32(), Is.EqualTo(original.Length));
+            Assert.That(artifact.GetProperty("sha256").GetString(), Is.EqualTo(Convert.ToHexString(SHA256.HashData(original))));
 
             var (failure, failedOutput, _) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return unknown; }"),
                 arguments);
-            Assert.Equal(1, failure);
+            Assert.That(failure, Is.EqualTo(1));
             using var failedDocument = JsonDocument.Parse(failedOutput);
-            Assert.False(failedDocument.RootElement.GetProperty("success").GetBoolean());
-            Assert.False(failedDocument.RootElement.TryGetProperty("artifact", out _));
-            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            Assert.That(failedDocument.RootElement.GetProperty("success").GetBoolean(), Is.False);
+            Assert.That(failedDocument.RootElement.TryGetProperty("artifact", out _), Is.False);
+            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
 
             var oversized = "int32 Main() {" + string.Concat(Enumerable.Range(0, 257)
                 .Select(static index => FormattableString.Invariant($"int32 v{index} = 0;"))) + "return 0;}";
             var (limitExit, limitOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(oversized),
                 arguments);
-            Assert.Equal(1, limitExit);
+            Assert.That(limitExit, Is.EqualTo(1));
             using var limitDocument = JsonDocument.Parse(limitOutput);
-            Assert.Equal("TRM3016", limitDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-            Assert.False(limitDocument.RootElement.TryGetProperty("artifact", out _));
-            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            Assert.That(limitDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM3016"));
+            Assert.That(limitDocument.RootElement.TryGetProperty("artifact", out _), Is.False);
+            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
 
             using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true })
                 ?? throw new InvalidOperationException("Could not start native artifact.");
@@ -1541,26 +1527,24 @@ public sealed partial class CliTests
                 throw;
             }
 
-            Assert.Equal(23, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(23));
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("/* first */ int32 Main() { int32 \u03B1 = 17; return \u03B1 + 25; } // end")]
-    [InlineData("int32 F(int32 value) { if (value == 0) { return 1; } return value * F(value - 1); } int32 Main() { return F(5); }")]
-    [InlineData("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { S value = new S(42); return value.Value; }")]
-    [InlineData("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
-    [InlineData("int32 Main() { int64 minimum = -9223372036854775808; return int32(minimum % -1); }")]
-    [InlineData("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; i < 10; i = i + 1) { sum = sum + i; } return sum; }")]
-    [InlineData("int32 End() { return 1; } int32 Main() { require OwnedInt32Buffer.TryCreate(1, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); ReadonlyInt32BufferView prefix = buffer[..End()]; return prefix.Read(0) + 1; }")]
-    [InlineData("int32 Start() { return 1; } int32 End() { return 2; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[Start()..End()]; return view.Read(0); }")]
-    [InlineData("int32 Start() { return 1; } int32 End() { return 0; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[^Start()..^End()]; return view.Read(0); }")]
-    [InlineData("float32 Echo(float32 value) { return value; } int32 Main() { _ = Echo(float32(0x1.fp+2)); return 42; }")]
-    [InlineData("float64 Widen(float32 value) { return float64(value); } float32 Narrow(float64 value) { return float32(value); } int32 Main() { _ = Narrow(Widen(0.1)); return 42; }")]
+    [TestCase("/* first */ int32 Main() { int32 \u03B1 = 17; return \u03B1 + 25; } // end")]
+    [TestCase("int32 F(int32 value) { if (value == 0) { return 1; } return value * F(value - 1); } int32 Main() { return F(5); }")]
+    [TestCase("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { S value = new S(42); return value.Value; }")]
+    [TestCase("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
+    [TestCase("int32 Main() { int64 minimum = -9223372036854775808; return int32(minimum % -1); }")]
+    [TestCase("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; i < 10; i = i + 1) { sum = sum + i; } return sum; }")]
+    [TestCase("int32 End() { return 1; } int32 Main() { require OwnedInt32Buffer.TryCreate(1, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); ReadonlyInt32BufferView prefix = buffer[..End()]; return prefix.Read(0) + 1; }")]
+    [TestCase("int32 Start() { return 1; } int32 End() { return 2; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[Start()..End()]; return view.Read(0); }")]
+    [TestCase("int32 Start() { return 1; } int32 End() { return 0; } int32 Main() { require OwnedInt32Buffer.TryCreate(2, out var raw); mut OwnedInt32Buffer buffer = move raw; require buffer.TryAppend(40); require buffer.TryAppend(41); ReadonlyInt32BufferView view = buffer[^Start()..^End()]; return view.Read(0); }")]
+    [TestCase("float32 Echo(float32 value) { return value; } int32 Main() { _ = Echo(float32(0x1.fp+2)); return 42; }")]
+    [TestCase("float64 Widen(float32 value) { return float64(value); } float32 Narrow(float64 value) { return float32(value); } int32 Main() { _ = Narrow(Widen(0.1)); return 42; }")]
     public async Task NativeScannerFeedsTheOfficialCompilerWithoutChangingEmissionAsync(string source)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -1571,17 +1555,17 @@ public sealed partial class CliTests
             var bytes = Encoding.UTF8.GetBytes(source);
             var (hostExit, hostOutput, hostError) = await RunAsync(bytes, "build", "-", "-o", original,
                 "--runtime", "fail-fast", "--json");
-            Assert.Equal(0, hostExit);
-            Assert.Empty(hostError);
+            Assert.That(hostExit, Is.EqualTo(0));
+            Assert.That(hostError, Is.Empty);
             var (nativeExit, nativeOutput, nativeError) = await RunAsync(bytes, "build-component",
                 Path.Combine(root, "self-host"), "-", "-o", scanned, "--runtime", "fail-fast", "--json");
-            Assert.Equal(0, nativeExit);
-            Assert.Empty(nativeError);
+            Assert.That(nativeExit, Is.EqualTo(0));
+            Assert.That(nativeError, Is.Empty);
             using var host = JsonDocument.Parse(hostOutput);
             using var native = JsonDocument.Parse(nativeOutput);
-            Assert.Equal(host.RootElement.GetProperty("contentId").GetString(), native.RootElement.GetProperty("contentId").GetString());
-            Assert.Equal("build-component", native.RootElement.GetProperty("command").GetString());
-            Assert.Equal(await File.ReadAllBytesAsync(original), await File.ReadAllBytesAsync(scanned));
+            Assert.That(native.RootElement.GetProperty("contentId").GetString(), Is.EqualTo(host.RootElement.GetProperty("contentId").GetString()));
+            Assert.That(native.RootElement.GetProperty("command").GetString(), Is.EqualTo("build-component"));
+            Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(original)));
         }
         finally
         {
@@ -1589,12 +1573,10 @@ public sealed partial class CliTests
             File.Delete(scanned);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return 0; } /*", "TRM0003")]
-    [InlineData("int32 Main() { return 0; }\0", "TRM0001")]
-    [InlineData("int32 Main() { return 1e+; }", "TRM0004")]
-    [InlineData("int32 Main() { return 0 }", "TRM1001")]
+    [TestCase("int32 Main() { return 0; } /*","TRM0003")]
+    [TestCase("int32 Main() { return 0; }\0","TRM0001")]
+    [TestCase("int32 Main() { return 1e+; }","TRM0004")]
+    [TestCase("int32 Main() { return 0 }","TRM1001")]
     public async Task NativeScannerBuildPreservesLexicalAndParserDiagnosticsAsync(string source, string code)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -1605,23 +1587,20 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(artifact, previous);
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "build-component",
                 Path.Combine(root, "self-host"), "-", "-o", artifact, "--runtime", "fail-fast", "--json");
-            Assert.Equal(1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-            Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
-                diagnostic => diagnostic.GetProperty("code").GetString() == code);
-            Assert.Equal(previous, await File.ReadAllBytesAsync(artifact));
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+            Assert.That(global::System.Linq.Enumerable.Any(document.RootElement.GetProperty("diagnostics").EnumerateArray(),diagnostic => diagnostic.GetProperty("code").GetString() == code),Is.True);
+            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(previous));
         }
         finally
         {
             File.Delete(artifact);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ScannerBundleCompilationDiagnosticsKeepTheirSourceFileAsync(bool json)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -1651,23 +1630,22 @@ public sealed partial class CliTests
             }
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
                 arguments);
-            Assert.Equal(1, exit);
+            Assert.That(exit, Is.EqualTo(1));
             if (json)
             {
-                Assert.Empty(error);
+                Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+                Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(2));
                 var sources = document.RootElement.GetProperty("sources");
                 var characterSourceIndex = Enumerable.Range(0, sources.GetArrayLength())
                     .Single(index => sources[index].GetProperty("path").GetString() == characterLiterals);
-                Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
-                    diagnostic => diagnostic.GetProperty("sourceIndex").GetInt32() == characterSourceIndex);
+                Assert.That(global::System.Linq.Enumerable.Any(document.RootElement.GetProperty("diagnostics").EnumerateArray(),diagnostic => diagnostic.GetProperty("sourceIndex").GetInt32() == characterSourceIndex),Is.True);
             }
             else
             {
-                Assert.Empty(output);
-                Assert.Contains(characterLiterals + "(", error, StringComparison.Ordinal);
-                Assert.Contains("TRM1001", error, StringComparison.Ordinal);
+                Assert.That(output, Is.Empty);
+                Assert.That(error, Does.Contain(characterLiterals + "("));
+                Assert.That(error, Does.Contain("TRM1001"));
             }
         }
         finally
@@ -1680,11 +1658,10 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public void CompilerPrimitivesLibraryExportsExpectedSymbols()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "Compiler-primitives exports require Windows x64.");
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True, "Compiler-primitives exports require Windows x64.");
 
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name
@@ -1692,7 +1669,7 @@ public sealed partial class CliTests
         var root = RepositoryRoot();
         var libraryPath = Path.Combine(root, "artifacts", "bin", "self-host", configuration,
             "terrum-compiler-primitives.dll");
-        Assert.True(File.Exists(libraryPath), $"Compiler-primitives library was not built: {libraryPath}");
+        Assert.That(File.Exists(libraryPath), Is.True, $"Compiler-primitives library was not built: {libraryPath}");
 
         var handle = NativeLibrary.Load(libraryPath);
         try
@@ -1890,8 +1867,7 @@ public sealed partial class CliTests
                 "Terrum.CodeAnalysis.Numerics64.ClampFloat64",
             })
             {
-                Assert.True(NativeLibrary.TryGetExport(handle, export, out _),
-                    $"Compiler-primitives library is missing export '{export}'.");
+                Assert.That(NativeLibrary.TryGetExport(handle, export, out _), Is.True, $"Compiler-primitives library is missing export '{export}'.");
             }
 
             var decode = Marshal.GetDelegateForFunctionPointer<Utf16ScalarDecoderExport>(
@@ -1906,7 +1882,7 @@ public sealed partial class CliTests
                 (0xDC00, 0, -1),
             })
             {
-                Assert.Equal(expected, decode(first, second));
+                Assert.That(decode(first, second), Is.EqualTo(expected));
             }
 
             var scalarWidth = Marshal.GetDelegateForFunctionPointer<Utf16ScalarWidthExport>(
@@ -1918,7 +1894,7 @@ public sealed partial class CliTests
                 (0x10FFFF, 2),
             })
             {
-                Assert.Equal(expected, scalarWidth(scalar));
+                Assert.That(scalarWidth(scalar), Is.EqualTo(expected));
             }
 
             Span<char> utf16 = stackalloc char[2];
@@ -1928,10 +1904,10 @@ public sealed partial class CliTests
                 utf16[0] = (char)codeUnit;
                 var status = Rune.DecodeFromUtf16(utf16, out var expected, out _);
                 var expectedScalar = status == OperationStatus.Done ? expected.Value : -1;
-                Assert.Equal(expectedScalar, decode(utf16[0], utf16[1]));
+                Assert.That(decode(utf16[0], utf16[1]), Is.EqualTo(expectedScalar));
                 if (!char.IsSurrogate((char)codeUnit))
                 {
-                    Assert.Equal(1, scalarWidth(codeUnit));
+                    Assert.That(scalarWidth(codeUnit), Is.EqualTo(1));
                 }
             }
 
@@ -1941,15 +1917,15 @@ public sealed partial class CliTests
                 utf16[0] = (char)codeUnit;
                 var status = Rune.DecodeFromUtf16(utf16, out var expected, out _);
                 var expectedScalar = status == OperationStatus.Done ? expected.Value : -1;
-                Assert.Equal(expectedScalar, decode(utf16[0], utf16[1]));
+                Assert.That(decode(utf16[0], utf16[1]), Is.EqualTo(expectedScalar));
             }
 
             for (var scalar = 0x10000; scalar < 0x110000; scalar++)
             {
                 var expected = new Rune(scalar);
-                Assert.Equal(2, expected.EncodeToUtf16(utf16));
-                Assert.Equal(scalar, decode(utf16[0], utf16[1]));
-                Assert.Equal(2, scalarWidth(scalar));
+                Assert.That(expected.EncodeToUtf16(utf16), Is.EqualTo(2));
+                Assert.That(decode(utf16[0], utf16[1]), Is.EqualTo(scalar));
+                Assert.That(scalarWidth(scalar), Is.EqualTo(2));
             }
 
             var magnitudeInt64 = Marshal.GetDelegateForFunctionPointer<MagnitudeInt64Export>(
@@ -1962,9 +1938,9 @@ public sealed partial class CliTests
             foreach (var value in signedValues)
             {
                 var expected = (ulong)BigInteger.Abs(new BigInteger(value));
-                Assert.Equal(expected, magnitudeInt64(value));
+                Assert.That(magnitudeInt64(value), Is.EqualTo(expected));
             }
-            Assert.Equal(0x8000000000000000UL, magnitudeInt64(long.MinValue));
+            Assert.That(magnitudeInt64(long.MinValue), Is.EqualTo(0x8000000000000000UL));
             AssertWideIntegerAccumulatorExports(handle);
             AssertWideIntegerArithmeticExports(handle);
             AssertBitOperationsExports(handle);
@@ -1993,22 +1969,22 @@ public sealed partial class CliTests
             for (var value = 0; value <= ushort.MaxValue; value++)
             {
                 var character = (ushort)value;
-                Assert.Equal(value >= 48 && value <= 57 ? 1 : 0, isAsciiDigit(character));
+                Assert.That(isAsciiDigit(character), Is.EqualTo(value >= 48 && value <= 57 ? 1 : 0));
                 var expectedLineBreak = value == 10 || value == 13 || value == 133
                     || value == 8232 || value == 8233;
-                Assert.Equal(expectedLineBreak ? 1 : 0, isLineBreak(character));
+                Assert.That(isLineBreak(character), Is.EqualTo(expectedLineBreak ? 1 : 0));
                 if (value >= 48 && value <= 57)
                 {
-                    Assert.Equal(value - 48, getDecimalDigit(character));
+                    Assert.That(getDecimalDigit(character), Is.EqualTo(value - 48));
                 }
             }
 
-            Assert.Equal(8, Marshal.SizeOf<NativeSourceRange>());
-            Assert.Equal(0, Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Start)).ToInt32());
-            Assert.Equal(4, Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32());
-            Assert.Equal(16, Marshal.SizeOf<GuardedSourceRange>());
-            Assert.Equal(4, Marshal.OffsetOf<GuardedSourceRange>(nameof(GuardedSourceRange.Range)).ToInt32());
-            Assert.Equal(12, Marshal.OffsetOf<GuardedSourceRange>(nameof(GuardedSourceRange.After)).ToInt32());
+            Assert.That(Marshal.SizeOf<NativeSourceRange>(), Is.EqualTo(8));
+            Assert.That(Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Start)).ToInt32(), Is.EqualTo(0));
+            Assert.That(Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32(), Is.EqualTo(4));
+            Assert.That(Marshal.SizeOf<GuardedSourceRange>(), Is.EqualTo(16));
+            Assert.That(Marshal.OffsetOf<GuardedSourceRange>(nameof(GuardedSourceRange.Range)).ToInt32(), Is.EqualTo(4));
+            Assert.That(Marshal.OffsetOf<GuardedSourceRange>(nameof(GuardedSourceRange.After)).ToInt32(), Is.EqualTo(12));
 
             var tryCreateRange = Marshal.GetDelegateForFunctionPointer<SourceRangeTryCreateExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SourceRange.TryCreate"));
@@ -2052,25 +2028,22 @@ public sealed partial class CliTests
                 {
                 }
 
-                Assert.Equal(expectedSuccess, expectedRange.HasValue);
+                Assert.That(expectedRange.HasValue, Is.EqualTo(expectedSuccess));
                 var guarded = new GuardedSourceRange {
                     Before = lowerRangeCanary,
                     Range = new NativeSourceRange { Start = sentinelStart, Length = sentinelLength },
                     After = upperRangeCanary,
                 };
-                Assert.Equal(expectedSuccess ? 1 : 0,
-                    tryCreateRange(start, length, ref guarded.Range));
-                Assert.Equal(expectedSuccess ? expectedRange.GetValueOrDefault().Start : sentinelStart,
-                    guarded.Range.Start);
-                Assert.Equal(expectedSuccess ? expectedRange.GetValueOrDefault().Length : sentinelLength,
-                    guarded.Range.Length);
-                Assert.Equal(lowerRangeCanary, guarded.Before);
-                Assert.Equal(upperRangeCanary, guarded.After);
+                Assert.That(tryCreateRange(start, length, ref guarded.Range), Is.EqualTo(expectedSuccess ? 1 : 0));
+                Assert.That(guarded.Range.Start, Is.EqualTo(expectedSuccess ? expectedRange.GetValueOrDefault().Start : sentinelStart));
+                Assert.That(guarded.Range.Length, Is.EqualTo(expectedSuccess ? expectedRange.GetValueOrDefault().Length : sentinelLength));
+                Assert.That(guarded.Before, Is.EqualTo(lowerRangeCanary));
+                Assert.That(guarded.After, Is.EqualTo(upperRangeCanary));
                 if (expectedSuccess)
                 {
                     var expectedEnd = expectedRange.GetValueOrDefault().End;
-                    Assert.Equal(expectedEnd, getRangeEnd(guarded.Range));
-                    Assert.Equal(expectedEnd, getRangeEndProperty(guarded.Range));
+                    Assert.That(getRangeEnd(guarded.Range), Is.EqualTo(expectedEnd));
+                    Assert.That(getRangeEndProperty(guarded.Range), Is.EqualTo(expectedEnd));
                 }
             }
 
@@ -2079,20 +2052,20 @@ public sealed partial class CliTests
                 Range = new NativeSourceRange { Start = sentinelStart, Length = sentinelLength },
                 After = upperRangeCanary,
             };
-            Assert.Equal(0, tryCreateRange(-1, 0, ref reusedRange.Range));
-            Assert.Equal(sentinelStart, reusedRange.Range.Start);
-            Assert.Equal(sentinelLength, reusedRange.Range.Length);
-            Assert.Equal(1, tryCreateRange(5, 7, ref reusedRange.Range));
-            Assert.Equal(5, reusedRange.Range.Start);
-            Assert.Equal(7, reusedRange.Range.Length);
-            Assert.Equal(0, tryCreateRange(int.MaxValue, 1, ref reusedRange.Range));
-            Assert.Equal(5, reusedRange.Range.Start);
-            Assert.Equal(7, reusedRange.Range.Length);
-            Assert.Equal(1, tryCreateRange(0, int.MaxValue, ref reusedRange.Range));
-            Assert.Equal(0, reusedRange.Range.Start);
-            Assert.Equal(int.MaxValue, reusedRange.Range.Length);
-            Assert.Equal(lowerRangeCanary, reusedRange.Before);
-            Assert.Equal(upperRangeCanary, reusedRange.After);
+            Assert.That(tryCreateRange(-1, 0, ref reusedRange.Range), Is.EqualTo(0));
+            Assert.That(reusedRange.Range.Start, Is.EqualTo(sentinelStart));
+            Assert.That(reusedRange.Range.Length, Is.EqualTo(sentinelLength));
+            Assert.That(tryCreateRange(5, 7, ref reusedRange.Range), Is.EqualTo(1));
+            Assert.That(reusedRange.Range.Start, Is.EqualTo(5));
+            Assert.That(reusedRange.Range.Length, Is.EqualTo(7));
+            Assert.That(tryCreateRange(int.MaxValue, 1, ref reusedRange.Range), Is.EqualTo(0));
+            Assert.That(reusedRange.Range.Start, Is.EqualTo(5));
+            Assert.That(reusedRange.Range.Length, Is.EqualTo(7));
+            Assert.That(tryCreateRange(0, int.MaxValue, ref reusedRange.Range), Is.EqualTo(1));
+            Assert.That(reusedRange.Range.Start, Is.EqualTo(0));
+            Assert.That(reusedRange.Range.Length, Is.EqualTo(int.MaxValue));
+            Assert.That(reusedRange.Before, Is.EqualTo(lowerRangeCanary));
+            Assert.That(reusedRange.After, Is.EqualTo(upperRangeCanary));
 
             var tryGetHexDigit = Marshal.GetDelegateForFunctionPointer<HexDigitExport>(
                 NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.TryGetHexDigit"));
@@ -2111,10 +2084,10 @@ public sealed partial class CliTests
             })
             {
                 words[1] = sentinel;
-                Assert.Equal(1, tryGetHexDigit(character, ref words[1]));
-                Assert.Equal(expected, words[1]);
-                Assert.Equal(lowerCanary, words[0]);
-                Assert.Equal(upperCanary, words[2]);
+                Assert.That(tryGetHexDigit(character, ref words[1]), Is.EqualTo(1));
+                Assert.That(words[1], Is.EqualTo(expected));
+                Assert.That(words[0], Is.EqualTo(lowerCanary));
+                Assert.That(words[2], Is.EqualTo(upperCanary));
             }
 
             foreach (var character in new ushort[] {
@@ -2123,29 +2096,27 @@ public sealed partial class CliTests
             })
             {
                 words[1] = sentinel;
-                Assert.Equal(0, tryGetHexDigit(character, ref words[1]));
-                Assert.Equal(sentinel, words[1]);
-                Assert.Equal(lowerCanary, words[0]);
-                Assert.Equal(upperCanary, words[2]);
+                Assert.That(tryGetHexDigit(character, ref words[1]), Is.EqualTo(0));
+                Assert.That(words[1], Is.EqualTo(sentinel));
+                Assert.That(words[0], Is.EqualTo(lowerCanary));
+                Assert.That(words[2], Is.EqualTo(upperCanary));
             }
 
             words[1] = sentinel;
-            Assert.Equal(0, tryGetHexDigit(0, ref words[1]));
-            Assert.Equal(sentinel, words[1]);
-            Assert.Equal(1, tryGetHexDigit((ushort)'f', ref words[1]));
-            Assert.Equal(15, words[1]);
-            Assert.Equal(0, tryGetHexDigit((ushort)'g', ref words[1]));
-            Assert.Equal(15, words[1]);
+            Assert.That(tryGetHexDigit(0, ref words[1]), Is.EqualTo(0));
+            Assert.That(words[1], Is.EqualTo(sentinel));
+            Assert.That(tryGetHexDigit((ushort)'f', ref words[1]), Is.EqualTo(1));
+            Assert.That(words[1], Is.EqualTo(15));
+            Assert.That(tryGetHexDigit((ushort)'g', ref words[1]), Is.EqualTo(0));
+            Assert.That(words[1], Is.EqualTo(15));
         }
         finally
         {
             NativeLibrary.Free(handle);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Scan() { return 0; }", 1)]
-    [InlineData("int32 Scan() { require false; return 0; }", unchecked((int)0xE0540003))]
+    [TestCase("int32 Scan() { return 0; }",1)]
+    [TestCase("int32 Scan() { require false; return 0; }",unchecked((int)0xE0540003))]
     public async Task ScannerFailureNeverFallsBackToTheHostLexerAsync(string scanner, int expected)
     {
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-scanner-worker-{Guid.NewGuid():N}");
@@ -2158,14 +2129,14 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(artifact, previous);
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
                 "build-component", component, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
-            Assert.Equal(expected, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(expected));
+            Assert.That(error, Is.Empty);
             if (exit == 1)
             {
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal("TRM5001", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+                Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
             }
-            Assert.Equal(previous, await File.ReadAllBytesAsync(artifact));
+            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(previous));
         }
         finally
         {
@@ -2173,10 +2144,8 @@ public sealed partial class CliTests
             File.Delete(artifact);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ComponentBuildCannotOverwriteEitherSourceAsync(bool scannerIsDestination)
     {
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-component-input-{Guid.NewGuid():N}");
@@ -2190,12 +2159,12 @@ public sealed partial class CliTests
             await File.WriteAllTextAsync(input, Source);
             var (exit, output, error) = await RunAsync([], "build-component", scanner, input,
                 "-o", scannerIsDestination ? scanner : input, "--runtime", "fail-fast", "--json");
-            Assert.Equal(2, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(2));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("TRM2002", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-            Assert.Equal(Scanner, await File.ReadAllTextAsync(scanner));
-            Assert.Equal(Source, await File.ReadAllTextAsync(input));
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2002"));
+            Assert.That(await File.ReadAllTextAsync(scanner), Is.EqualTo(Scanner));
+            Assert.That(await File.ReadAllTextAsync(input), Is.EqualTo(Source));
         }
         finally
         {
@@ -2203,38 +2172,34 @@ public sealed partial class CliTests
             File.Delete(input);
         }
     }
-
-    [Theory]
-    [InlineData("build", "-", "-o", "unused.exe", "--json")]
-    [InlineData("build", "-", "-o", "unused.exe", "--runtime", "implicit", "--json")]
-    [InlineData("build-component", "scanner.terrum", "-", "-o", "unused.exe", "--json")]
-    [InlineData("build-component", "scanner.terrum", "-", "-o", "unused.exe", "--runtime", "implicit", "--json")]
-    [InlineData("build-component", "-", "-", "-o", "unused.exe", "--runtime", "fail-fast", "--json")]
+    [TestCase("build","-","-o","unused.exe","--json")]
+    [TestCase("build","-","-o","unused.exe","--runtime","implicit","--json")]
+    [TestCase("build-component","scanner.terrum","-","-o","unused.exe","--json")]
+    [TestCase("build-component","scanner.terrum","-","-o","unused.exe","--runtime","implicit","--json")]
+    [TestCase("build-component","-","-","-o","unused.exe","--runtime","fail-fast","--json")]
     [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null argument arrays.")]
     public async Task BuildRequiresExplicitRuntimePolicyAsync(params string[] arguments)
     {
         var (exit, output, _) = await RunAsync([], arguments);
-        Assert.Equal(2, exit);
+        Assert.That(exit, Is.EqualTo(2));
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("TRM2000", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+        Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
     }
 
-    [Fact]
+    [Test]
     public async Task AnalyzeRunsBindingRatherThanOnlyParsingAsync()
     {
         var source = Encoding.UTF8.GetBytes("int32 Main() { var x = 1; return x; }");
         var (syntaxExit, _, _) = await RunAsync(source, "check", "-", "--json");
-        Assert.Equal(0, syntaxExit);
+        Assert.That(syntaxExit, Is.EqualTo(0));
         var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
-        Assert.Equal(1, semanticExit);
+        Assert.That(semanticExit, Is.EqualTo(1));
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-10", document.RootElement.GetProperty("profile").GetString());
-        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.That(document.RootElement.GetProperty("profile").GetString(), Is.EqualTo("native-10"));
+        Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
     }
-
-    [Theory]
-    [InlineData("check")]
-    [InlineData("analyze")]
+    [TestCase("check")]
+    [TestCase("analyze")]
     public async Task CliAcceptsPostTestedAndNamedLoopsAsync(string command)
     {
         const string source = """
@@ -2247,128 +2212,120 @@ public sealed partial class CliTests
             }
             """;
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json");
-        Assert.Equal(0, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(0));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
         if (command == "check")
         {
-            Assert.Equal(SyntaxTree.LanguageVersion, document.RootElement.GetProperty("languageVersion").GetString());
+            Assert.That(document.RootElement.GetProperty("languageVersion").GetString(), Is.EqualTo(SyntaxTree.LanguageVersion));
         }
     }
-
-    [Theory]
-    [InlineData("check")]
-    [InlineData("tree")]
+    [TestCase("check")]
+    [TestCase("tree")]
     public async Task RepeatedOptionalReportsPreciseStructuredDiagnosticAsync(string command)
     {
         const string Source = "void F(T? /* gap */\n? value) {}";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), command, "-", "--json");
-        Assert.Equal(1, exit);
-        Assert.Equal("", error);
+        Assert.That(exit, Is.EqualTo(1));
+        Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
-        Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal(SyntaxTree.LanguageVersion, root.GetProperty("languageVersion").GetString());
-        var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
-        Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
-        Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());
-        Assert.Equal(1, diagnostic.GetProperty("span").GetProperty("length").GetInt32());
+        Assert.That(root.GetProperty("success").GetBoolean(), Is.False);
+        Assert.That(root.GetProperty("languageVersion").GetString(), Is.EqualTo(SyntaxTree.LanguageVersion));
+        var diagnostic = global::System.Linq.Enumerable.Single(root.GetProperty("diagnostics").EnumerateArray());
+        Assert.That(diagnostic.GetProperty("code").GetString(), Is.EqualTo("TRM1005"));
+        Assert.That(diagnostic.GetProperty("span").GetProperty("start").GetInt32(), Is.EqualTo(Source.LastIndexOf('?', StringComparison.Ordinal)));
+        Assert.That(diagnostic.GetProperty("span").GetProperty("length").GetInt32(), Is.EqualTo(1));
 
         if (command == "tree")
         {
             var reconstructed = string.Concat(root.GetProperty("tokens").EnumerateArray().Select(token =>
                 string.Concat(token.GetProperty("leadingTrivia").EnumerateArray().Select(trivia => trivia.GetProperty("text").GetString())) + token.GetProperty("text").GetString()));
-            Assert.Equal(Source, reconstructed);
+            Assert.That(reconstructed, Is.EqualTo(Source));
         }
     }
-
-    [Theory]
-    [InlineData("name")]
-    [InlineData("\"quote\\\" and \\\\ slash\"")]
-    [InlineData("\"<tag> \u03B1 \U0001F600\"")]
+    [TestCase("name")]
+    [TestCase("\"quote\\\" and \\\\ slash\"")]
+    [TestCase("\"<tag> \u03B1 \U0001F600\"")]
     public async Task HumanTokensPreserveJsonEscapingAsync(string source)
     {
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "tokens", "-");
-        Assert.Equal(0, exit);
-        Assert.Equal("", error);
-        Assert.Contains(JsonSerializer.Serialize(source), output, StringComparison.Ordinal);
+        Assert.That(exit, Is.EqualTo(0));
+        Assert.That(error, Is.EqualTo(""));
+        Assert.That(output, Does.Contain(JsonSerializer.Serialize(source)));
     }
-
-    [Theory]
-    [InlineData("check", "void Main() { return; }", 0)]
-    [InlineData("tree", "void Main() { return 1 }", 1)]
-    [InlineData("tokens", " \r\n\u03B1 + 12 // end", 0)]
-    [InlineData("tokens", "1 \u0661", 1)]
+    [TestCase("check","void Main() { return; }",0)]
+    [TestCase("tree","void Main() { return 1 }",1)]
+    [TestCase("tokens"," \r\n\u03B1 + 12 // end",0)]
+    [TestCase("tokens","1 \u0661",1)]
     [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null source strings.")]
     public async Task EmitsStructuredResultsWithExpectedExitAsync(string command, string source, int exitCode)
     {
         (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json");
-        Assert.Equal(exitCode, exit);
-        Assert.Equal("", error);
+        Assert.That(exit, Is.EqualTo(exitCode));
+        Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
-        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("utf-16", root.GetProperty("coordinateSystem").GetString());
-        Assert.Equal(exitCode == 0, root.GetProperty("success").GetBoolean());
-        Assert.Equal(source.Length, root.GetProperty("sourceLength").GetInt32());
+        Assert.That(root.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(1));
+        Assert.That(root.GetProperty("coordinateSystem").GetString(), Is.EqualTo("utf-16"));
+        Assert.That(root.GetProperty("success").GetBoolean(), Is.EqualTo(exitCode == 0));
+        Assert.That(root.GetProperty("sourceLength").GetInt32(), Is.EqualTo(source.Length));
 
         if (command != "check")
         {
             var reconstructed = string.Concat(root.GetProperty("tokens").EnumerateArray().Select(token =>
                 string.Concat(token.GetProperty("leadingTrivia").EnumerateArray().Select(trivia => trivia.GetProperty("text").GetString())) + token.GetProperty("text").GetString()));
-            Assert.Equal(source, reconstructed);
+            Assert.That(reconstructed, Is.EqualTo(source));
         }
 
         if (command == "tree")
         {
-            Assert.Equal("CompilationUnit", root.GetProperty("nodes")[0].GetProperty("kind").GetString());
-            Assert.Equal(64, Assert.IsType<string>(root.GetProperty("contentId").GetString()).Length);
+            Assert.That(root.GetProperty("nodes")[0].GetProperty("kind").GetString(), Is.EqualTo("CompilationUnit"));
+            Assert.That(((global::System.Func<string>)(() => { var __nunitActual2 = root.GetProperty("contentId").GetString(); Assert.That(__nunitActual2, Is.TypeOf<string>()); return (string)__nunitActual2!; }))().Length, Is.EqualTo(64));
         }
     }
-
-    [Theory]
-    [InlineData("void Main() {\nreturn 1\n}", "<stdin>(3,1): error TRM1001")]
-    [InlineData("void F(T? /* gap */\n? value) {}", "<stdin>(2,1): error TRM1005")]
+    [TestCase("void Main() {\nreturn 1\n}","<stdin>(3,1): error TRM1001")]
+    [TestCase("void F(T? /* gap */\n? value) {}","<stdin>(2,1): error TRM1005")]
     public async Task HumanErrorsUseOneBasedLocationsAndStderrAsync(string source, string diagnostic)
     {
         (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), "check", "-");
-        Assert.Equal(1, exit);
-        Assert.Equal("", output);
-        Assert.Contains(diagnostic, error, StringComparison.Ordinal);
+        Assert.That(exit, Is.EqualTo(1));
+        Assert.That(output, Is.EqualTo(""));
+        Assert.That(error, Does.Contain(diagnostic));
     }
 
-    [Fact]
+    [Test]
     public async Task InputFailuresRemainStructuredAndDoNotClaimToParseAsync()
     {
         foreach (var arguments in new[] { new[] { "bad", "-", "--json" }, ["check", Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".terrum"), "--json"] })
         {
             (var exit, var output, var error) = await RunAsync([], arguments);
-            Assert.Equal(2, exit);
-            Assert.Equal("", error);
+            Assert.That(exit, Is.EqualTo(2));
+            Assert.That(error, Is.EqualTo(""));
             using var document = JsonDocument.Parse(output);
-            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
-            Assert.StartsWith("TRM200", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), StringComparison.Ordinal);
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Does.StartWith("TRM200"));
         }
     }
 
-    [Fact]
+    [Test]
     public async Task StrictUtf8RejectsInvalidBytesAndAcceptsAnOptionalBomAsync()
     {
         (var exit, var output, _) = await RunAsync([0xFF, 0xFE, 0x00, 0xD8], "check", "-", "--json");
-        Assert.Equal(2, exit);
+        Assert.That(exit, Is.EqualTo(2));
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("TRM2001", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+        Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
         (var validExit, _, _) = await RunAsync([0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("void Main() {}")], "check", "-");
-        Assert.Equal(0, validExit);
+        Assert.That(validExit, Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public async Task FlatTreeProtocolPreservesReferencesAndDeepTreesAsync()
     {
         var source = "void F() { return " + string.Join(" + ", Enumerable.Repeat("1", 500)) + "; }";
         (var exit, var output, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
-        Assert.Equal(0, exit);
+        Assert.That(exit, Is.EqualTo(0));
         using var document = JsonDocument.Parse(output);
         var nodes = document.RootElement.GetProperty("nodes");
         var tokens = document.RootElement.GetProperty("tokens");
@@ -2390,12 +2347,12 @@ public sealed partial class CliTests
             }
         }
 
-        Assert.Equal(0, nodeReferences[0]);
-        Assert.All(nodeReferences.Skip(1), count => Assert.Equal(1, count));
-        Assert.All(tokenReferences, count => Assert.Equal(1, count));
+        Assert.That(nodeReferences[0], Is.EqualTo(0));
+        {var __nunitItems0 = nodeReferences.Skip(1);        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems0) { Assert.That(__nunitItem3, Is.EqualTo(1)); } });}
+        {var __nunitItems1 = tokenReferences;        Assert.Multiple(() => { foreach (var __nunitItem4 in __nunitItems1) { Assert.That(__nunitItem4, Is.EqualTo(1)); } });}
         (var secondExit, var secondOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
-        Assert.Equal(exit, secondExit);
-        Assert.Equal(output, secondOutput);
+        Assert.That(secondExit, Is.EqualTo(exit));
+        Assert.That(secondOutput, Is.EqualTo(output));
     }
 
     private static async Task<int> ExecuteNativeImageAsync(string path)
@@ -2431,7 +2388,7 @@ public sealed partial class CliTests
         var configuration = frameworkDirectory.Parent?.Name ?? throw new InvalidOperationException("Missing configuration directory.");
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var cli = Path.Combine(root, "artifacts", "bin", "sources", "terrumc", configuration, frameworkDirectory.Name, "terrumc.dll");
-        Assert.True(File.Exists(cli), $"CLI was not built: {cli}");
+        Assert.That(File.Exists(cli), Is.True, $"CLI was not built: {cli}");
         var start = new ProcessStartInfo("dotnet") {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,

@@ -4,7 +4,7 @@ using System;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -214,22 +214,20 @@ public sealed partial class CliTests
         string expected,
         string operation = "formatter")
     {
-        var guardedLength = new GuardedInt32
-        {
+        var guardedLength = new GuardedInt32 {
             Before = 0x13579BDF,
             Value = -1,
             After = 0x2468ACE0,
         };
         var packed = consumeWorkspace(workspace, start, ref guardedLength.Value);
 
-        Assert.Equal(expected.Length, guardedLength.Value);
-        Assert.Equal(0x13579BDF, guardedLength.Before);
-        Assert.Equal(0x2468ACE0, guardedLength.After);
+        Assert.That(guardedLength.Value, Is.EqualTo(expected.Length));
+        Assert.That(guardedLength.Before, Is.EqualTo(0x13579BDF));
+        Assert.That(guardedLength.After, Is.EqualTo(0x2468ACE0));
         for (var offset = 0; offset < 8 && start + offset < expected.Length; offset++)
         {
             var actual = (char)((packed >> (offset * 8)) & 0xFF);
-            Assert.True(expected[start + offset] == actual,
-                $"{operation} at output position {start + offset}: expected '{expected[start + offset]}', got '{actual}'.");
+            Assert.That(expected[start + offset] == actual, Is.True, $"{operation} at output position {start + offset}: expected '{expected[start + offset]}', got '{actual}'.");
         }
     }
 

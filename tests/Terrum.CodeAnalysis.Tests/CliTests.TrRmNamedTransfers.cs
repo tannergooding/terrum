@@ -7,17 +7,16 @@ using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("mut int32 x = 0; outer: while (x < 3) { mut int32 y = 0; while (y++ < 2) { x++; if (x == 2) { break outer; } } } return x == 2 ? 42 : 0;")]
-    [InlineData("mut int32 x = 0; outer: for (; x < 3; x++) { mut int32 y = 0; while (y++ < 2) { if (x == 1) { continue outer; } } } return x == 3 ? 42 : 0;")]
-    [InlineData("mut int32 x = 0; mut int32 effects = 0; outer: do { mut int32 y = 0; while (y++ < 2) { if (x++ == 0) { continue outer; } } } while (++effects < 2); return effects == 2 && x == 3 ? 42 : 0;")]
-    [InlineData("mut int32 x = 0; outer: while (x < 2) { mut int32 y = 0; while (y++ < 2) { mut int32 z = 0; do { x++; if (x == 2) { break outer; } } while (z++ < 1); } } return x == 2 ? 42 : 0;")]
+    [TestCase("mut int32 x = 0; outer: while (x < 3) { mut int32 y = 0; while (y++ < 2) { x++; if (x == 2) { break outer; } } } return x == 2 ? 42 : 0;")]
+    [TestCase("mut int32 x = 0; outer: for (; x < 3; x++) { mut int32 y = 0; while (y++ < 2) { if (x == 1) { continue outer; } } } return x == 3 ? 42 : 0;")]
+    [TestCase("mut int32 x = 0; mut int32 effects = 0; outer: do { mut int32 y = 0; while (y++ < 2) { if (x++ == 0) { continue outer; } } } while (++effects < 2); return effects == 2 && x == 3 ? 42 : 0;")]
+    [TestCase("mut int32 x = 0; outer: while (x < 2) { mut int32 y = 0; while (y++ < 2) { mut int32 z = 0; do { x++; if (x == 2) { break outer; } } while (z++ < 1); } } return x == 2 ? 42 : 0;")]
     public async Task PersistedNamedTransfersRunAndBuildWithoutSourceAsync(string body)
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-named-{Guid.NewGuid():N}");
@@ -28,28 +27,27 @@ public sealed partial class CliTests
             var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { " + body + " }"),
                 "compile-trrm", "-", "--identity", "named-cli", "-o", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.True(compiled == 0, $"{output}{error}");
+            Assert.That(compiled == 0, Is.True, $"{output}{error}");
             var bytes = await File.ReadAllBytesAsync(artifact);
             TrRmStructuralMetadataValidator.ValidateCompact(bytes);
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.True(ran == 42, $"{runOutput}{runError}");
+            Assert.That(ran == 42, Is.True, $"{runOutput}{runError}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
                 "-o", executable, "--runtime", "fail-fast", "--json");
-            Assert.True(built == 0, $"{buildOutput}{buildError}");
-            Assert.Equal(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast),
-                await File.ReadAllBytesAsync(executable));
-            Assert.Equal(42, await ExecuteTrRmImageAsync(executable));
-            Assert.Equal(bytes, await File.ReadAllBytesAsync(artifact));
+            Assert.That(built == 0, Is.True, $"{buildOutput}{buildError}");
+            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast)));
+            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(42));
+            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(bytes));
         }
         finally
         {
             File.Delete(artifact);
-            File.Delete(executable);
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task PersistedNamedTransfersRetainNormalizedLibraryExportsAsync()
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-named-{Guid.NewGuid():N}");
@@ -61,20 +59,19 @@ public sealed partial class CliTests
             var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "compile-trrm", "-", "--identity", "named-export", "-o", artifact,
                 "--runtime", "fail-fast", "--library", "--json");
-            Assert.True(compiled == 0, $"{output}{error}");
+            Assert.That(compiled == 0, Is.True, $"{output}{error}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm-library", artifact,
                 "--export", "await", "-o", library, "--runtime", "fail-fast", "--json");
-            Assert.True(built == 0, $"{buildOutput}{buildError}");
+            Assert.That(built == 0, Is.True, $"{buildOutput}{buildError}");
             var loaded = TrRmExecutableCompiler.Load(await File.ReadAllBytesAsync(artifact));
-            Assert.Equal(NativeEmitter.EmitLibrary(loaded, ["await"], NativeRuntimePolicy.FailFast),
-                await File.ReadAllBytesAsync(library));
+            Assert.That(await File.ReadAllBytesAsync(library), Is.EqualTo(NativeEmitter.EmitLibrary(loaded, ["await"], NativeRuntimePolicy.FailFast)));
             var handle = NativeLibrary.Load(library);
             try
             {
                 var invoke = Marshal.GetDelegateForFunctionPointer<DoForExport>(NativeLibrary.GetExport(handle, "await"));
-                Assert.Equal(0, invoke(0));
-                Assert.Equal(1, invoke(1));
-                Assert.Equal(2, invoke(4));
+                Assert.That(invoke(0), Is.EqualTo(0));
+                Assert.That(invoke(1), Is.EqualTo(1));
+                Assert.That(invoke(4), Is.EqualTo(2));
             }
             finally
             {

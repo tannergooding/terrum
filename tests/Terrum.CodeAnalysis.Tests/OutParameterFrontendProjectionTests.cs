@@ -7,34 +7,33 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class OutParameterFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void OutParameterProjectionMatchesHostedBindingAndEmission()
     {
         const string text = "public bool Try(out int32 value) { return false; }";
         var source = SourceText.From(text);
         var words = Projection(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.Equal(1, result.OutParameterMask);
+        Assert.That(result.OutParameterMask, Is.EqualTo(1));
 
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var actual = ScalarFrontendHost.BindLibrary(source, Bytes(words), policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
-            var actualFunction = Assert.Single(actual.Functions);
-            var hostedFunction = Assert.Single(hosted.Functions);
-            Assert.True(actualFunction.Variables[0].IsOut);
-            Assert.True(actualFunction.Variables[0].IsMutable);
-            Assert.True(hostedFunction.Variables[0].IsOut);
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Try"], (NativeRuntimePolicy)policy),
-                NativeEmitter.EmitLibrary(actual, ["Try"], (NativeRuntimePolicy)policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var actualFunction = global::System.Linq.Enumerable.Single(actual.Functions);
+            var hostedFunction = global::System.Linq.Enumerable.Single(hosted.Functions);
+            Assert.That(actualFunction.Variables[0].IsOut, Is.True);
+            Assert.That(actualFunction.Variables[0].IsMutable, Is.True);
+            Assert.That(hostedFunction.Variables[0].IsOut, Is.True);
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Try"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Try"], (NativeRuntimePolicy)policy)));
         }
 
         Reject(0, 68);
@@ -51,7 +50,7 @@ public sealed class OutParameterFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void OutParameterMaskPreservesParameterOrdinals()
     {
         const string text = "public bool Try(int32 seed, out int32 first, out int32 second) { return false; }";
@@ -69,22 +68,21 @@ public sealed class OutParameterFrontendProjectionTests
         words[36] = 6;
 
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.Equal(6, result.OutParameterMask);
+        Assert.That(result.OutParameterMask, Is.EqualTo(6));
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var actual = ScalarFrontendHost.BindLibrary(source, Bytes(words), policy);
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
-            var actualFunction = Assert.Single(actual.Functions);
-            var hostedFunction = Assert.Single(hosted.Functions);
-            Assert.False(actualFunction.Variables[0].IsOut);
-            Assert.True(actualFunction.Variables[1].IsOut);
-            Assert.True(actualFunction.Variables[2].IsOut);
-            Assert.Equal(hostedFunction.Variables[1].IsOut, actualFunction.Variables[1].IsOut);
-            Assert.Equal(hostedFunction.Variables[2].IsOut, actualFunction.Variables[2].IsOut);
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["Try"], (NativeRuntimePolicy)policy),
-                NativeEmitter.EmitLibrary(actual, ["Try"], (NativeRuntimePolicy)policy));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+            var actualFunction = global::System.Linq.Enumerable.Single(actual.Functions);
+            var hostedFunction = global::System.Linq.Enumerable.Single(hosted.Functions);
+            Assert.That(actualFunction.Variables[0].IsOut, Is.False);
+            Assert.That(actualFunction.Variables[1].IsOut, Is.True);
+            Assert.That(actualFunction.Variables[2].IsOut, Is.True);
+            Assert.That(actualFunction.Variables[1].IsOut, Is.EqualTo(hostedFunction.Variables[1].IsOut));
+            Assert.That(actualFunction.Variables[2].IsOut, Is.EqualTo(hostedFunction.Variables[2].IsOut));
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Try"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["Try"], (NativeRuntimePolicy)policy)));
         }
     }
 

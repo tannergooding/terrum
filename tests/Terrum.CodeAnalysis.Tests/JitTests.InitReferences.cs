@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task PrivateInitReferencePublishesOnlyOnSuccessAsync(bool checkedFailures)
     {
         if (checkedFailures)
@@ -21,10 +20,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(InitReferenceTests.ScalarSource, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task FloatingInitReferencePublishesOnSuccessAsync(bool checkedFailures)
     {
         const string Source = """
@@ -46,10 +43,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task FloatingOutPublishesOnEveryNormalReturnAsync(bool checkedFailures)
     {
         const string Source = """
@@ -73,10 +68,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task FloatingVoidOutPublishesOnReturnAsync(bool checkedFailures)
     {
         const string Source = """
@@ -94,7 +87,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedInitReferenceFailurePropagatesWithoutPublicationAsync()
     {
         const string Source = """
@@ -116,7 +109,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedEarlierArgumentFailureLeavesInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
             bool Fill(int32 ignored, init ref<int32> value) {
@@ -137,7 +130,7 @@ public sealed partial class JitTests
             }
             """, 42);
 
-    [Fact]
+    [Test]
     public Task CheckedLaterArgumentFailureLeavesStagedInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
             [NoThrow] bool Fill(init ref<int32> value, int32 ignored) {
@@ -159,7 +152,7 @@ public sealed partial class JitTests
             }
             """, 42);
 
-    [Fact]
+    [Test]
     public Task CheckedReorderedNamedLaterArgumentFailureLeavesInitDestinationVacantAsync() =>
         AssertCheckedExecutionAsync("""
             [NoThrow] bool Fill(int32 ignored, init ref<int32> value) {
@@ -181,7 +174,7 @@ public sealed partial class JitTests
             }
             """, 42);
 
-    [Fact]
+    [Test]
     public Task CheckedEarlierArgumentFailureLeavesOutDestinationUnchangedAsync() =>
         AssertCheckedExecutionAsync("""
             [NoThrow] void Fill(int32 ignored, out int32 value) { value = 42; }
@@ -199,7 +192,7 @@ public sealed partial class JitTests
             }
             """, 42);
 
-    [Fact]
+    [Test]
     public Task CheckedNonBooleanUniqueInitFailureDoesNotPublishAsync()
     {
         const string Source = """
@@ -227,10 +220,8 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 43);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task CopyAggregateInitReferencePublishesCompleteValueAsync(bool checkedFailures)
     {
         const string Source = """
@@ -262,10 +253,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task OwningInitReferenceTransfersTheCompleteValueAsync(bool checkedFailures)
     {
         const string Source = """
@@ -291,17 +280,13 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ManagedInitReferenceRootsOnlyPublishedHandlesAsync(bool checkedFailures) =>
         checkedFailures ? AssertCheckedExecutionAsync(InitReferenceTests.ManagedSource, 42)
             : AssertFailFastExecutionAsync(InitReferenceTests.ManagedSource, 42);
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ManagedInitPublishesAnInitializedNullDistinctFromVacancyAsync(bool checkedFailures)
     {
         const string Source = """
@@ -321,7 +306,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task CheckedManagedInitFailureDoesNotPublishOrRetainTheScratchHandleAsync() =>
         AssertCheckedExecutionAsync("""
             bool Fail(init ref<write ManagedNode> value) {

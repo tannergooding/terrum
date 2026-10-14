@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmTypeDefTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EmitsMultiModuleTypePartitionsAndFieldOwnership()
     {
         var stringBytes = Names();
@@ -23,18 +23,18 @@ public sealed class TrRmTypeDefTableWriterTests
         };
         var bytes = TrRmTypeDefTableWriter.Encode(rows, strings, modules, 1, 0, 0, 0);
         var types = new TrRmTypeDefTableReader(bytes, 2, strings, modules, 1, 0, 0, 0);
-        Assert.Equal(80, bytes.Length);
-        Assert.Equal("", types.GetNamespace(1));
-        Assert.Equal("Widget", types.GetName(1));
-        Assert.Equal("Gadget", types.GetName(2));
-        Assert.Equal((0, 0), types.GetFieldRange(1));
-        Assert.Equal((1, 2), types.GetFieldRange(2));
-        Assert.Equal(2, types.GetFieldOwner(1));
-        Assert.Equal(1, types.GetOwnerModule(1));
-        Assert.Equal(2, types.GetOwnerModule(2));
+        Assert.That(bytes.Length, Is.EqualTo(80));
+        Assert.That(types.GetNamespace(1), Is.EqualTo(""));
+        Assert.That(types.GetName(1), Is.EqualTo("Widget"));
+        Assert.That(types.GetName(2), Is.EqualTo("Gadget"));
+        Assert.That(types.GetFieldRange(1), Is.EqualTo((0, 0)));
+        Assert.That(types.GetFieldRange(2), Is.EqualTo((1, 2)));
+        Assert.That(types.GetFieldOwner(1), Is.EqualTo(2));
+        Assert.That(types.GetOwnerModule(1), Is.EqualTo(1));
+        Assert.That(types.GetOwnerModule(2), Is.EqualTo(2));
 
         rows[1] = rows[1] with { FieldFirst = 0, FieldCount = 0 };
-        Assert.Equal((1, 2), types.GetFieldRange(2));
+        Assert.That(types.GetFieldRange(2), Is.EqualTo((1, 2)));
         var noFields = TrRmTypeDefTableWriter.Encode(rows, strings, modules, 0, 0, 0, 0);
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 2, moduleBytes),
@@ -44,7 +44,7 @@ public sealed class TrRmTypeDefTableWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidNamesFlagsRangesAndMissingOwners()
     {
         var first = new TrRmTypeDefRow(1, 4, 4, 0, 0, 0, 0, 0, 0, 0);

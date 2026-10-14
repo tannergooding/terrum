@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task DiscardEvaluatesValueAndEffectsOnceAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """
@@ -29,10 +28,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task DiscardedVoidCallKeepsExistingCallSemanticsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -50,10 +47,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task DiscardedOwningResultUsesExistingCleanupAsync(bool checkedFailures)
     {
         const string Source = """
@@ -72,10 +67,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task DiscardedManagedResultRetiresItsRootBeforeNextStatementAsync(bool checkedFailures)
     {
         const string Source = """
@@ -92,19 +85,14 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData("int32 Main() { _ = int32(1) / int32(0); return 42; }", unchecked((int)0xE0540002))]
-    [InlineData("int32 Main() { _ = Fail(); return 42; } int32 Fail() { require false; return 0; }",
-        unchecked((int)0xE0540003))]
+    [TestCase("int32 Main() { _ = int32(1) / int32(0); return 42; }",unchecked((int)0xE0540002))]
+    [TestCase("int32 Main() { _ = Fail(); return 42; } int32 Fail() { require false; return 0; }",        unchecked((int)0xE0540003))]
     public Task DiscardPreservesCheckedFailureOrderAsync(string source, int expected) =>
         AssertFailFastExecutionAsync(source, expected);
-
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
+    [TestCase(false,false)]
+    [TestCase(false,true)]
+    [TestCase(true,false)]
+    [TestCase(true,true)]
     public Task DiscardedMutableViewSetMutatesOnceAcrossAotAndJitAsync(bool checkedFailures, bool parenthesized)
     {
         var action = parenthesized
@@ -130,10 +118,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(source, 42)
             : AssertFailFastExecutionAsync(source, 42);
     }
-
-    [Theory]
-    [InlineData("-1")]
-    [InlineData("1")]
+    [TestCase("-1")]
+    [TestCase("1")]
     public Task DiscardedMutableViewSetRejectsInvalidIndexAcrossAotAndJitAsync(string index)
     {
         var source = $$"""
@@ -149,7 +135,7 @@ public sealed partial class JitTests
         return AssertFailFastExecutionAsync(source, unchecked((int)0xE0540003));
     }
 
-    [Fact]
+    [Test]
     public Task DiscardedMutableViewSetFailureIsCatchableAcrossAotAndJitAsync()
     {
         const string Source = """
@@ -172,7 +158,7 @@ public sealed partial class JitTests
         return AssertCheckedExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task DiscardedCheckedDivisionFailureIsCatchableAcrossAotAndJitAsync() =>
         AssertCheckedExecutionAsync("""
             int32 Main() {

@@ -3,15 +3,14 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ConcreteManagedFactoryInCopyTemplatePreservesConditionalOutputsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -43,7 +42,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public Task ConcreteManagedFactoryInCopyTemplateRetainsCheckedFailureCleanupAsync()
     {
         const string Source = """
@@ -81,10 +80,8 @@ public sealed partial class JitTests
             }
         }
         """;
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ConcreteCopyStructHelperArgumentsExecuteAcrossIndirectValuesAsync(bool checkedFailures)
     {
         var source = CompositionValue + """
@@ -108,12 +105,10 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
+    [TestCase(false,false)]
+    [TestCase(false,true)]
+    [TestCase(true,false)]
+    [TestCase(true,true)]
     public async Task CopyOnlyGenericSelectionPreservesNestedTokenValuesAsync(bool checkedFailures, bool infer)
     {
         string[] components = [
@@ -153,12 +148,10 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(source, 42, components).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
+    [TestCase(false,false)]
+    [TestCase(false,true)]
+    [TestCase(true,false)]
+    [TestCase(true,true)]
     public async Task RecursiveGenericHelpersPreserveIndirectCopyResultsAsync(bool mutual, bool infer)
     {
         var source = CompositionValue + """
@@ -190,10 +183,8 @@ public sealed partial class JitTests
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ComposedHelpersPreserveMixedStackArgumentsAndNestedCopyTemporariesAsync(bool infer)
     {
         var source = CompositionValue + """
@@ -220,10 +211,8 @@ public sealed partial class JitTests
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task InferredArgumentMethodWithMutableReceiverRunsExactlyOnceAsync(bool checkedFailures)
     {
         const string Source = """
@@ -257,10 +246,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ScalarCopyHelpersPreserveValuesAndConditionalOutputsAsync(bool checkedFailures)
     {
         const string Source = """
@@ -301,10 +288,8 @@ public sealed partial class JitTests
             await AssertFailFastExecutionAsync(Source, 42, components).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task InferredOutputCallsRespectConditionalPublicationAsync(bool checkedFailures)
     {
         const string Source = """
@@ -337,7 +322,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ConstrainedHelperFailureUnwindsToCallerAndAllowsSubsequentCallsAsync()
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",

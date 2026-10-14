@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -23,10 +23,8 @@ public sealed class NativeMutableBufferViewTests
             require buffer.TryAppend(40);
             require buffer.TryAppend(1);
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ExclusiveViewWritesAndClearReusesTheOwnerAsync(BoundRuntimePolicy policy)
     {
         const string Source = Owner + """
@@ -43,12 +41,10 @@ public sealed class NativeMutableBufferViewTests
             return buffer.Read(0);
         }
         """;
-        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ExclusiveViewHandlesBranchesLoopsAndReturnCleanupAsync(BoundRuntimePolicy policy)
     {
         const string Source = Owner + """
@@ -62,12 +58,10 @@ public sealed class NativeMutableBufferViewTests
             finally { int32 length = window.Length; }
         }
         """;
-        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ViewSetEvaluatesIndexAndValueOnceInOrderAsync(BoundRuntimePolicy policy)
     {
         const string Source = """
@@ -85,10 +79,10 @@ public sealed class NativeMutableBufferViewTests
             return buffer.Read(1) + other.Count;
         }
         """;
-        Assert.Equal(42, await RunAsync(Source, policy).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedWriteArgumentFailurePreservesOwnerAndActiveViewAsync()
     {
         const string Source = """
@@ -123,10 +117,10 @@ public sealed class NativeMutableBufferViewTests
                 return buffer.Read(0) + buffer.Read(1);
             }
             """;
-        Assert.Equal(42, await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void ClearOnLiveOwnerCanBeNoThrow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -140,33 +134,33 @@ public sealed class NativeMutableBufferViewTests
                 return 42;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal("native-17", Compilation.GetNativeProfileVersion(
-            Assert.IsType<BoundProgram>(compilation.Program)));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(Compilation.GetNativeProfileVersion(
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))()), Is.EqualTo("native-17"));
     }
 
-    [Fact]
+    [Test]
     public void UnusedClearIntrinsicDoesNotPromoteOwnedBufferProgram()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
             return buffer.Read(0) + buffer.Read(1);
         }
         """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal("native-15", Compilation.GetNativeProfileVersion(program));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(Compilation.GetNativeProfileVersion(program), Is.EqualTo("native-15"));
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Size(OwnedInt32Buffer owner) {
                 mut OwnedInt32Buffer buffer = move owner;
                 return buffer.Count;
             }
             """));
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Size"]);
-        Assert.Equal("native-15", ModuleCompiler.GetNativeProfileVersion(producer, false));
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = library.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Size"]);
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-15"));
     }
 
-    [Fact]
+    [Test]
     public void ClearOnlyProducerRetainsNative17()
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -176,43 +170,39 @@ public sealed class NativeMutableBufferViewTests
                 return buffer.Count;
             }
             """));
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Reset"]);
-        Assert.Equal("native-17", ModuleCompiler.GetNativeProfileVersion(producer, false));
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = library.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), ["Reset"]);
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-17"));
     }
-
-    [Theory]
-    [InlineData("buffer.Read(0);")]
-    [InlineData("int32 count = buffer.Count;")]
-    [InlineData("buffer.Set(0, 41);")]
-    [InlineData("buffer.Clear();")]
-    [InlineData("OwnedInt32Buffer moved = move buffer;")]
-    [InlineData("OwnedInt32Buffer.TryCreate(1, out buffer);")]
-    [InlineData("ReadonlyInt32BufferView other = buffer.Slice(0, 1);")]
-    [InlineData("mut MutableInt32BufferView other = buffer.SliceMutable(0, 1);")]
-    [InlineData("if (false) { buffer.Clear(); }")]
-    [InlineData("try { return window.Read(0); } finally { buffer.Clear(); }")]
+    [TestCase("buffer.Read(0);")]
+    [TestCase("int32 count = buffer.Count;")]
+    [TestCase("buffer.Set(0, 41);")]
+    [TestCase("buffer.Clear();")]
+    [TestCase("OwnedInt32Buffer moved = move buffer;")]
+    [TestCase("OwnedInt32Buffer.TryCreate(1, out buffer);")]
+    [TestCase("ReadonlyInt32BufferView other = buffer.Slice(0, 1);")]
+    [TestCase("mut MutableInt32BufferView other = buffer.SliceMutable(0, 1);")]
+    [TestCase("if (false) { buffer.Clear(); }")]
+    [TestCase("try { return window.Read(0); } finally { buffer.Clear(); }")]
     public void ExclusiveViewRejectsOwnerAccessAndOverlappingViews(string operation)
     {
         var source = Owner + " mut MutableInt32BufferView window = buffer.SliceMutable(0, 2); "
             + operation + " return window.Read(0); }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("MutableInt32BufferView window = buffer.SliceMutable(0, 1);")]
-    [InlineData("mut MutableInt32BufferView window = buffer.Slice(0, 1);")]
-    [InlineData("mut MutableInt32BufferView window = buffer.SliceMutable(0, 1); MutableInt32BufferView copy = window;")]
+    [TestCase("MutableInt32BufferView window = buffer.SliceMutable(0, 1);")]
+    [TestCase("mut MutableInt32BufferView window = buffer.Slice(0, 1);")]
+    [TestCase("mut MutableInt32BufferView window = buffer.SliceMutable(0, 1); MutableInt32BufferView copy = window;")]
     public void WritableViewRequiresMutableNamedOwnerAndCannotBeCopied(string declaration)
     {
         var source = Owner + declaration + " return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ImmutableOwnerCannotAcquireWritableView()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -222,33 +212,27 @@ public sealed class NativeMutableBufferViewTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
-
-    [Theory]
-    [InlineData("buffer.SliceMutable(-1, 0)")]
-    [InlineData("buffer.SliceMutable(2, 1)")]
-    [InlineData("buffer.SliceMutable(0, -1)")]
+    [TestCase("buffer.SliceMutable(-1, 0)")]
+    [TestCase("buffer.SliceMutable(2, 1)")]
+    [TestCase("buffer.SliceMutable(0, -1)")]
     public async Task MutableSliceRejectsInvalidInitializedPrefixAsync(string range)
     {
         var source = Owner + " mut MutableInt32BufferView window = " + range
             + "; return window.Length; }";
-        Assert.Equal(unchecked((int)0xE0540003),
-            await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
-
-    [Theory]
-    [InlineData("-1")]
-    [InlineData("2")]
+    [TestCase("-1")]
+    [TestCase("2")]
     public async Task ViewSetChecksItsOwnRangeAsync(string index)
     {
         var source = Owner + " mut MutableInt32BufferView window = buffer.SliceMutable(0, 2); "
             + "window.Set(" + index + ", 42); return 0; }";
-        Assert.Equal(unchecked((int)0xE0540003),
-            await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        Assert.That(await RunAsync(source, BoundRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedViewSetFailureUnwindsBeforeOwnerReuseAsync()
     {
         const string Source = Owner + """
@@ -266,10 +250,10 @@ public sealed class NativeMutableBufferViewTests
             return 0;
         }
         """;
-        Assert.Equal(42, await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        Assert.That(await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public void MutableViewRejectsOutReplacementDuringAcquisitionOrSet()
     {
         const string Helpers = """
@@ -282,11 +266,11 @@ public sealed class NativeMutableBufferViewTests
         })
         {
             var compilation = Compilation.Create(SyntaxTree.Parse(Helpers + Owner + statement + " return 42; }"));
-            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
         }
     }
 
-    [Fact]
+    [Test]
     public void ForgedIrCannotReadReservedOwnerDuringWritableView()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
@@ -294,12 +278,11 @@ public sealed class NativeMutableBufferViewTests
             return window.Read(0);
         }
         """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var entry = program.Functions[program.EntryPoint];
-        var owner = Assert.Single(entry.Variables, static variable => variable.Name == "buffer");
-        var count = program.Functions.IndexOf(Assert.Single(program.Functions,
-            static function => function.Name == "OwnedInt32Buffer.Count"));
+        var owner = global::System.Linq.Enumerable.Single(entry.Variables, static variable => variable.Name == "buffer");
+        var count = program.Functions.IndexOf(global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "OwnedInt32Buffer.Count"));
         var changed = false;
 
         BoundStatement Rewrite(BoundStatement statement)
@@ -326,13 +309,13 @@ public sealed class NativeMutableBufferViewTests
             Functions = program.Functions.SetItem(program.EntryPoint,
                 entry with { Body = (BoundBlock)Rewrite(entry.Body) }),
         };
-        Assert.True(changed);
-        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        Assert.Equal("Ownership", error.Data["Terrum.InvalidEffect"]);
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        Assert.That(changed, Is.True);
+        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        Assert.That(error.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void ForgedIrCannotSetThroughAnUnrelatedSlot()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
@@ -341,8 +324,8 @@ public sealed class NativeMutableBufferViewTests
             return window.Read(0);
         }
         """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
         var entry = program.Functions[program.EntryPoint];
         var modified = false;
 
@@ -367,15 +350,13 @@ public sealed class NativeMutableBufferViewTests
             Functions = program.Functions.SetItem(program.EntryPoint,
                 entry with { Body = (BoundBlock)Rewrite(entry.Body) }),
         };
-        Assert.True(modified);
-        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        Assert.Equal("Ownership", error.Data["Terrum.InvalidEffect"]);
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        Assert.That(modified, Is.True);
+        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        Assert.That(error.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SemanticModuleRetainsExclusiveScopeAndClearAsync(BoundRuntimePolicy policy)
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -390,9 +371,9 @@ public sealed class NativeMutableBufferViewTests
                 return result;
             }
             """), policy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Update"]);
-        Assert.Equal("native-17", ModuleCompiler.GetNativeProfileVersion(producer, false));
+        Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = library.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), ["Update"]);
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-17"));
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(1, out var created);
@@ -401,22 +382,22 @@ public sealed class NativeMutableBufferViewTests
                 return Update(move buffer);
             }
             """), ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        Assert.Equal("native-15", ModuleCompiler.GetNativeProfileVersion(consumer, true));
-        Assert.Equal(42, await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(consumer, true), Is.EqualTo("native-15"));
+        Assert.That(await RunAsync(ModuleCompiler.Link(consumer, producer), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     private static async Task<int> RunAsync(string source, BoundRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return await RunAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return await RunAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(), policy).ConfigureAwait(true);
     }
 
     private static async Task<int> RunAsync(BoundProgram program, BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-mutable-view-{Guid.NewGuid():N}.exe");
@@ -444,7 +425,7 @@ public sealed class NativeMutableBufferViewTests
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

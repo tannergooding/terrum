@@ -4,25 +4,23 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmTypeArgTableReaderTests
 {
-    [Fact]
+    [Test]
     public void ValidatesContiguousConstructedArguments()
     {
         Create(OneArgument(), 1);
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, 1)]
-    [InlineData(0, 3)]
-    [InlineData(4, 1)]
-    [InlineData(8, 0)]
-    [InlineData(8, 2)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(0,(byte)(1))]
+    [TestCase(0,(byte)(3))]
+    [TestCase(4,(byte)(1))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(2))]
     public void RejectsWrongOwnerOrdinalAndTypeReferences(int offset, byte replacement)
     {
         var argument = OneArgument();
@@ -30,14 +28,14 @@ public sealed class TrRmTypeArgTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(argument, 1));
     }
 
-    [Fact]
+    [Test]
     public void RejectsCountMismatchesAndTruncatedRows()
     {
         Assert.Throws<InvalidDataException>(() => Create(OneArgument()[..^1], 1));
         Assert.Throws<InvalidDataException>(() => Create(OneArgument(), 2));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOverlappingConstructedRanges()
     {
         var specs = IndexedTypes(

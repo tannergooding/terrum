@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmLayoutTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EmitsOwnedLayoutAndFixedOffsetFieldInFramedArtifact()
     {
         var stringBytes = TrRmStringTableWriter.EncodeTextRows([
@@ -27,7 +27,7 @@ public sealed class TrRmLayoutTableWriterTests
         var rows = new[] { new TrRmLayoutRow(1, 1, 4, 4, 0, 0) };
         var layoutBytes = TrRmLayoutTableWriter.Encode(rows, types);
         var layouts = new TrRmLayoutTableReader(layoutBytes, 1, types);
-        Assert.Equal(4u, layouts.GetSize(1));
+        Assert.That(layouts.GetSize(1), Is.EqualTo(4u));
         rows[0] = rows[0] with { OwnerTypeDefRow = 0 };
         _ = new TrRmLayoutTableReader(layoutBytes, 1, types);
 
@@ -61,7 +61,7 @@ public sealed class TrRmLayoutTableWriterTests
         Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(invalidArtifact));
     }
 
-    [Fact]
+    [Test]
     public void RejectsUnownedRowsUnassignedTargetsAndReservedFlags()
     {
         var row = new TrRmLayoutRow(1, 1, 4, 4, 0, 0);

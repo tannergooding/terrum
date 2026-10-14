@@ -3,15 +3,14 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task HandwrittenDoForExecutesInFreshConsumersAndRejectsTamperingAsync(bool iterator)
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-do-for-raw-{Guid.NewGuid():N}");
@@ -25,25 +24,25 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.Artifact(body));
             var (ran, output, error) = await RunAsync([], "run-trrm", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.True(ran == 42, $"Exit {ran}: {output}{Environment.NewLine}{error}");
+            Assert.That(ran == 42, Is.True, $"Exit {ran}: {output}{Environment.NewLine}{error}");
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
                 "-o", executable, "--runtime", "fail-fast", "--json");
-            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
-            Assert.Equal(42, await ExecuteTrRmImageAsync(executable));
+            Assert.That(built == 0, Is.True, $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(42));
             var retained = await File.ReadAllBytesAsync(executable);
 
             body[15] = iterator ? (byte)4 : (byte)3;
             await File.WriteAllBytesAsync(artifact, TrRmExecutionAuditTests.Artifact(body));
             var (rejected, rejectOutput, rejectError) = await RunAsync([], "build-trrm", artifact,
                 "-o", executable, "--runtime", "fail-fast", "--json");
-            Assert.True(rejected == 1, $"{rejectOutput}{Environment.NewLine}{rejectError}");
-            Assert.Contains("TRM5001", rejectOutput);
-            Assert.Equal(retained, await File.ReadAllBytesAsync(executable));
+            Assert.That(rejected == 1, Is.True, $"{rejectOutput}{Environment.NewLine}{rejectError}");
+            Assert.That(rejectOutput, Does.Contain("TRM5001"));
+            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(retained));
         }
         finally
         {
             File.Delete(artifact);
-            File.Delete(executable);
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
         }
     }
 }

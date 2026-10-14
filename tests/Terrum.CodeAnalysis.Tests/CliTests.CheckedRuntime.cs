@@ -9,36 +9,32 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("checked-exceptions", 0, "native-11")]
-    [InlineData("fail-fast", 1, "native-10")]
+    [TestCase("checked-exceptions",0,"native-11")]
+    [TestCase("fail-fast",1,"native-10")]
     public async Task AnalyzeUsesTheExplicitRecoveryPolicyAsync(string policy, int expected, string profile)
     {
         const string Source = "int32 Main() { unsafe { try { require false; } catch { return 42; } } return 0; }";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "analyze", "-", "--runtime", policy, "--json");
-        Assert.Equal(expected, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(expected));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(profile, document.RootElement.GetProperty("profile").GetString());
-        Assert.Equal(expected == 0, document.RootElement.GetProperty("success").GetBoolean());
-        Assert.False(document.RootElement.TryGetProperty("artifact", out _));
+        Assert.That(document.RootElement.GetProperty("profile").GetString(), Is.EqualTo(profile));
+        Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.EqualTo(expected == 0));
+        Assert.That(document.RootElement.TryGetProperty("artifact", out _), Is.False);
         if (expected != 0)
         {
-            Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
-                diagnostic => diagnostic.GetProperty("code").GetString() == "TRM3022");
+            Assert.That(global::System.Linq.Enumerable.Any(document.RootElement.GetProperty("diagnostics").EnumerateArray(),diagnostic => diagnostic.GetProperty("code").GetString() == "TRM3022"),Is.True);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task AnalyzeReportsCompactUniqueProfileAsync(string policy)
     {
         const string Source = """
@@ -51,16 +47,14 @@ public sealed partial class CliTests
             """;
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "analyze", "-", "--runtime", policy, "--json");
-        Assert.Equal(0, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(0));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-12", document.RootElement.GetProperty("profile").GetString());
-        Assert.Equal(policy, document.RootElement.GetProperty("runtimePolicy").GetString());
+        Assert.That(document.RootElement.GetProperty("profile").GetString(), Is.EqualTo("native-12"));
+        Assert.That(document.RootElement.GetProperty("runtimePolicy").GetString(), Is.EqualTo(policy));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task ModulePolicyIsNotReadFromAnOptionLikeSourceOperandAsync(bool native)
     {
         var directory = Directory.CreateTempSubdirectory("terrum-policy-operand-").FullName;
@@ -75,18 +69,18 @@ public sealed partial class CliTests
                 : ["compile-module", "producer", "--runtime", "Value",
                     "-o", artifact, "--runtime", "fail-fast", "--json"];
             var (exit, output, error) = await RunAsync([], arguments, directory);
-            Assert.Equal(0, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(0));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("native-10", document.RootElement.GetProperty("profile").GetString());
+            Assert.That(document.RootElement.GetProperty("profile").GetString(), Is.EqualTo("native-10"));
             var bytes = await File.ReadAllBytesAsync(artifact);
             if (native)
             {
-                Assert.Equal(NativeRuntimePolicy.FailFast, NativeModuleCompiler.Inspect(bytes).RuntimePolicy);
+                Assert.That(NativeModuleCompiler.Inspect(bytes).RuntimePolicy, Is.EqualTo(NativeRuntimePolicy.FailFast));
             }
             else
             {
-                Assert.Equal(BoundRuntimePolicy.FailFast, ModuleCompiler.CreateReference(bytes).RuntimePolicy);
+                Assert.That(ModuleCompiler.CreateReference(bytes).RuntimePolicy, Is.EqualTo(BoundRuntimePolicy.FailFast));
             }
         }
         finally
@@ -97,7 +91,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task InvalidUnsafeRecoveryPreservesAnExistingArtifactAsync()
     {
         var path = Path.Combine(Path.GetTempPath(), $"terrum-checked-invalid-{Guid.NewGuid():N}.exe");
@@ -108,13 +102,12 @@ public sealed partial class CliTests
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
                 "int32 Main() { try { require false; } catch { return 42; } return 0; }"),
                 "build", "-", "-o", path, "--runtime", "checked-exceptions", "--json");
-            Assert.Equal(1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("native-11", document.RootElement.GetProperty("profile").GetString());
-            Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
-                diagnostic => diagnostic.GetProperty("code").GetString() == "TRM3021");
-            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+            Assert.That(document.RootElement.GetProperty("profile").GetString(), Is.EqualTo("native-11"));
+            Assert.That(global::System.Linq.Enumerable.Any(document.RootElement.GetProperty("diagnostics").EnumerateArray(),diagnostic => diagnostic.GetProperty("code").GetString() == "TRM3021"),Is.True);
+            Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
         }
         finally
         {
@@ -122,7 +115,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public void MultipleSnapshotsAcceptExplicitCheckedBufferCapabilities()
     {
         var reader = SyntaxTree.Parse("int32 Read(int32 at) { return Host.Data[at]; }", "reader.terrum");
@@ -131,8 +124,8 @@ public sealed partial class CliTests
             """, "entry.terrum");
         var compilation = Compilation.Create([reader, entry],
             [new HostBuffer("Data", PrimitiveType.Int32, [7], false)], BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(reader, tree), tree => Assert.Same(entry, tree));
-        Assert.Equal(BoundRuntimePolicy.CheckedExceptions, Assert.IsType<BoundProgram>(compilation.Program).RuntimePolicy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        { var __nunitItems0 = global::System.Linq.Enumerable.ToArray(compilation.SyntaxTrees); Assert.That(__nunitItems0, Has.Length.EqualTo(2)); Assert.That(__nunitItems0[0], Is.SameAs(reader)); Assert.That(__nunitItems0[1], Is.SameAs(entry)); }
+        Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))().RuntimePolicy, Is.EqualTo(BoundRuntimePolicy.CheckedExceptions));
     }
 }

@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -25,10 +25,8 @@ public sealed class TypeArgTableValidationComponentTests
             return valid == (Host.Expected[6] != 0) ? 0 : 1;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task TypeArgTableValidationMatchesHostedOwnershipReader(BoundRuntimePolicy policy)
     {
         var valid = CreateValidCase();
@@ -88,7 +86,7 @@ public sealed class TypeArgTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(VerificationSource, "type-arg-table-validation-component.terrum"));
@@ -98,7 +96,7 @@ public sealed class TypeArgTableValidationComponentTests
             if (testCase.HasHostedOracle)
             {
                 var hostedValid = ValidateHosted(testCase);
-                Assert.Equal(testCase.ExpectedValid, hostedValid);
+                Assert.That(hostedValid, Is.EqualTo(testCase.ExpectedValid));
             }
 
             var compilation = Compilation.Create(components,
@@ -116,10 +114,10 @@ public sealed class TypeArgTableValidationComponentTests
                     testCase.ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-            Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
     }
 
@@ -139,7 +137,7 @@ public sealed class TypeArgTableValidationComponentTests
         ], typeReader);
         var testCase = new TableCase([.. types.Select(static value => (int)value)],
             [.. arguments.Select(static value => (int)value)], 3, 5, 1, 1, 0, 3, true, true);
-        Assert.True(ValidateHosted(testCase));
+        Assert.That(ValidateHosted(testCase), Is.True);
         return testCase;
     }
 
@@ -214,7 +212,7 @@ public sealed class TypeArgTableValidationComponentTests
 
     private static void AddRejected(List<TableCase> cases, TableCase testCase)
     {
-        Assert.False(ValidateHosted(testCase));
+        Assert.That(ValidateHosted(testCase), Is.False);
         cases.Add(testCase);
     }
 
@@ -268,10 +266,7 @@ public sealed class TypeArgTableValidationComponentTests
         }
         finally
         {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 

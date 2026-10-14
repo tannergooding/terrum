@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -36,10 +36,8 @@ public sealed class TypeDefTableValidationComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task TypeDefValidationMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var strings = TrRmStringTableWriter.EncodeTextRows([
@@ -126,7 +124,9 @@ public sealed class TypeDefTableValidationComponentTests
             invalidByteWords, 2, 2, 5, 0, 2, 0, 0, -1, 1, 0, 0, 0,
             false, false, 3, 2, []));
         cases.Add(Valid(strings, modules, types, fieldCount: 1) with {
-            FieldOwnerCount = 1, ExpectedValid = false, HasHostedOracle = false,
+            FieldOwnerCount = 1,
+            ExpectedValid = false,
+            HasHostedOracle = false,
         });
         cases.Add(Valid(strings, modules, types, fieldCount: 1) with {
             TypeDefs = [.. types[..^1].Select(static value => (int)value)],
@@ -146,7 +146,7 @@ public sealed class TypeDefTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(VerificationSource, "type-def-table-validation.terrum"));
@@ -156,8 +156,7 @@ public sealed class TypeDefTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                Assert.True(testCase.ExpectedValid == ValidateHosted(testCase),
-                    $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
+                Assert.That(testCase.ExpectedValid == ValidateHosted(testCase), Is.True, $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
             }
 
             var compilation = Compilation.Create(components,
@@ -188,18 +187,14 @@ public sealed class TypeDefTableValidationComponentTests
                     .. testCase.ExpectedFieldOwners,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.True(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0,
-                $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
-            Assert.True(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0,
-                $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task TypeDefFieldAndTypeSpecValidationCompose(BoundRuntimePolicy policy)
     {
         var strings = TrRmStringTableWriter.EncodeTextRows([
@@ -241,7 +236,7 @@ public sealed class TypeDefTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse("""
@@ -271,8 +266,8 @@ public sealed class TypeDefTableValidationComponentTests
 
         foreach (var testCase in cases)
         {
-            Assert.Equal(testCase.ExpectedValid, ValidateComposedHosted(
-                strings, modules, typeDefs, fieldDefs, testCase.TypeSpecs));
+            Assert.That(ValidateComposedHosted(
+                strings, modules, typeDefs, fieldDefs, testCase.TypeSpecs), Is.EqualTo(testCase.ExpectedValid));
 
             var compilation = Compilation.Create(components,
             [
@@ -299,12 +294,10 @@ public sealed class TypeDefTableValidationComponentTests
                     testCase.ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.True(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0,
-                $"JIT composition case expected {testCase.ExpectedValid}.");
-            Assert.True(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0,
-                $"AOT composition case expected {testCase.ExpectedValid}.");
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT composition case expected {testCase.ExpectedValid}.");
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT composition case expected {testCase.ExpectedValid}.");
         }
     }
 
@@ -348,7 +341,8 @@ public sealed class TypeDefTableValidationComponentTests
         int fieldCount = 0, int layoutCount = 0)
         => Valid(strings, modules, typeDefs, recordCount: recordCount,
             stringCount: stringCount, fieldCount: fieldCount, layoutCount: layoutCount) with {
-            ExpectedValid = false, HasHostedOracle = hasHostedOracle,
+            ExpectedValid = false,
+            HasHostedOracle = hasHostedOracle,
         };
 
     private static bool ValidateHosted(TableCase testCase)
@@ -459,7 +453,7 @@ public sealed class TypeDefTableValidationComponentTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

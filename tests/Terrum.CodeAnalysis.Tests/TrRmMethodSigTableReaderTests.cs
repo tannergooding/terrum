@@ -4,25 +4,25 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmMethodSigTableReaderTests
 {
-    [Fact]
+    [Test]
     public void ValidatesParameterModesAndZeroBasedOrdinals()
     {
         var types = Types();
         var signatures = new TrRmMethodSigTableReader(Signature(), 1, types, 2, 0);
-        Assert.Equal(1, signatures.GetParamOwner(1));
-        Assert.Equal(1, signatures.GetParamOwner(2));
+        Assert.That(signatures.GetParamOwner(1), Is.EqualTo(1));
+        Assert.That(signatures.GetParamOwner(2), Is.EqualTo(1));
         Assert.Throws<InvalidDataException>(() => GetOwner(0));
         Assert.Throws<InvalidDataException>(() => GetOwner(3));
         _ = new TrRmParamTableReader(Params(), 2, signatures, types);
     }
 
-    [Fact]
+    [Test]
     public void ParameterRangesCanBeAssignedOutOfSignatureOrder()
     {
         var sigs = new byte[48];
@@ -39,21 +39,19 @@ public sealed class TrRmMethodSigTableReaderTests
 
         var types = Types();
         var signatures = new TrRmMethodSigTableReader(sigs, 2, types, 2, 0);
-        Assert.Equal(2, signatures.GetParamOwner(1));
-        Assert.Equal(1, signatures.GetParamOwner(2));
+        Assert.That(signatures.GetParamOwner(1), Is.EqualTo(2));
+        Assert.That(signatures.GetParamOwner(2), Is.EqualTo(1));
         _ = new TrRmParamTableReader(paramRows, 2, signatures, types);
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, 2)]
-    [InlineData(4, 2)]
-    [InlineData(8, 0)]
-    [InlineData(8, 2)]
-    [InlineData(12, 0)]
-    [InlineData(12, 3)]
-    [InlineData(16, 1)]
-    [InlineData(20, 1)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(0,(byte)(2))]
+    [TestCase(4,(byte)(2))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(2))]
+    [TestCase(12,(byte)(0))]
+    [TestCase(12,(byte)(3))]
+    [TestCase(16,(byte)(1))]
+    [TestCase(20,(byte)(1))]
     public void RejectsInvalidSignatureReferencesAndRanges(int offset, byte replacement)
     {
         var bytes = Signature();
@@ -61,7 +59,7 @@ public sealed class TrRmMethodSigTableReaderTests
         Assert.Throws<InvalidDataException>(() => CreateSignature(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOverlappingAndUnownedParameterRanges()
     {
         var overlapping = new byte[48];
@@ -74,20 +72,18 @@ public sealed class TrRmMethodSigTableReaderTests
         Assert.Throws<InvalidDataException>(() => CreateSignature(unowned));
         Assert.Throws<InvalidDataException>(() => CreateSignature(Signature()[..^1]));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, 2)]
-    [InlineData(4, 1)]
-    [InlineData(8, 0)]
-    [InlineData(8, 2)]
-    [InlineData(12, 5)]
-    [InlineData(13, 1)]
-    [InlineData(14, 1)]
-    [InlineData(15, 1)]
-    [InlineData(20, 0)]
-    [InlineData(24, 0)]
-    [InlineData(28, 5)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(0,(byte)(2))]
+    [TestCase(4,(byte)(1))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(2))]
+    [TestCase(12,(byte)(5))]
+    [TestCase(13,(byte)(1))]
+    [TestCase(14,(byte)(1))]
+    [TestCase(15,(byte)(1))]
+    [TestCase(20,(byte)(0))]
+    [TestCase(24,(byte)(0))]
+    [TestCase(28,(byte)(5))]
     public void RejectsInvalidParameterOwnerOrdinalAndFlags(int offset, byte replacement)
     {
         var bytes = Params();
@@ -95,7 +91,7 @@ public sealed class TrRmMethodSigTableReaderTests
         Assert.Throws<InvalidDataException>(() => CreateParams(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsWrongParameterCountAndStride()
     {
         Assert.Throws<InvalidDataException>(() => CreateParams(Params(), recordCount: 1));

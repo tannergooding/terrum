@@ -6,13 +6,13 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Fact]
+    [Test]
     public async Task ScalarFrontendSwitchProjectsAndMatchesHostedIfChainAsync()
     {
         const string source = """
@@ -50,40 +50,38 @@ public sealed partial class CliTests
             {
                 var (componentExit, componentOutput, componentError) = await RunAsync(input,
                     "frontend-component", directory, "-", "--runtime", policy, "--json");
-                Assert.True(componentExit == 0, $"{componentExit}: {componentOutput}{componentError}");
+                Assert.That(componentExit == 0, Is.True, $"{componentExit}: {componentOutput}{componentError}");
                 using (var component = JsonDocument.Parse(componentOutput))
                 {
-                    Assert.Equal(88, component.RootElement.GetProperty("result")
-                        .GetProperty("projectionVersion").GetInt32());
+                    Assert.That(component.RootElement.GetProperty("result")
+                        .GetProperty("projectionVersion").GetInt32(), Is.EqualTo(88));
                 }
 
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
                     "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(equivalentInput,
                     "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
-                Assert.True(nativeExit == 0, $"{nativeExit}: {nativeOutput}{nativeError}");
-                Assert.True(hostedExit == 0, $"{hostedExit}: {hostedOutput}{hostedError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
-                Assert.Equal(2, await ExecuteNativeImageAsync(nativePath));
-                Assert.Equal(2, await ExecuteNativeImageAsync(hostedPath));
+                Assert.That(nativeExit == 0, Is.True, $"{nativeExit}: {nativeOutput}{nativeError}");
+                Assert.That(hostedExit == 0, Is.True, $"{hostedExit}: {hostedOutput}{hostedError}");
+                Assert.That(await File.ReadAllBytesAsync(nativePath), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)));
+                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(2));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(2));
 
                 var (runExit, runOutput, runError) = await RunAsync(input,
                     "frontend-run", directory, "-", "--runtime", policy, "--json");
-                Assert.Equal(2, runExit);
-                Assert.Empty(runOutput);
-                Assert.Empty(runError);
+                Assert.That(runExit, Is.EqualTo(2));
+                Assert.That(runOutput, Is.Empty);
+                Assert.That(runError, Is.Empty);
             }
         }
         finally
         {
-            File.Delete(nativePath);
-            File.Delete(hostedPath);
+            await TestFileCleanup.DeleteWithRetryAsync(nativePath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(hostedPath).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendSwitchCompletionAndLoopTransfersMatchHostedAsync(string policy)
     {
         var cases = new (string Name, string Source, string HostedEquivalent, int ExpectedResult)[] {
@@ -158,23 +156,21 @@ public sealed partial class CliTests
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(
                     Encoding.UTF8.GetBytes(testCase.HostedEquivalent), "build", "-",
                     "-o", hostedPath, "--runtime", policy, "--json");
-                Assert.True(nativeExit == 0,
-                    $"{testCase.Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
-                Assert.True(hostedExit == 0,
-                    $"{testCase.Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hostedPath), await File.ReadAllBytesAsync(nativePath));
-                Assert.Equal(testCase.ExpectedResult, await ExecuteNativeImageAsync(nativePath));
-                Assert.Equal(testCase.ExpectedResult, await ExecuteNativeImageAsync(hostedPath));
+                Assert.That(nativeExit == 0, Is.True, $"{testCase.Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.That(hostedExit == 0, Is.True, $"{testCase.Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.That(await File.ReadAllBytesAsync(nativePath), Is.EqualTo(await File.ReadAllBytesAsync(hostedPath)));
+                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(testCase.ExpectedResult));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(testCase.ExpectedResult));
             }
             finally
             {
-                File.Delete(nativePath);
-                File.Delete(hostedPath);
+                await TestFileCleanup.DeleteWithRetryAsync(nativePath).ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(hostedPath).ConfigureAwait(true);
             }
         }
     }
 
-    [Fact]
+    [Test]
     public async Task ScalarFrontendSwitchOutputLocalsAndConstantLabelsMatchHostedAsync()
     {
         var cases = new (string Name, string Source, string HostedEquivalent)[] {
@@ -258,23 +254,21 @@ public sealed partial class CliTests
                         "frontend-build", directory, "-", "-o", nativePath, "--runtime", policy, "--json");
                     var (hostedExit, hostedOutput, hostedError) = await RunAsync(equivalentInput,
                         "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
-                    Assert.True(nativeExit == 0, $"{testCase.Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
-                    Assert.True(hostedExit == 0, $"{testCase.Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                    Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
-                    Assert.Equal(42, await ExecuteNativeImageAsync(hostedPath));
+                    Assert.That(nativeExit == 0, Is.True, $"{testCase.Name} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                    Assert.That(hostedExit == 0, Is.True, $"{testCase.Name} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                    Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(42));
+                    Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(42));
                 }
                 finally
                 {
-                    File.Delete(nativePath);
-                    File.Delete(hostedPath);
+                    await TestFileCleanup.DeleteWithRetryAsync(nativePath).ConfigureAwait(true);
+                    await TestFileCleanup.DeleteWithRetryAsync(hostedPath).ConfigureAwait(true);
                 }
             }
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendSwitchMatchesHostedSelectorsAcrossAllScalarWidthsAsync(string policy)
     {
         foreach (var (type, value) in new[]
@@ -317,22 +311,20 @@ public sealed partial class CliTests
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(
                     Encoding.UTF8.GetBytes(hostedEquivalent), "build", "-", "-o", hostedPath,
                     "--runtime", policy, "--json");
-                Assert.True(nativeExit == 0, $"{type} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
-                Assert.True(hostedExit == 0, $"{type} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
-                Assert.Equal(42, await ExecuteNativeImageAsync(hostedPath));
+                Assert.That(nativeExit == 0, Is.True, $"{type} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.That(hostedExit == 0, Is.True, $"{type} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(42));
             }
             finally
             {
-                File.Delete(nativePath);
-                File.Delete(hostedPath);
+                await TestFileCleanup.DeleteWithRetryAsync(nativePath).ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(hostedPath).ConfigureAwait(true);
             }
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendSwitchSelectsDefaultAcrossAllScalarTypesAsync(string policy)
     {
         foreach (var (type, value, label) in new[]
@@ -371,73 +363,66 @@ public sealed partial class CliTests
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(
                     Encoding.UTF8.GetBytes(hostedEquivalent), "build", "-", "-o", hostedPath,
                     "--runtime", policy, "--json");
-                Assert.True(nativeExit == 0, $"{type} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
-                Assert.True(hostedExit == 0, $"{type} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
-                Assert.Equal(42, await ExecuteNativeImageAsync(nativePath));
-                Assert.Equal(42, await ExecuteNativeImageAsync(hostedPath));
+                Assert.That(nativeExit == 0, Is.True, $"{type} {policy}: {nativeExit}: {nativeOutput}{nativeError}");
+                Assert.That(hostedExit == 0, Is.True, $"{type} {policy}: {hostedExit}: {hostedOutput}{hostedError}");
+                Assert.That(await ExecuteNativeImageAsync(nativePath), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(hostedPath), Is.EqualTo(42));
             }
             finally
             {
-                File.Delete(nativePath);
-                File.Delete(hostedPath);
+                await TestFileCleanup.DeleteWithRetryAsync(nativePath).ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(hostedPath).ConfigureAwait(true);
             }
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { 1 when true => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { 1 or 2 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { x => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { 1 => {}, 1 + 0 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 2147483647; switch (x) { 2147483647 => {}, 2147483647 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { uint32 x = 4294967295; switch (x) { 4294967295 => {}, 4294967295 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { int64 x = 9223372036854775807; switch (x) { 9223372036854775807 => {}, 9223372036854775807 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { uint64 x = 18446744073709551615; switch (x) { 18446744073709551615 => {}, 18446744073709551615 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { bool x = true; switch (x) { true => {}, true => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { char16 x = char16(55296); switch (x) { char16(55296) => {}, char16(55296) => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { 1 => {}, _ => {}, 2 => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { 1 => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { case 1 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { int32 x = 1; switch (x) { 1: return 1; _ => {} } return 0; }")]
-    [InlineData("int32 Main() { switch (1) { 1 => {} _ => {} } return 0; }")]
-    [InlineData("int32 Main() { float32 x = 1.0; switch (x) { 1.0 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { float64 x = 1.0; switch (x) { 1.0 => {}, _ => {} } return 0; }")]
-    [InlineData("int32 Main() { switch (1) { 1 => {}, _ => {} } return 0; } int32 Broken() { int32 value = ; return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { 1 when true => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { 1 or 2 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { x => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { 1 => {}, 1 + 0 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 2147483647; switch (x) { 2147483647 => {}, 2147483647 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { uint32 x = 4294967295; switch (x) { 4294967295 => {}, 4294967295 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { int64 x = 9223372036854775807; switch (x) { 9223372036854775807 => {}, 9223372036854775807 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { uint64 x = 18446744073709551615; switch (x) { 18446744073709551615 => {}, 18446744073709551615 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { bool x = true; switch (x) { true => {}, true => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { char16 x = char16(55296); switch (x) { char16(55296) => {}, char16(55296) => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { 1 => {}, _ => {}, 2 => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { 1 => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { case 1 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { int32 x = 1; switch (x) { 1: return 1; _ => {} } return 0; }")]
+    [TestCase("int32 Main() { switch (1) { 1 => {} _ => {} } return 0; }")]
+    [TestCase("int32 Main() { float32 x = 1.0; switch (x) { 1.0 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { float64 x = 1.0; switch (x) { 1.0 => {}, _ => {} } return 0; }")]
+    [TestCase("int32 Main() { switch (1) { 1 => {}, _ => {} } return 0; } int32 Broken() { int32 value = ; return 0; }")]
     public async Task ScalarFrontendSwitchRejectsUnsupportedFormsAsync(string source)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(1, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(1));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendSwitchSeparatorDiagnosticRetainsTheOffendingSpanAsync(string policy)
     {
         const string source = "void Main() { switch (0) { 0 => {} _ => {} } }";
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
-        Assert.Equal(1, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(1));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
         var result = document.RootElement.GetProperty("result");
-        Assert.Equal(1, result.GetProperty("errorCode").GetInt32());
+        Assert.That(result.GetProperty("errorCode").GetInt32(), Is.EqualTo(1));
         var errorSpan = result.GetProperty("errorSpan");
-        Assert.Equal(source.IndexOf("_ =>", StringComparison.Ordinal),
-            errorSpan.GetProperty("start").GetInt32());
-        Assert.Equal(1, errorSpan.GetProperty("length").GetInt32());
+        Assert.That(errorSpan.GetProperty("start").GetInt32(), Is.EqualTo(source.IndexOf("_ =>", StringComparison.Ordinal)));
+        Assert.That(errorSpan.GetProperty("length").GetInt32(), Is.EqualTo(1));
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendSwitchRetainsTheTwelveStatementBudgetAsync(string policy)
     {
         static string SourceWithCases(int count)
@@ -451,18 +436,18 @@ public sealed partial class CliTests
         var (atLimitExit, atLimitOutput, atLimitError) = await RunAsync(
             Encoding.UTF8.GetBytes(SourceWithCases(10)),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
-        Assert.True(atLimitExit == 0, $"{atLimitExit}: {atLimitOutput}{atLimitError}");
+        Assert.That(atLimitExit == 0, Is.True, $"{atLimitExit}: {atLimitOutput}{atLimitError}");
         using (var atLimit = JsonDocument.Parse(atLimitOutput))
         {
-            Assert.True(atLimit.RootElement.GetProperty("success").GetBoolean());
+            Assert.That(atLimit.RootElement.GetProperty("success").GetBoolean(), Is.True);
         }
 
         var (overLimitExit, overLimitOutput, overLimitError) = await RunAsync(
             Encoding.UTF8.GetBytes(SourceWithCases(11)),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
-        Assert.Equal(1, overLimitExit);
-        Assert.Empty(overLimitError);
+        Assert.That(overLimitExit, Is.EqualTo(1));
+        Assert.That(overLimitError, Is.Empty);
         using var overLimit = JsonDocument.Parse(overLimitOutput);
-        Assert.False(overLimit.RootElement.GetProperty("success").GetBoolean());
+        Assert.That(overLimit.RootElement.GetProperty("success").GetBoolean(), Is.False);
     }
 }

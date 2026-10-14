@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task VacantAssignmentPublishesCopyAndUniqueStorageAsync(bool checkedFailures)
     {
         const string Source = """
@@ -36,10 +35,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task VacantAssignmentRootsManagedStorageOnlyAfterPublicationAsync(bool checkedFailures)
     {
         const string Source = """
@@ -59,7 +56,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task FailedVacantAssignmentLeavesStorageAvailableInTheHandlerAsync() =>
         AssertCheckedExecutionAsync("""
             int32 Divide(int32 divisor) { return 42 / divisor; }

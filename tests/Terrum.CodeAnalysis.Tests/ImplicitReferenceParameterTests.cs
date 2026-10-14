@@ -5,15 +5,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ImplicitReferenceParameterTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ReadsAndForwardsTheCallerPlace(NativeRuntimePolicy policy)
     {
         var source = """
@@ -25,18 +24,16 @@ public sealed class ImplicitReferenceParameterTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.True(program.Functions[0].Variables[0].IsImplicitRef);
-        Assert.Equal(41, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(program.Functions[0].Variables[0].IsImplicitRef, Is.True);
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(41));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-test"));
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void EarlierLoanObservesMutationFromLaterArgument(NativeRuntimePolicy policy)
     {
         var source = """
@@ -53,15 +50,13 @@ public sealed class ImplicitReferenceParameterTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void IndexedHostBufferLoanObservesMutationFromLaterArgument(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -75,15 +70,13 @@ public sealed class ImplicitReferenceParameterTests
             [new HostBuffer("Values", PrimitiveType.Int32, [7], true)],
             (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void IndexedLexicalViewLoanRetainsItsScopedBacking(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -100,15 +93,13 @@ public sealed class ImplicitReferenceParameterTests
             }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NestedFieldCanBeReborrowedFromAnImplicitReference(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -124,15 +115,13 @@ public sealed class ImplicitReferenceParameterTests
             }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ReorderedNamedCallPassesTheReferenceAddressOnTheStack(NativeRuntimePolicy policy)
     {
         var source = """
@@ -147,15 +136,13 @@ public sealed class ImplicitReferenceParameterTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(58, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(58));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void MaterializesValueExpressionsForReadonlyReferences(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -163,17 +150,17 @@ public sealed class ImplicitReferenceParameterTests
             int32 Main() { return Read(40 + 2); }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var main = Assert.Single(program.Functions, static function => function.Name == "Main");
-        Assert.Contains(main.Variables, static variable => variable.IsImplicitReferenceTemporary);
-        Assert.Equal(42, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var main = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Main");
+        Assert.That(global::System.Linq.Enumerable.Any(main.Variables,static variable => variable.IsImplicitReferenceTemporary),Is.True);
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-temp-test"));
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
 
         var mainIndex = program.Functions.IndexOf(main);
-        var call = Assert.IsType<BoundCall>(Assert.IsType<BoundReturn>(main.Body.Statements[0]).Value);
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual8 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual7 = main.Body.Statements[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual7!; }))().Value; Assert.That(__nunitActual8, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual8!; }))();
         var temporary = call.ImplicitReferenceTemporary(0);
         var forgedMain = main with {
             Variables = main.Variables.SetItem(temporary,
@@ -183,10 +170,8 @@ public sealed class ImplicitReferenceParameterTests
             Functions = program.Functions.SetItem(mainIndex, forgedMain),
         }));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void MaterializedExpressionIsEvaluatedOnceBeforeLaterArguments(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -203,15 +188,13 @@ public sealed class ImplicitReferenceParameterTests
             }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(17, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(17));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ReorderedNamedArgumentsPreserveImplicitReferenceEvaluationOrder(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -228,15 +211,13 @@ public sealed class ImplicitReferenceParameterTests
             }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(702, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(702));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ReusesMaterializationSlotAcrossLoopIterations(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -252,29 +233,27 @@ public sealed class ImplicitReferenceParameterTests
             }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(33, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(33));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
-
-    [Theory]
-    [InlineData("bool", "true", "value ? 42 : 0", NativeRuntimePolicy.FailFast)]
-    [InlineData("char16", "char16(42)", "int32(value)", NativeRuntimePolicy.FailFast)]
-    [InlineData("int32", "40 + 2", "value", NativeRuntimePolicy.FailFast)]
-    [InlineData("uint32", "uint32(42)", "int32(value)", NativeRuntimePolicy.FailFast)]
-    [InlineData("int64", "int64(42)", "int32(value)", NativeRuntimePolicy.FailFast)]
-    [InlineData("uint64", "uint64(42)", "int32(value)", NativeRuntimePolicy.FailFast)]
-    [InlineData("float32", "float32(42)", "value == float32(42) ? 42 : 0", NativeRuntimePolicy.FailFast)]
-    [InlineData("float64", "float64(42)", "value == float64(42) ? 42 : 0", NativeRuntimePolicy.FailFast)]
-    [InlineData("bool", "true", "value ? 42 : 0", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("char16", "char16(42)", "int32(value)", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("int32", "40 + 2", "value", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("uint32", "uint32(42)", "int32(value)", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("int64", "int64(42)", "int32(value)", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("uint64", "uint64(42)", "int32(value)", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("float32", "float32(42)", "value == float32(42) ? 42 : 0", NativeRuntimePolicy.CheckedExceptions)]
-    [InlineData("float64", "float64(42)", "value == float64(42) ? 42 : 0", NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("bool","true","value ? 42 : 0",NativeRuntimePolicy.FailFast)]
+    [TestCase("char16","char16(42)","int32(value)",NativeRuntimePolicy.FailFast)]
+    [TestCase("int32","40 + 2","value",NativeRuntimePolicy.FailFast)]
+    [TestCase("uint32","uint32(42)","int32(value)",NativeRuntimePolicy.FailFast)]
+    [TestCase("int64","int64(42)","int32(value)",NativeRuntimePolicy.FailFast)]
+    [TestCase("uint64","uint64(42)","int32(value)",NativeRuntimePolicy.FailFast)]
+    [TestCase("float32","float32(42)","value == float32(42) ? 42 : 0",NativeRuntimePolicy.FailFast)]
+    [TestCase("float64","float64(42)","value == float64(42) ? 42 : 0",NativeRuntimePolicy.FailFast)]
+    [TestCase("bool","true","value ? 42 : 0",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("char16","char16(42)","int32(value)",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("int32","40 + 2","value",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("uint32","uint32(42)","int32(value)",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("int64","int64(42)","int32(value)",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("uint64","uint64(42)","int32(value)",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("float32","float32(42)","value == float32(42) ? 42 : 0",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("float64","float64(42)","value == float64(42) ? 42 : 0",NativeRuntimePolicy.CheckedExceptions)]
     public void BorrowsAndMaterializesSupportedScalarReferences(string type, string expression, string read,
         NativeRuntimePolicy policy)
     {
@@ -286,13 +265,13 @@ public sealed class ImplicitReferenceParameterTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(84, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(84));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
 
-    [Fact]
+    [Test]
     public void ImplicitReferenceParameterIsReadonly()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -306,10 +285,10 @@ public sealed class ImplicitReferenceParameterTests
             }
             """));
 
-        Assert.True(compilation.HasErrors);
+        Assert.That(compilation.HasErrors, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ImplicitReferenceCannotBorrowAnUninitializedLocal()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -320,13 +299,10 @@ public sealed class ImplicitReferenceParameterTests
             }
             """));
 
-        Assert.Contains(compilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void BorrowsAndMaterializesNonUniqueAggregateReferences(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -371,17 +347,15 @@ public sealed class ImplicitReferenceParameterTests
             }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(277, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(277));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "implicit-ref-aggregate-test"));
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Read"]));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void StructFieldPlacesAreBorrowedAndObserveLaterArgumentWrites(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -407,9 +381,9 @@ public sealed class ImplicitReferenceParameterTests
             }
             """), (BoundRuntimePolicy)policy);
 
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(99, NativeJit.Execute(program, policy));
-        Assert.NotEmpty(NativeEmitter.Emit(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(99));
+        Assert.That(NativeEmitter.Emit(program, policy), Is.Not.Empty);
     }
 }

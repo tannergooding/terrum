@@ -11,23 +11,22 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class PeImageImportGroupingTests
 {
-    [Fact]
+    [Test]
     public void ImportGroupsAndSymbolsAreDeterministicAcrossFixupOrder()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 A() { return 1; } "
             + "public int32 B() { return 2; } "
             + "public int32 C() { return 3; }"));
-        Assert.False(providerCompilation.HasErrors,
-            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(providerCompilation.Program), ["A", "B", "C"]);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = providerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["A", "B", "C"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var bindings = new[]
         {
@@ -47,17 +46,16 @@ public sealed class PeImageImportGroupingTests
     private static BoundProgram CompileConsumer(CompilationReference reference, string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
     private static void AssertImportLayout(byte[] image)
     {
         var imports = ReadImports(image);
-        Assert.Equal(new[] { "KERNEL32.dll", "ALPHA.DLL", "zeta.dll" },
-            Array.ConvertAll(imports, static item => item.Name));
-        Assert.Equal(new[] { "Alpha", "Beta" }, imports[1].Symbols);
-        Assert.Equal(new[] { "Zulu" }, imports[2].Symbols);
+        Assert.That(Array.ConvertAll(imports, static item => item.Name), Is.EqualTo(new[] { "KERNEL32.dll", "ALPHA.DLL", "zeta.dll" }));
+        Assert.That(imports[1].Symbols, Is.EqualTo(new[] { "Alpha", "Beta" }));
+        Assert.That(imports[2].Symbols, Is.EqualTo(new[] { "Zulu" }));
     }
 
     private static (string Name, string[] Symbols)[] ReadImports(byte[] image)

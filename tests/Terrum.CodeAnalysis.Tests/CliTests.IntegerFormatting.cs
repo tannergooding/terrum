@@ -3,7 +3,7 @@
 using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -102,8 +102,7 @@ public sealed partial class CliTests
         const int before = 0x13579BDF;
         const int after = 0x2468ACE0;
         const int sentinel = 0x76543210;
-        var guarded = new GuardedInt32
-        {
+        var guarded = new GuardedInt32 {
             Before = before,
             Value = sentinel,
             After = after,
@@ -111,9 +110,9 @@ public sealed partial class CliTests
 
         var status = query(ref guarded.Value);
 
-        Assert.Equal(expectedLength.HasValue ? 1 : 0, status);
-        Assert.Equal(expectedLength ?? sentinel, guarded.Value);
-        Assert.Equal(before, guarded.Before);
-        Assert.Equal(after, guarded.After);
+        Assert.That(status, Is.EqualTo(expectedLength.HasValue ? 1 : 0));
+        Assert.That(guarded.Value, Is.EqualTo(expectedLength ?? sentinel));
+        Assert.That(guarded.Before, Is.EqualTo(before));
+        Assert.That(guarded.After, Is.EqualTo(after));
     }
 }

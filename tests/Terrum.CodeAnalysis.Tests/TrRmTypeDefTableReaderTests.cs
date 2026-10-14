@@ -4,38 +4,36 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmTypeDefTableReaderTests
 {
-    [Fact]
+    [Test]
     public void DecodesEmptyNamespaceAndOwnedFieldRange()
     {
         var names = new TrRmStringTableReader(Names(), 2);
         var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 0, 0);
         var types = new TrRmTypeDefTableReader(Type(), 1, names, modules, 1, 0, 0, 0);
-        Assert.Equal("", types.GetNamespace(1));
-        Assert.Equal("Widget", types.GetName(1));
-        Assert.Equal((1, 2), types.GetFieldRange(1));
-        Assert.Equal(1, types.GetOwnerModule(1));
+        Assert.That(types.GetNamespace(1), Is.EqualTo(""));
+        Assert.That(types.GetName(1), Is.EqualTo("Widget"));
+        Assert.That(types.GetFieldRange(1), Is.EqualTo((1, 2)));
+        Assert.That(types.GetOwnerModule(1), Is.EqualTo(1));
         Assert.Throws<InvalidDataException>(() => GetName(Type(), 0));
         Assert.Throws<InvalidDataException>(() => GetName(Type(), 2));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(4, 0)]
-    [InlineData(8, 0)]
-    [InlineData(8, 3)]
-    [InlineData(8, 0x40)]
-    [InlineData(12, 0)]
-    [InlineData(12, 2)]
-    [InlineData(16, 0)]
-    [InlineData(20, 1)]
-    [InlineData(28, 1)]
-    [InlineData(32, 1)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(4,(byte)(0))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(3))]
+    [TestCase(8,(byte)(0x40))]
+    [TestCase(12,(byte)(0))]
+    [TestCase(12,(byte)(2))]
+    [TestCase(16,(byte)(0))]
+    [TestCase(20,(byte)(1))]
+    [TestCase(28,(byte)(1))]
+    [TestCase(32,(byte)(1))]
     public void RejectsMalformedReferencesFlagsAndRanges(int offset, byte replacement)
     {
         var bytes = Type();
@@ -43,14 +41,14 @@ public sealed class TrRmTypeDefTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsTruncatedRowsAndMismatchedOwnerCounts()
     {
         Assert.Throws<InvalidDataException>(() => Create(Type()[..^1]));
         Assert.Throws<InvalidDataException>(() => Create(Type(), fieldCount: 0));
     }
 
-    [Fact]
+    [Test]
     public void PrivateAutoTypeCannotPublishLayout()
     {
         var bytes = Type();
@@ -58,7 +56,7 @@ public sealed class TrRmTypeDefTableReaderTests
         Assert.Throws<InvalidDataException>(() => CreateWithLayout(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOverlappingAndUnownedFieldRanges()
     {
         var duplicate = new byte[80];
@@ -72,11 +70,11 @@ public sealed class TrRmTypeDefTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(unowned));
     }
 
-    [Fact]
+    [Test]
     public void ValidatesFieldRowsAgainstOwnerAndTypeSpec()
     {
         var bytes = Field();
-        Assert.Equal("Widget", GetFieldName(bytes, 1));
+        Assert.That(GetFieldName(bytes, 1), Is.EqualTo("Widget"));
         Assert.Throws<InvalidDataException>(() => GetFieldName(bytes, 0));
         Assert.Throws<InvalidDataException>(() => GetFieldName(bytes, 2));
 

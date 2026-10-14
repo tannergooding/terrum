@@ -12,15 +12,14 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class IntegerParsingComponentTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task RadixParsingMatchesBoundariesAcrossNativeBackendsAsync(NativeRuntimePolicy policy)
     {
         var cases = new List<ParseCase>();
@@ -149,9 +148,9 @@ public sealed class IntegerParsingComponentTests
             programSource,
         ], [new HostBuffer("Source", PrimitiveType.Char16,
             [.. source.ToString().Select(unit => (int)unit)], false)], (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
 
         var path = Path.Combine(root, "artifacts", $"integer-parsing-{Guid.NewGuid():N}.exe");
         try
@@ -174,20 +173,18 @@ public sealed class IntegerParsingComponentTests
                 }
                 throw;
             }
-            Assert.Equal(0, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(0));
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("TryParseUInt64Base(1, 1, 10, init var value); return int32(value);")]
-    [InlineData("TryParseInt64Base(1, 1, 10, init var value); return int32(value);")]
-    [InlineData("TryParseUInt32Base(1, 1, 10, init var value); return int32(value);")]
-    [InlineData("TryParseInt32Base(1, 1, 10, init var value); return value;")]
-    [InlineData("TryParseChar16Base(1, 1, 10, init var value); return int32(value);")]
+    [TestCase("TryParseUInt64Base(1, 1, 10, init var value); return int32(value);")]
+    [TestCase("TryParseInt64Base(1, 1, 10, init var value); return int32(value);")]
+    [TestCase("TryParseUInt32Base(1, 1, 10, init var value); return int32(value);")]
+    [TestCase("TryParseInt32Base(1, 1, 10, init var value); return value;")]
+    [TestCase("TryParseChar16Base(1, 1, 10, init var value); return int32(value);")]
     public void FailedParseCannotPublishOutput(string body)
     {
         ArgumentNullException.ThrowIfNull(body);
@@ -199,10 +196,10 @@ public sealed class IntegerParsingComponentTests
             ReadComponent(root, "IntegerParsing.terrum"),
             entry,
         ], [new HostBuffer("Source", PrimitiveType.Char16, [49], false)]);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.SourceDiagnostics, diagnostic => diagnostic.SyntaxTree == entry
-            && diagnostic.Diagnostic.Code == "TRM3016");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.SourceDiagnostics,diagnostic => diagnostic.SyntaxTree == entry
+            && diagnostic.Diagnostic.Code == "TRM3016"),Is.True);
     }
 
     private static SyntaxTree ReadComponent(string root, string name) =>

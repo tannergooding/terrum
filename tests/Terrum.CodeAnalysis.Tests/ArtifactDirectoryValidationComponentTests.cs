@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -37,10 +37,8 @@ public sealed class ArtifactDirectoryValidationComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ArtifactDirectoryValidationMatchesHostedIndexExceptPayloadOrdering(
         BoundRuntimePolicy policy)
     {
@@ -119,7 +117,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         var path = Path.Combine(root, "self-host", "ArtifactDirectoryValidation.terrum");
         var source = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var tree = SyntaxTree.Parse(source, path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         components.Add(tree);
         components.Add(SyntaxTree.Parse(VerificationSource, "artifact-directory-validation.terrum"));
 
@@ -128,7 +126,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HostedArtifact is not null)
             {
-                Assert.Equal(testCase.ExpectedHostedValid, ValidateHosted(testCase.HostedArtifact));
+                Assert.That(ValidateHosted(testCase.HostedArtifact), Is.EqualTo(testCase.ExpectedHostedValid));
             }
 
             var entryCount = testCase.Artifact[12] | (testCase.Artifact[13] << 8)
@@ -154,16 +152,13 @@ public sealed class ArtifactDirectoryValidationComponentTests
                 new HostBuffer("SectionLengths", PrimitiveType.Int32, [.. new int[scratchLength]], true),
                 new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
             ], policy);
-            Assert.False(compilation.HasErrors,
-                string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
             int jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
-            Assert.True(jitResult == 0,
-                $"JIT differential case {caseIndex} returned {jitResult}.");
+            Assert.That(jitResult == 0, Is.True, $"JIT differential case {caseIndex} returned {jitResult}.");
             int aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true);
-            Assert.True(aotResult == 0,
-                $"AOT differential case {caseIndex} returned {aotResult}.");
+            Assert.That(aotResult == 0, Is.True, $"AOT differential case {caseIndex} returned {aotResult}.");
         }
     }
 
@@ -494,10 +489,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         }
         finally
         {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 

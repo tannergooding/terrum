@@ -8,32 +8,29 @@ using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ScalarFrontendVersionTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void SingleFunctionLayoutsAcceptOnlyCurrentTag(bool tree)
     {
         const string text = "int32 Value() { return 42; }";
         var source = SourceText.From(text);
         var words = Function(text, "Value", tree);
-        Assert.True(ScalarFrontendHost.ReadResult(source, Bytes(words)).IsValid);
-        Assert.Single(ScalarFrontendHost.BindLibrary(source, Bytes(words), BoundRuntimePolicy.FailFast).Functions);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words)).IsValid, Is.True);
+        Assert.That(ScalarFrontendHost.BindLibrary(source, Bytes(words), BoundRuntimePolicy.FailFast).Functions, Has.Exactly(1).Items);
         foreach (var version in RejectedVersions())
         {
             words[0] = version;
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void StandaloneV87RemainsBoundedToThreeParameters(bool tree)
     {
         var text = tree
@@ -76,10 +73,10 @@ public sealed class ScalarFrontendVersionTests
         }
 
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.True(result.IsValid);
-        Assert.Equal(3, result.ParameterCount);
-        Assert.Equal(0, result.FourthType);
-        Assert.Equal(default, result.FourthName);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(result.ParameterCount, Is.EqualTo(3));
+        Assert.That(result.FourthType, Is.EqualTo(0));
+        Assert.That(result.FourthName, Is.EqualTo(default(TextSpan)));
         if (tree)
         {
             foreach (var maskWord in new[] { 16, 17 })
@@ -103,48 +100,46 @@ public sealed class ScalarFrontendVersionTests
             SourceText.From(fourParameterText), Bytes(fourParameter)));
     }
 
-    [Fact]
+    [Test]
     public void SingleFunctionValidationPreservesUtf16Spans()
     {
         const string prefix = "//\U0001D11E\n";
         var text = $"{prefix}int32 Value() {{ return 42; }}";
         var source = SourceText.From(text);
-        Assert.Equal(10, Lexer.Lex(source).Tokens.Length);
-        Assert.False(SyntaxTree.Parse(source).HasErrors);
+        Assert.That(Lexer.Lex(source).Tokens.Length, Is.EqualTo(10));
+        Assert.That(SyntaxTree.Parse(source).HasErrors, Is.False);
 
         var words = Function(text, "Value", tree: true);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
 
-        Assert.True(result.IsValid);
-        Assert.Equal(new TextSpan(text.IndexOf("Value", StringComparison.Ordinal), "Value".Length),
-            result.Name);
-        Assert.Equal(new TextSpan(text.IndexOf("42", StringComparison.Ordinal), 2),
-            Assert.Single(result.Nodes).Span);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(result.Name, Is.EqualTo(new TextSpan(text.IndexOf("Value", StringComparison.Ordinal), "Value".Length)));
+        Assert.That(global::System.Linq.Enumerable.Single(result.Nodes).Span, Is.EqualTo(new TextSpan(text.IndexOf("42", StringComparison.Ordinal), 2)));
     }
 
-    [Fact]
+    [Test]
     public void SingleFunctionValidationRejectsMalformedSyntaxLexicalErrorsAndAliasFailures()
     {
         const string function = "int32 Value() { return 42; }";
         var malformed = SourceText.From(function[..^1]);
-        Assert.True(SyntaxTree.Parse(malformed).HasErrors);
+        Assert.That(SyntaxTree.Parse(malformed).HasErrors, Is.True);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(malformed,
             Bytes(Function(malformed.Text, "Value", tree: true))));
 
         var lexicalErrorText = string.Concat("//", (char)0xD800, "\n", function);
         var lexicalError = SourceText.From(lexicalErrorText);
-        Assert.NotEmpty(Lexer.Lex(lexicalError).Diagnostics);
+        Assert.That(Lexer.Lex(lexicalError).Diagnostics, Is.Not.Empty);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(lexicalError,
             Bytes(Function(lexicalErrorText, "Value", tree: true))));
 
         const string invalidAliasText = "alias Scalar = Missing; int32 Value() { return 42; }";
         var invalidAlias = SourceText.From(invalidAliasText);
-        Assert.False(SyntaxTree.Parse(invalidAlias).HasErrors);
+        Assert.That(SyntaxTree.Parse(invalidAlias).HasErrors, Is.False);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(invalidAlias,
             Bytes(Function(invalidAliasText, "Value", tree: true))));
     }
 
-    [Fact]
+    [Test]
     public void DiagnosticProjectionAcceptsOnlyCurrentTag()
     {
         var source = SourceText.From("not a scalar function");
@@ -153,7 +148,7 @@ public sealed class ScalarFrontendVersionTests
         words[1] = 2;
         words[2] = 1;
         words[4] = source.Length;
-        Assert.False(ScalarFrontendHost.ReadResult(source, Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words)).IsValid, Is.False);
         foreach (var version in RejectedVersions())
         {
             words[0] = version;
@@ -161,7 +156,7 @@ public sealed class ScalarFrontendVersionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void CompleteProgramAndEveryFrameAcceptOnlyCurrentTag()
     {
         const string text = "int32 First() { return 42; } int32 Second() { return 42; }";
@@ -193,8 +188,8 @@ public sealed class ScalarFrontendVersionTests
             words.AsSpan(frame + 4 + ScalarFrontendHost.ProgramBodyWordCount, 64).Fill(-1);
             start = end;
         }
-        Assert.Equal(2, ScalarFrontendHost.ReadProgram(source, bytes, Bytes(words),
-            BoundRuntimePolicy.FailFast).Projection.Functions.Length);
+        Assert.That(ScalarFrontendHost.ReadProgram(source, bytes, Bytes(words),
+            BoundRuntimePolicy.FailFast).Projection.Functions.Length, Is.EqualTo(2));
         foreach (var offset in new[] { 0, 8, 8 + ScalarFrontendHost.ProgramFrameWordCount })
         {
             foreach (var version in RejectedProgramVersions())
@@ -205,11 +200,11 @@ public sealed class ScalarFrontendVersionTests
             }
             words[offset] = 88;
         }
-        Assert.Equal(2, ScalarFrontendHost.BindLibrary(source, bytes, Bytes(words),
-            BoundRuntimePolicy.FailFast).Functions.Length);
+        Assert.That(ScalarFrontendHost.BindLibrary(source, bytes, Bytes(words),
+            BoundRuntimePolicy.FailFast).Functions.Length, Is.EqualTo(2));
     }
 
-    [Fact]
+    [Test]
     public void CompleteProgramCarriesAndValidatesFileScopedNamespaceIdentity()
     {
         const string text = "namespace Demo.Core; int32 Main() { return 42; }";
@@ -245,10 +240,10 @@ public sealed class ScalarFrontendVersionTests
         var programBytes = Bytes(words);
         var read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes,
             BoundRuntimePolicy.FailFast);
-        var function = Assert.Single(read.Projection.Functions);
-        Assert.Equal(namespaceName, function.NamespaceNameSpan);
-        Assert.Equal("Demo.Core.Main", function.QualifiedName);
-        Assert.Equal("Demo.Core.Main", Assert.Single(read.Program!.Functions).Name);
+        var function = global::System.Linq.Enumerable.Single(read.Projection.Functions);
+        Assert.That(function.NamespaceNameSpan, Is.EqualTo(namespaceName));
+        Assert.That(function.QualifiedName, Is.EqualTo("Demo.Core.Main"));
+        Assert.That(global::System.Linq.Enumerable.Single(read.Program!.Functions).Name, Is.EqualTo("Demo.Core.Main"));
 
         var forgedNamespace = words.ToArray();
         forgedNamespace[frame + 4 + 21]++;
@@ -257,10 +252,8 @@ public sealed class ScalarFrontendVersionTests
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source,
             Bytes(Function(text, "Main", tree: true))));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void CompleteProgramCarriesAndValidatesNamespaceBlockIdentity(BoundRuntimePolicy policy)
     {
         const string text = "namespace Demo.Core { int32 Main() { return 42; } }";
@@ -295,10 +288,10 @@ public sealed class ScalarFrontendVersionTests
         var bytes = Bytes(new int[ScalarFrontendHost.WordCount]);
         var read = ScalarFrontendHost.ReadProgram(source, bytes, Bytes(words),
             policy);
-        var function = Assert.Single(read.Projection.Functions);
-        Assert.Equal(namespaceName, function.NamespaceNameSpan);
-        Assert.Equal("Demo.Core.Main", function.QualifiedName);
-        Assert.Equal("Demo.Core.Main", Assert.Single(read.Program!.Functions).Name);
+        var function = global::System.Linq.Enumerable.Single(read.Projection.Functions);
+        Assert.That(function.NamespaceNameSpan, Is.EqualTo(namespaceName));
+        Assert.That(function.QualifiedName, Is.EqualTo("Demo.Core.Main"));
+        Assert.That(global::System.Linq.Enumerable.Single(read.Program!.Functions).Name, Is.EqualTo("Demo.Core.Main"));
 
         var forgedNamespace = words.ToArray();
         forgedNamespace[frame + 4 + 21]++;
@@ -309,11 +302,9 @@ public sealed class ScalarFrontendVersionTests
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(source, bytes,
             Bytes(forgedDeclarationName), policy));
     }
-
-    [Theory]
-    [InlineData(9, 64)]
-    [InlineData(10, 71)]
-    [InlineData(32, 225)]
+    [TestCase(9,64)]
+    [TestCase(10,71)]
+    [TestCase(32,225)]
     public void CompleteProgramInventoryAllowsMoreThan64AggregateTokens(int functionCount,
         int expectedTokenCount)
     {
@@ -321,7 +312,7 @@ public sealed class ScalarFrontendVersionTests
             .Select(index => $"int32 F{index}() => 0;"));
         var source = SourceText.From(text);
         var tokens = Lexer.Lex(source).Tokens;
-        Assert.Equal(expectedTokenCount, tokens.Length);
+        Assert.That(tokens.Length, Is.EqualTo(expectedTokenCount));
 
         var program = new int[ScalarFrontendHost.ProgramWordCount];
         program[0] = 88;
@@ -366,17 +357,15 @@ public sealed class ScalarFrontendVersionTests
         var bytes = Bytes(new int[ScalarFrontendHost.WordCount]);
         var result = ScalarFrontendHost.ReadProgram(source, bytes, Bytes(program),
             BoundRuntimePolicy.FailFast).Projection;
-        Assert.True(result.IsValid);
-        Assert.Equal(functionCount, result.Functions.Length);
-        Assert.Equal(new TextSpan(text.IndexOf("F0", StringComparison.Ordinal), 2),
-            result.Functions[0].Name);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(result.Functions.Length, Is.EqualTo(functionCount));
+        Assert.That(result.Functions[0].Name, Is.EqualTo(new TextSpan(text.IndexOf("F0", StringComparison.Ordinal), 2)));
         var lastFunction = $"F{functionCount - 1}";
-        Assert.Equal(new TextSpan(text.LastIndexOf(lastFunction, StringComparison.Ordinal),
-            lastFunction.Length),
-            result.Functions[^1].Name);
+        Assert.That(result.Functions[^1].Name, Is.EqualTo(new TextSpan(text.LastIndexOf(lastFunction, StringComparison.Ordinal),
+            lastFunction.Length)));
     }
 
-    [Fact]
+    [Test]
     public void CompleteProgramInventoryRejectsMoreThanThirtyTwoFunctions()
     {
         var words = new int[ScalarFrontendHost.ProgramWordCount];

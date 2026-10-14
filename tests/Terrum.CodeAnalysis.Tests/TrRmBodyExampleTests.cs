@@ -6,113 +6,112 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmBodyExampleTests
 {
-    [Theory]
-    [InlineData("GeneralCheckedAdd", 105, 5, false, 38, 36, 3)]
-    [InlineData("## Value and place state through checked arithmetic", 122, 5, true, 51, 49, 7)]
-    [InlineData("GeneralConstantReturn", 57, 1, false, 18, 16, 1)]
+    [TestCase("GeneralCheckedAdd",105,5,false,38,36,3)]
+    [TestCase("## Value and place state through checked arithmetic",122,5,true,51,49,7)]
+    [TestCase("GeneralConstantReturn",57,1,false,18,16,1)]
     public void BodyExamplesHaveDirectDefinitionAndUseIndexes(
         string heading, int sectionLength, int valueCount, bool hasPlace,
         int blockLength, int terminatorOffset, int operationCount)
     {
         var bytes = ReadExample(heading);
 
-        Assert.Equal(sectionLength, bytes.Length);
+        Assert.That(bytes.Length, Is.EqualTo(sectionLength));
         var position = 0;
-        Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal((uint)(sectionLength - 8), ReadUInt32(bytes, ref position));
-        Assert.Equal((byte)0, bytes[position++]);
-        Assert.Equal((byte)1, bytes[position++]);
-        Assert.Equal((byte)valueCount, bytes[position++]);
-        Assert.Equal((byte)(hasPlace ? 1 : 0), bytes[position++]);
-        Assert.Equal((byte)0, bytes[position++]);
-        Assert.Equal((byte)1, bytes[position++]);
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(0u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo((uint)(sectionLength - 8)));
+        Assert.That(bytes[position++], Is.EqualTo((byte)0));
+        Assert.That(bytes[position++], Is.EqualTo((byte)1));
+        Assert.That(bytes[position++], Is.EqualTo((byte)valueCount));
+        Assert.That(bytes[position++], Is.EqualTo((byte)(hasPlace ? 1 : 0)));
+        Assert.That(bytes[position++], Is.EqualTo((byte)0));
+        Assert.That(bytes[position++], Is.EqualTo((byte)1));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(1u));
         if (hasPlace)
         {
-            Assert.Equal(new byte[] { 1, 0, 5, 1 }, bytes.AsSpan(position, 4).ToArray());
+            Assert.That(bytes.AsSpan(position, 4).ToArray(), Is.EqualTo(new byte[] { 1, 0, 5, 1 }));
             position += 4;
         }
 
         for (var value = 0; value < valueCount; value++)
         {
-            Assert.Equal((byte)1, bytes[position++]);
-            Assert.Equal((byte)(hasPlace && value == 0 ? 1 : 0), bytes[position++]);
-            Assert.Equal((byte)1, bytes[position++]);
+            Assert.That(bytes[position++], Is.EqualTo((byte)1));
+            Assert.That(bytes[position++], Is.EqualTo((byte)(hasPlace && value == 0 ? 1 : 0)));
+            Assert.That(bytes[position++], Is.EqualTo((byte)1));
         }
 
-        Assert.Equal((byte)0, bytes[position++]);
-        Assert.Equal((byte)valueCount, bytes[position++]);
+        Assert.That(bytes[position++], Is.EqualTo((byte)0));
+        Assert.That(bytes[position++], Is.EqualTo((byte)valueCount));
         uint[] expectedDefinitions = hasPlace ? [24, 27, 34, 37, 41]
             : valueCount == 1 ? [12]
             : [uint.MaxValue, uint.MaxValue, 22, 27, 31];
         foreach (var expected in expectedDefinitions)
         {
-            Assert.Equal(expected, ReadUInt32(bytes, ref position));
+            Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(expected));
         }
 
-        Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal((uint)blockLength, ReadUInt32(bytes, ref position));
-        Assert.Equal((uint)terminatorOffset, ReadUInt32(bytes, ref position));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(0u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo((uint)blockLength));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo((uint)terminatorOffset));
         var block = bytes.AsSpan(position);
-        Assert.Equal(blockLength, block.Length);
+        Assert.That(block.Length, Is.EqualTo(blockLength));
         var cursor = 0;
-        Assert.Equal((byte)0, block[cursor++]);
+        Assert.That(block[cursor++], Is.EqualTo((byte)0));
         var parameters = block[cursor++];
-        Assert.Equal((byte)(valueCount == 5 && !hasPlace ? 2 : 0), parameters);
+        Assert.That(parameters, Is.EqualTo((byte)(valueCount == 5 && !hasPlace ? 2 : 0)));
         for (var parameter = 0; parameter < parameters; parameter++)
         {
-            Assert.Equal((byte)(parameter + 1), block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)(parameter + 1)));
         }
-        Assert.Equal((byte)0, block[cursor++]);
-        Assert.Equal((byte)0, block[cursor++]);
-        Assert.Equal((byte)0, block[cursor++]);
+        Assert.That(block[cursor++], Is.EqualTo((byte)0));
+        Assert.That(block[cursor++], Is.EqualTo((byte)0));
+        Assert.That(block[cursor++], Is.EqualTo((byte)0));
         var starts = block[cursor++];
-        Assert.Equal((byte)(hasPlace ? 1 : 0), starts);
+        Assert.That(starts, Is.EqualTo((byte)(hasPlace ? 1 : 0)));
         if (hasPlace)
         {
-            Assert.Equal((byte)1, block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)1));
         }
         var ends = block[cursor++];
-        Assert.Equal((byte)(hasPlace ? 1 : 0), ends);
+        Assert.That(ends, Is.EqualTo((byte)(hasPlace ? 1 : 0)));
         if (hasPlace)
         {
-            Assert.Equal((byte)1, block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)1));
         }
-        Assert.Equal((byte)valueCount, block[cursor++]);
+        Assert.That(block[cursor++], Is.EqualTo((byte)valueCount));
         byte[] expectedLastUses = hasPlace ? [6, 2, 5, 5, 7]
             : valueCount == 1 ? [1]
             : [0, 0, 2, 2, 3];
         for (var value = 0; value < valueCount; value++)
         {
-            Assert.Equal((byte)(value + 1), block[cursor++]);
-            Assert.Equal(expectedLastUses[value], block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)(value + 1)));
+            Assert.That(block[cursor++], Is.EqualTo(expectedLastUses[value]));
         }
-        Assert.Equal((byte)(hasPlace ? 1 : 0), block[cursor++]);
+        Assert.That(block[cursor++], Is.EqualTo((byte)(hasPlace ? 1 : 0)));
         if (hasPlace)
         {
-            Assert.Equal((byte)1, block[cursor++]);
-            Assert.Equal((byte)operationCount, block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)1));
+            Assert.That(block[cursor++], Is.EqualTo((byte)operationCount));
         }
-        Assert.Equal((byte)operationCount, block[cursor++]);
+        Assert.That(block[cursor++], Is.EqualTo((byte)operationCount));
         var observedDefinitions = new int[valueCount + 1];
         var observedLastUses = new int[valueCount + 1];
         Array.Fill(observedDefinitions, -1);
         Array.Fill(observedLastUses, -1);
         void Define(byte value, int offset)
         {
-            Assert.InRange(value, 1, valueCount);
-            Assert.Equal(-1, observedDefinitions[value]);
+            Assert.That(value, Is.InRange(1, valueCount));
+            Assert.That(observedDefinitions[value], Is.EqualTo(-1));
             observedDefinitions[value] = offset;
         }
         void Use(byte value, int ordinal)
         {
-            Assert.InRange(value, 1, valueCount);
+            Assert.That(value, Is.InRange(1, valueCount));
             observedLastUses[value] = ordinal;
         }
 
@@ -123,12 +122,12 @@ public sealed class TrRmBodyExampleTests
             {
                 case 0x01 or 0x02:
                     Define(block[cursor++], offset);
-                    Assert.Equal((byte)1, block[cursor++]);
+                    Assert.That(block[cursor++], Is.EqualTo((byte)1));
                     cursor++;
                     break;
                 case 0x0B:
                     Define(block[cursor++], offset);
-                    Assert.Equal((byte)1, block[cursor++]);
+                    Assert.That(block[cursor++], Is.EqualTo((byte)1));
                     break;
                 case 0x0D:
                     Define(block[cursor++], offset);
@@ -140,7 +139,7 @@ public sealed class TrRmBodyExampleTests
                     break;
                 case 0x15:
                     Define(block[cursor++], offset);
-                    Assert.Equal((byte)1, block[cursor++]);
+                    Assert.That(block[cursor++], Is.EqualTo((byte)1));
                     Use(block[cursor++], ordinal);
                     Use(block[cursor++], ordinal);
                     break;
@@ -149,120 +148,115 @@ public sealed class TrRmBodyExampleTests
                     break;
             }
         }
-        Assert.Equal(terminatorOffset, cursor);
-        Assert.Equal((byte)0x83, block[terminatorOffset]);
-        Assert.Equal((byte)(valueCount == 1 ? 1 : 5), block[terminatorOffset + 1]);
+        Assert.That(cursor, Is.EqualTo(terminatorOffset));
+        Assert.That(block[terminatorOffset], Is.EqualTo((byte)0x83));
+        Assert.That(block[terminatorOffset + 1], Is.EqualTo((byte)(valueCount == 1 ? 1 : 5)));
         Use(block[terminatorOffset + 1], operationCount);
         for (var value = 1; value <= valueCount; value++)
         {
             var expected = expectedDefinitions[value - 1];
-            Assert.Equal(expected == uint.MaxValue ? -1 : (int)expected, observedDefinitions[value]);
-            Assert.Equal(expectedLastUses[value - 1], observedLastUses[value]);
+            Assert.That(observedDefinitions[value], Is.EqualTo(expected == uint.MaxValue ? -1 : (int)expected));
+            Assert.That(observedLastUses[value], Is.EqualTo(expectedLastUses[value - 1]));
         }
     }
 
-    [Fact]
+    [Test]
     public void ConditionalMergeHasIndexedDefsUsesAndNormalEdges()
     {
         var bytes = ReadExample("GeneralConditionalMerge");
-        Assert.Equal(165, bytes.Length);
+        Assert.That(bytes.Length, Is.EqualTo(165));
         var position = 0;
-        Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal(157u, ReadUInt32(bytes, ref position));
-        Assert.Equal(new byte[] { 0, 4, 4, 0, 0, 2 },
-            bytes.AsSpan(position, 6).ToArray());
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(0u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(157u));
+        Assert.That(bytes.AsSpan(position, 6).ToArray(), Is.EqualTo(new byte[] { 0, 4, 4, 0, 0, 2 }));
         position += 6;
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
-        Assert.Equal(2u, ReadUInt32(bytes, ref position));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(1u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(2u));
         for (var value = 1; value <= 4; value++)
         {
-            Assert.Equal((byte)(value == 1 ? 1 : 2), bytes[position++]);
-            Assert.Equal((byte)0, bytes[position++]);
-            Assert.Equal((byte)1, bytes[position++]);
+            Assert.That(bytes[position++], Is.EqualTo((byte)(value == 1 ? 1 : 2)));
+            Assert.That(bytes[position++], Is.EqualTo((byte)0));
+            Assert.That(bytes[position++], Is.EqualTo((byte)1));
         }
-        Assert.Equal(new byte[] { 0, 3, 3, 3, 4 },
-            bytes.AsSpan(position, 5).ToArray());
+        Assert.That(bytes.AsSpan(position, 5).ToArray(), Is.EqualTo(new byte[] { 0, 3, 3, 3, 4 }));
         position += 5;
         for (var value = 0; value < 4; value++)
         {
-            Assert.Equal(uint.MaxValue, ReadUInt32(bytes, ref position));
+            Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(uint.MaxValue));
         }
         int[] offsets = [0, 23, 41, 59, 74];
         int[] terminators = [17, 14, 14, 13];
         foreach (var offset in offsets)
         {
-            Assert.Equal((uint)offset, ReadUInt32(bytes, ref position));
+            Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo((uint)offset));
         }
         foreach (var terminator in terminators)
         {
-            Assert.Equal((uint)terminator, ReadUInt32(bytes, ref position));
+            Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo((uint)terminator));
         }
         var blockData = bytes.AsSpan(position);
-        Assert.Equal(74, blockData.Length);
+        Assert.That(blockData.Length, Is.EqualTo(74));
         byte[] usedValues = [1, 3, 2, 4];
         for (var blockId = 1; blockId <= 4; blockId++)
         {
             var block = blockData[offsets[blockId - 1]..offsets[blockId]];
             var cursor = 0;
-            Assert.Equal((byte)0, block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
             byte[][] parameters = [[1, 2, 3], [], [], [4]];
-            Assert.Equal((byte)parameters[blockId - 1].Length, block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)parameters[blockId - 1].Length));
             foreach (var parameter in parameters[blockId - 1])
             {
-                Assert.Equal(parameter, block[cursor++]);
+                Assert.That(block[cursor++], Is.EqualTo(parameter));
             }
             byte[][] liveIns = [[], [3], [2], []];
             byte[][] liveOuts = [[2, 3], [3], [2], []];
             foreach (var expected in new[] { liveIns[blockId - 1], liveOuts[blockId - 1] })
             {
-                Assert.Equal((byte)expected.Length, block[cursor++]);
+                Assert.That(block[cursor++], Is.EqualTo((byte)expected.Length));
                 foreach (var value in expected)
                 {
-                    Assert.Equal(value, block[cursor++]);
+                    Assert.That(block[cursor++], Is.EqualTo(value));
                 }
             }
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal((byte)1, block[cursor++]);
-            Assert.Equal(usedValues[blockId - 1], block[cursor++]);
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal(terminators[blockId - 1], cursor);
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(block[cursor++], Is.EqualTo((byte)1));
+            Assert.That(block[cursor++], Is.EqualTo(usedValues[blockId - 1]));
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(cursor, Is.EqualTo(terminators[blockId - 1]));
             if (blockId == 1)
             {
-                Assert.Equal(new byte[] { 0x81, 1, 2, 0, 3, 0 }, block[cursor..].ToArray());
+                Assert.That(block[cursor..].ToArray(), Is.EqualTo(new byte[] { 0x81, 1, 2, 0, 3, 0 }));
             }
             else if (blockId == 4)
             {
-                Assert.Equal(new byte[] { 0x83, 4 }, block[cursor..].ToArray());
+                Assert.That(block[cursor..].ToArray(), Is.EqualTo(new byte[] { 0x83, 4 }));
             }
             else
             {
-                Assert.Equal(new byte[] { 0x80, 4, 1, usedValues[blockId - 1] },
-                    block[cursor..].ToArray());
+                Assert.That(block[cursor..].ToArray(), Is.EqualTo(new byte[] { 0x80, 4, 1, usedValues[blockId - 1] }));
             }
         }
     }
-
-    [Theory]
-    [InlineData("### Checked add end to end (informative)", 31, 3, 5, 2)]
-    [InlineData("### Compact linear constant return", 21, 1, 1, 0)]
-    [InlineData("#### Compact linear parameter return", 17, 0, 1, 1)]
+    [TestCase("### Checked add end to end (informative)",31,3,5,2)]
+    [TestCase("### Compact linear constant return",21,1,1,0)]
+    [TestCase("#### Compact linear parameter return",17,0,1,1)]
     public void CompactLinearDerivesDefinitionsAndUses(
         string heading, int sectionLength, int operationCount, int valueCount,
         int parameterCount)
     {
         var bytes = ReadExample(heading);
-        Assert.Equal(sectionLength, bytes.Length);
+        Assert.That(bytes.Length, Is.EqualTo(sectionLength));
         var position = 0;
-        Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal((uint)(sectionLength - 8), ReadUInt32(bytes, ref position));
-        Assert.Equal((byte)0x04, bytes[position++]);
-        Assert.Equal((byte)1, bytes[position++]);
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
-        Assert.Equal((byte)operationCount, bytes[position++]);
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(0u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo((uint)(sectionLength - 8)));
+        Assert.That(bytes[position++], Is.EqualTo((byte)0x04));
+        Assert.That(bytes[position++], Is.EqualTo((byte)1));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(1u));
+        Assert.That(bytes[position++], Is.EqualTo((byte)operationCount));
 
         var definitions = new int[valueCount + 1];
         var lastUses = new int[valueCount + 1];
@@ -273,67 +267,62 @@ public sealed class TrRmBodyExampleTests
         {
             var offset = position;
             var opcode = bytes[position++];
-            Assert.True(opcode is 0x01 or 0x02 or 0x15);
-            Assert.Equal((byte)nextValue++, bytes[position++]);
+            Assert.That(opcode is 0x01 or 0x02 or 0x15, Is.True);
+            Assert.That(bytes[position++], Is.EqualTo((byte)nextValue++));
             definitions[nextValue - 1] = offset;
             if (opcode == 0x15)
             {
-                Assert.Equal((byte)1, bytes[position++]);
+                Assert.That(bytes[position++], Is.EqualTo((byte)1));
                 lastUses[bytes[position++]] = ordinal;
                 lastUses[bytes[position++]] = ordinal;
             }
             else
             {
-                Assert.Equal((byte)1, bytes[position++]);
+                Assert.That(bytes[position++], Is.EqualTo((byte)1));
                 position++;
             }
         }
-        Assert.Equal(valueCount + 1, nextValue);
-        Assert.Equal((byte)0x83, bytes[position++]);
+        Assert.That(nextValue, Is.EqualTo(valueCount + 1));
+        Assert.That(bytes[position++], Is.EqualTo((byte)0x83));
         lastUses[bytes[position++]] = operationCount;
-        Assert.Equal(bytes.Length, position);
-        Assert.Equal(valueCount == 5
+        Assert.That(position, Is.EqualTo(bytes.Length));
+        Assert.That(definitions, Is.EqualTo(valueCount == 5
             ? new[] { -1, -1, -1, 15, 20, 24 }
-            : parameterCount == 1 ? new[] { -1, -1 } : new[] { -1, 15 },
-            definitions);
-        Assert.Equal(valueCount == 5
+            : parameterCount == 1 ? new[] { -1, -1 } : new[] { -1, 15 }));
+        Assert.That(lastUses, Is.EqualTo(valueCount == 5
             ? new[] { -1, 0, 0, 2, 2, 3 }
-            : new[] { -1, operationCount }, lastUses);
+            : new[] { -1, operationCount }));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedMergeRetainsDirectFlowFacts()
     {
         var bytes = ReadExample("#### Compact indexed conditional merge");
-        Assert.Equal(100, bytes.Length);
+        Assert.That(bytes.Length, Is.EqualTo(100));
         var position = 0;
-        Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal(92u, ReadUInt32(bytes, ref position));
-        Assert.Equal(new byte[] { 0x08, 4, 4, 0, 2 },
-            bytes.AsSpan(position, 5).ToArray());
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(0u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(92u));
+        Assert.That(bytes.AsSpan(position, 5).ToArray(), Is.EqualTo(new byte[] { 0x08, 4, 4, 0, 2 }));
         position += 5;
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
-        Assert.Equal(2u, ReadUInt32(bytes, ref position));
-        Assert.Equal(new byte[] { 1, 1, 2, 1, 2, 1, 2, 1 },
-            bytes.AsSpan(position, 8).ToArray());
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(1u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(2u));
+        Assert.That(bytes.AsSpan(position, 8).ToArray(), Is.EqualTo(new byte[] { 1, 1, 2, 1, 2, 1, 2, 1 }));
         position += 8;
-        Assert.Equal(new byte[] { 0, 3, 3, 3, 4 },
-            bytes.AsSpan(position, 5).ToArray());
+        Assert.That(bytes.AsSpan(position, 5).ToArray(), Is.EqualTo(new byte[] { 0, 3, 3, 3, 4 }));
         position += 5;
-        Assert.Equal(new byte[] { 255, 255, 255, 255 },
-            bytes.AsSpan(position, 4).ToArray());
+        Assert.That(bytes.AsSpan(position, 4).ToArray(), Is.EqualTo(new byte[] { 255, 255, 255, 255 }));
         position += 4;
         int[] offsets = [0, 18, 31, 44, 53];
         int[] terminators = [12, 9, 9, 7];
         foreach (var offset in offsets)
         {
-            Assert.Equal((byte)offset, bytes[position++]);
+            Assert.That(bytes[position++], Is.EqualTo((byte)offset));
         }
         foreach (var offset in terminators)
         {
-            Assert.Equal((byte)offset, bytes[position++]);
+            Assert.That(bytes[position++], Is.EqualTo((byte)offset));
         }
-        Assert.Equal(53, bytes.Length - position);
+        Assert.That(bytes.Length - position, Is.EqualTo(53));
         byte[][] parameters = [[1, 2, 3], [], [], [4]];
         byte[][] liveIns = [[], [3], [2], []];
         byte[][] liveOuts = [[2, 3], [3], [2], []];
@@ -344,78 +333,72 @@ public sealed class TrRmBodyExampleTests
                 offsets[blockId] - offsets[blockId - 1]);
             var cursor = 0;
             var flags = block[cursor++];
-            Assert.Equal((byte)(blockId == 1 ? 0x1A : blockId == 4 ? 0x12 : 0x1C),
-                flags);
+            Assert.That(flags, Is.EqualTo((byte)(blockId == 1 ? 0x1A : blockId == 4 ? 0x12 : 0x1C)));
             foreach (var (bit, values) in new[] {
                 (0x02, parameters[blockId - 1]),
                 (0x04, liveIns[blockId - 1]),
                 (0x08, liveOuts[blockId - 1]),
             })
             {
-                Assert.Equal(values.Length != 0, (flags & bit) != 0);
+                Assert.That((flags & bit) != 0, Is.EqualTo(values.Length != 0));
                 if (values.Length != 0)
                 {
-                    Assert.Equal((byte)values.Length, block[cursor++]);
+                    Assert.That(block[cursor++], Is.EqualTo((byte)values.Length));
                     foreach (var value in values)
                     {
-                        Assert.Equal(value, block[cursor++]);
+                        Assert.That(block[cursor++], Is.EqualTo(value));
                     }
                 }
             }
-            Assert.Equal((byte)1, block[cursor++]);
-            Assert.Equal(usedValues[blockId - 1], block[cursor++]);
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal((byte)0, block[cursor++]);
-            Assert.Equal(terminators[blockId - 1], cursor);
+            Assert.That(block[cursor++], Is.EqualTo((byte)1));
+            Assert.That(block[cursor++], Is.EqualTo(usedValues[blockId - 1]));
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(block[cursor++], Is.EqualTo((byte)0));
+            Assert.That(cursor, Is.EqualTo(terminators[blockId - 1]));
             if (blockId == 1)
             {
-                Assert.Equal(new byte[] { 0x81, 1, 2, 0, 3, 0 }, block[cursor..].ToArray());
+                Assert.That(block[cursor..].ToArray(), Is.EqualTo(new byte[] { 0x81, 1, 2, 0, 3, 0 }));
             }
             else if (blockId == 4)
             {
-                Assert.Equal(new byte[] { 0x83, 4 }, block[cursor..].ToArray());
+                Assert.That(block[cursor..].ToArray(), Is.EqualTo(new byte[] { 0x83, 4 }));
             }
             else
             {
-                Assert.Equal(new byte[] { 0x80, 4, 1, usedValues[blockId - 1] },
-                    block[cursor..].ToArray());
+                Assert.That(block[cursor..].ToArray(), Is.EqualTo(new byte[] { 0x80, 4, 1, usedValues[blockId - 1] }));
             }
         }
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedConditionalAddPreservesCheckedArm()
     {
         var bytes = ReadExample("#### Compact indexed conditional sum");
-        Assert.Equal(90, bytes.Length);
+        Assert.That(bytes.Length, Is.EqualTo(90));
         var position = 0;
-        Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal(82u, ReadUInt32(bytes, ref position));
-        Assert.Equal(new byte[] { 0x08, 3, 4, 0, 2 },
-            bytes.AsSpan(position, 5).ToArray());
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(0u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(82u));
+        Assert.That(bytes.AsSpan(position, 5).ToArray(), Is.EqualTo(new byte[] { 0x08, 3, 4, 0, 2 }));
         position += 5;
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
-        Assert.Equal(2u, ReadUInt32(bytes, ref position));
-        Assert.Equal(new byte[] { 1, 1, 2, 2, 2, 1, 2, 1 },
-            bytes.AsSpan(position, 8).ToArray());
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(1u));
+        Assert.That(ReadUInt32(bytes, ref position), Is.EqualTo(2u));
+        Assert.That(bytes.AsSpan(position, 8).ToArray(), Is.EqualTo(new byte[] { 1, 1, 2, 2, 2, 1, 2, 1 }));
         position += 8;
-        Assert.Equal(new byte[] { 0, 3, 4, 4 },
-            bytes.AsSpan(position, 4).ToArray());
+        Assert.That(bytes.AsSpan(position, 4).ToArray(), Is.EqualTo(new byte[] { 0, 3, 4, 4 }));
         position += 4;
-        Assert.Equal(new byte[] { 255, 255, 255, 12 },
-            bytes.AsSpan(position, 4).ToArray());
+        Assert.That(bytes.AsSpan(position, 4).ToArray(), Is.EqualTo(new byte[] { 255, 255, 255, 12 }));
         position += 4;
         int[] offsets = [0, 18, 37, 46];
         int[] terminators = [12, 17, 7];
         foreach (var offset in offsets)
         {
-            Assert.Equal((byte)offset, bytes[position++]);
+            Assert.That(bytes[position++], Is.EqualTo((byte)offset));
         }
         foreach (var offset in terminators)
         {
-            Assert.Equal((byte)offset, bytes[position++]);
+            Assert.That(bytes[position++], Is.EqualTo((byte)offset));
         }
-        Assert.Equal(46, bytes.Length - position);
+        Assert.That(bytes.Length - position, Is.EqualTo(46));
         byte[][] parameters = [[1, 2, 3], [], []];
         byte[][] liveIns = [[], [2, 3], [2]];
         byte[][] liveOuts = [[2, 3], [], []];
@@ -426,80 +409,75 @@ public sealed class TrRmBodyExampleTests
                 offsets[blockId] - offsets[blockId - 1]);
             var cursor = 0;
             var flags = block[cursor++];
-            Assert.Equal((byte)(blockId == 1 ? 0x1A : 0x14), flags);
+            Assert.That(flags, Is.EqualTo((byte)(blockId == 1 ? 0x1A : 0x14)));
             foreach (var (bit, values) in new[] {
                 (0x02, parameters[blockId - 1]),
                 (0x04, liveIns[blockId - 1]),
                 (0x08, liveOuts[blockId - 1]),
             })
             {
-                Assert.Equal(values.Length != 0, (flags & bit) != 0);
+                Assert.That((flags & bit) != 0, Is.EqualTo(values.Length != 0));
                 if (values.Length != 0)
                 {
-                    Assert.Equal((byte)values.Length, block[cursor++]);
+                    Assert.That(block[cursor++], Is.EqualTo((byte)values.Length));
                     foreach (var value in values)
                     {
-                        Assert.Equal(value, block[cursor++]);
+                        Assert.That(block[cursor++], Is.EqualTo(value));
                     }
                 }
             }
             var uses = usedValues[blockId - 1];
-            Assert.Equal((byte)(uses.Length / 2), block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)(uses.Length / 2)));
             foreach (var value in uses)
             {
-                Assert.Equal(value, block[cursor++]);
+                Assert.That(block[cursor++], Is.EqualTo(value));
             }
-            Assert.Equal((byte)(blockId == 2 ? 1 : 0), block[cursor++]);
+            Assert.That(block[cursor++], Is.EqualTo((byte)(blockId == 2 ? 1 : 0)));
             if (blockId == 2)
             {
-                Assert.Equal(12, cursor);
-                Assert.Equal(new byte[] { 0x15, 4, 1, 2, 3 },
-                    block.Slice(cursor, 5).ToArray());
+                Assert.That(cursor, Is.EqualTo(12));
+                Assert.That(block.Slice(cursor, 5).ToArray(), Is.EqualTo(new byte[] { 0x15, 4, 1, 2, 3 }));
                 cursor += 5;
             }
-            Assert.Equal(terminators[blockId - 1], cursor);
-            Assert.Equal(blockId == 1
+            Assert.That(cursor, Is.EqualTo(terminators[blockId - 1]));
+            Assert.That(block[cursor..].ToArray(), Is.EqualTo(blockId == 1
                 ? new byte[] { 0x81, 1, 2, 0, 3, 0 }
                 : blockId == 2 ? new byte[] { 0x83, 4 }
-                : new byte[] { 0x83, 2 }, block[cursor..].ToArray());
+                : new byte[] { 0x83, 2 }));
         }
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderInspectsConditionalAdd()
     {
         var section = ReadExample("#### Compact indexed conditional sum");
-        Assert.Equal((3, 4), InspectIndexed(section));
+        Assert.That(InspectIndexed(section), Is.EqualTo((3, 4)));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderInspectsForwardMergeArguments()
     {
         var section = ReadExample("#### Compact indexed conditional merge");
-        Assert.Equal((4, 4), InspectIndexed(section));
+        Assert.That(InspectIndexed(section), Is.EqualTo((4, 4)));
     }
-
-    [Theory]
-    [InlineData(75, 3)]
-    [InlineData(77, 1)]
-    [InlineData(89, 2)]
-    [InlineData(93, 3)]
+    [TestCase(75,(byte)(3))]
+    [TestCase(77,(byte)(1))]
+    [TestCase(89,(byte)(2))]
+    [TestCase(93,(byte)(3))]
     public void CompactIndexedReaderRejectsInvalidMergeEdges(int offset, byte value)
     {
         var section = ReadExample("#### Compact indexed conditional merge");
         section[offset] = value;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
     }
-
-    [Theory]
-    [InlineData(24, 1)]
-    [InlineData(36, 13)]
-    [InlineData(41, 11)]
-    [InlineData(44, 0x3A)]
-    [InlineData(58, 1)]
-    [InlineData(60, 2)]
-    [InlineData(77, 4)]
-    [InlineData(76, 8)]
+    [TestCase(24,(byte)(1))]
+    [TestCase(36,(byte)(13))]
+    [TestCase(41,(byte)(11))]
+    [TestCase(44,(byte)(0x3A))]
+    [TestCase(58,(byte)(1))]
+    [TestCase(60,(byte)(2))]
+    [TestCase(77,(byte)(4))]
+    [TestCase(76,(byte)(8))]
     public void CompactIndexedReaderRejectsInvalidIndexesAndEdges(int offset, byte value)
     {
         var section = ReadExample("#### Compact indexed conditional sum");
@@ -507,7 +485,7 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderBoundsMutatedAndTruncatedRows()
     {
         var example = ReadExample("#### Compact indexed conditional sum");
@@ -532,7 +510,7 @@ public sealed class TrRmBodyExampleTests
         }
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderAllowsValueFreeFailureWithNonvoidSignature()
     {
         byte[] section =
@@ -540,23 +518,23 @@ public sealed class TrRmBodyExampleTests
             0, 0, 0, 0, 14, 0, 0, 0,
             0x08, 1, 0, 0, 0, 0, 0, 0, 4, 2, 0, 0, 0x87, 1,
         ];
-        Assert.Equal((1, 0), InspectIndexed(section, 0));
+        Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 0)));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksConstantAndCopyDefinitions()
     {
         var section = IndexedConstantCopy();
-        Assert.Equal((1, 2), InspectIndexed(section, 0));
+        Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
 
         section[35] = 2;
         section[38] = 0xFF;
-        Assert.Equal((1, 2), InspectIndexed(section, 0));
+        Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 0, secondTypeCode: 0x0D));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderRejectsDuplicateResolvedTypeMapKeys()
     {
         var original = IndexedConstantCopy();
@@ -568,18 +546,16 @@ public sealed class TrRmBodyExampleTests
         BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(17), 1);
         original.AsSpan(17).CopyTo(section.AsSpan(21));
 
-        Assert.Equal((1, 2), InspectIndexed(section, 0));
+        Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 0, firstTypeCode: 8, secondTypeCode: 8));
     }
-
-    [Theory]
-    [InlineData(13, 0)]
-    [InlineData(23, 0)]
-    [InlineData(35, 0xF0)]
-    [InlineData(37, 0)]
-    [InlineData(41, 2)]
-    [InlineData(38, 0xFF)]
+    [TestCase(13,(byte)(0))]
+    [TestCase(23,(byte)(0))]
+    [TestCase(35,(byte)(0xF0))]
+    [TestCase(37,(byte)(0))]
+    [TestCase(41,(byte)(2))]
+    [TestCase(38,(byte)(0xFF))]
     public void CompactIndexedReaderRejectsInvalidScalarOperations(int offset, byte value)
     {
         var section = IndexedConstantCopy();
@@ -595,16 +571,16 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderBoundsWideBitPatternsAndSignedValues()
     {
         var section = WideIndexedConstant();
-        Assert.Equal((1, 2), InspectIndexed(section, 0, secondTypeCode: 9));
+        Assert.That(InspectIndexed(section, 0, secondTypeCode: 9), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
 
         section[37] = 2;
         BinaryPrimitives.WriteUInt64LittleEndian(section.AsSpan(40), 1UL << 63);
-        Assert.Equal((1, 2), InspectIndexed(section, 0, secondTypeCode: 9));
+        Assert.That(InspectIndexed(section, 0, secondTypeCode: 9), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
         Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 0, secondTypeCode: 0x0E));
@@ -614,7 +590,7 @@ public sealed class TrRmBodyExampleTests
             InspectIndexed(section, 0, secondTypeCode: 9));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderAllowsWideReferenceOperandsIndependentlyOfBodyLayout()
     {
         var original = IndexedConstantCopy();
@@ -626,7 +602,7 @@ public sealed class TrRmBodyExampleTests
         section[27] = 18;
         byte[] copy = [0xF0, 1, 3, 2, 0, 1, 0];
         copy.CopyTo(section, 39);
-        Assert.Equal((1, 2), InspectIndexed(section, 0));
+        Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
 
         section[40] = 3;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
@@ -634,7 +610,7 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksPrefixedReturnWidth()
     {
         var original = IndexedConstantCopy();
@@ -644,13 +620,13 @@ public sealed class TrRmBodyExampleTests
         section[26] = 19;
         byte[] terminator = [0xF0, 1, 0x83, 2, 0];
         terminator.CopyTo(section, 42);
-        Assert.Equal((1, 2), InspectIndexed(section, 0));
+        Assert.That(InspectIndexed(section, 0), Is.EqualTo((1, 2)));
 
         section[43] = 5;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksPrefixedBranchReferenceAndCountWidths()
     {
         var original = ReadExample("#### Compact indexed conditional sum");
@@ -666,40 +642,38 @@ public sealed class TrRmBodyExampleTests
             0xF0, 5, 0x81, 1, 0, 2, 0, 0, 0, 3, 0, 0, 0,
         ];
         terminator.CopyTo(section, 56);
-        Assert.Equal((3, 4), InspectIndexed(section));
+        Assert.That(InspectIndexed(section), Is.EqualTo((3, 4)));
 
         section[57] = 0x25;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x82, 1, 1, 0, 3, 0, 2, 0 })]
-    [InlineData(new byte[] { 0x82, 1, 2, 0, 3, 0, 1, 2, 0, 2, 0 })]
-    [InlineData(new byte[] { 0xF0, 0x10, 0x82, 1, 1, 0, 0, 3, 0, 2, 0 })]
-    [InlineData(new byte[] { 0xF0, 0x05, 0x82, 1, 0, 1, 0, 0, 3, 0, 0, 0,
+    [TestCase(new byte[] { 0x82, 1, 1, 0, 3, 0, 2, 0 })]
+    [TestCase(new byte[] { 0x82, 1, 2, 0, 3, 0, 1, 2, 0, 2, 0 })]
+    [TestCase(new byte[] { 0xF0, 0x10, 0x82, 1, 1, 0, 0, 3, 0, 2, 0 })]
+    [TestCase(new byte[] { 0xF0, 0x05, 0x82, 1, 0, 1, 0, 0, 3, 0, 0, 0,
         2, 0, 0, 0 })]
     public void CompactIndexedReaderChecksSwitchEdges(byte[] terminator)
-        => Assert.Equal((3, 4), InspectIndexed(IndexedBoolSwitch(terminator)));
+        => Assert.That(InspectIndexed(IndexedBoolSwitch(terminator)), Is.EqualTo((3, 4)));
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksChar16SwitchPatternWidth()
     {
         byte[] terminator = [0xF0, 0x10, 0x82, 1, 1, 0xFF, 0xFF, 3, 0, 2, 0];
-        Assert.Equal((3, 4), InspectIndexed(IndexedBoolSwitch(terminator),
-            firstTypeCode: 3));
+        Assert.That(InspectIndexed(IndexedBoolSwitch(terminator),
+            firstTypeCode: 3), Is.EqualTo((3, 4)));
 
         byte[] invalid = [0xF0, 0x20, 0x82, 1, 1, 0, 0, 1, 0, 3, 0, 2, 0];
         Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedBoolSwitch(invalid), firstTypeCode: 3));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksIntegerSwitchPatternWidth()
     {
         byte[] terminator = [0xF0, 0x20, 0x82, 1, 1, 0xFF, 0xFF, 0xFF, 0xFF,
             3, 0, 2, 0];
-        Assert.Equal((3, 4), InspectIndexed(IndexedBoolSwitch(terminator),
-            firstTypeCode: 8, secondTypeCode: 0x0D));
+        Assert.That(InspectIndexed(IndexedBoolSwitch(terminator),
+            firstTypeCode: 8, secondTypeCode: 0x0D), Is.EqualTo((3, 4)));
 
         byte[] invalid = [0xF0, 0x30, 0x82, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0,
             3, 0, 2, 0];
@@ -707,13 +681,11 @@ public sealed class TrRmBodyExampleTests
             InspectIndexed(IndexedBoolSwitch(invalid),
                 firstTypeCode: 8, secondTypeCode: 0x0D));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x82, 1, 1, 2, 3, 0, 2, 0 })]
-    [InlineData(new byte[] { 0x82, 1, 2, 1, 3, 0, 0, 2, 0, 2, 0 })]
-    [InlineData(new byte[] { 0x82, 1, 10, 0, 3, 0, 2, 0 })]
-    [InlineData(new byte[] { 0x82, 1, 1, 0, 1, 0, 2, 0 })]
-    [InlineData(new byte[] { 0xF0, 0x40, 0x82, 1, 1, 0, 3, 0, 2, 0 })]
+    [TestCase(new byte[] { 0x82, 1, 1, 2, 3, 0, 2, 0 })]
+    [TestCase(new byte[] { 0x82, 1, 2, 1, 3, 0, 0, 2, 0, 2, 0 })]
+    [TestCase(new byte[] { 0x82, 1, 10, 0, 3, 0, 2, 0 })]
+    [TestCase(new byte[] { 0x82, 1, 1, 0, 1, 0, 2, 0 })]
+    [TestCase(new byte[] { 0xF0, 0x40, 0x82, 1, 1, 0, 3, 0, 2, 0 })]
     public void CompactIndexedReaderRejectsMalformedSwitch(byte[] terminator)
         => Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedBoolSwitch(terminator)));
@@ -732,149 +704,127 @@ public sealed class TrRmBodyExampleTests
         section[40] = (byte)(46 + extra);
         return section;
     }
-
-    [Theory]
-    [InlineData(new byte[] { 4, 2, 2, 1 }, new byte[] { 2 }, (byte)2)]
-    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)1)]
-    [InlineData(new byte[] { 5, 3, 6, 1, 2 }, new byte[] { 2, 2 }, (byte)1)]
-    [InlineData(new byte[] { 5, 3, 10, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 1, 1 }, (byte)1)]
-    [InlineData(new byte[] { 7, 4, 1, 2, 3 }, new byte[] { 1, 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 4, 2, 1, 1 }, new byte[] { 1 }, (byte)1)]
-    [InlineData(new byte[] { 0x15, 3, 2, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 0x15, 3, 3, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 0x15, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 0x15, 3, 5, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 0x15, 3, 6, 1, 2 }, new byte[] { 2, 3 }, (byte)2)]
-    [InlineData(new byte[] { 0x15, 3, 7, 1, 2 }, new byte[] { 2, 3 }, (byte)2)]
-    [InlineData(new byte[] { 0x16, 2, 3, 1 }, new byte[] { 2 }, (byte)3)]
-    [InlineData(new byte[] { 0x16, 2, 2, 1 }, new byte[] { 3 }, (byte)2)]
-    [InlineData(new byte[] { 0x17, 2, 1 }, new byte[] { 2 }, (byte)2)]
+    [TestCase(new byte[] { 4, 2, 2, 1 },new byte[] { 2 },(byte)2)]
+    [TestCase(new byte[] { 5, 3, 4, 1, 2 },new byte[] { 2, 2 },(byte)1)]
+    [TestCase(new byte[] { 5, 3, 6, 1, 2 },new byte[] { 2, 2 },(byte)1)]
+    [TestCase(new byte[] { 5, 3, 10, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 5, 3, 4, 1, 2 },new byte[] { 1, 1 },(byte)1)]
+    [TestCase(new byte[] { 7, 4, 1, 2, 3 },new byte[] { 1, 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 4, 2, 1, 1 },new byte[] { 1 },(byte)1)]
+    [TestCase(new byte[] { 0x15, 3, 2, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 0x15, 3, 3, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 0x15, 3, 4, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 0x15, 3, 5, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 0x15, 3, 6, 1, 2 },new byte[] { 2, 3 },(byte)2)]
+    [TestCase(new byte[] { 0x15, 3, 7, 1, 2 },new byte[] { 2, 3 },(byte)2)]
+    [TestCase(new byte[] { 0x16, 2, 3, 1 },new byte[] { 2 },(byte)3)]
+    [TestCase(new byte[] { 0x16, 2, 2, 1 },new byte[] { 3 },(byte)2)]
+    [TestCase(new byte[] { 0x17, 2, 1 },new byte[] { 2 },(byte)2)]
     public void CompactIndexedReaderChecksScalarOperatorResults(
         byte[] operation, byte[] parameters, byte resultType)
     {
         var section = IndexedScalarOperation(operation, parameters, resultType);
-        Assert.Equal((1, parameters.Length + 1),
-            InspectIndexed(section, parameters.Length, resultTypeSpec: resultType,
-                parameterTypeIds: parameters, thirdTypeCode: 0x0D));
+        Assert.That(InspectIndexed(section, parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeCode: 0x0D), Is.EqualTo((1, parameters.Length + 1)));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 4, 2, 0, 1 }, new byte[] { 2 }, (byte)2)]
-    [InlineData(new byte[] { 5, 3, 13, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 7, 4, 2, 1, 3 }, new byte[] { 1, 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 5, 3, 1, 1, 2 }, new byte[] { 1, 1 }, (byte)1)]
-    [InlineData(new byte[] { 0x15, 3, 6, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 0x15, 3, 8, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
-    [InlineData(new byte[] { 0x16, 2, 1, 1 }, new byte[] { 2 }, (byte)2)]
+    [TestCase(new byte[] { 4, 2, 0, 1 },new byte[] { 2 },(byte)2)]
+    [TestCase(new byte[] { 5, 3, 13, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 5, 3, 4, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 7, 4, 2, 1, 3 },new byte[] { 1, 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 5, 3, 1, 1, 2 },new byte[] { 1, 1 },(byte)1)]
+    [TestCase(new byte[] { 0x15, 3, 6, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 0x15, 3, 8, 1, 2 },new byte[] { 2, 2 },(byte)2)]
+    [TestCase(new byte[] { 0x16, 2, 1, 1 },new byte[] { 2 },(byte)2)]
     public void CompactIndexedReaderRejectsInvalidScalarOperatorResults(
         byte[] operation, byte[] parameters, byte resultType)
         => Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeCode: 0x0D));
-
-    [Theory]
-    [InlineData(1, (byte)0x0E, (byte)8)]
-    [InlineData(2, (byte)0x0E, (byte)8)]
-    [InlineData(3, (byte)0x0D, (byte)8)]
-    [InlineData(3, (byte)0x0E, (byte)9)]
+    [TestCase((byte)(1),(byte)0x0E,(byte)8)]
+    [TestCase((byte)(2),(byte)0x0E,(byte)8)]
+    [TestCase((byte)(3),(byte)0x0D,(byte)8)]
+    [TestCase((byte)(3),(byte)0x0E,(byte)9)]
     public void CompactIndexedReaderAcceptsIntegerConvertPolicies(byte policy,
         byte destinationType, byte sourceType)
     {
         var operation = new byte[] { 6, 2, 3, policy, 1 };
-        Assert.Equal((1, 2), InspectIndexed(
+        Assert.That(InspectIndexed(
             IndexedScalarOperation(operation, [2], 3), 1,
             secondTypeCode: sourceType, resultTypeSpec: 3,
-            parameterTypeIds: [2], thirdTypeCode: destinationType));
+            parameterTypeIds: [2], thirdTypeCode: destinationType), Is.EqualTo((1, 2)));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderAcceptsPrefixedConvertReferenceWidth()
     {
         byte[] operation = [0xF0, 1, 6, 2, 0, 3, 0, 1, 1, 0];
-        Assert.Equal((1, 2), InspectIndexed(
+        Assert.That(InspectIndexed(
             IndexedScalarOperation(operation, [2], 3), 1, resultTypeSpec: 3,
-            parameterTypeIds: [2], thirdTypeCode: 0x0D));
+            parameterTypeIds: [2], thirdTypeCode: 0x0D), Is.EqualTo((1, 2)));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 6, 2, 3, 0, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0D)]
-    [InlineData(new byte[] { 6, 2, 3, 4, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0D)]
-    [InlineData(new byte[] { 6, 2, 2, 1, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0D)]
-    [InlineData(new byte[] { 6, 2, 3, 3, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0E)]
-    [InlineData(new byte[] { 6, 2, 3, 1, 1 }, new byte[] { 1 }, (byte)3, (byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 3, 0, 1 },new byte[] { 2 },(byte)3,(byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 3, 4, 1 },new byte[] { 2 },(byte)3,(byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 2, 1, 1 },new byte[] { 2 },(byte)3,(byte)0x0D)]
+    [TestCase(new byte[] { 6, 2, 3, 3, 1 },new byte[] { 2 },(byte)3,(byte)0x0E)]
+    [TestCase(new byte[] { 6, 2, 3, 1, 1 },new byte[] { 1 },(byte)3,(byte)0x0D)]
     public void CompactIndexedReaderRejectsInvalidIntegerConvert(
         byte[] operation, byte[] parameters, byte resultType, byte destinationType)
         => Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeCode: destinationType));
-
-    [Theory]
-    [InlineData(new byte[] { 6, 2, 3, 1, 1 }, new byte[] { 2 }, (byte)3)]
-    [InlineData(new byte[] { 6, 2, 2, 2, 1 }, new byte[] { 3 }, (byte)2)]
+    [TestCase(new byte[] { 6, 2, 3, 1, 1 },new byte[] { 2 },(byte)3)]
+    [TestCase(new byte[] { 6, 2, 2, 2, 1 },new byte[] { 3 },(byte)2)]
     public void CompactIndexedReaderRejectsOptionalIntegerConvert(
         byte[] operation, byte[] parameters, byte resultType)
         => Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeOptional: true));
-
-    [Theory]
-    [InlineData((byte)3, (byte)8)]
-    [InlineData((byte)3, (byte)0x0E)]
-    [InlineData((byte)8, (byte)3)]
-    [InlineData((byte)0x0D, (byte)3)]
-    [InlineData((byte)9, (byte)3)]
+    [TestCase((byte)3,(byte)8)]
+    [TestCase((byte)3,(byte)0x0E)]
+    [TestCase((byte)8,(byte)3)]
+    [TestCase((byte)0x0D,(byte)3)]
+    [TestCase((byte)9,(byte)3)]
     public void CompactIndexedReaderChecksChar16RangeConvert(byte source, byte destination)
     {
         var section = IndexedScalarOperation([0x16, 2, 3, 1], [2], 3);
-        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+        Assert.That(InspectIndexed(section, parameterCount: 1,
             secondTypeCode: source, thirdTypeCode: destination,
-            resultTypeSpec: 3, parameterTypeIds: [2]));
+            resultTypeSpec: 3, parameterTypeIds: [2]), Is.EqualTo((1, 2)));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x16, 2, 3, 1 }, new byte[] { 2 }, (byte)3)]
-    [InlineData(new byte[] { 0x16, 2, 2, 1 }, new byte[] { 3 }, (byte)2)]
+    [TestCase(new byte[] { 0x16, 2, 3, 1 },new byte[] { 2 },(byte)3)]
+    [TestCase(new byte[] { 0x16, 2, 2, 1 },new byte[] { 3 },(byte)2)]
     public void CompactIndexedReaderRejectsOptionalChar16RangeConvert(
         byte[] operation, byte[] parameters, byte resultType)
         => Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
                 parameters.Length, secondTypeCode: 3, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeOptional: true));
-
-    [Theory]
-    [InlineData(new byte[] { 1, 1, 3, 42 }, new byte[] { }, (byte)3, false)]
-    [InlineData(new byte[] { 0xF0, 0x10, 1, 1, 3, 0xFF, 0xFF },
-        new byte[] { }, (byte)3, false)]
-    [InlineData(new byte[] { 3, 2, 1 }, new byte[] { 3 }, (byte)3, false)]
-    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 3, 3 }, (byte)1, false)]
-    [InlineData(new byte[] { 5, 3, 5, 1, 2 }, new byte[] { 3, 3 }, (byte)1, false)]
-    [InlineData(new byte[] { 8, 2, 3, 1 }, new byte[] { 2 }, (byte)3, true)]
-    [InlineData(new byte[] { 9, 1, 3 }, new byte[] { }, (byte)3, true)]
-    [InlineData(new byte[] { 0x0A, 2, 1 }, new byte[] { 3 }, (byte)1, true)]
+    [TestCase(new byte[] { 1, 1, 3, 42 },new byte[] { },(byte)3,false)]
+    [TestCase(new byte[] { 0xF0, 0x10, 1, 1, 3, 0xFF, 0xFF },        new byte[] { },(byte)3,false)]
+    [TestCase(new byte[] { 3, 2, 1 },new byte[] { 3 },(byte)3,false)]
+    [TestCase(new byte[] { 5, 3, 4, 1, 2 },new byte[] { 3, 3 },(byte)1,false)]
+    [TestCase(new byte[] { 5, 3, 5, 1, 2 },new byte[] { 3, 3 },(byte)1,false)]
+    [TestCase(new byte[] { 8, 2, 3, 1 },new byte[] { 2 },(byte)3,true)]
+    [TestCase(new byte[] { 9, 1, 3 },new byte[] { },(byte)3,true)]
+    [TestCase(new byte[] { 0x0A, 2, 1 },new byte[] { 3 },(byte)1,true)]
     public void CompactIndexedReaderPreservesChar16CodeUnits(
         byte[] operation, byte[] parameters, byte resultType, bool optional)
     {
-        Assert.Equal((1, parameters.Length + 1),
-            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+        Assert.That(InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
                 parameters.Length, secondTypeCode: optional ? (byte)3 : (byte)8,
                 resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeCode: optional ? null : (byte)3,
-                thirdTypeOptional: optional));
+                thirdTypeOptional: optional), Is.EqualTo((1, parameters.Length + 1)));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0xF0, 0x20, 1, 1, 3, 0, 0, 1, 0 },
-        new byte[] { }, (byte)3)]
-    [InlineData(new byte[] { 2, 1, 3, 42 }, new byte[] { }, (byte)3)]
-    [InlineData(new byte[] { 4, 2, 2, 1 }, new byte[] { 3 }, (byte)3)]
-    [InlineData(new byte[] { 5, 3, 6, 1, 2 }, new byte[] { 3, 3 }, (byte)1)]
-    [InlineData(new byte[] { 5, 3, 10, 1, 2 }, new byte[] { 3, 3 }, (byte)3)]
-    [InlineData(new byte[] { 6, 2, 3, 1, 1 }, new byte[] { 3 }, (byte)3)]
+    [TestCase(new byte[] { 0xF0, 0x20, 1, 1, 3, 0, 0, 1, 0 },        new byte[] { },(byte)3)]
+    [TestCase(new byte[] { 2, 1, 3, 42 },new byte[] { },(byte)3)]
+    [TestCase(new byte[] { 4, 2, 2, 1 },new byte[] { 3 },(byte)3)]
+    [TestCase(new byte[] { 5, 3, 6, 1, 2 },new byte[] { 3, 3 },(byte)1)]
+    [TestCase(new byte[] { 5, 3, 10, 1, 2 },new byte[] { 3, 3 },(byte)3)]
+    [TestCase(new byte[] { 6, 2, 3, 1, 1 },new byte[] { 3 },(byte)3)]
     public void CompactIndexedReaderRejectsIntegerOperationsOnChar16(
         byte[] operation, byte[] parameters, byte resultType)
         => Assert.Throws<InvalidDataException>(() =>
@@ -882,7 +832,7 @@ public sealed class TrRmBodyExampleTests
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeCode: 3));
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderRejectsUnsignedCheckedNegate()
     {
         var section = IndexedScalarOperation([0x17, 2, 1], [2], 2);
@@ -890,30 +840,27 @@ public sealed class TrRmBodyExampleTests
             InspectIndexed(section, 1, secondTypeCode: 0x0D,
                 parameterTypeIds: [2]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 8, 2, 3, 1 }, new byte[] { 2 }, (byte)3)]
-    [InlineData(new byte[] { 9, 1, 3 }, new byte[] { }, (byte)3)]
-    [InlineData(new byte[] { 0x0A, 2, 1 }, new byte[] { 3 }, (byte)1)]
-    [InlineData(new byte[] { 3, 2, 1 }, new byte[] { 3 }, (byte)3)]
-    [InlineData(new byte[] { 7, 4, 1, 2, 3 }, new byte[] { 1, 3, 3 }, (byte)3)]
+    [TestCase(new byte[] { 8, 2, 3, 1 },new byte[] { 2 },(byte)3)]
+    [TestCase(new byte[] { 9, 1, 3 },new byte[] { },(byte)3)]
+    [TestCase(new byte[] { 0x0A, 2, 1 },new byte[] { 3 },(byte)1)]
+    [TestCase(new byte[] { 3, 2, 1 },new byte[] { 3 },(byte)3)]
+    [TestCase(new byte[] { 7, 4, 1, 2, 3 },new byte[] { 1, 3, 3 },(byte)3)]
     public void CompactIndexedReaderPreservesOptionalPresence(
         byte[] operation, byte[] parameters, byte resultType)
     {
         var section = IndexedScalarOperation(operation, parameters, resultType);
-        Assert.Equal((1, parameters.Length + 1),
-            InspectIndexed(section, parameters.Length, resultTypeSpec: resultType,
-                parameterTypeIds: parameters, thirdTypeOptional: true));
+        Assert.That(InspectIndexed(section, parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeOptional: true), Is.EqualTo((1, parameters.Length + 1)));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderAllowsOnlyOptionalChar16Equality()
     {
         var optionalCharEquality = IndexedScalarOperation(
             [5, 3, 4, 1, 2], [3, 3], 1);
-        Assert.Equal((1, 3), InspectIndexed(optionalCharEquality, 2,
+        Assert.That(InspectIndexed(optionalCharEquality, 2,
             resultTypeSpec: 1, parameterTypeIds: [3, 3], secondTypeCode: 3,
-            thirdTypeOptional: true));
+            thirdTypeOptional: true), Is.EqualTo((1, 3)));
 
         var optionalIntegerEquality = IndexedScalarOperation(
             [5, 3, 4, 1, 2], [3, 3], 1);
@@ -921,12 +868,10 @@ public sealed class TrRmBodyExampleTests
             resultTypeSpec: 1, parameterTypeIds: [3, 3], secondTypeCode: 8,
             thirdTypeOptional: true));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 8, 2, 3, 1 }, new byte[] { 3 }, (byte)3)]
-    [InlineData(new byte[] { 9, 1, 2 }, new byte[] { }, (byte)3)]
-    [InlineData(new byte[] { 0x0A, 2, 1 }, new byte[] { 2 }, (byte)1)]
-    [InlineData(new byte[] { 1, 1, 3, 1 }, new byte[] { }, (byte)3)]
+    [TestCase(new byte[] { 8, 2, 3, 1 },new byte[] { 3 },(byte)3)]
+    [TestCase(new byte[] { 9, 1, 2 },new byte[] { },(byte)3)]
+    [TestCase(new byte[] { 0x0A, 2, 1 },new byte[] { 2 },(byte)1)]
+    [TestCase(new byte[] { 1, 1, 3, 1 },new byte[] { },(byte)3)]
     public void CompactIndexedReaderRejectsOptionalScalarConfusion(
         byte[] operation, byte[] parameters, byte resultType)
         => Assert.Throws<InvalidDataException>(() =>
@@ -934,7 +879,7 @@ public sealed class TrRmBodyExampleTests
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeOptional: true));
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderRejectsCheckedExceptionPolicy()
     {
         var section = IndexedScalarOperation([0x15, 3, 1, 1, 2], [2, 2], 2);
@@ -943,18 +888,16 @@ public sealed class TrRmBodyExampleTests
                 runtimePolicy: 1));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderIndexesTwoResultsFromOneCheckedOperation()
     {
-        Assert.Equal((1, 4), InspectIndexed(IndexedDivRem(), 2,
-            parameterTypeIds: [2, 2]));
+        Assert.That(InspectIndexed(IndexedDivRem(), 2,
+            parameterTypeIds: [2, 2]), Is.EqualTo((1, 4)));
     }
-
-    [Theory]
-    [InlineData(26, 1)]
-    [InlineData(34, 13)]
-    [InlineData(52, 3)]
-    [InlineData(53, 3)]
+    [TestCase(26,(byte)(1))]
+    [TestCase(34,(byte)(13))]
+    [TestCase(52,(byte)(3))]
+    [TestCase(53,(byte)(3))]
     public void CompactIndexedReaderRejectsMalformedDualResults(int offset, byte value)
     {
         var section = IndexedDivRem();
@@ -962,43 +905,40 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(section, 2, parameterTypeIds: [2, 2]));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x12, 1, 1, 0 }, new byte[0], 1)]
-    [InlineData(new byte[] { 0x12, 2, 1, 1, 1 }, new byte[] { 2 }, 2)]
-    [InlineData(new byte[] { 0xF0, 0x04, 0x12, 2, 1, 1, 0, 1 }, new byte[] { 2 }, 2)]
-    [InlineData(new byte[] { 0xF0, 0x05, 0x12, 2, 0, 1, 0, 1, 0, 1, 0 },
-        new byte[] { 2 }, 2)]
+    [TestCase(new byte[] { 0x12, 1, 1, 0 },new byte[0],1)]
+    [TestCase(new byte[] { 0x12, 2, 1, 1, 1 },new byte[] { 2 },2)]
+    [TestCase(new byte[] { 0xF0, 0x04, 0x12, 2, 1, 1, 0, 1 },new byte[] { 2 },2)]
+    [TestCase(new byte[] { 0xF0, 0x05, 0x12, 2, 0, 1, 0, 1, 0, 1, 0 },        new byte[] { 2 },2)]
     public void CompactIndexedReaderChecksLocalScalarCalls(
         byte[] operation, byte[] parameters, int values)
-        => Assert.Equal((1, values), InspectIndexed(
+        => Assert.That(InspectIndexed(
             IndexedScalarOperation(operation, parameters, 2),
-            parameters.Length, resultTypeSpec: 2, parameterTypeIds: parameters));
+            parameters.Length, resultTypeSpec: 2, parameterTypeIds: parameters), Is.EqualTo((1, values)));
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderPreservesOptionalCallSignatures()
-        => Assert.Equal((1, 2), InspectIndexed(
+        => Assert.That(InspectIndexed(
             IndexedScalarOperation([0x12, 2, 1, 1, 1], [3], 3),
             parameterCount: 1, resultTypeSpec: 3, parameterTypeIds: [3],
-            thirdTypeOptional: true));
+            thirdTypeOptional: true), Is.EqualTo((1, 2)));
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderResolvesTheSecondLocalMethod()
     {
         var section = IndexedScalarOperation([0x12, 2, 2, 1, 1], [2], 2);
-        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
-            parameterTypeIds: [2], secondMethod: true));
-        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
-            parameterTypeIds: [2], secondMethod: true, ownedTarget: true));
+        Assert.That(InspectIndexed(section, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true), Is.EqualTo((1, 2)));
+        Assert.That(InspectIndexed(section, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, ownedTarget: true), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             importedTarget: true));
-        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+        Assert.That(InspectIndexed(section, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true,
-            importedTarget: true, expectedTarget: true));
-        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+            importedTarget: true, expectedTarget: true), Is.EqualTo((1, 2)));
+        Assert.That(InspectIndexed(section, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true,
-            importedTarget: true, expectedTarget: true, ownedTarget: true));
+            importedTarget: true, expectedTarget: true, ownedTarget: true), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             importedTarget: true, expectedTarget: true, ownedTarget: true,
@@ -1008,35 +948,35 @@ public sealed class TrRmBodyExampleTests
             expectedTarget: true));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksPackedDirectCallIdentity()
     {
         var body = IndexedScalarOperation([0x12, 2, 0, 2, 0, 0, 0x16, 1, 1],
             [2], 2);
-        Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
-            parameterTypeIds: [2], secondMethod: true, packedTarget: true));
-        Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
+        Assert.That(InspectIndexed(body, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, packedTarget: true), Is.EqualTo((1, 2)));
+        Assert.That(InspectIndexed(body, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, packedTarget: true,
-            callerTargetRequirement: 1));
+            callerTargetRequirement: 1), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             packedTarget: true, packedTargetRuntimePolicy: 1));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             packedTarget: true, packedTargetRequirement: 1));
-        Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
+        Assert.That(InspectIndexed(body, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, packedTarget: true,
-            callerTargetRequirement: 1, packedTargetRequirement: 1));
-        Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
+            callerTargetRequirement: 1, packedTargetRequirement: 1), Is.EqualTo((1, 2)));
+        Assert.That(InspectIndexed(body, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, packedTarget: true,
-            ownedTarget: true));
+            ownedTarget: true), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             packedTarget: true, ownedTarget: true, privateOwner: true));
         var wide = IndexedScalarOperation(
             [0xF0, 5, 0x12, 2, 0, 0, 0, 2, 0, 0, 0x16, 1, 0, 1, 0], [2], 2);
-        Assert.Equal((1, 2), InspectIndexed(wide, parameterCount: 1,
-            parameterTypeIds: [2], secondMethod: true, packedTarget: true));
+        Assert.That(InspectIndexed(wide, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, packedTarget: true), Is.EqualTo((1, 2)));
 
         foreach (var (offset, value) in new (int, byte)[]
         {
@@ -1048,7 +988,7 @@ public sealed class TrRmBodyExampleTests
             var invalid = IndexedScalarOperation([0x12, 2, 0, 2, 0, 0, 0x16, 1, 1],
                 [2], 2);
             var direct = invalid.AsSpan().IndexOf(new byte[] { 0x12, 2, 0, 2, 0, 0, 0x16, 1, 1 });
-            Assert.True(direct >= 0);
+            Assert.That(direct >= 0, Is.True);
             invalid[direct + offset] = value;
             Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
                 parameterCount: 1, parameterTypeIds: [2],
@@ -1057,40 +997,36 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void CompactIndexedReaderRejectsGenericExternalOwner(bool packedTarget)
     {
         var operation = packedTarget
             ? new byte[] { 0x12, 2, 0, 2, 0, 0, 0x16, 1, 1 }
             : [0x12, 2, 2, 1, 1];
         var section = IndexedScalarOperation(operation, [2], 2);
-        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+        Assert.That(InspectIndexed(section, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, ownedTarget: true,
             packedTarget: packedTarget, importedTarget: !packedTarget,
-            expectedTarget: !packedTarget));
+            expectedTarget: !packedTarget), Is.EqualTo((1, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             ownedTarget: true, packedTarget: packedTarget, importedTarget: !packedTarget,
             expectedTarget: !packedTarget, genericOwner: true));
     }
-
-    [Theory]
-    [InlineData(new byte[] { 0x12, 1, 0, 0 }, new byte[0])]
-    [InlineData(new byte[] { 0x12, 1, 2, 0 }, new byte[0])]
-    [InlineData(new byte[] { 0x12, 1, 1, 1, 1 }, new byte[0])]
-    [InlineData(new byte[] { 0x12, 2, 1, 0 }, new byte[] { 2 })]
-    [InlineData(new byte[] { 0x12, 0, 1, 0 }, new byte[0])]
-    [InlineData(new byte[] { 0xF0, 0x0C, 0x12, 1, 1, 0 }, new byte[0])]
+    [TestCase(new byte[] { 0x12, 1, 0, 0 },new byte[0])]
+    [TestCase(new byte[] { 0x12, 1, 2, 0 },new byte[0])]
+    [TestCase(new byte[] { 0x12, 1, 1, 1, 1 },new byte[0])]
+    [TestCase(new byte[] { 0x12, 2, 1, 0 },new byte[] { 2 })]
+    [TestCase(new byte[] { 0x12, 0, 1, 0 },new byte[0])]
+    [TestCase(new byte[] { 0xF0, 0x0C, 0x12, 1, 1, 0 },new byte[0])]
     public void CompactIndexedReaderRejectsInvalidLocalScalarCalls(
         byte[] operation, byte[] parameters)
         => Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedScalarOperation(operation, parameters, 2),
                 parameters.Length, resultTypeSpec: 2, parameterTypeIds: parameters));
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderAllowsVoidCallsWithoutValueDefinitions()
     {
         byte[] row =
@@ -1102,23 +1038,23 @@ public sealed class TrRmBodyExampleTests
         var section = new byte[row.Length + 8];
         BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(4), (uint)row.Length);
         row.CopyTo(section, 8);
-        Assert.Equal((1, 0), InspectIndexed(section, parameterCount: 0,
-            resultTypeSpec: 1, firstTypeCode: 0));
+        Assert.That(InspectIndexed(section, parameterCount: 0,
+            resultTypeSpec: 1, firstTypeCode: 0), Is.EqualTo((1, 0)));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksLoopRegionAndBackedge()
     {
         var body = IndexedScalarLoop();
-        Assert.Equal((4, 7), InspectIndexed(body, parameterCount: 1,
-            resultTypeSpec: 2, parameterTypeIds: [2]));
-        Assert.Equal((4, 7), InspectIndexed(IndexedScalarLoop(entryHeader: true),
-            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
-        Assert.Equal((7, 13), InspectIndexed(IndexedScalarLoop(siblingLoop: true),
-            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
+        Assert.That(InspectIndexed(body, parameterCount: 1,
+            resultTypeSpec: 2, parameterTypeIds: [2]), Is.EqualTo((4, 7)));
+        Assert.That(InspectIndexed(IndexedScalarLoop(entryHeader: true),
+            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]), Is.EqualTo((4, 7)));
+        Assert.That(InspectIndexed(IndexedScalarLoop(siblingLoop: true),
+            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]), Is.EqualTo((7, 13)));
 
         var region = body.AsSpan().IndexOf(new byte[] { 1, 0, 2, 4, 0 });
-        Assert.True(region >= 0);
+        Assert.That(region >= 0, Is.True);
         foreach (var (offset, replacement) in new[]
             { (0, (byte)2), (2, (byte)3), (3, (byte)3), (4, (byte)1) })
         {
@@ -1129,7 +1065,7 @@ public sealed class TrRmBodyExampleTests
         }
 
         var backedge = body.AsSpan().LastIndexOf(new byte[] { 0x80, 2, 1, 6 });
-        Assert.True(backedge >= 0);
+        Assert.That(backedge >= 0, Is.True);
         var wrongTarget = (byte[])body.Clone();
         wrongTarget[backedge + 1] = 1;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongTarget,
@@ -1143,12 +1079,12 @@ public sealed class TrRmBodyExampleTests
             resultTypeSpec: 2, parameterTypeIds: [2]));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderRejectsMalformedSiblingLoopRegions()
     {
         var body = IndexedScalarLoop(siblingLoop: true);
         var region = body.AsSpan().IndexOf(new byte[] { 1, 0, 5, 7, 0 });
-        Assert.True(region >= 0);
+        Assert.That(region >= 0, Is.True);
         foreach (var (offset, replacement) in new[]
             { (1, (byte)1), (2, (byte)2), (3, (byte)4) })
         {
@@ -1159,22 +1095,22 @@ public sealed class TrRmBodyExampleTests
         }
 
         var backedge = body.AsSpan().LastIndexOf(new byte[] { 0x80, 5, 1, 12 });
-        Assert.True(backedge >= 0);
+        Assert.That(backedge >= 0, Is.True);
         var noSecondBackedge = (byte[])body.Clone();
         noSecondBackedge[backedge + 1] = 7;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(noSecondBackedge,
             parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
     }
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderChecksNestedLoopRegions()
     {
         var body = IndexedNestedLoop();
-        Assert.Equal((6, 1), InspectIndexed(body, parameterCount: 1,
-            resultTypeSpec: 1, parameterTypeIds: [1]));
+        Assert.That(InspectIndexed(body, parameterCount: 1,
+            resultTypeSpec: 1, parameterTypeIds: [1]), Is.EqualTo((6, 1)));
 
         var innerRegion = body.AsSpan().IndexOf(new byte[] { 1, 1, 2, 4, 0 });
-        Assert.True(innerRegion >= 0);
+        Assert.That(innerRegion >= 0, Is.True);
         foreach (var (offset, replacement) in new[]
             { (1, (byte)0), (1, (byte)2), (2, (byte)3), (3, (byte)5) })
         {
@@ -1185,7 +1121,7 @@ public sealed class TrRmBodyExampleTests
         }
 
         var outerRegion = body.AsSpan().IndexOf(new byte[] { 1, 0, 1, 6, 0 });
-        Assert.True(outerRegion >= 0);
+        Assert.That(outerRegion >= 0, Is.True);
         var wrongOuterExit = (byte[])body.Clone();
         wrongOuterExit[outerRegion + 3] = 5;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongOuterExit,
@@ -1193,33 +1129,31 @@ public sealed class TrRmBodyExampleTests
 
         var skipInnerHeader = (byte[])body.Clone();
         var outerBranch = body.AsSpan().IndexOf(new byte[] { 0x81, 1, 2, 0, 6, 0 });
-        Assert.True(outerBranch >= 0);
+        Assert.That(outerBranch >= 0, Is.True);
         skipInnerHeader[outerBranch + 2] = 3;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerHeader,
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
 
         var skipInnerExit = (byte[])body.Clone();
         var innerBranch = body.AsSpan().IndexOf(new byte[] { 0x81, 1, 3, 0, 4, 0 });
-        Assert.True(innerBranch >= 0);
+        Assert.That(innerBranch >= 0, Is.True);
         skipInnerExit[innerBranch + 4] = 5;
         Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerExit,
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
     }
-
-    [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
+    [TestCase(true,false)]
+    [TestCase(false,true)]
     public void CompactIndexedReaderRejectsMissingNestedLoopPropagation(
         bool omitLiveIn, bool omitLiveOut)
         => Assert.Throws<InvalidDataException>(() => InspectIndexed(
             IndexedNestedLoop(omitPropagatedLiveIn: omitLiveIn, omitPropagatedLiveOut: omitLiveOut),
             parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
 
-    [Fact]
+    [Test]
     public void CompactIndexedReaderRejectsUnusedLivenessCirculatingThroughNestedLoops()
     {
-        Assert.Equal((6, 2), InspectIndexed(IndexedNestedLoop(unusedValue: true),
-            parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
+        Assert.That(InspectIndexed(IndexedNestedLoop(unusedValue: true),
+            parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]), Is.EqualTo((6, 2)));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(
             IndexedNestedLoop(ghostLiveness: true), parameterCount: 1,
             resultTypeSpec: 1, parameterTypeIds: [1]));
@@ -1607,8 +1541,7 @@ public sealed class TrRmBodyExampleTests
 
         var defs = new TrRmTypeDefTableReader(ownedTarget ? typeDef : [],
             ownedTarget ? 1 : 0, names, modules, 0, genericOwner ? 1 : 0, 0, 0);
-        byte[] typeBytes = (thirdTypeOptional, thirdTypeCode) switch
-        {
+        byte[] typeBytes = (thirdTypeOptional, thirdTypeCode) switch {
             (true, _) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 12, 0, 0, 0,
                 1, 0, firstTypeCode, 1, 0, secondTypeCode, 6, 0, 2, 0, 0, 0],
             (false, byte third) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 9, 0, 0, 0,
@@ -1687,8 +1620,7 @@ public sealed class TrRmBodyExampleTests
     {
         // These fixtures identify the compiler's development schema, not the
         // canonical registry, whose opcode assignments have since changed.
-        var fixtureHex = heading switch
-        {
+        var fixtureHex = heading switch {
             "GeneralCheckedAdd" => """
                 00 00 00 00 61 00 00 00
                 00 01 05 00 00 01 01 00 00 00

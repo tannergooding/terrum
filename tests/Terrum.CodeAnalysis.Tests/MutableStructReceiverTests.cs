@@ -4,16 +4,15 @@ using System;
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class MutableStructReceiverTests
 {
-    [Theory]
-    [InlineData("Counter value = new Counter(40); value.Increment();")]
-    [InlineData("new Counter(40).Increment();")]
-    [InlineData("Counter.Create().Increment();")]
+    [TestCase("Counter value = new Counter(40); value.Increment();")]
+    [TestCase("new Counter(40).Increment();")]
+    [TestCase("Counter.Create().Increment();")]
     public void MutationRequiresNamedMutableStorage(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -25,13 +24,11 @@ public sealed class MutableStructReceiverTests
             }
             int32 Main() {
             """ + body + " return 0; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("public void Readonly() { Increment(); }")]
-    [InlineData("public mut void Replace() { this = new Counter(42); }")]
+    [TestCase("public void Readonly() { Increment(); }")]
+    [TestCase("public mut void Replace() { this = new Counter(42); }")]
     public void ReadonlyMethodsAndReceiverRebindingCannotMutateStorage(string method)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -40,14 +37,12 @@ public sealed class MutableStructReceiverTests
                 public Counter(int32 value) { Value = value; }
                 public mut void Increment() { Value = Value + 1; }
             """ + method + " }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("Owner owner = new Owner(41); owner.Increment();")]
-    [InlineData("new Owner(41).Increment();")]
-    [InlineData("mut Owner owner = new Owner(41); Owner moved = move owner; owner.Increment();")]
+    [TestCase("Owner owner = new Owner(41); owner.Increment();")]
+    [TestCase("new Owner(41).Increment();")]
+    [TestCase("mut Owner owner = new Owner(41); Owner moved = move owner; owner.Increment();")]
     public void UniqueStructMutationRequiresAnInitializedWritablePlace(string body)
     {
         const string Source = """
@@ -60,11 +55,11 @@ public sealed class MutableStructReceiverTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source
             + "int32 Main() { " + body + " return 0; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void UniqueMutableReceiverReservesRootBeforeArgumentMoves()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -80,11 +75,11 @@ public sealed class MutableStructReceiverTests
                 return 0;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ForgedReadonlyLoanCannotCallUniqueMutableMethod()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -100,13 +95,13 @@ public sealed class MutableStructReceiverTests
                 return owner.Value;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var main = program.Functions[program.EntryPoint];
-        var region = Assert.IsType<BoundTryFinally>(main.Body.Statements[1]);
-        var statement = Assert.IsType<BoundExpressionStatement>(region.Body.Statements[0]);
-        var call = Assert.IsType<BoundCall>(statement.Expression);
-        var loan = Assert.IsType<BoundMutableReceiverLoan>(Assert.Single(call.Arguments));
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual1 = main.Body.Statements[1]; Assert.That(__nunitActual1, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual1!; }))();
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual2 = region.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual2!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual3 = statement.Expression; Assert.That(__nunitActual3, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual3!; }))();
+        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual4, Is.TypeOf<BoundMutableReceiverLoan>()); return (BoundMutableReceiverLoan)__nunitActual4!; }))();
         var forged = region with {
             Body = region.Body with {
                 Statements = region.Body.Statements.SetItem(0, statement with {
@@ -120,16 +115,14 @@ public sealed class MutableStructReceiverTests
             Functions = program.Functions.SetItem(program.EntryPoint, main with {
                 Body = main.Body with { Statements = main.Body.Statements.SetItem(1, forged) },
             }),
-        }));
+        }))!;
     }
-
-    [Theory]
-    [InlineData("Outer owner = new Outer(1); owner.Nested.Child.Increment(1);", "TRM3023")]
-    [InlineData("mut ReadonlyOuter owner = new ReadonlyOuter(1); owner.Nested.Child.Increment(1);", "TRM3023")]
-    [InlineData("mut Outer owner = new Outer(1); owner.Nested.Readonly.Increment(1);", "TRM3023")]
-    [InlineData("new Outer(1).Nested.Child.Increment(1);", "TRM3023")]
-    [InlineData("mut UniqueOuter owner = new UniqueOuter(1); owner.Nested.Child.Increment(1);", "TRM3023")]
-    [InlineData("mut Outer owner = new Outer(1); owner.Nested.Hidden.Increment(1);", "TRM3011")]
+    [TestCase("Outer owner = new Outer(1); owner.Nested.Child.Increment(1);","TRM3023")]
+    [TestCase("mut ReadonlyOuter owner = new ReadonlyOuter(1); owner.Nested.Child.Increment(1);","TRM3023")]
+    [TestCase("mut Outer owner = new Outer(1); owner.Nested.Readonly.Increment(1);","TRM3023")]
+    [TestCase("new Outer(1).Nested.Child.Increment(1);","TRM3023")]
+    [TestCase("mut UniqueOuter owner = new UniqueOuter(1); owner.Nested.Child.Increment(1);","TRM3023")]
+    [TestCase("mut Outer owner = new Outer(1); owner.Nested.Hidden.Increment(1);","TRM3011")]
     public void NestedReceiverRequiresWritableAccessibleNonOwningPlace(string body, string code)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -162,16 +155,14 @@ public sealed class MutableStructReceiverTests
             }
             int32 Main() {
             """ + body + " return 0; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("Owner owner = new Owner(41); owner.Child.Increment(true);")]
-    [InlineData("mut Owner owner = new Owner(41); owner.Readonly.Increment(true);")]
-    [InlineData("new Owner(41).Child.Increment(true);")]
-    [InlineData("mut Owner owner = new Owner(41); Owner moved = move owner; owner.Child.Increment(true);")]
-    [InlineData("mut Owner owner = new Owner(41); owner.Child.Increment(Replace(out owner));")]
+    [TestCase("Owner owner = new Owner(41); owner.Child.Increment(true);")]
+    [TestCase("mut Owner owner = new Owner(41); owner.Readonly.Increment(true);")]
+    [TestCase("new Owner(41).Child.Increment(true);")]
+    [TestCase("mut Owner owner = new Owner(41); Owner moved = move owner; owner.Child.Increment(true);")]
+    [TestCase("mut Owner owner = new Owner(41); owner.Child.Increment(Replace(out owner));")]
     public void UniqueFieldReceiverRequiresInitializedWritableRootAndFields(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -190,11 +181,11 @@ public sealed class MutableStructReceiverTests
             bool Replace(out Owner result) { result = new Owner(1); return true; }
             int32 Main() {
             """ + body + " return 0; }"));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void PartialUniqueConstructorCannotLoanInitializedChildBeforeWholeOwner()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -215,17 +206,15 @@ public sealed class MutableStructReceiverTests
                 [NoThrow] [Cleanup] public void Close() {}
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(5)]
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
+    [TestCase(4)]
+    [TestCase(5)]
     public void ForgedMutableFieldLoanThroughUniqueOwnerIsRejected(int mutation)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -254,14 +243,14 @@ public sealed class MutableStructReceiverTests
                 return owner.Active.Data.Value;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
         var main = program.Functions[program.EntryPoint];
-        var region = Assert.IsType<BoundTryFinally>(main.Body.Statements[1]);
-        var statement = Assert.IsType<BoundExpressionStatement>(region.Body.Statements[0]);
-        var call = Assert.IsType<BoundCall>(statement.Expression);
-        var loan = Assert.IsType<BoundMutableFieldLoan>(Assert.Single(call.Arguments));
-        var parent = Assert.IsType<BoundFieldRead>(loan.Place.Receiver);
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual6 = main.Body.Statements[1]; Assert.That(__nunitActual6, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual6!; }))();
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual7 = region.Body.Statements[0]; Assert.That(__nunitActual7, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual7!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual8 = statement.Expression; Assert.That(__nunitActual8, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual8!; }))();
+        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual9 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual9, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual9!; }))();
+        var parent = ((global::System.Func<BoundFieldRead>)(() => { var __nunitActual10 = loan.Place.Receiver; Assert.That(__nunitActual10, Is.TypeOf<BoundFieldRead>()); return (BoundFieldRead)__nunitActual10!; }))();
         var forgedPlace = mutation switch {
             0 => loan.Place with { Field = 8 },
             1 => loan.Place with { Type = PrimitiveType.Int32 },
@@ -285,10 +274,10 @@ public sealed class MutableStructReceiverTests
             Functions = program.Functions.SetItem(program.EntryPoint, main with {
                 Body = main.Body with { Statements = main.Body.Statements.SetItem(1, forged) },
             }),
-        }));
+        }))!;
     }
 
-    [Fact]
+    [Test]
     public void NestedReceiverReservesRootBeforeEvaluatingArguments()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -308,11 +297,11 @@ public sealed class MutableStructReceiverTests
                 return owner.Nested.Value;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ReadonlyThisCannotLoanItsMutableField()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -327,11 +316,11 @@ public sealed class MutableStructReceiverTests
                 public void Change() { Nested.Increment(); }
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ManagedClassFieldCannotBecomeMutableStructReceiver()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -350,10 +339,10 @@ public sealed class MutableStructReceiverTests
                 return 0;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-    [Fact]
+    [Test]
     public void MutableReceiverHasDistinctVerifiedPlaceContract()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -368,15 +357,14 @@ public sealed class MutableStructReceiverTests
                 return value.Value;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
         SemanticVerifier.Verify(program);
-        var method = Assert.Single(program.Functions,
-            function => function.Name == "Counter.Increment");
-        Assert.True(method.Variables[0].IsMutable);
+        var method = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Counter.Increment");
+        Assert.That(method.Variables[0].IsMutable, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ForgedLoanFromReadonlyLocalIsRejected()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -392,14 +380,18 @@ public sealed class MutableStructReceiverTests
                 return writable.Value;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))();
         var main = program.Functions[program.EntryPoint];
         var readonlyIndex = Array.FindIndex(main.Variables.ToArray(),
             static variable => variable.Name == "readonlyValue");
-        var call = Assert.IsType<BoundCall>(Assert.Single(main.Body.Statements
-            .OfType<BoundExpressionStatement>()).Expression);
-        var loan = Assert.IsType<BoundMutableReceiverLoan>(Assert.Single(call.Arguments));
+        var call = ((global::System.Func<BoundCall>)(() => {
+            var __nunitActual13 = global::System.Linq.Enumerable.Single(main.Body.Statements
+            .OfType<BoundExpressionStatement>()).Expression;
+            Assert.That(__nunitActual13, Is.TypeOf<BoundCall>());
+            return (BoundCall)__nunitActual13!;
+        }))();
+        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => { var __nunitActual14 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual14, Is.TypeOf<BoundMutableReceiverLoan>()); return (BoundMutableReceiverLoan)__nunitActual14!; }))();
         var forgedCall = call with { Arguments = [loan with { Variable = readonlyIndex }] };
         var index = Array.FindIndex(main.Body.Statements.ToArray(),
             statement => statement is BoundExpressionStatement expression && expression.Expression == call);
@@ -411,15 +403,13 @@ public sealed class MutableStructReceiverTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }));
+        }))!;
     }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
+    [TestCase(4)]
     public void ForgedNestedMutablePlacesAreRejected(int mutation)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -443,15 +433,15 @@ public sealed class MutableStructReceiverTests
                 return owner.Active.Value;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))();
         var main = program.Functions[program.EntryPoint];
         var immutable = Array.FindIndex(main.Variables.ToArray(), variable => variable.Name == "immutable");
         var index = Array.FindIndex(main.Body.Statements.ToArray(),
             statement => statement is BoundExpressionStatement);
-        var statement = Assert.IsType<BoundExpressionStatement>(main.Body.Statements[index]);
-        var call = Assert.IsType<BoundCall>(statement.Expression);
-        var loan = Assert.IsType<BoundMutableFieldLoan>(call.Arguments[0]);
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual16 = main.Body.Statements[index]; Assert.That(__nunitActual16, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual16!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual17 = statement.Expression; Assert.That(__nunitActual17, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual17!; }))();
+        var loan = ((global::System.Func<BoundMutableFieldLoan>)(() => { var __nunitActual18 = call.Arguments[0]; Assert.That(__nunitActual18, Is.TypeOf<BoundMutableFieldLoan>()); return (BoundMutableFieldLoan)__nunitActual18!; }))();
         var forgedPlace = mutation switch {
             0 => loan.Place with { Field = 9 },
             1 => loan.Place with { Field = 1 },
@@ -472,12 +462,10 @@ public sealed class MutableStructReceiverTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }));
+        }))!;
     }
-
-    [Theory]
-    [InlineData("int32", "40", "")]
-    [InlineData("int64", "40", "public int64 Second;")]
+    [TestCase("int32","40","")]
+    [TestCase("int64","40","public int64 Second;")]
     public void MutableReceiverRejectsForgedValueArgumentBeforeEmission(
         string type, string initial, string additionalField)
     {
@@ -497,14 +485,14 @@ public sealed class MutableStructReceiverTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual19 = compilation.Program; Assert.That(__nunitActual19, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual19!; }))();
         var main = program.Functions[program.EntryPoint];
         var index = Array.FindIndex(main.Body.Statements.ToArray(),
             static statement => statement is BoundExpressionStatement);
-        var statement = Assert.IsType<BoundExpressionStatement>(main.Body.Statements[index]);
-        var call = Assert.IsType<BoundCall>(statement.Expression);
-        var loan = Assert.IsType<BoundMutableReceiverLoan>(Assert.Single(call.Arguments));
+        var statement = ((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual20 = main.Body.Statements[index]; Assert.That(__nunitActual20, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual20!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual21 = statement.Expression; Assert.That(__nunitActual21, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual21!; }))();
+        var loan = ((global::System.Func<BoundMutableReceiverLoan>)(() => { var __nunitActual22 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual22, Is.TypeOf<BoundMutableReceiverLoan>()); return (BoundMutableReceiverLoan)__nunitActual22!; }))();
         var forged = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(index, statement with {
@@ -516,10 +504,10 @@ public sealed class MutableStructReceiverTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }));
+        }))!;
     }
 
-    [Fact]
+    [Test]
     public void ForgedOutReceiverHeaderIsRejected()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -529,8 +517,8 @@ public sealed class MutableStructReceiverTests
                 public mut void Touch() { }
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = compilation.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))();
         var index = Array.FindIndex(program.Functions.ToArray(),
             static function => function.Name == "Counter.Touch");
         var method = program.Functions[index];
@@ -539,10 +527,10 @@ public sealed class MutableStructReceiverTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program with {
             Functions = program.Functions.SetItem(index, forged),
-        }));
+        }))!;
     }
 
-    [Fact]
+    [Test]
     public void ForgedMutableLoanToReadonlyMethodIsRejected()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -556,12 +544,12 @@ public sealed class MutableStructReceiverTests
                 return value.Read();
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = compilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
         var main = program.Functions[program.EntryPoint];
-        var returned = Assert.IsType<BoundReturn>(main.Body.Statements[^1]);
-        var call = Assert.IsType<BoundCall>(returned.Value);
-        var read = Assert.IsType<BoundRead>(Assert.Single(call.Arguments));
+        var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual25 = main.Body.Statements[^1]; Assert.That(__nunitActual25, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual25!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual26 = returned.Value; Assert.That(__nunitActual26, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual26!; }))();
+        var read = ((global::System.Func<BoundRead>)(() => { var __nunitActual27 = global::System.Linq.Enumerable.Single(call.Arguments); Assert.That(__nunitActual27, Is.TypeOf<BoundRead>()); return (BoundRead)__nunitActual27!; }))();
         var forged = main with {
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(main.Body.Statements.Length - 1,
@@ -574,6 +562,6 @@ public sealed class MutableStructReceiverTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forged),
-        }));
+        }))!;
     }
 }

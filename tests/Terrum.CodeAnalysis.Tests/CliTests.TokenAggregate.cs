@@ -2,7 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -28,14 +28,13 @@ public sealed partial class CliTests
 
     private static void AssertTokenAggregateExports(IntPtr handle)
     {
-        Assert.Equal(8, Marshal.SizeOf<NativeSourceRange>());
-        Assert.Equal(12, Marshal.SizeOf<NativeToken>());
-        Assert.Equal(0, Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Kind)).ToInt32());
-        Assert.Equal(4, Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Range)).ToInt32());
-        Assert.Equal(4, Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32());
-        Assert.Equal(8,
-            Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Range)).ToInt32()
-            + Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32());
+        Assert.That(Marshal.SizeOf<NativeSourceRange>(), Is.EqualTo(8));
+        Assert.That(Marshal.SizeOf<NativeToken>(), Is.EqualTo(12));
+        Assert.That(Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Kind)).ToInt32(), Is.EqualTo(0));
+        Assert.That(Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Range)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32(), Is.EqualTo(4));
+        Assert.That(Marshal.OffsetOf<NativeToken>(nameof(NativeToken.Range)).ToInt32()
+            + Marshal.OffsetOf<NativeSourceRange>(nameof(NativeSourceRange.Length)).ToInt32(), Is.EqualTo(8));
 
         var tryCreateRange = Marshal.GetDelegateForFunctionPointer<SourceRangeTryCreateExport>(
             NativeLibrary.GetExport(handle, "Terrum.CodeAnalysis.SourceRange.TryCreate"));
@@ -47,7 +46,7 @@ public sealed partial class CliTests
         NativeToken CreateToken(int kind, int start, int length)
         {
             var range = default(NativeSourceRange);
-            Assert.Equal(1, tryCreateRange(start, length, ref range));
+            Assert.That(tryCreateRange(start, length, ref range), Is.EqualTo(1));
             return construct(kind, range);
         }
 
@@ -58,8 +57,7 @@ public sealed partial class CliTests
             (-123456789, int.MaxValue - 1, 1),
         })
         {
-            var expected = new NativeToken
-            {
+            var expected = new NativeToken {
                 Kind = kind,
                 Range = new NativeSourceRange { Start = start, Length = length },
             };
@@ -94,11 +92,8 @@ public sealed partial class CliTests
 
     private static void AssertNativeToken(NativeToken expected, NativeToken actual, string operation)
     {
-        Assert.True(expected.Kind == actual.Kind,
-            $"{operation}: expected kind {expected.Kind}, got {actual.Kind}.");
-        Assert.True(expected.Range.Start == actual.Range.Start,
-            $"{operation}: expected start {expected.Range.Start}, got {actual.Range.Start}.");
-        Assert.True(expected.Range.Length == actual.Range.Length,
-            $"{operation}: expected length {expected.Range.Length}, got {actual.Range.Length}.");
+        Assert.That(expected.Kind == actual.Kind, Is.True, $"{operation}: expected kind {expected.Kind}, got {actual.Kind}.");
+        Assert.That(expected.Range.Start == actual.Range.Start, Is.True, $"{operation}: expected start {expected.Range.Start}, got {actual.Range.Start}.");
+        Assert.That(expected.Range.Length == actual.Range.Length, Is.True, $"{operation}: expected length {expected.Range.Length}, got {actual.Range.Length}.");
     }
 }

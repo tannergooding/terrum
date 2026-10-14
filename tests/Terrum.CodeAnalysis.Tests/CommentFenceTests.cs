@@ -7,130 +7,120 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CommentFenceTests
 {
-    [Theory]
-    [InlineData("/* */", TriviaKind.MultiLineComment, "")]
-    [InlineData("/** /* */ text **/", TriviaKind.MultiLineComment, "")]
-    [InlineData("/**/", TriviaKind.MultiLineComment, "TRM0003")]
-    [InlineData("/*** **/ ***/", TriviaKind.MultiLineComment, "")]
-    [InlineData("//* *//", TriviaKind.DocumentationBlockComment, "")]
-    [InlineData("//* */", TriviaKind.DocumentationBlockComment, "TRM0003")]
-    [InlineData("//** / /* **//", TriviaKind.DocumentationBlockComment, "")]
-    [InlineData("/// text", TriviaKind.DocumentationLineComment, "")]
-    [InlineData("// text", TriviaKind.SingleLineComment, "")]
-    [InlineData("/* **/ */", TriviaKind.MultiLineComment, "TRM0010")]
-    [InlineData("//** ***// **//", TriviaKind.DocumentationBlockComment, "TRM0010")]
-    [InlineData("/** /**/ **/", TriviaKind.MultiLineComment, "TRM0011")]
-    [InlineData("/* \"*/", TriviaKind.MultiLineComment, "")]
+    [TestCase("/* */",TriviaKind.MultiLineComment,"")]
+    [TestCase("/** /* */ text **/",TriviaKind.MultiLineComment,"")]
+    [TestCase("/**/",TriviaKind.MultiLineComment,"TRM0003")]
+    [TestCase("/*** **/ ***/",TriviaKind.MultiLineComment,"")]
+    [TestCase("//* *//",TriviaKind.DocumentationBlockComment,"")]
+    [TestCase("//* */",TriviaKind.DocumentationBlockComment,"TRM0003")]
+    [TestCase("//** / /* **//",TriviaKind.DocumentationBlockComment,"")]
+    [TestCase("/// text",TriviaKind.DocumentationLineComment,"")]
+    [TestCase("// text",TriviaKind.SingleLineComment,"")]
+    [TestCase("/* **/ */",TriviaKind.MultiLineComment,"TRM0010")]
+    [TestCase("//** ***// **//",TriviaKind.DocumentationBlockComment,"TRM0010")]
+    [TestCase("/** /**/ **/",TriviaKind.MultiLineComment,"TRM0011")]
+    [TestCase("/* \"*/",TriviaKind.MultiLineComment,"")]
     public void CommentFencesPreserveLosslessTriviaAndDiagnostics(string text, TriviaKind kind, string error)
     {
         var lexed = Lexer.Lex(SourceText.From(text));
         var comment = lexed.Tokens[0].LeadingTrivia[0];
-        Assert.Equal(kind, comment.Kind);
-        Assert.Equal(text, string.Concat(lexed.Tokens.SelectMany(token => token.LeadingTrivia)
-            .Select(trivia => trivia.Text)) + string.Concat(lexed.Tokens.Select(token => token.Text)));
-        Assert.Equal(error.Length == 0 ? [] : [error], lexed.Diagnostics.Select(diagnostic => diagnostic.Code));
+        Assert.That(comment.Kind, Is.EqualTo(kind));
+        Assert.That(string.Concat(lexed.Tokens.SelectMany(token => token.LeadingTrivia)
+            .Select(trivia => trivia.Text)) + string.Concat(lexed.Tokens.Select(token => token.Text)), Is.EqualTo(text));
+        Assert.That(lexed.Diagnostics.Select(diagnostic => diagnostic.Code),
+            Is.EqualTo(error.Length == 0 ? Array.Empty<string>() : [error]));
     }
 
-    [Fact]
+    [Test]
     public void MalformedSurrogatesInOpaquePayloadRetainDiagnostics()
     {
         var text = "/*" + '\uD800' + "\U0001F600*/ //**" + '\uDC00' + "**//";
         var lexed = Lexer.Lex(SourceText.From(text));
-        Assert.Equal(["TRM0001", "TRM0001"], lexed.Diagnostics.Select(diagnostic => diagnostic.Code));
-        Assert.Equal([2, 12], lexed.Diagnostics.Select(diagnostic => diagnostic.Span.Start));
-        Assert.Equal(text, string.Concat(lexed.Tokens.SelectMany(token => token.LeadingTrivia)
-            .Select(trivia => trivia.Text)) + string.Concat(lexed.Tokens.Select(token => token.Text)));
+        Assert.That(lexed.Diagnostics.Select(diagnostic => diagnostic.Code), Is.EqualTo(["TRM0001", "TRM0001"]));
+        Assert.That(lexed.Diagnostics.Select(diagnostic => diagnostic.Span.Start), Is.EqualTo([2, 12]));
+        Assert.That(string.Concat(lexed.Tokens.SelectMany(token => token.LeadingTrivia)
+            .Select(trivia => trivia.Text)) + string.Concat(lexed.Tokens.Select(token => token.Text)), Is.EqualTo(text));
     }
-
-    [Theory]
-    [InlineData("/* *//", TriviaKind.MultiLineComment)]
-    [InlineData("//* *///", TriviaKind.DocumentationBlockComment)]
+    [TestCase("/* *//",TriviaKind.MultiLineComment)]
+    [TestCase("//* *///",TriviaKind.DocumentationBlockComment)]
     public void ClosingFenceConsumesOnlyItsRequiredSlashes(string text, TriviaKind kind)
     {
         var result = Lexer.Lex(SourceText.From(text));
-        Assert.Empty(result.Diagnostics);
-        Assert.Equal(kind, result.Tokens[0].LeadingTrivia[0].Kind);
-        Assert.Equal("/", result.Tokens[0].Text);
-        Assert.Equal(text.Length - 1, result.Tokens[0].Span.Start);
-        Assert.Equal(TokenKind.EndOfFile, result.Tokens[1].Kind);
+        Assert.That(result.Diagnostics, Is.Empty);
+        Assert.That(result.Tokens[0].LeadingTrivia[0].Kind, Is.EqualTo(kind));
+        Assert.That(result.Tokens[0].Text, Is.EqualTo("/"));
+        Assert.That(result.Tokens[0].Span.Start, Is.EqualTo(text.Length - 1));
+        Assert.That(result.Tokens[1].Kind, Is.EqualTo(TokenKind.EndOfFile));
     }
-
-    [Theory]
-    [InlineData("/* **/ */", 3, 3)]
-    [InlineData("//** ***// **//", 5, 5)]
+    [TestCase("/* **/ */",3,3)]
+    [TestCase("//** ***// **//",5,5)]
     public void OverlongFenceReportsTheWholeRunAndRequiredSuffix(string source, int start, int length)
     {
         var result = Lexer.Lex(SourceText.From(source));
-        var diagnostic = Assert.Single(result.Diagnostics);
-        Assert.Equal("TRM0010", diagnostic.Code);
-        Assert.Equal(new TextSpan(start, length), diagnostic.Span);
-        Assert.Equal(source, result.Tokens[0].LeadingTrivia[0].Text);
+        var diagnostic = global::System.Linq.Enumerable.Single(result.Diagnostics);
+        Assert.That(diagnostic.Code, Is.EqualTo("TRM0010"));
+        Assert.That(diagnostic.Span, Is.EqualTo(new TextSpan(start, length)));
+        Assert.That(result.Tokens[0].LeadingTrivia[0].Text, Is.EqualTo(source));
     }
 
-    [Fact]
+    [Test]
     public void RejectedFenceWithoutLaterCloserAlsoReportsUnterminatedComment()
     {
         var result = Lexer.Lex(SourceText.From("/* **/"));
-        Assert.Equal(["TRM0010", "TRM0003"], result.Diagnostics.Select(diagnostic => diagnostic.Code));
-        Assert.Equal([new TextSpan(3, 3), new TextSpan(0, 6)],
-            result.Diagnostics.Select(diagnostic => diagnostic.Span));
-        Assert.Equal("/* **/", result.Tokens[0].LeadingTrivia[0].Text);
+        Assert.That(result.Diagnostics.Select(diagnostic => diagnostic.Code), Is.EqualTo(["TRM0010", "TRM0003"]));
+        Assert.That(result.Diagnostics.Select(diagnostic => diagnostic.Span), Is.EqualTo([new TextSpan(3, 3), new TextSpan(0, 6)]));
+        Assert.That(result.Tokens[0].LeadingTrivia[0].Text, Is.EqualTo("/* **/"));
     }
 
-    [Fact]
+    [Test]
     public void DocumentationTriviaAtEndOfFileRemainsInTheLosslessTree()
     {
         const string Source = "int32 Main() { return 42; } /// line\r\n//** block **//";
         var tree = SyntaxTree.Parse(Source);
-        Assert.Equal(Source, tree.Root.ToFullString());
-        Assert.Equal(TriviaKind.DocumentationBlockComment,
-            tree.Tokens[^1].LeadingTrivia[^1].Kind);
-        Assert.Empty(tree.Diagnostics);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        Assert.That(tree.Tokens[^1].LeadingTrivia[^1].Kind, Is.EqualTo(TriviaKind.DocumentationBlockComment));
+        Assert.That(tree.Diagnostics, Is.Empty);
     }
-
-    [Theory]
-    [InlineData("/* **/ */")]
-    [InlineData("//** ***// **//")]
-    [InlineData("/** /* */ text **/")]
-    [InlineData("//* */")]
-    [InlineData("x/*a*/ / /** /**/ **/")]
+    [TestCase("/* **/ */")]
+    [TestCase("//** ***// **//")]
+    [TestCase("/** /* */ text **/")]
+    [TestCase("//* */")]
+    [TestCase("x/*a*/ / /** /**/ **/")]
     public Task CompiledScannerRetainsFenceKindsAndExactErrorSpansAsync(string source) =>
         ScannerTests.CheckScannerAsync(source);
 
-    [Fact]
+    [Test]
     public Task CompiledDocumentationBlockPreservesMalformedSurrogateAsync() =>
         ScannerTests.CheckScannerAsync("//**" + '\uD800' + "\r\n\U0001F600**//");
 
-    [Fact]
+    [Test]
     public async Task MaximumSourceBoundAndDenseStarRunsRemainInBoundsAsync()
     {
         var exact = "/*" + new string('*', ScannerHost.MaximumSourceLength - 4) + "*/";
         var lexed = Lexer.Lex(SourceText.From(exact));
-        Assert.Equal("TRM0003", Assert.Single(lexed.Diagnostics).Code);
-        Assert.Equal(ScannerHost.MaximumSourceLength, ScannerHost.CreateBuffers(lexed.Source)[0].Values.Length);
+        Assert.That(global::System.Linq.Enumerable.Single(lexed.Diagnostics).Code, Is.EqualTo("TRM0003"));
+        Assert.That(ScannerHost.CreateBuffers(lexed.Source)[0].Values.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         await ScannerTests.CheckScannerAsync(exact).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
+    [TestCase(1)]
+    [TestCase(2)]
     public Task MaximumBalancedFenceExecutesWithoutAStarCountQuotaAsync(int slashes)
     {
         var fence = new string('*', (ScannerHost.MaximumSourceLength / 2) - slashes - 1);
         var suffix = new string('/', slashes);
         var source = suffix + fence + "  " + fence + suffix;
-        Assert.Equal(ScannerHost.MaximumSourceLength, source.Length);
-        Assert.Empty(Lexer.Lex(SourceText.From(source)).Diagnostics);
+        Assert.That(source.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
+        Assert.That(Lexer.Lex(SourceText.From(source)).Diagnostics, Is.Empty);
         return ScannerTests.CheckScannerAsync(source);
     }
 
-    [Fact]
+    [Test]
     public void OldFixedFenceRecordsCannotMasqueradeAsCurrentScannerOutput()
     {
         var source = SourceText.From("/* **/ */");

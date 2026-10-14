@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -25,10 +25,8 @@ public sealed class TypeSpecTableValidationComponentTests
             return valid == (Host.Expected[5] != 0) ? 0 : 1;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task TypeSpecTableValidationMatchesHostedStructuralReader(BoundRuntimePolicy policy)
     {
         const int typeDefCount = 1;
@@ -172,7 +170,7 @@ public sealed class TypeSpecTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         var entry = SyntaxTree.Parse(VerificationSource, "type-spec-table-validation-component.terrum");
@@ -186,7 +184,7 @@ public sealed class TypeSpecTableValidationComponentTests
                 var hostedValid = ValidateHosted(hostedSection, testCase.RecordCount,
                     testCase.TypeDefCount, testCase.ImportCount,
                     testCase.GenericParamCount, testCase.TypeArgCount);
-                Assert.Equal(testCase.ExpectedValid, hostedValid);
+                Assert.That(hostedValid, Is.EqualTo(testCase.ExpectedValid));
             }
 
             var compilation = Compilation.Create(components,
@@ -202,10 +200,10 @@ public sealed class TypeSpecTableValidationComponentTests
                     testCase.ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-            Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
     }
 
@@ -214,7 +212,7 @@ public sealed class TypeSpecTableValidationComponentTests
     {
         var valid = ValidateHosted(section, recordCount, typeDefCount, importCount,
             genericParamCount, typeArgCount);
-        Assert.True(valid);
+        Assert.That(valid, Is.True);
         return new TableCase([.. section.Select(static value => (int)value)], recordCount,
             typeDefCount, importCount, genericParamCount, typeArgCount, true, true);
     }
@@ -222,8 +220,8 @@ public sealed class TypeSpecTableValidationComponentTests
     private static void AddRejectedTableCase(List<TableCase> cases, byte[] section, int recordCount,
         int typeDefCount, int importCount, int genericParamCount, int typeArgCount)
     {
-        Assert.False(ValidateHosted(section, recordCount, typeDefCount, importCount,
-            genericParamCount, typeArgCount));
+        Assert.That(ValidateHosted(section, recordCount, typeDefCount, importCount,
+            genericParamCount, typeArgCount), Is.False);
         cases.Add(new TableCase([.. section.Select(static value => (int)value)], recordCount,
             typeDefCount, importCount, genericParamCount, typeArgCount, false, true));
     }
@@ -240,8 +238,8 @@ public sealed class TypeSpecTableValidationComponentTests
     {
         var section = TrRmVariableTableWriter.EncodeBlobs(
             [.. rows.Select(static row => (ReadOnlyMemory<byte>)row)]);
-        Assert.False(ValidateHosted(section, recordCount, typeDefCount, importCount,
-            genericParamCount, typeArgCount));
+        Assert.That(ValidateHosted(section, recordCount, typeDefCount, importCount,
+            genericParamCount, typeArgCount), Is.False);
         cases.Add(new TableCase([.. section.Select(static value => (int)value)], recordCount,
             typeDefCount, importCount, genericParamCount, typeArgCount, false, true));
     }
@@ -278,7 +276,7 @@ public sealed class TypeSpecTableValidationComponentTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

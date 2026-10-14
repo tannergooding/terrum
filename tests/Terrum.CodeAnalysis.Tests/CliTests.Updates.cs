@@ -5,17 +5,16 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("int32")]
-    [InlineData("uint32")]
-    [InlineData("int64")]
-    [InlineData("uint64")]
+    [TestCase("int32")]
+    [TestCase("uint32")]
+    [TestCase("int64")]
+    [TestCase("uint64")]
     public async Task UpdatesMatchCompiledScannerAndExecuteAllIntegerWidthsAsync(string type)
     {
         var source = $$"""
@@ -47,12 +46,12 @@ public sealed partial class CliTests
                 var input = Encoding.UTF8.GetBytes(source);
                 var (exit, output, error) = await RunAsync(input, "build", "-", "-o", hosted,
                     "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"build {policy} exited {exit}: {output}{error}");
+                Assert.That(exit == 0, Is.True, $"build {policy} exited {exit}: {output}{error}");
                 (exit, output, error) = await RunAsync(input, "build-component",
                     Path.Combine(root, "self-host"), "-", "-o", scanned,
                     "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"build-component {policy} exited {exit}: {output}{error}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));
+                Assert.That(exit == 0, Is.True, $"build-component {policy} exited {exit}: {output}{error}");
+                Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
                 using var process = Process.Start(new ProcessStartInfo(scanned) {
                     UseShellExecute = false,
                     CreateNoWindow = true,
@@ -70,7 +69,7 @@ public sealed partial class CliTests
                     }
                     throw;
                 }
-                Assert.Equal(42, process.ExitCode);
+                Assert.That(process.ExitCode, Is.EqualTo(42));
             }
         }
         finally
@@ -79,7 +78,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task NominalUpdatesMatchCompiledScannerAndPreserveFailureExitAsync()
     {
         const string source = """
@@ -109,12 +108,12 @@ public sealed partial class CliTests
                 var input = Encoding.UTF8.GetBytes(source);
                 var (exit, output, error) = await RunAsync(input, "build", "-", "-o", hosted,
                     "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"build {policy} exited {exit}: {output}{error}");
+                Assert.That(exit == 0, Is.True, $"build {policy} exited {exit}: {output}{error}");
                 (exit, output, error) = await RunAsync(input, "build-component",
                     Path.Combine(root, "self-host"), "-", "-o", scanned,
                     "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"build-component {policy} exited {exit}: {output}{error}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));
+                Assert.That(exit == 0, Is.True, $"build-component {policy} exited {exit}: {output}{error}");
+                Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
                 using var process = Process.Start(new ProcessStartInfo(scanned) {
                     UseShellExecute = false,
                     CreateNoWindow = true,
@@ -136,9 +135,9 @@ public sealed partial class CliTests
                     }
                     throw;
                 }
-                Assert.Equal(unchecked((int)0xE0540001), process.ExitCode);
-                Assert.Empty(await stdout);
-                Assert.Empty(await stderr);
+                Assert.That(process.ExitCode, Is.EqualTo(unchecked((int)0xE0540001)));
+                Assert.That(await stdout, Is.Empty);
+                Assert.That(await stderr, Is.Empty);
             }
         }
         finally

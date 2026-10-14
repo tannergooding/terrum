@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -97,17 +97,15 @@ public sealed class DecimalFloatLiteralModuleTests
         "0x1p0",
         "1\0",
     ];
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DecimalFloatLiteralModuleMatchesHostedTargetRoundingAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
         var componentPath = Path.Combine(root, "self-host", "DecimalFloatLiteral.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var componentTree = SyntaxTree.Parse(componentText, componentPath);
-        Assert.False(componentTree.HasErrors, string.Join(Environment.NewLine, componentTree.Diagnostics));
+        Assert.That(componentTree.HasErrors, Is.False, string.Join(Environment.NewLine, componentTree.Diagnostics));
 
         var verificationTree = SyntaxTree.Parse(VerificationSource, "decimal-float-literal-module.terrum");
         var producerCompilation = Compilation.Create(
@@ -118,10 +116,9 @@ public sealed class DecimalFloatLiteralModuleTests
                 },
             ],
             policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program), ["Terrum.CodeAnalysis.VerifyRecords"]);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Terrum.CodeAnalysis.VerifyRecords"]);
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -129,16 +126,15 @@ public sealed class DecimalFloatLiteralModuleTests
             """, "decimal-float-literal-consumer.terrum");
         var consumerCompilation = Compilation.Create(
             consumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.Link(
-            ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer),
+            ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer),
             producer);
 
         var emptyGrant = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
         };
-        Assert.Equal(0, NativeJit.ExecuteWithSourceGrant(consumer, [emptyGrant], (NativeRuntimePolicy)policy));
+        Assert.That(NativeJit.ExecuteWithSourceGrant(consumer, [emptyGrant], (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         var fixtures = s_fixtures.Concat(CreateRandomFixtures()).ToArray();
         var hostedBits = ReadHostedBits(fixtures);
@@ -146,7 +142,7 @@ public sealed class DecimalFloatLiteralModuleTests
         {
             if (s_fixtures[index].KnownBits is ulong knownBits)
             {
-                Assert.Equal(knownBits, hostedBits[index]);
+                Assert.That(hostedBits[index], Is.EqualTo(knownBits));
             }
         }
 
@@ -156,47 +152,45 @@ public sealed class DecimalFloatLiteralModuleTests
                 .SelectMany(static spelling => new[] { new Fixture(32, spelling, null), new Fixture(64, spelling, null) })
                 .ToArray(),
             null));
-        Assert.Equal(0, ExecuteRecords(consumer, records, (NativeRuntimePolicy)policy));
+        Assert.That(ExecuteRecords(consumer, records, (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         var longFraction = "1." + new string('0', 15_990) + "e0";
         var longFixture = new[] { new Fixture(64, longFraction, 0x3FF0000000000000) };
         var longHostedBits = ReadHostedBits(longFixture);
-        Assert.Equal(0x3FF0000000000000UL, longHostedBits[0]);
-        Assert.True(longFraction.Length + 7 <= 16_384);
-        Assert.Equal(0, ExecuteRecords(
-            consumer, CreateRecords(longFixture, longHostedBits), (NativeRuntimePolicy)policy));
+        Assert.That(longHostedBits[0], Is.EqualTo(0x3FF0000000000000UL));
+        Assert.That(longFraction.Length + 7 <= 16_384, Is.True);
+        Assert.That(ExecuteRecords(
+            consumer, CreateRecords(longFixture, longHostedBits), (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         var longExponent = "1e" + new string('9', 15_990);
         var longExponentFixture = new[] { new Fixture(64, longExponent, 0x7FF0000000000000) };
         var longExponentBits = ReadHostedBits(longExponentFixture);
-        Assert.Equal(0x7FF0000000000000UL, longExponentBits[0]);
-        Assert.Equal(0, ExecuteRecords(
-            consumer, CreateRecords(longExponentFixture, longExponentBits), (NativeRuntimePolicy)policy));
+        Assert.That(longExponentBits[0], Is.EqualTo(0x7FF0000000000000UL));
+        Assert.That(ExecuteRecords(
+            consumer, CreateRecords(longExponentFixture, longExponentBits), (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         var longSignificand = new string('9', 15_990) + "e-15989";
         var longSignificandFixture = new[] { new Fixture(64, longSignificand, 0x4024000000000000) };
         var longSignificandBits = ReadHostedBits(longSignificandFixture);
-        Assert.Equal(0x4024000000000000UL, longSignificandBits[0]);
-        Assert.Equal(0, ExecuteRecords(
-            consumer, CreateRecords(longSignificandFixture, longSignificandBits), (NativeRuntimePolicy)policy));
+        Assert.That(longSignificandBits[0], Is.EqualTo(0x4024000000000000UL));
+        Assert.That(ExecuteRecords(
+            consumer, CreateRecords(longSignificandFixture, longSignificandBits), (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         var longFractionCancellation = "0." + new string('0', 15_990) + "1e15991";
         var longFractionCancellationFixture = new[] {
             new Fixture(64, longFractionCancellation, 0x3FF0000000000000),
         };
         var longFractionCancellationBits = ReadHostedBits(longFractionCancellationFixture);
-        Assert.Equal(0x3FF0000000000000UL, longFractionCancellationBits[0]);
-        Assert.Equal(0, ExecuteRecords(consumer,
+        Assert.That(longFractionCancellationBits[0], Is.EqualTo(0x3FF0000000000000UL));
+        Assert.That(ExecuteRecords(consumer,
             CreateRecords(longFractionCancellationFixture, longFractionCancellationBits),
-            (NativeRuntimePolicy)policy));
+            (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void DecimalFloatLiteralExportsPreserveScalarSourceGrantAbi(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = RepositoryRoot();
         var componentPath = Path.Combine(root, "self-host", "DecimalFloatLiteral.terrum");
         var componentTree = SyntaxTree.Parse(File.ReadAllText(componentPath), componentPath);
@@ -204,17 +198,17 @@ public sealed class DecimalFloatLiteralModuleTests
             IsInvocationScoped = true,
         };
         var compilation = Compilation.CreateLibrary([componentTree], [sourceBuffer], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         const string Float32Export = "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne";
         const string Float64Export = "Terrum.CodeAnalysis.GetDecimalFloat64LiteralBitsOrMinusOne";
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             [Float32Export, Float64Export], (NativeRuntimePolicy)policy);
         foreach (var descriptor in artifact.Exports)
         {
-            Assert.True(descriptor.SourceDependent);
-            Assert.Equal(PrimitiveType.Int64, descriptor.ReturnType);
-            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32], descriptor.ParameterTypes.ToArray());
+            Assert.That(descriptor.SourceDependent, Is.True);
+            Assert.That(descriptor.ReturnType, Is.EqualTo(PrimitiveType.Int64));
+            Assert.That(descriptor.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
         }
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-decimal-float-source-grant-{Guid.NewGuid():N}.dll");
@@ -232,35 +226,33 @@ public sealed class DecimalFloatLiteralModuleTests
                 for (var index = 0; index < fixtures.Length; index++)
                 {
                     var fixture = fixtures[index];
-                    Assert.InRange(fixture.Spelling.Length, 1, 16_384);
+                    Assert.That(fixture.Spelling.Length, Is.InRange(1, 16_384));
                     var source = fixture.Spelling.ToCharArray();
                     var export = fixture.Precision == 32 ? Float32Export : Float64Export;
                     var actual = bindings.Invoke<long>(export, source, 0, source.Length);
-                    Assert.Equal(expectedBits[index], unchecked((ulong)actual));
+                    Assert.That(unchecked((ulong)actual), Is.EqualTo(expectedBits[index]));
                 }
 
                 foreach (var spelling in s_invalidSpellings)
                 {
                     var source = spelling.ToCharArray();
-                    Assert.Equal(-1, bindings.Invoke<long>(Float32Export, source, 0, source.Length));
-                    Assert.Equal(-1, bindings.Invoke<long>(Float64Export, source, 0, source.Length));
+                    Assert.That(bindings.Invoke<long>(Float32Export, source, 0, source.Length), Is.EqualTo(-1));
+                    Assert.That(bindings.Invoke<long>(Float64Export, source, 0, source.Length), Is.EqualTo(-1));
                 }
 
                 var maximumSpelling = MaximumLengthDecimalOne();
-                Assert.Equal(16_384, maximumSpelling.Length);
+                Assert.That(maximumSpelling.Length, Is.EqualTo(16_384));
                 var maximumSource = maximumSpelling.ToCharArray();
-                Assert.Equal(0x3F800000L,
-                    bindings.Invoke<long>(Float32Export, maximumSource, 0, maximumSource.Length));
-                Assert.Equal(0x3FF0000000000000L,
-                    bindings.Invoke<long>(Float64Export, maximumSource, 0, maximumSource.Length));
+                Assert.That(bindings.Invoke<long>(Float32Export, maximumSource, 0, maximumSource.Length), Is.EqualTo(0x3F800000L));
+                Assert.That(bindings.Invoke<long>(Float64Export, maximumSource, 0, maximumSource.Length), Is.EqualTo(0x3FF0000000000000L));
 
                 var shortSource = "1.25".ToCharArray();
-                Assert.Equal(-1, bindings.Invoke<long>(Float32Export, null, 0, 1));
-                Assert.Equal(-1, bindings.Invoke<long>(Float64Export, shortSource, int.MinValue, 1));
-                Assert.Equal(-1, bindings.Invoke<long>(Float32Export, shortSource, 0, int.MaxValue));
-                Assert.Equal(-1, bindings.Invoke<long>(Float64Export, shortSource, 4, 1));
+                Assert.That(bindings.Invoke<long>(Float32Export, null, 0, 1), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<long>(Float64Export, shortSource, int.MinValue, 1), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<long>(Float32Export, shortSource, 0, int.MaxValue), Is.EqualTo(-1));
+                Assert.That(bindings.Invoke<long>(Float64Export, shortSource, 4, 1), Is.EqualTo(-1));
                 _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                    bindings.Invoke<long>(Float32Export, new char[16_385], 0, 1));
+                    bindings.Invoke<long>(Float32Export, new char[16_385], 0, 1))!;
             }
             finally
             {
@@ -355,7 +347,7 @@ public sealed class DecimalFloatLiteralModuleTests
 
         var float64MidpointCoefficient = ((BigInteger.One << 53) + 1) * BigInteger.Pow(5, 1075);
         var float64MidpointDigits = float64MidpointCoefficient.ToString(CultureInfo.InvariantCulture);
-        Assert.Equal(768, float64MidpointDigits.Length);
+        Assert.That(float64MidpointDigits.Length, Is.EqualTo(768));
         fixtures.Add(new Fixture(64, float64MidpointDigits + "e-1075", 0x0010000000000000));
         fixtures.Add(new Fixture(64,
             (float64MidpointCoefficient * 10 - 1).ToString(CultureInfo.InvariantCulture) + "e-1076",
@@ -414,7 +406,7 @@ public sealed class DecimalFloatLiteralModuleTests
     private static string AdjustLastDecimalPlace(string spelling, int adjustment)
     {
         var decimalPoint = spelling.IndexOf('.');
-        Assert.True(decimalPoint >= 0);
+        Assert.That(decimalPoint >= 0, Is.True);
         var decimalScale = spelling.Length - decimalPoint - 1;
         var coefficient = BigInteger.Parse(spelling.Remove(decimalPoint, 1), CultureInfo.InvariantCulture);
         return FormatDecimalCoefficient(coefficient + adjustment, decimalScale);
@@ -494,25 +486,23 @@ public sealed class DecimalFloatLiteralModuleTests
             var type = fixture.Precision == 32 ? "float32" : "float64";
             var source = $"public {type} Read{index}() {{ return {fixture.Spelling}; }}";
             var lexed = Lexer.Lex(SourceText.From(fixture.Spelling));
-            Assert.True(lexed.Diagnostics.IsEmpty,
-                $"Hosted lexer rejected generated fixture '{fixture.Spelling}': "
+            Assert.That(lexed.Diagnostics.IsEmpty, Is.True, $"Hosted lexer rejected generated fixture '{fixture.Spelling}': "
                 + string.Join(", ", lexed.Diagnostics));
-            Assert.Equal(2, lexed.Tokens.Length);
-            Assert.Equal(fixture.Spelling, lexed.Tokens[0].Text);
+            Assert.That(lexed.Tokens.Length, Is.EqualTo(2));
+            Assert.That(lexed.Tokens[0].Text, Is.EqualTo(fixture.Spelling));
             return SyntaxTree.Parse(source, $"decimal-float-oracle-{index}.terrum");
         });
         var compilation = Compilation.CreateLibrary(trees);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         var results = new ulong[fixtures.Length];
         for (var index = 0; index < fixtures.Length; index++)
         {
-            var function = Assert.Single(program.Functions, function => function.Name == $"Read{index}");
-            var result = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
-            var constant = Assert.IsType<BoundConstant>(result.Value);
-            Assert.Equal(fixtures[index].Precision == 32 ? PrimitiveType.Float32 : PrimitiveType.Float64,
-                constant.Type);
+            var function = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == $"Read{index}");
+            var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
+            var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = result.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))();
+            Assert.That(constant.Type, Is.EqualTo(fixtures[index].Precision == 32 ? PrimitiveType.Float32 : PrimitiveType.Float64));
             results[index] = unchecked((ulong)constant.Value);
         }
 
@@ -541,15 +531,15 @@ public sealed class DecimalFloatLiteralModuleTests
 
     private static int ExecuteRecords(BoundProgram consumer, List<int> records, NativeRuntimePolicy policy)
     {
-        Assert.NotEmpty(records);
+        Assert.That(records, Is.Not.Empty);
         for (var start = 0; start < records.Count;)
         {
             var end = start;
             while (end < records.Count)
             {
-                Assert.True(records.Count - end >= 7);
+                Assert.That(records.Count - end >= 7, Is.True);
                 var recordLength = 7 + records[end + 2];
-                Assert.InRange(recordLength, 8, 16_384);
+                Assert.That(recordLength, Is.InRange(8, 16_384));
                 if (end > start && end - start + recordLength > 16_384)
                 {
                     break;

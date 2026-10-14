@@ -5,13 +5,13 @@ using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ScopedLocalFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void IndependentExpiredIdentityCannotAuthorizeReadsOrUpdatesOfReusedSpelling()
     {
         const string text = "public int32 Value() { if (false) { mut int32 x = 1; } mut int32 x = 41; x++; return x; }";
@@ -48,7 +48,7 @@ public sealed class ScopedLocalFrontendProjectionTests
 
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
-            Assert.Single(ScalarFrontendHost.BindLibrary(source, Bytes(), policy).Functions);
+            Assert.That(ScalarFrontendHost.BindLibrary(source, Bytes(), policy).Functions, Has.Exactly(1).Items);
         }
         Reject(70, 1);
         Reject(86, 1);
@@ -99,7 +99,7 @@ public sealed class ScopedLocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReaderRejectsObsoleteScopedLocalTagForOrdinaryReturn()
     {
         const string text = "public int32 Value() { return 42; }";
@@ -133,13 +133,13 @@ public sealed class ScopedLocalFrontendProjectionTests
         }
         var source = SourceText.From(text);
         Encode();
-        Assert.True(ScalarFrontendHost.ReadResult(source, bytes).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).IsValid, Is.True);
         words[0] = 50;
         Encode();
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
     }
 
-    [Fact]
+    [Test]
     public void IndependentSiblingSlotsExpireAcrossArms()
     {
         const string text = "public int32 Value(bool flag) { if (flag) { int32 x = 1; } else { int32 x = 2; return x; } return 0; }";
@@ -184,7 +184,7 @@ public sealed class ScopedLocalFrontendProjectionTests
         Statement(4, 8, 0, 3, innerReturn, innerReturn + 9);
         Statement(5, 8, 0, 4, outerReturn, outerReturn + 9);
 
-        Assert.Equal(2, ScalarFrontendHost.ReadResult(source, Bytes()).Locals.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Locals.Length, Is.EqualTo(2));
         Reject(0, 49);
         Reject(70, 2);
         Reject(341, 1);
@@ -237,7 +237,7 @@ public sealed class ScopedLocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void IndependentScopedDeclarationRequiresVersionAndExactSourceAuthority()
     {
         const string text = "public int32 Value() { if (true) { int32 x = 42; return x; } return 0; }";
@@ -272,10 +272,10 @@ public sealed class ScopedLocalFrontendProjectionTests
         Statement(3, 8, 0, 3, lastReturn, lastReturn + 9);
 
         var result = ScalarFrontendHost.ReadResult(source, Bytes());
-        Assert.Single(result.Locals);
-        Assert.Equal(4, result.Statements.Length);
-        Assert.Single(ScalarFrontendHost.BindLibrary(source, Bytes(),
-            BoundRuntimePolicy.CheckedExceptions).Functions);
+        Assert.That(result.Locals, Has.Exactly(1).Items);
+        Assert.That(result.Statements.Length, Is.EqualTo(4));
+        Assert.That(ScalarFrontendHost.BindLibrary(source, Bytes(),
+            BoundRuntimePolicy.CheckedExceptions).Functions, Has.Exactly(1).Items);
         Reject(0, 49);
         Reject(0, 48);
         Reject(300, 2);

@@ -9,32 +9,31 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("[NoThrow] int32 Main() { return 40 + 2; }", 42)]
-    [InlineData("[NoThrow] int32 Main() => int32(84) / int32(2);", 42)]
-    [InlineData("[NoThrow] int32 Main() { return int32(21) << 1; }", 42)]
-    [InlineData("[NoThrow] int32 Main() { if (int32(1) == int32(1)) { return 42; } }", 42)]
-    [InlineData("[NoThrow] int32 Main() { if (false) { return 0; } else if (true) { return 42; } return 1; }", 42)]
-    [InlineData("[NoThrow] int32 Main() { int32 x = 40; return x | 2; }", 42)]
-    [InlineData("[NoThrow] int32 Main() { mut int32 x = 0; { x = 42; } while (false) {} return x; }", 42)]
-    [InlineData("[NoThrow] void Main() {}", 0)]
-    [InlineData("[NoThrow] void Main() { return (); }", 0)]
-    [InlineData("[NoThrow] void Main() => require int32(1) + int32(1) == 2;", 0)]
-    [InlineData("[NoThrow] void Main() => _ = int32(84) / int32(2);", 0)]
-    [InlineData("[NoThrow] void Main() { _ = uint64(0xFFFFFFFFFFFFFFFF); require true || false; }", 0)]
-    [InlineData("[NoThrow] void Main() { if (false) {} else if (true) { require true ? true : false; } }", 0)]
-    [InlineData("[NoThrow] int32 Main() { mut int32 x = 0; a: do { x = 42; break a; } while (true); return x; }", 42)]
-    [InlineData("[DoesNotReturn] void Main() { require false; }", unchecked((int)0xE0540003))]
-    [InlineData("[DoesNotReturn] void Main() => require false;", unchecked((int)0xE0540003))]
-    [InlineData("[DoesNotReturn] void Main() { require false; return; }", unchecked((int)0xE0540003))]
-    [InlineData("[DoesNotReturn] void Main() { if (true) { require false; } else if (false) { return; } }", unchecked((int)0xE0540003))]
-    [InlineData("[DoesNotReturn] void Main() { require int32(1) / int32(0) == 0; require false; }", unchecked((int)0xE0540002))]
+    [TestCase("[NoThrow] int32 Main() { return 40 + 2; }",42)]
+    [TestCase("[NoThrow] int32 Main() => int32(84) / int32(2);",42)]
+    [TestCase("[NoThrow] int32 Main() { return int32(21) << 1; }",42)]
+    [TestCase("[NoThrow] int32 Main() { if (int32(1) == int32(1)) { return 42; } }",42)]
+    [TestCase("[NoThrow] int32 Main() { if (false) { return 0; } else if (true) { return 42; } return 1; }",42)]
+    [TestCase("[NoThrow] int32 Main() { int32 x = 40; return x | 2; }",42)]
+    [TestCase("[NoThrow] int32 Main() { mut int32 x = 0; { x = 42; } while (false) {} return x; }",42)]
+    [TestCase("[NoThrow] void Main() {}",0)]
+    [TestCase("[NoThrow] void Main() { return (); }",0)]
+    [TestCase("[NoThrow] void Main() => require int32(1) + int32(1) == 2;",0)]
+    [TestCase("[NoThrow] void Main() => _ = int32(84) / int32(2);",0)]
+    [TestCase("[NoThrow] void Main() { _ = uint64(0xFFFFFFFFFFFFFFFF); require true || false; }",0)]
+    [TestCase("[NoThrow] void Main() { if (false) {} else if (true) { require true ? true : false; } }",0)]
+    [TestCase("[NoThrow] int32 Main() { mut int32 x = 0; a: do { x = 42; break a; } while (true); return x; }",42)]
+    [TestCase("[DoesNotReturn] void Main() { require false; }",unchecked((int)0xE0540003))]
+    [TestCase("[DoesNotReturn] void Main() => require false;",unchecked((int)0xE0540003))]
+    [TestCase("[DoesNotReturn] void Main() { require false; return; }",unchecked((int)0xE0540003))]
+    [TestCase("[DoesNotReturn] void Main() { if (true) { require false; } else if (false) { return; } }",unchecked((int)0xE0540003))]
+    [TestCase("[DoesNotReturn] void Main() { require int32(1) / int32(0) == 0; require false; }",unchecked((int)0xE0540002))]
     public async Task NativeFunctionEffectsMatchHostedScannerPeAndJitAsync(string text, int expected)
     {
         var root = RepositoryRoot();
@@ -48,59 +47,57 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(source, "frontend-build", Path.Combine(root, "self-host"),
                     "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{output}{error}");
+                Assert.That(exit == 0, Is.True, $"{output}{error}");
                 using var document = JsonDocument.Parse(output);
-                Assert.Equal(87, document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32());
+                Assert.That(document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build", "-", "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
                 var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component", Path.Combine(root, "self-host"),
                     "-", "-o", scanner, "--runtime", policy, "--json");
-                Assert.True(scanExit == 0, $"{scanOutput}{scanError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanner));
-                Assert.Equal(expected, await ExecuteNativeImageAsync(native));
+                Assert.That(scanExit == 0, Is.True, $"{scanOutput}{scanError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await File.ReadAllBytesAsync(scanner), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(expected));
                 var (runExit, runOutput, runError) = await RunAsync(source, "frontend-run", Path.Combine(root, "self-host"),
                     "-", "--runtime", policy, "--json");
-                Assert.True(runExit == expected, $"{runOutput}{runError}");
+                Assert.That(runExit == expected, Is.True, $"{runOutput}{runError}");
                 var (jitExit, jitOutput, jitError) = await RunAsync(source, "jit", "-", "--runtime", policy, "--json");
-                Assert.True(jitExit == expected, $"{jitOutput}{jitError}");
+                Assert.That(jitExit == expected, Is.True, $"{jitOutput}{jitError}");
             }
         }
         finally
         {
-            File.Delete(native);
+            await TestFileCleanup.DeleteWithRetryAsync(native).ConfigureAwait(true);
             File.Delete(hosted);
             File.Delete(scanner);
         }
     }
-
-    [Theory]
-    [InlineData("[NoThrow] int32 Main() { mut int32 x = 1; return x + 1; }")]
-    [InlineData("[NoThrow] void Main() { require false; }")]
-    [InlineData("[NoThrow] void Main() => require false;")]
-    [InlineData("[NoThrow] void Main() { _ = int32(2147483647) + int32(1); }")]
-    [InlineData("[NoThrow] void Main() { _ = char16(65536); }")]
-    [InlineData("[NoThrow] void Main() { mut int32 x = 0; x++; }")]
-    [InlineData("[NoThrow] void Main() { require false && int32(1) / int32(0) == 0; }")]
-    [InlineData("[NoThrow] void Main() { _ = true ? int32(42) : int32(1) / int32(0); }")]
-    [InlineData("[DoesNotReturn] int32 Main() { return 42; }")]
-    [InlineData("[DoesNotReturn] void Main() {}")]
-    [InlineData("[DoesNotReturn] void Main() { return; }")]
-    [InlineData("[DoesNotReturn] void Main() { return (); }")]
-    [InlineData("[DoesNotReturn] void Main() => require true;")]
-    [InlineData("[NoThrow][DoesNotReturn] void Main() { require false; }")]
-    [InlineData("[NoThrow][NoThrow] void Main() {}")]
-    [InlineData("[DoesNotReturn][DoesNotReturn] void Main() { require false; }")]
-    [InlineData("[nothrow] void Main() {}")]
-    [InlineData("[NoＴhrow] void Main() {}")]
-    [InlineData("[@NoThrow] void Main() {}")]
-    [InlineData("[NoThrow(value)] void Main() {}")]
-    [InlineData("[NoThrow()] void Main() {}")]
-    [InlineData("[Cleanup] void Main() {}")]
-    [InlineData("[ConstEval] void Main() {}")]
-    [InlineData("public [NoThrow] void Main() {}")]
-    [InlineData("[NoThrow] void Main() { return; Missing(); }")]
-    [InlineData("[DoesNotReturn] void Main() { require false; Missing(); }")]
+    [TestCase("[NoThrow] int32 Main() { mut int32 x = 1; return x + 1; }")]
+    [TestCase("[NoThrow] void Main() { require false; }")]
+    [TestCase("[NoThrow] void Main() => require false;")]
+    [TestCase("[NoThrow] void Main() { _ = int32(2147483647) + int32(1); }")]
+    [TestCase("[NoThrow] void Main() { _ = char16(65536); }")]
+    [TestCase("[NoThrow] void Main() { mut int32 x = 0; x++; }")]
+    [TestCase("[NoThrow] void Main() { require false && int32(1) / int32(0) == 0; }")]
+    [TestCase("[NoThrow] void Main() { _ = true ? int32(42) : int32(1) / int32(0); }")]
+    [TestCase("[DoesNotReturn] int32 Main() { return 42; }")]
+    [TestCase("[DoesNotReturn] void Main() {}")]
+    [TestCase("[DoesNotReturn] void Main() { return; }")]
+    [TestCase("[DoesNotReturn] void Main() { return (); }")]
+    [TestCase("[DoesNotReturn] void Main() => require true;")]
+    [TestCase("[NoThrow][DoesNotReturn] void Main() { require false; }")]
+    [TestCase("[NoThrow][NoThrow] void Main() {}")]
+    [TestCase("[DoesNotReturn][DoesNotReturn] void Main() { require false; }")]
+    [TestCase("[nothrow] void Main() {}")]
+    [TestCase("[NoＴhrow] void Main() {}")]
+    [TestCase("[@NoThrow] void Main() {}")]
+    [TestCase("[NoThrow(value)] void Main() {}")]
+    [TestCase("[NoThrow()] void Main() {}")]
+    [TestCase("[Cleanup] void Main() {}")]
+    [TestCase("[ConstEval] void Main() {}")]
+    [TestCase("public [NoThrow] void Main() {}")]
+    [TestCase("[NoThrow] void Main() { return; Missing(); }")]
+    [TestCase("[DoesNotReturn] void Main() { require false; Missing(); }")]
     public async Task NativeFunctionEffectsRejectInvalidEffectsAndRetainPeAsync(string text)
     {
         var path = Path.Combine(RepositoryRoot(), $"effects-{Guid.NewGuid():N}.exe");
@@ -111,12 +108,12 @@ public sealed partial class CliTests
                 var (initial, initialOutput, initialError) = await RunAsync(
                     Encoding.UTF8.GetBytes("[NoThrow] int32 Main() => 42;"), "frontend-build",
                     Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(initial == 0, $"{initialOutput}{initialError}");
+                Assert.That(initial == 0, Is.True, $"{initialOutput}{initialError}");
                 var bytes = await File.ReadAllBytesAsync(path);
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(text), "frontend-build",
                     Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(exit == 1, $"{output}{error}");
-                Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
+                Assert.That(exit == 1, Is.True, $"{output}{error}");
+                Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
             }
         }
         finally
@@ -124,15 +121,13 @@ public sealed partial class CliTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "int32(40) + int32(2)", 42)]
-    [InlineData("uint32", "uint32(84) / uint32(2)", 42)]
-    [InlineData("int64", "int64(21) << 1", 42)]
-    [InlineData("uint64", "uint64(40) | uint64(2)", 42)]
-    [InlineData("char16", "char16(42)", 42)]
-    [InlineData("bool", "true && !false", 1)]
-    [InlineData("void", "require true", 0)]
+    [TestCase("int32","int32(40) + int32(2)",42)]
+    [TestCase("uint32","uint32(84) / uint32(2)",42)]
+    [TestCase("int64","int64(21) << 1",42)]
+    [TestCase("uint64","uint64(40) | uint64(2)",42)]
+    [TestCase("char16","char16(42)",42)]
+    [TestCase("bool","true && !false",1)]
+    [TestCase("void","require true",0)]
     public async Task NativeFunctionEffectsPreserveNormalizedSixScalarAndVoidExportsAsync(string type, string expression, int expected)
     {
         var root = RepositoryRoot();
@@ -145,11 +140,11 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(source, "frontend-build-library", Path.Combine(root, "self-host"),
                     "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{output}{error}");
+                Assert.That(exit == 0, Is.True, $"{output}{error}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build-library", "-", "--export", "await",
                     "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
                 var handle = NativeLibrary.Load(native);
                 try
                 {
@@ -169,7 +164,7 @@ public sealed partial class CliTests
                             "bool" => Marshal.GetDelegateForFunctionPointer<ScopedBool>(export)() ? 1 : 0,
                             _ => throw new InvalidOperationException(type),
                         };
-                        Assert.Equal(expected, actual);
+                        Assert.That(actual, Is.EqualTo(expected));
                     }
                 }
                 finally
@@ -185,7 +180,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task NativeNoThrowSupportsParameterizedScalarFunctionsAsync()
     {
         const string text = "[NoThrow] public int32 Identity(int32 value) { return value; }";
@@ -200,30 +195,30 @@ public sealed partial class CliTests
                 var (componentExit, componentOutput, componentError) = await RunAsync(
                     Encoding.UTF8.GetBytes(text), "frontend-component", frontend, "-",
                     "--runtime", runtimeName, "--json");
-                Assert.Equal(0, componentExit);
-                Assert.Empty(componentError);
+                Assert.That(componentExit, Is.EqualTo(0));
+                Assert.That(componentError, Is.Empty);
                 using (var document = JsonDocument.Parse(componentOutput))
                 {
                     var result = document.RootElement.GetProperty("result");
-                    Assert.True(result.GetProperty("valid").GetBoolean());
-                    Assert.True(result.GetProperty("noThrow").GetBoolean());
-                    Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.That(result.GetProperty("valid").GetBoolean(), Is.True);
+                    Assert.That(result.GetProperty("noThrow").GetBoolean(), Is.True);
+                    Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
                 }
 
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
                     "frontend-build-library", frontend, "-", "-o", native, "--runtime", runtimeName, "--json");
-                Assert.True(buildExit == 0, $"{runtimeName}: {buildOutput}{buildError}");
+                Assert.That(buildExit == 0, Is.True, $"{runtimeName}: {buildOutput}{buildError}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(Encoding.UTF8.GetBytes(text),
                     "build-library", "-", "--export", "Identity", "-o", hosted, "--runtime", runtimeName, "--json");
-                Assert.True(hostExit == 0, $"{runtimeName}: {hostOutput}{hostError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostExit == 0, Is.True, $"{runtimeName}: {hostOutput}{hostError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
 
                 var handle = NativeLibrary.Load(native);
                 try
                 {
                     var invoke = Marshal.GetDelegateForFunctionPointer<ParameterizedIdentity>(
                         NativeLibrary.GetExport(handle, "Identity"));
-                    Assert.Equal(42, invoke(42));
+                    Assert.That(invoke(42), Is.EqualTo(42));
                 }
                 finally
                 {
@@ -238,7 +233,7 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task NativeDoesNotReturnSupportsParameterizedScalarFunctionsAsync()
     {
         const string text = "[DoesNotReturn] public void Stop(int32 value) { require false; }";
@@ -253,23 +248,23 @@ public sealed partial class CliTests
                 var (componentExit, componentOutput, componentError) = await RunAsync(
                     Encoding.UTF8.GetBytes(text), "frontend-component", frontend, "-",
                     "--runtime", runtimeName, "--json");
-                Assert.Equal(0, componentExit);
-                Assert.Empty(componentError);
+                Assert.That(componentExit, Is.EqualTo(0));
+                Assert.That(componentError, Is.Empty);
                 using (var document = JsonDocument.Parse(componentOutput))
                 {
                     var result = document.RootElement.GetProperty("result");
-                    Assert.True(result.GetProperty("valid").GetBoolean());
-                    Assert.True(result.GetProperty("doesNotReturn").GetBoolean());
-                    Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
+                    Assert.That(result.GetProperty("valid").GetBoolean(), Is.True);
+                    Assert.That(result.GetProperty("doesNotReturn").GetBoolean(), Is.True);
+                    Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
                 }
 
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(text),
                     "frontend-build-library", frontend, "-", "-o", native, "--runtime", runtimeName, "--json");
-                Assert.True(buildExit == 0, $"{runtimeName}: {buildOutput}{buildError}");
+                Assert.That(buildExit == 0, Is.True, $"{runtimeName}: {buildOutput}{buildError}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(Encoding.UTF8.GetBytes(text),
                     "build-library", "-", "--export", "Stop", "-o", hosted, "--runtime", runtimeName, "--json");
-                Assert.True(hostExit == 0, $"{runtimeName}: {hostOutput}{hostError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostExit == 0, Is.True, $"{runtimeName}: {hostOutput}{hostError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             }
         }
         finally
@@ -278,12 +273,10 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("[DoesNotReturn] void Main() { while (true) {} }")]
-    [InlineData("[NoThrow][DoesNotReturn] void Main() { for (;;) {} }")]
-    [InlineData("[DoesNotReturn][NoThrow] void Main() { for (;;) {} }")]
-    [InlineData("[NoThrow][DoesNotReturn] void Main() { if (false) { return; } else if (true) { for (;;) {} } }")]
+    [TestCase("[DoesNotReturn] void Main() { while (true) {} }")]
+    [TestCase("[NoThrow][DoesNotReturn] void Main() { for (;;) {} }")]
+    [TestCase("[DoesNotReturn][NoThrow] void Main() { for (;;) {} }")]
+    [TestCase("[NoThrow][DoesNotReturn] void Main() { if (false) { return; } else if (true) { for (;;) {} } }")]
     public async Task NativeFunctionEffectsNonFallthroughCompileOnlyAsync(string text)
     {
         var root = RepositoryRoot();
@@ -296,10 +289,10 @@ public sealed partial class CliTests
                 var source = Encoding.UTF8.GetBytes(text);
                 var (exit, output, error) = await RunAsync(source, "frontend-build", Path.Combine(root, "self-host"),
                     "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{output}{error}");
+                Assert.That(exit == 0, Is.True, $"{output}{error}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build", "-", "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             }
         }
         finally
@@ -308,41 +301,43 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData(64, true)]
-    [InlineData(65, true)]
+    [TestCase(64,true)]
+    [TestCase(65,true)]
     public async Task NativeFunctionEffectsAcceptAttributeTokensBeyondThePreviousWindowAsync(int count, bool valid)
     {
         var source = "[NoThrow] public void @await(bool a, bool b, bool c) { require "
             + new string('(', 15) + "true" + new string(')', 15)
             + "; require true; require true; require true; require "
             + (count == 64 ? "true" : "!false") + "; }";
-        Assert.Equal(count, Lexer.Lex(SourceText.From(source)).Tokens.Length);
+        Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length, Is.EqualTo(count));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "frontend-component",
             Path.Combine(RepositoryRoot(), "self-host"), "-", "--runtime", "fail-fast", "--json");
-        Assert.True(exit == (valid ? 0 : 1), $"{output}{error}");
+        Assert.That(exit == (valid ? 0 : 1), Is.True, $"{output}{error}");
     }
-
-    [Theory]
-    [InlineData(false, 0)]
-    [InlineData(false, 1)]
-    [InlineData(false, 2)]
-    [InlineData(false, 3)]
-    [InlineData(true, 0)]
-    [InlineData(true, 1)]
-    [InlineData(true, 2)]
-    [InlineData(true, 3)]
+    [TestCase(false,0)]
+    [TestCase(false,1)]
+    [TestCase(false,2)]
+    [TestCase(false,3)]
+    [TestCase(true,0)]
+    [TestCase(true,1)]
+    [TestCase(true,2)]
+    [TestCase(true,3)]
     public async Task NativeFunctionEffectsPreserveZeroThroughThreeParameterAbiAsync(bool isVoid, int count)
     {
         var root = RepositoryRoot();
         var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.dll");
         var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.dll");
         var parameters = isVoid ? count switch {
-            0 => "", 1 => "bool a", 2 => "int32 a, uint64 b", _ => "char16 a, uint32 b, int64 c",
+            0 => "",
+            1 => "bool a",
+            2 => "int32 a, uint64 b",
+            _ => "char16 a, uint32 b, int64 c",
         } : string.Join(", ", Enumerable.Range(0, count).Select(index => $"int32 {(char)('a' + index)}"));
         var expression = isVoid ? "require true" : count switch {
-            0 => "42", 1 => "a", 2 => "a | b", _ => "a | b | c",
+            0 => "42",
+            1 => "a",
+            2 => "a | b",
+            _ => "a | b | c",
         };
         try
         {
@@ -351,11 +346,11 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(source, "frontend-build-library", Path.Combine(root, "self-host"),
                     "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{output}{error}");
+                Assert.That(exit == 0, Is.True, $"{output}{error}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build-library", "-", "--export", "await",
                     "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
                 var handle = NativeLibrary.Load(native);
                 try
                 {
@@ -364,10 +359,18 @@ public sealed partial class CliTests
                     {
                         switch (count)
                         {
-                            case 0: Marshal.GetDelegateForFunctionPointer<NativeVoidZero>(export)(); break;
-                            case 1: Marshal.GetDelegateForFunctionPointer<NativeVoidOne>(export)(true); break;
-                            case 2: Marshal.GetDelegateForFunctionPointer<NativeVoidTwo>(export)(42, ulong.MaxValue); break;
-                            default: Marshal.GetDelegateForFunctionPointer<NativeVoidThree>(export)(65535, uint.MaxValue, long.MinValue); break;
+                            case 0:
+                                Marshal.GetDelegateForFunctionPointer<NativeVoidZero>(export)();
+                                break;
+                            case 1:
+                                Marshal.GetDelegateForFunctionPointer<NativeVoidOne>(export)(true);
+                                break;
+                            case 2:
+                                Marshal.GetDelegateForFunctionPointer<NativeVoidTwo>(export)(42, ulong.MaxValue);
+                                break;
+                            default:
+                                Marshal.GetDelegateForFunctionPointer<NativeVoidThree>(export)(65535, uint.MaxValue, long.MinValue);
+                                break;
                         }
                     }
                     else
@@ -378,7 +381,7 @@ public sealed partial class CliTests
                             2 => Marshal.GetDelegateForFunctionPointer<ElseIfTwo>(export)(40, 2),
                             _ => Marshal.GetDelegateForFunctionPointer<DoForThreeScalars>(export)(32, 8, 2),
                         };
-                        Assert.Equal(42, actual);
+                        Assert.That(actual, Is.EqualTo(42));
                     }
                 }
                 finally
@@ -393,20 +396,18 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("source", 16384, true)]
-    [InlineData("source", 16385, false)]
-    [InlineData("records", 12, true)]
-    [InlineData("records", 13, false)]
-    [InlineData("locals", 8, true)]
-    [InlineData("locals", 9, false)]
-    [InlineData("nodes", 64, true)]
-    [InlineData("nodes", 65, false)]
-    [InlineData("expression", 16, true)]
-    [InlineData("expression", 17, false)]
-    [InlineData("depth", 6, true)]
-    [InlineData("depth", 7, false)]
+    [TestCase("source",16384,true)]
+    [TestCase("source",16385,false)]
+    [TestCase("records",12,true)]
+    [TestCase("records",13,false)]
+    [TestCase("locals",8,true)]
+    [TestCase("locals",9,false)]
+    [TestCase("nodes",64,true)]
+    [TestCase("nodes",65,false)]
+    [TestCase("expression",16,true)]
+    [TestCase("expression",17,false)]
+    [TestCase("depth",6,true)]
+    [TestCase("depth",7,false)]
     public async Task NativeFunctionEffectsRetainInclusiveResourceCapsAsync(string resource, int count, bool valid)
     {
         var body = resource switch {
@@ -422,25 +423,28 @@ public sealed partial class CliTests
         if (resource == "source")
         {
             text += " /*" + new string('x', count - text.Length - 5) + "*/";
-            Assert.Equal(count, text.Length);
+            Assert.That(text.Length, Is.EqualTo(count));
         }
         if (resource != "nodes")
         {
-            Assert.True(Lexer.Lex(SourceText.From(text)).Tokens.Length <= 64);
+            Assert.That(Lexer.Lex(SourceText.From(text)).Tokens.Length <= 64, Is.True);
         }
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(text), "frontend-component",
                 Path.Combine(RepositoryRoot(), "self-host"), "-", "--runtime", policy, "--json");
-            Assert.True(exit == (valid ? 0 : resource == "source" ? 2 : 1), $"{output}{error}");
+            Assert.That(exit == (valid ? 0 : resource == "source" ? 2 : 1), Is.True, $"{output}{error}");
             if (valid)
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
-                if (resource == "nodes") { Assert.Equal(count, result.GetProperty("nodes").GetArrayLength()); }
-                if (resource == "records") { Assert.Equal(count, result.GetProperty("statements").GetArrayLength()); }
-                if (resource == "locals") { Assert.Equal(count, result.GetProperty("locals").GetArrayLength()); }
+                Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
+                if (resource == "nodes")
+                { Assert.That(result.GetProperty("nodes").GetArrayLength(), Is.EqualTo(count)); }
+                if (resource == "records")
+                { Assert.That(result.GetProperty("statements").GetArrayLength(), Is.EqualTo(count)); }
+                if (resource == "locals")
+                { Assert.That(result.GetProperty("locals").GetArrayLength(), Is.EqualTo(count)); }
             }
         }
     }

@@ -5,7 +5,7 @@ using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -39,26 +39,24 @@ public sealed class NativeManagedClassCopyFieldTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void CopyFieldsUseNaturalAlignmentAndRetainTheExistingFactoryAbi()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Valid));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var fields = program.Classes[0].Fields;
-        Assert.Equal((0, 1), (fields[0].Offset, fields[0].Size));
-        Assert.Equal((4, 12), (fields[1].Offset, fields[1].Size));
-        Assert.Equal((16, 16), (fields[2].Offset, fields[2].Size));
-        Assert.Equal(32, program.Classes[0].Size);
+        Assert.That((fields[0].Offset, fields[0].Size), Is.EqualTo((0, 1)));
+        Assert.That((fields[1].Offset, fields[1].Size), Is.EqualTo((4, 12)));
+        Assert.That((fields[2].Offset, fields[2].Size), Is.EqualTo((16, 16)));
+        Assert.That(program.Classes[0].Size, Is.EqualTo(32));
         SemanticVerifier.Verify(program);
     }
-
-    [Theory]
-    [InlineData("public Small Value;", "box.Value.First = 42;", "TRM3008")]
-    [InlineData("public mut Small Value;", "box.Value.Second = 42;", "TRM3008")]
-    [InlineData("public OwnedInt32Buffer Value;", "", "TRM3023")]
-    [InlineData("public ReadonlyInt32BufferView Value;", "", "TRM3023")]
-    [InlineData("public Owner Value;", "", "TRM3023")]
+    [TestCase("public Small Value;","box.Value.First = 42;","TRM3008")]
+    [TestCase("public mut Small Value;","box.Value.Second = 42;","TRM3008")]
+    [TestCase("public OwnedInt32Buffer Value;","","TRM3023")]
+    [TestCase("public ReadonlyInt32BufferView Value;","","TRM3023")]
+    [TestCase("public Owner Value;","","TRM3023")]
     public void RejectsReadonlyNestedWritesAndOwningOrViewFields(string field, string assignment, string code)
     {
         ArgumentNullException.ThrowIfNull(field);
@@ -90,16 +88,16 @@ public sealed class NativeManagedClassCopyFieldTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void ForgedOwningAndMisalignedCopyFieldsNeverReachNativeEmission()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Valid));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         var @class = program.Classes[0];
         var fields = @class.Fields;
         var owning = program with {
@@ -107,21 +105,21 @@ public sealed class NativeManagedClassCopyFieldTests
                 Fields = fields.SetItem(1, fields[1] with { Type = PrimitiveType.OwnedInt32Buffer, Size = 8 }),
             }],
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(owning));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(owning, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(owning))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(owning, NativeRuntimePolicy.FailFast))!;
         var misaligned = program with {
             Classes = [@class with {
                 Fields = fields.SetItem(1, fields[1] with { Offset = 8 }),
             }],
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(misaligned));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(misaligned))!;
         var unique = program with {
             Structures = program.Structures.SetItem(0, program.Structures[0] with { IsUnique = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(unique));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(unique))!;
     }
 
-    [Fact]
+    [Test]
     public void ForgedReadonlyClassCopyFieldCannotBeMutatedThroughItsNestedFields()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -139,16 +137,16 @@ public sealed class NativeManagedClassCopyFieldTests
                 return box.Data.Value;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var @class = program.Classes[0];
         var readonlyField = @class.Fields[0] with { IsMutable = false };
         var forged = program with { Classes = [@class with { Fields = [readonlyField] }] };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(forged, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void ConstructorCannotWriteIntoAnUninitializedCopyField()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -165,13 +163,11 @@ public sealed class NativeManagedClassCopyFieldTests
             }
             int32 Main() { return 42; }
             """));
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
     }
-
-    [Theory]
-    [InlineData(8, true)]
-    [InlineData(9, false)]
+    [TestCase(8,true)]
+    [TestCase(9,false)]
     public void CompactCopyFieldsRespectThe128ByteClassPayload(int count, bool fits)
     {
         var fields = string.Join(" ", Enumerable.Range(0, count).Select(
@@ -196,13 +192,13 @@ public sealed class NativeManagedClassCopyFieldTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         if (fits)
         {
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            Assert.Equal(128, Assert.IsType<BoundProgram>(compilation.Program).Classes[0].Size);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Classes[0].Size, Is.EqualTo(128));
         }
         else
         {
-            Assert.Null(compilation.Program);
-            Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3005");
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3005"),Is.True);
         }
     }
 }

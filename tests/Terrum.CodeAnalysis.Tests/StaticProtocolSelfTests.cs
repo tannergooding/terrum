@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -47,32 +47,27 @@ public sealed class StaticProtocolSelfTests
         int32 Main() { return Calculate(new Value(38), new Value(2)).Number; }
         """;
 
-    [Fact]
+    [Test]
     public void SelfAndOrdinaryConformancesSpecializeTheSameNominalOwner()
     {
         var tree = SyntaxTree.Parse(Source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(Source, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         var compilation = Compilation.Create(tree);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            static function => function.Name == "Calculate<Value>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions,static function => function.Name == "Calculate<Value>"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SelfBoundProtocolsExecuteAotAsync(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Source), runtimePolicy: (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var image = NativeEmitter.Emit(Assert.IsType<BoundProgram>(compilation.Program), policy);
-        Assert.Equal(42, await StaticProtocolTests.RunAsync(image).ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var image = NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), policy);
+        Assert.That(await StaticProtocolTests.RunAsync(image).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void SelfBoundComparisonPreservesBoolResultAndWitnessIdentity(NativeRuntimePolicy policy)
     {
         const string Comparison = """
@@ -92,17 +87,15 @@ public sealed class StaticProtocolSelfTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Comparison), (BoundRuntimePolicy)policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), policy), Is.EqualTo(42));
         var missingWitness = Comparison.Replace("Less<Box, bool>, AlsoLess<Box, bool>",
             "AlsoLess<Box, bool>", StringComparison.Ordinal);
         var rejected = Compilation.Create(SyntaxTree.Parse(missingWitness), (BoundRuntimePolicy)policy);
-        Assert.Contains(rejected.Diagnostics, static diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(rejected.Diagnostics,static diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OldNoSelfProducerServesPersistedConsumersAfterSelfBoundReplacementAsync(
         NativeRuntimePolicy policy)
     {
@@ -121,90 +114,80 @@ public sealed class StaticProtocolSelfTests
         var sourcePolicy = (BoundRuntimePolicy)policy;
         var oldLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(oldSource), sourcePolicy);
         var newLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(newSource), sourcePolicy);
-        Assert.False(oldLibrary.HasErrors, string.Join(Environment.NewLine, oldLibrary.Diagnostics));
-        Assert.False(newLibrary.HasErrors, string.Join(Environment.NewLine, newLibrary.Diagnostics));
-        var oldProgram = Assert.IsType<BoundProgram>(oldLibrary.Program);
-        var newProgram = Assert.IsType<BoundProgram>(newLibrary.Program);
+        Assert.That(oldLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, oldLibrary.Diagnostics));
+        Assert.That(newLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, newLibrary.Diagnostics));
+        var oldProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = oldLibrary.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var newProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = newLibrary.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var oldProducer = ModuleCompiler.CreateProducer(oldProgram, ["Read"]);
         var replacement = ModuleCompiler.CreateProducer(newProgram, ["Read"]);
         var oldConsumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(oldProducer), sourcePolicy);
-        Assert.False(oldConsumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, oldConsumerCompilation.Diagnostics));
+        Assert.That(oldConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oldConsumerCompilation.Diagnostics));
         var oldConsumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(oldConsumerCompilation.Program), oldProducer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = oldConsumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), oldProducer);
         var snapshot = SHA256.HashData(oldConsumer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(oldConsumer, oldProducer), policy));
-        Assert.Equal(44, NativeJit.Execute(ModuleCompiler.Link(oldConsumer, replacement), policy));
-        Assert.Equal(snapshot, SHA256.HashData(oldConsumer));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(oldConsumer, oldProducer), policy), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(oldConsumer, replacement), policy), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(oldConsumer), Is.EqualTo(snapshot));
 
         var oldNative = NativeModuleCompiler.CreateProducer(oldProgram, ["Read"], "NodeB", policy);
         var nativeConsumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             NativeModuleCompiler.CreateGraphReference([oldNative]), sourcePolicy);
-        Assert.False(nativeConsumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
+        Assert.That(nativeConsumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
-            Assert.IsType<BoundProgram>(nativeConsumerCompilation.Program), [oldNative], policy);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = nativeConsumerCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), [oldNative], policy);
         var nativeSnapshot = SHA256.HashData(nativeConsumer);
         var newNative = NativeModuleCompiler.CreateProducer(newProgram, ["Read"], "NodeB", policy);
         NativeModuleCompiler.ValidateGraph(nativeConsumer, [newNative]);
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [newNative],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(nativeSnapshot, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [newNative],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeSnapshot));
     }
-
-    [Theory]
-    [InlineData("Addition<Value, Value>", "Addition<int32, Value>", "TRM3007")]
-    [InlineData("Addition<Value, Value>", "Addition<Value, int32>", "TRM3007")]
-    [InlineData("Negate<Value>", "Negate<int32>", "TRM3007")]
-    [InlineData("Addition<Value, Value>", "Addition<Value, Value, Value>", "TRM3007")]
-    [InlineData("Negate<Value>", "Negate<Value, Value>", "TRM3007")]
-    [InlineData("Addition<T, T>", "Addition<T, T, T>", "TRM3007")]
-    [InlineData("Negate<T>", "Negate<T, T>", "TRM3007")]
-    [InlineData("Addition<T, T>", "Addition<int32, T>", "TRM3007")]
-    [InlineData("interface Addition<this TLeft, TRight, TResult>",
-        "interface Addition<TLeft, this TRight, TResult>", "TRM3001")]
-    [InlineData("interface Addition<this TLeft, TRight, TResult>",
-        "interface Addition<this TLeft, this TRight, TResult>", "TRM3001")]
-    [InlineData("interface Addition<this TLeft, TRight, TResult>",
-        "interface Addition<this TLeft, TLeft, TResult>", "TRM3001")]
-    [InlineData("interface Addition<this TLeft, TRight, TResult>",
-        "interface Addition<this TLeft, TResult>", "TRM3001")]
-    [InlineData("static TResult operator +(TLeft left, TRight right)",
-        "abstract static TResult operator +(TLeft left, TRight right)", "TRM1002")]
-    [InlineData("static TResult operator +(TLeft left, TRight right)",
-        "static abstract TResult operator +(TLeft left, TRight right)", "TRM1002")]
+    [TestCase("Addition<Value, Value>","Addition<int32, Value>","TRM3007")]
+    [TestCase("Addition<Value, Value>","Addition<Value, int32>","TRM3007")]
+    [TestCase("Negate<Value>","Negate<int32>","TRM3007")]
+    [TestCase("Addition<Value, Value>","Addition<Value, Value, Value>","TRM3007")]
+    [TestCase("Negate<Value>","Negate<Value, Value>","TRM3007")]
+    [TestCase("Addition<T, T>","Addition<T, T, T>","TRM3007")]
+    [TestCase("Negate<T>","Negate<T, T>","TRM3007")]
+    [TestCase("Addition<T, T>","Addition<int32, T>","TRM3007")]
+    [TestCase("interface Addition<this TLeft, TRight, TResult>",        "interface Addition<TLeft, this TRight, TResult>","TRM3001")]
+    [TestCase("interface Addition<this TLeft, TRight, TResult>",        "interface Addition<this TLeft, this TRight, TResult>","TRM3001")]
+    [TestCase("interface Addition<this TLeft, TRight, TResult>",        "interface Addition<this TLeft, TLeft, TResult>","TRM3001")]
+    [TestCase("interface Addition<this TLeft, TRight, TResult>",        "interface Addition<this TLeft, TResult>","TRM3001")]
+    [TestCase("static TResult operator +(TLeft left, TRight right)",        "abstract static TResult operator +(TLeft left, TRight right)","TRM1002")]
+    [TestCase("static TResult operator +(TLeft left, TRight right)",        "static abstract TResult operator +(TLeft left, TRight right)","TRM1002")]
     public void RejectsMismatchedSelfOrRequirementShape(string before, string after, string code)
     {
-        Assert.Contains(before, Source, StringComparison.Ordinal);
+        Assert.That(Source, Does.Contain(before));
         var compilation = Compilation.Create(SyntaxTree.Parse(Source.Replace(before, after, StringComparison.Ordinal)));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void AnAbstractNameIsAnOrdinaryIdentifier()
     {
         const string Source = "interface Abstract<T, R> { static R operator +(T abstract); } int32 Main() { int32 abstract = 42; return abstract; }";
         var tree = SyntaxTree.Parse(Source);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.False(Compilation.Create(tree).HasErrors);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(Compilation.Create(tree).HasErrors, Is.False);
     }
 
-    [Fact]
+    [Test]
     public void AFalseNoThrowSelfWitnessIsRejected()
     {
         var source = Source.Replace("[NoThrow] public static Value operator -(Value value)",
             "public static Value operator -(Value value)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void DefinitionProofCannotInventAnUnlistedWitness()
     {
         var source = Source.Replace("Addition<T, T>, Negate<T>, Ordinary<T, T, T>, [Copy]",
             "Addition<T, T>, Negate<T>, [Copy]", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3007");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3007"),Is.True);
     }
 }

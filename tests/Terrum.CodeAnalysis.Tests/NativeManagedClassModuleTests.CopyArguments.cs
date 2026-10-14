@@ -9,17 +9,16 @@ using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class NativeManagedClassModuleTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, false)]
-    [InlineData(NativeRuntimePolicy.FailFast, true)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    [TestCase(NativeRuntimePolicy.FailFast,false)]
+    [TestCase(NativeRuntimePolicy.FailFast,true)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,false)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions,true)]
     public void CopyFactoryArgumentsRetainVersionedManagedAccessEvenWithoutCopyFields(
         NativeRuntimePolicy policy, bool storeCopy)
     {
@@ -42,22 +41,20 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
-        Assert.Equal("native-19", ModuleCompiler.GetNativeProfileVersion(producer, false));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-19"));
         var reference = ModuleCompiler.CreateReference(producer);
-        Assert.Empty(reference.Structures);
-        Assert.Equal("Proof", Assert.Single(reference.Functions).Name);
+        Assert.That(reference.Structures, Is.Empty);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("Proof"));
         foreach (var version in new[] { 19, 20, 21, 22, 23 })
         {
             var downgraded = (byte[])producer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), version);
-            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded))!;
         }
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CopyFactorySemanticReplacementRemapsPrivateArgumentsAsync(NativeRuntimePolicy policy)
     {
         var original = ModuleCompiler.CreateProducer(
@@ -79,21 +76,17 @@ public sealed partial class NativeManagedClassModuleTests
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(Compile(CopyArgumentLeaf(), policy), ["Leaf"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
         var program = ModuleCompiler.Link(consumer, replacement);
-        Assert.Equal(["Cell", "Stamp", "$producer.Cell", "$producer.Stamp"],
-            program.Structures.Select(static structure => structure.Name));
-        var factory = Assert.Single(program.Functions,
-            static function => function.Intrinsic == BoundIntrinsic.ClassTryCreate);
-        Assert.Equal((PrimitiveType)103, factory.Variables[0].Type);
-        Assert.Equal((PrimitiveType)103, program.Functions[factory.ClassConstructor].Variables[1].Type);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true));
-        Assert.Equal(hash, SHA256.HashData(consumer));
+        Assert.That(program.Structures.Select(static structure => structure.Name), Is.EqualTo(["Cell", "Stamp", "$producer.Cell", "$producer.Stamp"]));
+        var factory = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Intrinsic == BoundIntrinsic.ClassTryCreate);
+        Assert.That(factory.Variables[0].Type, Is.EqualTo((PrimitiveType)103));
+        Assert.That(program.Functions[factory.ClassConstructor].Variables[1].Type, Is.EqualTo((PrimitiveType)103));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(hash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CopyFactoryLeafReplacesUnchangedNativeGraphAsync(NativeRuntimePolicy policy)
     {
         var original = NativeModuleCompiler.CreateProducer(
@@ -106,19 +99,19 @@ public sealed partial class NativeManagedClassModuleTests
         var middleHash = SHA256.HashData(middle);
         var replacement = NativeModuleCompiler.CreateProducer(
             Compile(CopyArgumentLeaf(), policy), ["Leaf"], "NodeB", policy);
-        Assert.Equal("native-20", NativeModuleCompiler.Inspect(replacement).NativeProfileVersion);
+        Assert.That(NativeModuleCompiler.Inspect(replacement).NativeProfileVersion, Is.EqualTo("native-20"));
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(44));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
-            TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(rootHash, SHA256.HashData(root));
-        Assert.Equal(middleHash, SHA256.HashData(middle));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
+        Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
 
     private static string CopyArgumentLeaf() =>

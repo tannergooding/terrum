@@ -10,20 +10,19 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CheckedRecoveryTests
 {
-    [Theory]
-    [InlineData("int32 Main() { try { require false; } catch { return 1; } return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3021")]
-    [InlineData("int32 Main() { unsafe { try { require false; } catch { return 1; } } return 0; }", BoundRuntimePolicy.FailFast, "TRM3022")]
-    [InlineData("int32 Main() { unsafe { try { require false; } catch { return 1; } finally { require false; } } return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3017")]
-    [InlineData("bool Take(out int32 x) { unsafe { try { require false; x = 1; } catch { return x == 1; } } return false; } int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
-    [InlineData("bool Take(out int32 x) { unsafe { try { x = 1; require false; } catch { Clear(out x); return x == 1; } } return false; } bool Clear(out int32 x) { return false; } int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
-    [InlineData("bool Take(out int32 x) { unsafe { try { require Set(out x); require false; } catch { return x == 1; } } return false; } bool Set(out int32 x) { x = 1; return true; } int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
-    [InlineData("""
+    [TestCase("int32 Main() { try { require false; } catch { return 1; } return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3021")]
+    [TestCase("int32 Main() { unsafe { try { require false; } catch { return 1; } } return 0; }",BoundRuntimePolicy.FailFast,"TRM3022")]
+    [TestCase("int32 Main() { unsafe { try { require false; } catch { return 1; } finally { require false; } } return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3017")]
+    [TestCase("bool Take(out int32 x) { unsafe { try { require false; x = 1; } catch { return x == 1; } } return false; } int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
+    [TestCase("bool Take(out int32 x) { unsafe { try { x = 1; require false; } catch { Clear(out x); return x == 1; } } return false; } bool Clear(out int32 x) { return false; } int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
+    [TestCase("bool Take(out int32 x) { unsafe { try { require Set(out x); require false; } catch { return x == 1; } } return false; } bool Set(out int32 x) { x = 1; return true; } int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
+    [TestCase("""
         [NoThrow] void Fill(out int32 value, int32 ignored) { value = 42; }
         int32 Fail() { require false; return 0; }
         int32 Main() {
@@ -31,8 +30,8 @@ public sealed class CheckedRecoveryTests
             unsafe { try { Fill(out value, Fail()); } catch { return value; } }
             return 0;
         }
-        """, BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
-    [InlineData("""
+        """,BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
+    [TestCase("""
         [NoThrow] void Fill(int32 ignored, out int32 value) { value = 42; }
         int32 Fail() { require false; return 0; }
         int32 Main() {
@@ -40,11 +39,11 @@ public sealed class CheckedRecoveryTests
             unsafe { try { Fill(value: out value, ignored: Fail()); } catch { return value; } }
             return 0;
         }
-        """, BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
-    [InlineData("int32 Main() { unsafe { try { require false; } catch { return 42; } } try { return 1; } finally { require false; } }", BoundRuntimePolicy.CheckedExceptions, "TRM3017")]
-    [InlineData("bool Take(out int32 x, int32 divisor) { try { x = 10 / divisor; return true; } finally { Observe(x); } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
-    [InlineData("bool Take(out int32 x, int32 divisor) { unsafe { try { require false; } catch { x = 10 / divisor; return true; } finally { Observe(x); } } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }", BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
-    [InlineData("""
+        """,BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
+    [TestCase("int32 Main() { unsafe { try { require false; } catch { return 42; } } try { return 1; } finally { require false; } }",BoundRuntimePolicy.CheckedExceptions,"TRM3017")]
+    [TestCase("bool Take(out int32 x, int32 divisor) { try { x = 10 / divisor; return true; } finally { Observe(x); } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
+    [TestCase("bool Take(out int32 x, int32 divisor) { unsafe { try { require false; } catch { x = 10 / divisor; return true; } finally { Observe(x); } } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
+    [TestCase("""
         struct Pair { public int32 Value; public Pair(int32 value) { Value = value; } }
         int32 Fail(out Pair result) { result = new Pair(42); require false; return 0; }
         int32 Main() {
@@ -52,15 +51,15 @@ public sealed class CheckedRecoveryTests
             unsafe { try { Fail(out result); } catch { return result.Value; } }
             return 0;
         }
-        """, BoundRuntimePolicy.CheckedExceptions, "TRM3016")]
+        """,BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
     public void RecoveryRequiresPolicyAndFailureEdgeInitialization(string source, BoundRuntimePolicy policy, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ValidRecoveryRetainsStructuredIrButCannotBeEmittedAsFailFast()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -71,14 +70,14 @@ public sealed class CheckedRecoveryTests
                 return 0;
             }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var region = Assert.IsType<BoundUnsafe>(program.Functions[0].Body.Statements[0]);
-        _ = Assert.IsType<BoundTryCatch>(region.Body.Statements[0]);
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        var region = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual1 = program.Functions[0].Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual1!; }))();
+        _ = ((global::System.Func<BoundTryCatch>)(() => { var __nunitActual2 = region.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundTryCatch>()); return (BoundTryCatch)__nunitActual2!; }))();
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void CheckedRegionsAndPolicySurviveSourceIndependentModuleLinking()
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -88,48 +87,46 @@ public sealed class CheckedRecoveryTests
                 }
             }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Compute"]);
+        Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = provider.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), ["Compute"]);
         var reference = ModuleCompiler.CreateReference(producer);
-        Assert.Equal(BoundRuntimePolicy.CheckedExceptions, reference.RuntimePolicy);
+        Assert.That(reference.RuntimePolicy, Is.EqualTo(BoundRuntimePolicy.CheckedExceptions));
         var mismatch = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(3); }"), reference);
-        Assert.Contains(mismatch.Diagnostics, item => item.Code == "TRM3022");
+        Assert.That(global::System.Linq.Enumerable.Any(mismatch.Diagnostics,item => item.Code == "TRM3022"),Is.True);
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(3); }"),
             reference, BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = client.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(BoundRuntimePolicy.CheckedExceptions, linked.RuntimePolicy);
-        Assert.Contains(linked.Functions, function => function.Body.Statements[0] is BoundUnsafe {
+        Assert.That(linked.RuntimePolicy, Is.EqualTo(BoundRuntimePolicy.CheckedExceptions));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Body.Statements[0] is BoundUnsafe {
             Body.Statements: [BoundTryCatch],
-        });
+        }),Is.True);
     }
-
-    [Theory]
-    [InlineData("bool Take(out int32 x) { unsafe { try { x = 1; require false; } catch { return x == 1; } } return false; } int32 Main() { return 0; }")]
-    [InlineData("bool Take(out int32 x) { unsafe { try { try { require false; } finally { x = 1; } } catch { return x == 1; } } return false; } int32 Main() { return 0; }")]
+    [TestCase("bool Take(out int32 x) { unsafe { try { x = 1; require false; } catch { return x == 1; } } return false; } int32 Main() { return 0; }")]
+    [TestCase("bool Take(out int32 x) { unsafe { try { try { require false; } finally { x = 1; } } catch { return x == 1; } } return false; } int32 Main() { return 0; }")]
     public void FailureEdgesIncludeOnlyCompletedWritesAndUnwoundCleanup(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
-    [Fact]
+    [Test]
     public async Task PersistedCheckedSemanticModulesExecuteInBoundedWorkerAsync()
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Divide(int32 divisor) { return 42 / divisor; }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program), ["Divide"]);
+        Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = provider.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), ["Divide"]);
         var reference = ModuleCompiler.CreateReference(producer);
         var client = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe { try { return Divide(0); } catch { return 42; } }
             }
             """), reference, BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program), producer);
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = client.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
         var directory = Path.Combine(AppContext.BaseDirectory, $"checked-module-{Guid.NewGuid():N}");
         _ = Directory.CreateDirectory(directory);
         try
@@ -166,7 +163,7 @@ public sealed class CheckedRecoveryTests
                 await process.WaitForExitAsync();
                 throw;
             }
-            Assert.Equal(42, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(42));
         }
         finally
         {
@@ -174,14 +171,14 @@ public sealed class CheckedRecoveryTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task NativePackagesCatchFailuresAcrossAnImportedFunctionAsync()
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Divide(int32 divisor) { return 42 / divisor; }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(provider.HasErrors, string.Join(Environment.NewLine, provider.Diagnostics));
-        var producer = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(provider.Program),
+        Assert.That(provider.HasErrors, Is.False, string.Join(Environment.NewLine, provider.Diagnostics));
+        var producer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = provider.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(),
             ["Divide"], "Checked", NativeRuntimePolicy.CheckedExceptions);
         var reference = NativeModuleCompiler.CreateReference(producer);
         var client = Compilation.Create(SyntaxTree.Parse("""
@@ -191,11 +188,11 @@ public sealed class CheckedRecoveryTests
                 }
             }
             """), reference, BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = NativeModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program),
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = client.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))(),
             producer, NativeRuntimePolicy.CheckedExceptions);
         NativeModuleCompiler.Validate(consumer, producer);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, producer, TimeSpan.FromSeconds(10)));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, producer, TimeSpan.FromSeconds(10)), Is.EqualTo(42));
 
         var replacement = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Divide(int32 divisor) {
@@ -203,29 +200,27 @@ public sealed class CheckedRecoveryTests
                 return 42 / divisor;
             }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.False(replacement.HasErrors, string.Join(Environment.NewLine, replacement.Diagnostics));
-        var replacedProducer = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(replacement.Program),
+        Assert.That(replacement.HasErrors, Is.False, string.Join(Environment.NewLine, replacement.Diagnostics));
+        var replacedProducer = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = replacement.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(),
             ["Divide"], "Checked", NativeRuntimePolicy.CheckedExceptions);
         NativeModuleCompiler.Validate(consumer, replacedProducer);
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, replacedProducer, TimeSpan.FromSeconds(10),
-            NativeRuntimePolicy.CheckedExceptions));
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, replacedProducer, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(43));
 
         var failFastProvider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Divide(int32 divisor) { return 42 / divisor; }
             """));
-        var failFast = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(failFastProvider.Program),
+        var failFast = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = failFastProvider.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(),
             ["Divide"], "Checked", NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, failFast));
-        _ = await Assert.ThrowsAsync<ModuleContractException>(() => NativeModuleCompiler.RunAsync(consumer, producer,
-            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, failFast))!;
+        _ = (await Assert.ThrowsAsync<ModuleContractException>(() => NativeModuleCompiler.RunAsync(consumer, producer,
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast)))!;
     }
-
-    [Theory]
-    [InlineData("body")]
-    [InlineData("catch")]
-    [InlineData("finally")]
-    [InlineData("unsafe")]
-    [InlineData("policy")]
+    [TestCase("body")]
+    [TestCase("catch")]
+    [TestCase("finally")]
+    [TestCase("unsafe")]
+    [TestCase("policy")]
     public void MalformedPublicRecoveryIrIsRejectedBeforeEmission(string variant)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -236,10 +231,10 @@ public sealed class CheckedRecoveryTests
                 return 0;
             }
             """), BoundRuntimePolicy.CheckedExceptions);
-        var valid = Assert.IsType<BoundProgram>(compilation.Program);
+        var valid = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
         var function = valid.Functions[valid.EntryPoint];
-        var unsafeBlock = Assert.IsType<BoundUnsafe>(function.Body.Statements[0]);
-        var recovery = Assert.IsType<BoundTryCatch>(unsafeBlock.Body.Statements[0]);
+        var unsafeBlock = ((global::System.Func<BoundUnsafe>)(() => { var __nunitActual12 = function.Body.Statements[0]; Assert.That(__nunitActual12, Is.TypeOf<BoundUnsafe>()); return (BoundUnsafe)__nunitActual12!; }))();
+        var recovery = ((global::System.Func<BoundTryCatch>)(() => { var __nunitActual13 = unsafeBlock.Body.Statements[0]; Assert.That(__nunitActual13, Is.TypeOf<BoundTryCatch>()); return (BoundTryCatch)__nunitActual13!; }))();
         var broken = variant switch {
             "body" => recovery with { Body = null! },
             "catch" => recovery with { Catch = null! },
@@ -260,17 +255,15 @@ public sealed class CheckedRecoveryTests
             }),
             RuntimePolicy = variant == "policy" ? (BoundRuntimePolicy)127 : valid.RuntimePolicy,
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(replaced));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(replaced, NativeRuntimePolicy.CheckedExceptions));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(replaced))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(replaced, NativeRuntimePolicy.CheckedExceptions))!;
     }
-
-    [Theory]
-    [InlineData("marker", unchecked((int)0xE0540092))]
-    [InlineData("version", unchecked((int)0xE0540092))]
-    [InlineData("reason", unchecked((int)0xE0540092))]
-    [InlineData("parameter-count", unchecked((int)0xE0540092))]
-    [InlineData("continuable", unchecked((int)0xE0540092))]
-    [InlineData("code", unchecked((int)0xE0550092))]
+    [TestCase("marker",unchecked((int)0xE0540092))]
+    [TestCase("version",unchecked((int)0xE0540092))]
+    [TestCase("reason",unchecked((int)0xE0540092))]
+    [TestCase("parameter-count",unchecked((int)0xE0540092))]
+    [TestCase("continuable",unchecked((int)0xE0540092))]
+    [TestCase("code",unchecked((int)0xE0550092))]
     public async Task ForeignOrMalformedFailureIdentityIsNotCaughtAsync(string variant, int expected)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -278,13 +271,13 @@ public sealed class CheckedRecoveryTests
                 unsafe { try { return 1 / 0; } catch { return 42; } }
             }
             """), BoundRuntimePolicy.CheckedExceptions);
-        var image = NativeEmitter.Emit(Assert.IsType<BoundProgram>(compilation.Program),
+        var image = NativeEmitter.Emit(((global::System.Func<BoundProgram>)(() => { var __nunitActual14 = compilation.Program; Assert.That(__nunitActual14, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual14!; }))(),
             NativeRuntimePolicy.CheckedExceptions);
         var marker = BitConverter.GetBytes(0x54455252554D0001L);
         var first = image.AsSpan().IndexOf(marker);
-        Assert.True(first >= 0);
+        Assert.That(first >= 0, Is.True);
         var second = image.AsSpan((first + marker.Length)..).IndexOf(marker);
-        Assert.True(second >= 0);
+        Assert.That(second >= 0, Is.True);
         var helper = first + marker.Length + second;
         var offset = variant switch {
             "marker" => helper,
@@ -321,25 +314,23 @@ public sealed class CheckedRecoveryTests
                 await process.WaitForExitAsync();
                 throw;
             }
-            Assert.Equal(expected, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(expected));
         }
         finally
         {
-            File.Delete(executable);
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
         }
 
         static int Find(byte[] bytes, byte[] needle, int start)
         {
             var relative = bytes.AsSpan(start..).IndexOf(needle);
-            Assert.True(relative >= 0);
+            Assert.That(relative >= 0, Is.True);
             return start + relative;
         }
     }
-
-    [Theory]
-    [InlineData("scope-count")]
-    [InlineData("scope-range")]
-    [InlineData("cleanup-target")]
+    [TestCase("scope-count")]
+    [TestCase("scope-range")]
+    [TestCase("cleanup-target")]
     public void TamperedCheckedNativeScopesAreRejected(string variant)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -347,7 +338,7 @@ public sealed class CheckedRecoveryTests
                     unsafe { try { return 42 / divisor; } catch { return 42; } }
                 }
                 """), BoundRuntimePolicy.CheckedExceptions);
-        var original = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+        var original = NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual15 = compilation.Program; Assert.That(__nunitActual15, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual15!; }))(),
             ["Divide"], "Scoped", NativeRuntimePolicy.CheckedExceptions);
         var changed = (byte[])original.Clone();
         var peImage = 18 + changed[7] + changed[8] + 2
@@ -363,9 +354,9 @@ public sealed class CheckedRecoveryTests
                 break;
             }
         }
-        Assert.True(xdata > 0);
+        Assert.That(xdata > 0, Is.True);
         var source = xdata + (4 * 8);
-        Assert.Equal((byte)0x19, changed[source]);
+        Assert.That(changed[source], Is.EqualTo((byte)0x19));
         var count = source + 12 + 4;
         var scope = source + 12 + 8;
         switch (variant)
@@ -383,6 +374,6 @@ public sealed class CheckedRecoveryTests
                 throw new InvalidOperationException("Unknown scope mutation.");
         }
         SHA256.HashData(changed.AsSpan(0, changed.Length - 32)).CopyTo(changed, changed.Length - 32);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(changed));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(changed))!;
     }
 }

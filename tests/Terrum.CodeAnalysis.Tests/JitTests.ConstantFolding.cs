@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task FoldedScalarNoThrowResultsAgreeAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """
@@ -25,10 +24,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task FoldedConstantComparisonsAgreeAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """
@@ -45,34 +42,28 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return (int32.MaxValue + 1) - 1; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return (42 / 0) * 0; }", unchecked((int)0xE0540002))]
-    [InlineData("int32 Main() { return int32(uint32.MaxValue); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return 0 * Fail(); } int32 Fail() { require false; return 42; }", unchecked((int)0xE0540003))]
-    [InlineData("int32 Main() { require uint64.MaxValue < uint64(0); return 0; }", unchecked((int)0xE0540003))]
-    [InlineData("int32 Main() { require int32.MaxValue + 1 == int32(0); return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { require Fail() == int32(0); return 0; } int32 Fail() { require false; return 0; }", unchecked((int)0xE0540003))]
-    [InlineData("int32 Main() { require true && (int32.MaxValue + 1 > int32(0)); return 0; }", unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return (int32.MaxValue + 1) - 1; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return (42 / 0) * 0; }",unchecked((int)0xE0540002))]
+    [TestCase("int32 Main() { return int32(uint32.MaxValue); }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { return 0 * Fail(); } int32 Fail() { require false; return 42; }",unchecked((int)0xE0540003))]
+    [TestCase("int32 Main() { require uint64.MaxValue < uint64(0); return 0; }",unchecked((int)0xE0540003))]
+    [TestCase("int32 Main() { require int32.MaxValue + 1 == int32(0); return 0; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { require Fail() == int32(0); return 0; } int32 Fail() { require false; return 0; }",unchecked((int)0xE0540003))]
+    [TestCase("int32 Main() { require true && (int32.MaxValue + 1 > int32(0)); return 0; }",unchecked((int)0xE0540001))]
     public Task UnsafeScalarExpressionsStillFailInOrderAcrossAotAndJitAsync(string source, int failure) =>
         AssertFailFastExecutionAsync(source, failure);
-
-    [Theory]
-    [InlineData("int32 Main() { unsafe { try { return (int32.MaxValue + 1) - 1; } catch { return 42; } } }")]
-    [InlineData("int32 Main() { unsafe { try { return (42 / 0) * 0; } catch { return 42; } } }")]
-    [InlineData("int32 Main() { unsafe { try { return int32(uint32.MaxValue); } catch { return 42; } } }")]
-    [InlineData("int32 Main() { unsafe { try { return 0 * Fail(); } catch { return 42; } } } int32 Fail() { require false; return 0; }")]
-    [InlineData("int32 Main() { unsafe { try { require uint64.MaxValue < uint64(0); } catch { return 42; } } return 0; }")]
-    [InlineData("int32 Main() { unsafe { try { require int32.MaxValue + 1 == int32(0); } catch { return 42; } } return 0; }")]
-    [InlineData("int32 Main() { unsafe { try { require Fail() == int32(0); } catch { return 42; } } return 0; } int32 Fail() { require false; return 0; }")]
-    [InlineData("int32 Main() { unsafe { try { require true && (int32.MaxValue + 1 > int32(0)); } catch { return 42; } } return 0; }")]
+    [TestCase("int32 Main() { unsafe { try { return (int32.MaxValue + 1) - 1; } catch { return 42; } } }")]
+    [TestCase("int32 Main() { unsafe { try { return (42 / 0) * 0; } catch { return 42; } } }")]
+    [TestCase("int32 Main() { unsafe { try { return int32(uint32.MaxValue); } catch { return 42; } } }")]
+    [TestCase("int32 Main() { unsafe { try { return 0 * Fail(); } catch { return 42; } } } int32 Fail() { require false; return 0; }")]
+    [TestCase("int32 Main() { unsafe { try { require uint64.MaxValue < uint64(0); } catch { return 42; } } return 0; }")]
+    [TestCase("int32 Main() { unsafe { try { require int32.MaxValue + 1 == int32(0); } catch { return 42; } } return 0; }")]
+    [TestCase("int32 Main() { unsafe { try { require Fail() == int32(0); } catch { return 42; } } return 0; } int32 Fail() { require false; return 0; }")]
+    [TestCase("int32 Main() { unsafe { try { require true && (int32.MaxValue + 1 > int32(0)); } catch { return 42; } } return 0; }")]
     public Task UnsafeScalarExpressionsStayCatchableAcrossAotAndJitAsync(string source) =>
         AssertCheckedExecutionAsync(source, 42);
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ConstantShortCircuitDoesNotDropUnknownOperandAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """
@@ -82,12 +73,10 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false, "uint32", "/", "2147483648", "1")]
-    [InlineData(true, "uint32", "%", "2147483648", "2147483647")]
-    [InlineData(false, "uint64", "%", "9223372036854775808", "9223372036854775807")]
-    [InlineData(true, "uint64", "/", "9223372036854775808", "1")]
+    [TestCase(false,"uint32","/","2147483648","1")]
+    [TestCase(true,"uint32","%","2147483648","2147483647")]
+    [TestCase(false,"uint64","%","9223372036854775808","9223372036854775807")]
+    [TestCase(true,"uint64","/","9223372036854775808","1")]
     public Task UnsignedPowerOfTwoOperationsAgreeAcrossAotAndJitAsync(
         bool checkedFailures, string type, string operation, string divisor, string expected)
     {
@@ -101,10 +90,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(source, 42)
             : AssertFailFastExecutionAsync(source, 42);
     }
-
-    [Theory]
-    [InlineData("uint32", "/")]
-    [InlineData("uint64", "%")]
+    [TestCase("uint32","/")]
+    [TestCase("uint64","%")]
     public Task UnsignedPowerOfTwoNumeratorFailuresRemainCatchableAcrossAotAndJitAsync(string type, string operation)
     {
         var source = $$"""
@@ -119,31 +106,29 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(source, 42);
     }
-
-    [Theory]
-    [InlineData("int32", "0", "1")]
-    [InlineData("int32", "-1", "1")]
-    [InlineData("int32", "-2147483648", "1")]
-    [InlineData("int32", "2147483647", "1")]
-    [InlineData("int32", "-3", "2")]
-    [InlineData("int32", "3", "2")]
-    [InlineData("int32", "-4", "2")]
-    [InlineData("int32", "-2147483648", "2")]
-    [InlineData("int32", "2147483647", "2")]
-    [InlineData("int32", "-1073741825", "1073741824")]
-    [InlineData("int32", "-2147483648", "1073741824")]
-    [InlineData("int32", "2147483647", "1073741824")]
-    [InlineData("int64", "0", "1")]
-    [InlineData("int64", "-1", "1")]
-    [InlineData("int64", "-9223372036854775808", "1")]
-    [InlineData("int64", "9223372036854775807", "1")]
-    [InlineData("int64", "-3", "2")]
-    [InlineData("int64", "3", "2")]
-    [InlineData("int64", "-9223372036854775808", "2")]
-    [InlineData("int64", "9223372036854775807", "2")]
-    [InlineData("int64", "-4611686018427387905", "4611686018427387904")]
-    [InlineData("int64", "-9223372036854775808", "4611686018427387904")]
-    [InlineData("int64", "9223372036854775807", "4611686018427387904")]
+    [TestCase("int32","0","1")]
+    [TestCase("int32","-1","1")]
+    [TestCase("int32","-2147483648","1")]
+    [TestCase("int32","2147483647","1")]
+    [TestCase("int32","-3","2")]
+    [TestCase("int32","3","2")]
+    [TestCase("int32","-4","2")]
+    [TestCase("int32","-2147483648","2")]
+    [TestCase("int32","2147483647","2")]
+    [TestCase("int32","-1073741825","1073741824")]
+    [TestCase("int32","-2147483648","1073741824")]
+    [TestCase("int32","2147483647","1073741824")]
+    [TestCase("int64","0","1")]
+    [TestCase("int64","-1","1")]
+    [TestCase("int64","-9223372036854775808","1")]
+    [TestCase("int64","9223372036854775807","1")]
+    [TestCase("int64","-3","2")]
+    [TestCase("int64","3","2")]
+    [TestCase("int64","-9223372036854775808","2")]
+    [TestCase("int64","9223372036854775807","2")]
+    [TestCase("int64","-4611686018427387905","4611686018427387904")]
+    [TestCase("int64","-9223372036854775808","4611686018427387904")]
+    [TestCase("int64","9223372036854775807","4611686018427387904")]
     public async Task SignedPowerOfTwoDivisionAndRemainderMatchExactValuesAcrossAotAndJitAsync(
         string type, string numerator, string divisor)
     {
@@ -162,12 +147,10 @@ public sealed partial class JitTests
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("int32", "/", "1")]
-    [InlineData("int32", "%", "1073741824")]
-    [InlineData("int64", "/", "4611686018427387904")]
-    [InlineData("int64", "%", "1")]
+    [TestCase("int32","/","1")]
+    [TestCase("int32","%","1073741824")]
+    [TestCase("int64","/","4611686018427387904")]
+    [TestCase("int64","%","1")]
     public async Task SignedPowerOfTwoNumeratorEffectsAndFailuresRemainObservableAcrossAotAndJitAsync(
         string type, string operation, string divisor)
     {
@@ -208,14 +191,12 @@ public sealed partial class JitTests
             }
             """, unchecked((int)0xE0540003)).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("int32", "-3", "-2", "1", "-1")]
-    [InlineData("int32", "-2147483648", "-2", "1073741824", "0")]
-    [InlineData("int32", "-2147483648", "-1", null, "0")]
-    [InlineData("int64", "-3", "-2", "1", "-1")]
-    [InlineData("int64", "-9223372036854775808", "-2", "4611686018427387904", "0")]
-    [InlineData("int64", "-9223372036854775808", "-1", null, "0")]
+    [TestCase("int32","-3","-2","1","-1")]
+    [TestCase("int32","-2147483648","-2","1073741824","0")]
+    [TestCase("int32","-2147483648","-1",null,"0")]
+    [TestCase("int64","-3","-2","1","-1")]
+    [TestCase("int64","-9223372036854775808","-2","4611686018427387904","0")]
+    [TestCase("int64","-9223372036854775808","-1",null,"0")]
     public async Task SignedNegativeDivisorControlsKeepExistingBehaviorAcrossAotAndJitAsync(
         string type, string numerator, string divisor, string? quotient, string remainder)
     {
@@ -248,12 +229,10 @@ public sealed partial class JitTests
             await AssertCheckedExecutionAsync(source, expected).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("int32", "/")]
-    [InlineData("int32", "%")]
-    [InlineData("int64", "/")]
-    [InlineData("int64", "%")]
+    [TestCase("int32","/")]
+    [TestCase("int32","%")]
+    [TestCase("int64","/")]
+    [TestCase("int64","%")]
     public async Task SignedZeroDivisorStillFailsAcrossAotAndJitAsync(string type, string operation)
     {
         var source = $$"""

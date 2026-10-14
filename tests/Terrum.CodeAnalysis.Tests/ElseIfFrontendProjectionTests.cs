@@ -7,67 +7,64 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ElseIfFrontendProjectionTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void IndependentElseIfPreservesDirectNestedConditionalsSpansAndScopes(bool isVoid)
     {
         var text = Text(isVoid);
         var words = Projection(text, isVoid);
         var result = ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words));
-        Assert.Equal(23, result.Statements[2].Kind);
-        Assert.Equal(text.IndexOf("else if", StringComparison.Ordinal), result.Statements[2].Span.Start);
-        Assert.Equal(result.Statements[3].Span.End, result.Statements[2].Span.End);
+        Assert.That(result.Statements[2].Kind, Is.EqualTo(23));
+        Assert.That(result.Statements[2].Span.Start, Is.EqualTo(text.IndexOf("else if", StringComparison.Ordinal)));
+        Assert.That(result.Statements[2].Span.End, Is.EqualTo(result.Statements[3].Span.End));
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var expected = hosted.Functions[0];
             var function = actual.Functions[0];
-            Assert.Equal(expected.Span, function.Span);
-            Assert.Equal(expected.Body.Span, function.Body.Span);
-            Assert.Equal(expected.Body.IsManagedLexicalScope, function.Body.IsManagedLexicalScope);
-            Check(Assert.IsType<BoundIf>(expected.Body.Statements[0]), Assert.IsType<BoundIf>(function.Body.Statements[0]));
-            if (isVoid) { Assert.Equal(expected.Body.Statements[1], function.Body.Statements[1]); }
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["await"], (NativeRuntimePolicy)policy),
-                NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy));
+            Assert.That(function.Span, Is.EqualTo(expected.Span));
+            Assert.That(function.Body.Span, Is.EqualTo(expected.Body.Span));
+            Assert.That(function.Body.IsManagedLexicalScope, Is.EqualTo(expected.Body.IsManagedLexicalScope));
+            Check(((global::System.Func<BoundIf>)(() => { var __nunitActual1 = expected.Body.Statements[0]; Assert.That(__nunitActual1, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual1!; }))(), ((global::System.Func<BoundIf>)(() => { var __nunitActual2 = function.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual2!; }))());
+            if (isVoid)
+            { Assert.That(function.Body.Statements[1], Is.EqualTo(expected.Body.Statements[1])); }
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["await"], (NativeRuntimePolicy)policy)));
         }
 
         static void Check(BoundIf expected, BoundIf actual)
         {
-            Assert.Equal(expected.Span, actual.Span);
-            Assert.Equal(expected.Condition, actual.Condition);
-            var trueBlock = Assert.IsType<BoundBlock>(actual.Then);
-            var expectedTrue = Assert.IsType<BoundBlock>(expected.Then);
-            Assert.Equal(expectedTrue.Span, trueBlock.Span);
-            Assert.Equal(expectedTrue.IsManagedLexicalScope, trueBlock.IsManagedLexicalScope);
-            Assert.Equal(expectedTrue.Statements[0], trueBlock.Statements[0]);
+            Assert.That(actual.Span, Is.EqualTo(expected.Span));
+            Assert.That(actual.Condition, Is.EqualTo(expected.Condition));
+            var trueBlock = ((global::System.Func<BoundBlock>)(() => { var __nunitActual3 = actual.Then; Assert.That(__nunitActual3, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual3!; }))();
+            var expectedTrue = ((global::System.Func<BoundBlock>)(() => { var __nunitActual4 = expected.Then; Assert.That(__nunitActual4, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual4!; }))();
+            Assert.That(trueBlock.Span, Is.EqualTo(expectedTrue.Span));
+            Assert.That(trueBlock.IsManagedLexicalScope, Is.EqualTo(expectedTrue.IsManagedLexicalScope));
+            Assert.That(trueBlock.Statements[0], Is.EqualTo(expectedTrue.Statements[0]));
             if (expected.Else is BoundIf nested)
             {
-                Check(nested, Assert.IsType<BoundIf>(actual.Else));
+                Check(nested, ((global::System.Func<BoundIf>)(() => { var __nunitActual5 = actual.Else; Assert.That(__nunitActual5, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual5!; }))());
             }
             else
             {
-                var falseBlock = Assert.IsType<BoundBlock>(actual.Else);
-                var expectedFalse = Assert.IsType<BoundBlock>(expected.Else);
-                Assert.Equal(expectedFalse.Span, falseBlock.Span);
-                Assert.Equal(expectedFalse.IsManagedLexicalScope, falseBlock.IsManagedLexicalScope);
-                Assert.Equal(expectedFalse.Statements[0], falseBlock.Statements[0]);
+                var falseBlock = ((global::System.Func<BoundBlock>)(() => { var __nunitActual6 = actual.Else; Assert.That(__nunitActual6, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual6!; }))();
+                var expectedFalse = ((global::System.Func<BoundBlock>)(() => { var __nunitActual7 = expected.Else; Assert.That(__nunitActual7, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual7!; }))();
+                Assert.That(falseBlock.Span, Is.EqualTo(expectedFalse.Span));
+                Assert.That(falseBlock.IsManagedLexicalScope, Is.EqualTo(expectedFalse.IsManagedLexicalScope));
+                Assert.That(falseBlock.Statements[0], Is.EqualTo(expectedFalse.Statements[0]));
             }
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void AllHistoricalVersionsRejectElseIfMarker(bool isVoid)
     {
         var text = Text(isVoid);
@@ -78,40 +75,38 @@ public sealed class ElseIfFrontendProjectionTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
-
-    [Theory]
-    [InlineData(0, 59)]
-    [InlineData(5, 0)]
-    [InlineData(5, 5)]
-    [InlineData(37, 4)]
-    [InlineData(37, 6)]
-    [InlineData(38, 0)]
-    [InlineData(39, 1)]
-    [InlineData(41, 1)]
-    [InlineData(298, 6)]
-    [InlineData(298, 13)]
-    [InlineData(299, 1)]
-    [InlineData(333, 3)]
-    [InlineData(334, 1)]
-    [InlineData(336, 1)]
-    [InlineData(342, 5)]
-    [InlineData(342, 4)]
-    [InlineData(342, 24)]
-    [InlineData(343, 3)]
-    [InlineData(343, 6)]
-    [InlineData(343, 8)]
-    [InlineData(344, 0)]
-    [InlineData(345, 0)]
-    [InlineData(346, 1)]
-    [InlineData(347, 3)]
-    [InlineData(347, 23)]
-    [InlineData(348, 6)]
-    [InlineData(349, 0)]
-    [InlineData(350, 0)]
-    [InlineData(351, 1)]
-    [InlineData(357, 23)]
-    [InlineData(358, 6)]
-    [InlineData(391, 1)]
+    [TestCase(0,59)]
+    [TestCase(5,0)]
+    [TestCase(5,5)]
+    [TestCase(37,4)]
+    [TestCase(37,6)]
+    [TestCase(38,0)]
+    [TestCase(39,1)]
+    [TestCase(41,1)]
+    [TestCase(298,6)]
+    [TestCase(298,13)]
+    [TestCase(299,1)]
+    [TestCase(333,3)]
+    [TestCase(334,1)]
+    [TestCase(336,1)]
+    [TestCase(342,5)]
+    [TestCase(342,4)]
+    [TestCase(342,24)]
+    [TestCase(343,3)]
+    [TestCase(343,6)]
+    [TestCase(343,8)]
+    [TestCase(344,0)]
+    [TestCase(345,0)]
+    [TestCase(346,1)]
+    [TestCase(347,3)]
+    [TestCase(347,23)]
+    [TestCase(348,6)]
+    [TestCase(349,0)]
+    [TestCase(350,0)]
+    [TestCase(351,1)]
+    [TestCase(357,23)]
+    [TestCase(358,6)]
+    [TestCase(391,1)]
     public void IndependentElseIfRejectsForgedHeaderMarkerEndChildOrderAssociationAndCoverage(int index, int value)
     {
         var text = Text(false);
@@ -119,16 +114,14 @@ public sealed class ElseIfFrontendProjectionTests
         words[index] = value;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData("else if", "else { if")]
-    [InlineData("else if", "else @if")]
-    [InlineData("return 42;", "return 42; Missing();")]
-    [InlineData("return 42;", "break;")]
-    [InlineData("return 42;", "continue missing;")]
-    [InlineData("else { return 0; }", "")]
-    [InlineData("else { return 0; }", "else if (false) { return 0; }")]
-    [InlineData("else { return 0; }", "else { return 0; } require true;")]
+    [TestCase("else if","else { if")]
+    [TestCase("else if","else @if")]
+    [TestCase("return 42;","return 42; Missing();")]
+    [TestCase("return 42;","break;")]
+    [TestCase("return 42;","continue missing;")]
+    [TestCase("else { return 0; }","")]
+    [TestCase("else { return 0; }","else if (false) { return 0; }")]
+    [TestCase("else { return 0; }","else { return 0; } require true;")]
     public void IndependentElseIfRejectsContradictingSource(string before, string after)
     {
         var text = Text(false);
@@ -136,7 +129,7 @@ public sealed class ElseIfFrontendProjectionTests
             SourceText.From(text.Replace(before, after, StringComparison.Ordinal)), Bytes(Projection(text, false))));
     }
 
-    [Fact]
+    [Test]
     public void CurrentVersionCoversOrdinaryReturnsAndRejectsMixedArrowOrScalarNullReturns()
     {
         const string scalar = "public int32 @await() { return 42; }";
@@ -145,7 +138,7 @@ public sealed class ElseIfFrontendProjectionTests
         words[37] = words[298] = 1;
         Node(words, 0, 3, 1, scalar.IndexOf("42", StringComparison.Ordinal), 2, 42);
         Statement(words, 0, 8, 0, 0, scalar.IndexOf("return", StringComparison.Ordinal), scalar.IndexOf(';') + 1);
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(scalar), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(scalar), Bytes(words)).IsValid, Is.True);
         words[0] = 58;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(scalar), Bytes(words)));
         var text = Text(false);
@@ -157,13 +150,11 @@ public sealed class ElseIfFrontendProjectionTests
         words[41] = 1;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData(363, 1)]
-    [InlineData(358, 1)]
-    [InlineData(307, 0)]
-    [InlineData(347, 2)]
-    [InlineData(348, 1)]
+    [TestCase(363,1)]
+    [TestCase(358,1)]
+    [TestCase(307,0)]
+    [TestCase(347,2)]
+    [TestCase(348,1)]
     public void IndependentElseIfRejectsWrongLoopTargetsOrLocalMembership(int index, int value)
     {
         const string text = "public void @await() { while (false) { if (false) { int32 x = 1; } else if (true) { int32 x = 2; break; } } }";
@@ -200,15 +191,14 @@ public sealed class ElseIfFrontendProjectionTests
         var source = SourceText.From(text);
         var actual = ScalarFrontendHost.BindLibrary(source, Bytes(words), BoundRuntimePolicy.FailFast);
         var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(text)).Program;
-        Assert.NotNull(hosted);
-        Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["await"], NativeRuntimePolicy.FailFast),
-            NativeEmitter.EmitLibrary(actual, ["await"], NativeRuntimePolicy.FailFast));
-        var loopBody = Assert.IsType<BoundBlock>(Assert.IsType<BoundWhile>(actual.Functions[0].Body.Statements[0]).Body);
-        Assert.True(loopBody.IsManagedLexicalScope);
-        var conditional = Assert.IsType<BoundIf>(loopBody.Statements[0]);
-        var nested = Assert.IsType<BoundIf>(conditional.Else);
-        var nestedBody = Assert.IsType<BoundBlock>(nested.Then);
-        Assert.Equal(1, Assert.IsType<BoundBreak>(nestedBody.Statements[1]).TargetDepth);
+        TestAssertions.NotNull(hosted);
+        Assert.That(NativeEmitter.EmitLibrary(actual, ["await"], NativeRuntimePolicy.FailFast), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["await"], NativeRuntimePolicy.FailFast)));
+        var loopBody = ((global::System.Func<BoundBlock>)(() => { var __nunitActual9 = ((global::System.Func<BoundWhile>)(() => { var __nunitActual8 = actual.Functions[0].Body.Statements[0]; Assert.That(__nunitActual8, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual8!; }))().Body; Assert.That(__nunitActual9, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual9!; }))();
+        Assert.That(loopBody.IsManagedLexicalScope, Is.True);
+        var conditional = ((global::System.Func<BoundIf>)(() => { var __nunitActual10 = loopBody.Statements[0]; Assert.That(__nunitActual10, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual10!; }))();
+        var nested = ((global::System.Func<BoundIf>)(() => { var __nunitActual11 = conditional.Else; Assert.That(__nunitActual11, Is.TypeOf<BoundIf>()); return (BoundIf)__nunitActual11!; }))();
+        var nestedBody = ((global::System.Func<BoundBlock>)(() => { var __nunitActual12 = nested.Then; Assert.That(__nunitActual12, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual12!; }))();
+        Assert.That(((global::System.Func<BoundBreak>)(() => { var __nunitActual13 = nestedBody.Statements[1]; Assert.That(__nunitActual13, Is.TypeOf<BoundBreak>()); return (BoundBreak)__nunitActual13!; }))().TargetDepth, Is.EqualTo(1));
         words[index] = value;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
     }
@@ -217,7 +207,7 @@ public sealed class ElseIfFrontendProjectionTests
         ? "/*\U0001F600*/ public void @await() { if (false) { return; } else if (true) { return (); } else { return; } } //tail"
         : "/*\U0001F600*/ public int32 @await() { if (false) { return 1; } else if (true) { return 42; } else { return 0; } } //tail";
 
-    [Fact]
+    [Test]
     public void IndependentElseIfMarkerCannotSwallowASiblingStatement()
     {
         var text = Text(false).Replace("} } //tail", "} return 2; } //tail", StringComparison.Ordinal);
@@ -227,7 +217,7 @@ public sealed class ElseIfFrontendProjectionTests
         words[298] = 8;
         Node(words, 5, 3, 1, returned + 7, 1, 2);
         Statement(words, 7, 8, 0, 5, returned, text.IndexOf(';', returned) + 1);
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[343] = 8;
         words[346] = text.IndexOf(';', returned) + 1 - words[345];
         words[336] = text.IndexOf(';', returned) + 1 - words[335];

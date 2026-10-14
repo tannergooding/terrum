@@ -5,13 +5,13 @@ using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class BlockFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void IndependentSiblingBlocksRequireExactScopeAndDeclarationIdentity()
     {
         const string text = "public int32 Value() { { mut int32 x = 1; x++; } { int32 x = 42; return x; } }";
@@ -40,15 +40,15 @@ public sealed class BlockFrontendProjectionTests
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
         var maximumLengthSource = SourceText.From(text + new string(' ',
             ScannerHost.MaximumSourceLength - text.Length));
-        Assert.True(ScalarFrontendHost.ReadResult(maximumLengthSource, Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(maximumLengthSource, Bytes(words)).IsValid, Is.True);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(maximumLengthSource.Text + " "), Bytes(words)));
-        Assert.Equal(result.Statements[0].Span, result.Statements[0].BodySpan);
-        Assert.Equal(result.Statements[3].Span, result.Statements[3].BodySpan);
+        Assert.That(result.Statements[0].BodySpan, Is.EqualTo(result.Statements[0].Span));
+        Assert.That(result.Statements[3].BodySpan, Is.EqualTo(result.Statements[3].Span));
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
-            var function = Assert.Single(ScalarFrontendHost.BindLibrary(source, Bytes(words), policy).Functions);
-            Assert.True(Assert.IsType<BoundBlock>(function.Body.Statements[0]).IsManagedLexicalScope);
+            var function = global::System.Linq.Enumerable.Single(ScalarFrontendHost.BindLibrary(source, Bytes(words), policy).Functions);
+            Assert.That(((global::System.Func<BoundBlock>)(() => { var __nunitActual0 = function.Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual0!; }))().IsManagedLexicalScope, Is.True);
         }
         foreach (var version in new[] { 1, 20, 48, 49, 50, 51, 53 })
         {
@@ -85,7 +85,7 @@ public sealed class BlockFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void IndependentExpiredBlockIdentityCannotAuthorizeAnOuterReturn()
     {
         const string text = "public int32 Value() { { int32 x = 42; } return x; }";
@@ -106,7 +106,7 @@ public sealed class BlockFrontendProjectionTests
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
     }
 
-    [Fact]
+    [Test]
     public void ReaderRejectsObsoleteBlockTagForOrdinaryReturn()
     {
         const string text = "public int32 Value() { return 42; }";
@@ -115,14 +115,12 @@ public sealed class BlockFrontendProjectionTests
         Node(words, 0, 3, returnAt + 7, 2, -1, 42);
         Statement(words, 0, 8, 0, 0, returnAt, returnAt + 10);
         words[0] = 87;
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[0] = 52;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData(6, true)]
-    [InlineData(7, false)]
+    [TestCase(6,true)]
+    [TestCase(7,false)]
     public void IndependentBlockDepthSharesTheStructuralLimit(int depth, bool valid)
     {
         var text = "public int32 Value() { " + new string('{', depth)
@@ -139,7 +137,7 @@ public sealed class BlockFrontendProjectionTests
         Statement(words, depth, 8, 0, 0, returnAt, returnAt + 10);
         if (valid)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         }
         else
         {
@@ -147,7 +145,7 @@ public sealed class BlockFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void IndependentBlockDoesNotBecomeANearestLoopTransferTarget()
     {
         const string text = "public int32 Value() { while (true) { { break; } } return 42; }";
@@ -163,12 +161,12 @@ public sealed class BlockFrontendProjectionTests
         Statement(words, 1, 14, 3, -1, block, transfer + 8);
         Statement(words, 2, 6, 0, -1, transfer, transfer + 6);
         Statement(words, 3, 8, 0, 1, returnAt, returnAt + 10);
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[343] = 1;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
-    [Fact]
+    [Test]
     public void IndependentEmptyBlockCannotForgeAValueReturningSuccess()
     {
         const string text = "public int32 Value() { {} }";

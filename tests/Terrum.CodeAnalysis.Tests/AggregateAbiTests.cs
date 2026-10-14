@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -52,43 +52,39 @@ public sealed class AggregateAbiTests
         }
         bool Forward(bool success, out Wide result) { return Try(success, out result); }
         """;
-
-    [Theory]
-    [InlineData("return Mix(new Twelve(1, 2, 7), new Three(true, false, true), new Six(char16(4), char16(5), char16(6)), Make(9), 14, new Twelve(1, 2, 7));", 42)]
-    [InlineData("Wide w = Echo(Make(1), Make(2), Make(3), Make(4), Recurse(5)); return w.Value.A + w.Value.B + w.Value.C + w.Tail;", 42)]
-    [InlineData("mut Wide w = Make(1); Wide copy = w; w.Value = new Twelve(1, 2, 3); w.Tail = 40; return copy.Value.A + copy.Value.B + copy.Value.C + copy.Tail + w.Value.A + w.Value.B + w.Value.C;", 40)]
-    [InlineData("require Forward(true, out var w); if (Forward(false, out var ignored)) { return -1; } return w.Value.A + w.Value.B + w.Value.C + w.Tail;", 42)]
-    [InlineData("Three t = new Three(true, false, true); Six s = new Six(char16(7), char16(8), char16(9)); if (t.A && !t.B && t.C) { return int32(s.A) + int32(s.B) + int32(s.C); } return -1;", 24)]
-    [InlineData("Wide w = Echo(Make(1 / 0), Make(2147483647 + 1), Make(3), Make(4), Make(5)); return w.Tail;", unchecked((int)0xE0540002))]
+    [TestCase("return Mix(new Twelve(1, 2, 7), new Three(true, false, true), new Six(char16(4), char16(5), char16(6)), Make(9), 14, new Twelve(1, 2, 7));",42)]
+    [TestCase("Wide w = Echo(Make(1), Make(2), Make(3), Make(4), Recurse(5)); return w.Value.A + w.Value.B + w.Value.C + w.Tail;",42)]
+    [TestCase("mut Wide w = Make(1); Wide copy = w; w.Value = new Twelve(1, 2, 3); w.Tail = 40; return copy.Value.A + copy.Value.B + copy.Value.C + copy.Tail + w.Value.A + w.Value.B + w.Value.C;",40)]
+    [TestCase("require Forward(true, out var w); if (Forward(false, out var ignored)) { return -1; } return w.Value.A + w.Value.B + w.Value.C + w.Tail;",42)]
+    [TestCase("Three t = new Three(true, false, true); Six s = new Six(char16(7), char16(8), char16(9)); if (t.A && !t.B && t.C) { return int32(s.A) + int32(s.B) + int32(s.C); } return -1;",24)]
+    [TestCase("Wide w = Echo(Make(1 / 0), Make(2147483647 + 1), Make(3), Make(4), Make(5)); return w.Tail;",unchecked((int)0xE0540002))]
     public async Task IndirectAggregatesExecuteThroughAotAndCliJitAsync(string body, int expected)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Declarations + " int32 Main() { " + body + " }"));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(3, program.Structures[0].Size);
-        Assert.Equal(6, program.Structures[1].Size);
-        Assert.Equal(12, program.Structures[2].Size);
-        Assert.Equal(16, program.Structures[3].Size);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(program.Structures[0].Size, Is.EqualTo(3));
+        Assert.That(program.Structures[1].Size, Is.EqualTo(6));
+        Assert.That(program.Structures[2].Size, Is.EqualTo(12));
+        Assert.That(program.Structures[3].Size, Is.EqualTo(16));
         await ExecuteBothAsync(program, expected).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(5)]
-    [InlineData(6)]
-    [InlineData(7)]
-    [InlineData(8)]
-    [InlineData(9)]
-    [InlineData(10)]
-    [InlineData(11)]
-    [InlineData(12)]
-    [InlineData(13)]
-    [InlineData(14)]
-    [InlineData(15)]
-    [InlineData(16)]
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
+    [TestCase(4)]
+    [TestCase(5)]
+    [TestCase(6)]
+    [TestCase(7)]
+    [TestCase(8)]
+    [TestCase(9)]
+    [TestCase(10)]
+    [TestCase(11)]
+    [TestCase(12)]
+    [TestCase(13)]
+    [TestCase(14)]
+    [TestCase(15)]
+    [TestCase(16)]
     public async Task EveryNaturalAggregateSizeCopiesReturnsAndPublishesExactlyAsync(int size)
     {
         var source = new StringBuilder("struct Bytes {");
@@ -115,9 +111,9 @@ public sealed class AggregateAbiTests
         }
         _ = source.Append("return 42; }");
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(size, program.Structures[0].Size);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(program.Structures[0].Size, Is.EqualTo(size));
         await ExecuteBothAsync(program, 42).ConfigureAwait(true);
     }
 
@@ -132,7 +128,7 @@ public sealed class AggregateAbiTests
             await File.WriteAllBytesAsync(executable, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
             await RunAsync(executable, [], expected).ConfigureAwait(true);
             var unused = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Unused() { return 0; }"));
-            var producerBytes = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(unused.Program), ["Unused"]);
+            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = unused.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Unused"]);
             await File.WriteAllBytesAsync(producer, producerBytes).ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumer, ModuleCompiler.CreateConsumer(program, producerBytes)).ConfigureAwait(true);
             var framework = new DirectoryInfo(AppContext.BaseDirectory);
@@ -143,7 +139,7 @@ public sealed class AggregateAbiTests
         }
         finally
         {
-            File.Delete(executable);
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
             File.Delete(consumer);
             File.Delete(producer);
         }
@@ -168,7 +164,7 @@ public sealed class AggregateAbiTests
             await process.WaitForExitAsync().ConfigureAwait(true);
             throw;
         }
-        Assert.Equal(expected, process.ExitCode);
-        Assert.Empty(await error.ConfigureAwait(true));
+        Assert.That(process.ExitCode, Is.EqualTo(expected));
+        Assert.That(await error.ConfigureAwait(true), Is.Empty);
     }
 }

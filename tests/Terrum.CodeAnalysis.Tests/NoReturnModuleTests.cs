@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -28,8 +28,8 @@ public sealed class NoReturnModuleTests
     private static BoundProgram CompileLibrary(string source)
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = result.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
 
     private static byte[] Producer(string source) =>
@@ -41,31 +41,31 @@ public sealed class NoReturnModuleTests
     private static BoundProgram CompileConsumer(string source, byte[] producer)
     {
         var result = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer));
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = result.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
-    [Fact]
+    [Test]
     public async Task IndependentConsumerPreservesImportedNonReturnPromiseAsync()
     {
         var producer = Producer(Terminating);
         var reference = ModuleCompiler.CreateReference(producer);
-        var declaration = Assert.Single(reference.Functions);
-        Assert.True(declaration.IsExternal);
-        Assert.True(declaration.DoesNotReturn);
-        Assert.False(declaration.IsNoThrow);
+        var declaration = global::System.Linq.Enumerable.Single(reference.Functions);
+        Assert.That(declaration.IsExternal, Is.True);
+        Assert.That(declaration.DoesNotReturn, Is.True);
+        Assert.That(declaration.IsNoThrow, Is.False);
         var consumer = CompileConsumer("int32 Main() { Stop(); }", producer);
         var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
         var linked = ModuleCompiler.Link(artifact, producer);
-        Assert.True(linked.Functions.Single(static function => function.Name == "Stop").DoesNotReturn);
+        Assert.That(linked.Functions.Single(static function => function.Name == "Stop").DoesNotReturn, Is.True);
 
         var nativeProducer = NativeProducer(Terminating);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, nativeProducer, NativeRuntimePolicy.FailFast);
-        Assert.Equal(unchecked((int)0xE0540003), await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
 
-    [Fact]
+    [Test]
     public async Task SameNativeConsumerCallsDifferentVerifiedNonReturningBodiesAsync()
     {
         var first = NativeProducer(Terminating);
@@ -77,30 +77,30 @@ public sealed class NoReturnModuleTests
         var original = (byte[])nativeConsumer.Clone();
         var imageHash = NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256;
         _ = ModuleCompiler.Link(artifact, Producer(Overflowing));
-        Assert.Equal(unchecked((int)0xE0540003), await NativeModuleCompiler.RunAsync(nativeConsumer, first,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(unchecked((int)0xE0540001), await NativeModuleCompiler.RunAsync(nativeConsumer, second,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(original, nativeConsumer);
-        Assert.Equal(imageHash, NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256);
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, first,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, second,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540001)));
+        Assert.That(nativeConsumer, Is.EqualTo(original));
+        Assert.That(NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256, Is.EqualTo(imageHash));
     }
 
-    [Fact]
+    [Test]
     public void WeakeningNonReturnPromiseRejectsReplacementBeforeLaunch()
     {
         var promised = Producer(Terminating);
         var consumer = CompileConsumer("int32 Main() { Stop(); }", promised);
         var semantic = ModuleCompiler.CreateConsumer(consumer, promised);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semantic, Producer(Returning)));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semantic, Producer(Returning)))!;
         var original = NativeProducer(Terminating);
         var replacement = NativeProducer(Returning);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, original, NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(nativeConsumer, replacement));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(nativeConsumer, replacement))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.RunAsync(nativeConsumer, replacement,
-            TimeSpan.FromSeconds(10)).GetAwaiter().GetResult());
+            TimeSpan.FromSeconds(10)).GetAwaiter().GetResult())!;
     }
 
-    [Fact]
+    [Test]
     public async Task ReturningConsumerAcceptsStrongerNonReturnPromiseWithoutReemissionAsync()
     {
         var original = NativeProducer(Returning);
@@ -111,14 +111,14 @@ public sealed class NoReturnModuleTests
         _ = ModuleCompiler.Link(artifact, Producer(Terminating));
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, original, NativeRuntimePolicy.FailFast);
         var imageHash = NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256;
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, original,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(unchecked((int)0xE0540003), await NativeModuleCompiler.RunAsync(nativeConsumer, replacement,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(imageHash, NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256);
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, original,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, replacement,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
+        Assert.That(NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256, Is.EqualTo(imageHash));
     }
 
-    [Fact]
+    [Test]
     public void BothPromisesStrengthenIndependentlyButNeverWeaken()
     {
         var sources = new[] { Returning, "[NoThrow] " + Returning, Terminating, Both };
@@ -127,9 +127,9 @@ public sealed class NoReturnModuleTests
         for (var expected = 0; expected < sources.Length; expected++)
         {
             var reference = ModuleCompiler.CreateReference(modules[expected]);
-            var promise = Assert.Single(reference.Functions);
-            Assert.Equal((expected & 1) != 0, promise.IsNoThrow);
-            Assert.Equal((expected & 2) != 0, promise.DoesNotReturn);
+            var promise = global::System.Linq.Enumerable.Single(reference.Functions);
+            Assert.That(promise.IsNoThrow, Is.EqualTo((expected & 1) != 0));
+            Assert.That(promise.DoesNotReturn, Is.EqualTo((expected & 2) != 0));
             var consumer = CompileConsumer("int32 Main() { Stop(); return 42; }", modules[expected]);
             var semantic = ModuleCompiler.CreateConsumer(consumer, modules[expected]);
             var native = NativeModuleCompiler.CreateConsumer(consumer, packages[expected], NativeRuntimePolicy.FailFast);
@@ -142,14 +142,14 @@ public sealed class NoReturnModuleTests
                 }
                 else
                 {
-                    _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semantic, modules[actual]));
-                    _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(native, packages[actual]));
+                    _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semantic, modules[actual]))!;
+                    _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(native, packages[actual]))!;
                 }
             }
         }
     }
 
-    [Fact]
+    [Test]
     public void ConsumerDeclarationNormalizationChecksEachPromise()
     {
         var both = Producer(Both);
@@ -163,39 +163,39 @@ public sealed class NoReturnModuleTests
         };
         var normalized = ModuleCompiler.CreateConsumer(weaker, both);
         var imported = ModuleCompiler.Link(normalized, both).Functions[index];
-        Assert.True(imported.IsNoThrow);
-        Assert.True(imported.DoesNotReturn);
+        Assert.That(imported.IsNoThrow, Is.True);
+        Assert.That(imported.DoesNotReturn, Is.True);
         _ = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateConsumer(consumer, Producer("[NoThrow] " + Returning)));
+            ModuleCompiler.CreateConsumer(consumer, Producer("[NoThrow] " + Returning)))!;
         _ = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateConsumer(consumer, Producer(Terminating)));
+            ModuleCompiler.CreateConsumer(consumer, Producer(Terminating)))!;
     }
 
-    [Fact]
+    [Test]
     public void ProducerBodiesCannotForgeNonReturnAndUnknownContractSuffixesAreRejected()
     {
         var program = CompileLibrary(Returning);
         var forged = program with {
             Functions = program.Functions.SetItem(0, program.Functions[0] with { DoesNotReturn = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Stop"]));
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Stop"]))!;
         _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(forged,
-            ["Stop"], "Termination", NativeRuntimePolicy.FailFast));
+            ["Stop"], "Termination", NativeRuntimePolicy.FailFast))!;
         var nonVoid = CompileLibrary("public int32 Value() { return 42; }");
         var invalidReturn = nonVoid with {
             Functions = nonVoid.Functions.SetItem(0, nonVoid.Functions[0] with { DoesNotReturn = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(invalidReturn, ["Value"]));
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(invalidReturn, ["Value"]))!;
 
         var producer = Producer(Returning);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer("int32 Main() { Stop(); return 0; }", producer), producer);
         var malformed = (byte[])consumer.Clone();
         var suffix = Encoding.UTF8.GetBytes("|MayThrow|MayReturn");
         var offset = malformed.AsSpan().IndexOf(suffix);
-        Assert.True(offset >= 0);
+        Assert.That(offset >= 0, Is.True);
         malformed[offset + "|MayThrow|".Length] = (byte)'X';
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(malformed, producer));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(malformed, producer))!;
         producer[4] = 8;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(producer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(producer))!;
     }
 }

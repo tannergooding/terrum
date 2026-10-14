@@ -2,7 +2,7 @@
 
 using System;
 using System.Runtime.InteropServices;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -140,25 +140,23 @@ public sealed partial class CliTests
         where TResult : struct
     {
         var expectedSuccess = TryConvert(() => expectedConversion(input), out TResult expected);
-        var guarded = new GuardedConversionResult<TResult>
-        {
+        var guarded = new GuardedConversionResult<TResult> {
             Before = lowerCanary,
             Value = sentinel,
             After = upperCanary,
         };
         var status = conversion(input, ref guarded.Value);
-        Assert.True(status == (expectedSuccess ? 1 : 0),
-            $"Conversion returned status {status} for input {input}.");
+        Assert.That(status == (expectedSuccess ? 1 : 0), Is.True, $"Conversion returned status {status} for input {input}.");
         if (expectedSuccess)
         {
-            Assert.Equal(expected, guarded.Value);
+            Assert.That(guarded.Value, Is.EqualTo(expected));
         }
         else
         {
-            Assert.Equal(sentinel, guarded.Value);
+            Assert.That(guarded.Value, Is.EqualTo(sentinel));
         }
-        Assert.Equal(lowerCanary, guarded.Before);
-        Assert.Equal(upperCanary, guarded.After);
+        Assert.That(guarded.Before, Is.EqualTo(lowerCanary));
+        Assert.That(guarded.After, Is.EqualTo(upperCanary));
     }
 
     private static bool TryConvert<T>(Func<T> conversion, out T result)

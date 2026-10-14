@@ -7,110 +7,102 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NamedTransferFrontendProjectionTests
 {
     private const string Source = "public int32 Value() { @const: while (true) { do { break const; } while (false); } return 42; }";
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void IndependentNamedTransferCertifiesAncestryDepthAndHostedLowering(bool continuing)
     {
         var text = continuing ? Source.Replace("break", "continue", StringComparison.Ordinal) : Source;
         var words = Projection(text, continuing);
         var bytes = Bytes(words);
         var result = ScalarFrontendHost.ReadResult(SourceText.From(text), bytes);
-        Assert.True(result.IsValid);
-        Assert.Equal(16, result.Statements[0].Kind);
-        Assert.Equal(text.IndexOf("while", StringComparison.Ordinal), result.Statements[0].LoopSpan.Start);
-        Assert.Equal(text.IndexOf("@const", StringComparison.Ordinal), result.Statements[0].Span.Start);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(result.Statements[0].Kind, Is.EqualTo(16));
+        Assert.That(result.Statements[0].LoopSpan.Start, Is.EqualTo(text.IndexOf("while", StringComparison.Ordinal)));
+        Assert.That(result.Statements[0].Span.Start, Is.EqualTo(text.IndexOf("@const", StringComparison.Ordinal)));
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), bytes, policy);
             var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-            var outer = Assert.IsType<BoundWhile>(actual.Functions[0].Body.Statements[0]);
-            var inner = Assert.IsType<BoundWhile>(Assert.Single(Assert.IsType<BoundBlock>(outer.Body).Statements));
-            var transfer = Assert.Single(Assert.IsType<BoundBlock>(inner.Body).Statements);
-            Assert.Equal(2, continuing ? Assert.IsType<BoundContinue>(transfer).TargetDepth
-                : Assert.IsType<BoundBreak>(transfer).TargetDepth);
+            Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+            var outer = ((global::System.Func<BoundWhile>)(() => { var __nunitActual0 = actual.Functions[0].Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual0!; }))();
+            var inner = ((global::System.Func<BoundWhile>)(() => { var __nunitActual2 = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => { var __nunitActual1 = outer.Body; Assert.That(__nunitActual1, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual1!; }))().Statements); Assert.That(__nunitActual2, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual2!; }))();
+            var transfer = global::System.Linq.Enumerable.Single(((global::System.Func<BoundBlock>)(() => { var __nunitActual3 = inner.Body; Assert.That(__nunitActual3, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual3!; }))().Statements);
+            Assert.That(continuing ? ((global::System.Func<BoundContinue>)(() => { var __nunitActual4 = transfer; Assert.That(__nunitActual4, Is.TypeOf<BoundContinue>()); return (BoundContinue)__nunitActual4!; }))().TargetDepth
+                : ((global::System.Func<BoundBreak>)(() => { var __nunitActual5 = transfer; Assert.That(__nunitActual5, Is.TypeOf<BoundBreak>()); return (BoundBreak)__nunitActual5!; }))().TargetDepth, Is.EqualTo(2));
             // The continuing case is deliberately compile-only.
-            Assert.Equal(NativeEmitter.EmitLibrary(Assert.IsType<BoundProgram>(hosted.Program), ["Value"],
-                (NativeRuntimePolicy)policy), NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy));
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = hosted.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), ["Value"],
+                (NativeRuntimePolicy)policy)));
         }
     }
-
-    [Theory]
-    [InlineData(0, 53)]
-    [InlineData(0, 52)]
-    [InlineData(0, 51)]
-    [InlineData(0, 48)]
-    [InlineData(0, 39)]
-    [InlineData(332, 3)]
-    [InlineData(332, 17)]
-    [InlineData(332, 18)]
-    [InlineData(333, 2)]
-    [InlineData(333, 5)]
-    [InlineData(334, 1)]
-    [InlineData(335, 0)]
-    [InlineData(336, 1)]
-    [InlineData(337, 16)]
-    [InlineData(337, 14)]
-    [InlineData(338, 2)]
-    [InlineData(339, 0)]
-    [InlineData(342, 6)]
-    [InlineData(342, 20)]
-    [InlineData(343, -1)]
-    [InlineData(343, 1)]
-    [InlineData(343, 2)]
-    [InlineData(343, 3)]
-    [InlineData(344, 0)]
-    [InlineData(345, 0)]
-    [InlineData(346, 1)]
-    [InlineData(298, 13)]
-    [InlineData(391, 1)]
+    [TestCase(0,53)]
+    [TestCase(0,52)]
+    [TestCase(0,51)]
+    [TestCase(0,48)]
+    [TestCase(0,39)]
+    [TestCase(332,3)]
+    [TestCase(332,17)]
+    [TestCase(332,18)]
+    [TestCase(333,2)]
+    [TestCase(333,5)]
+    [TestCase(334,1)]
+    [TestCase(335,0)]
+    [TestCase(336,1)]
+    [TestCase(337,16)]
+    [TestCase(337,14)]
+    [TestCase(338,2)]
+    [TestCase(339,0)]
+    [TestCase(342,6)]
+    [TestCase(342,20)]
+    [TestCase(343,-1)]
+    [TestCase(343,1)]
+    [TestCase(343,2)]
+    [TestCase(343,3)]
+    [TestCase(344,0)]
+    [TestCase(345,0)]
+    [TestCase(346,1)]
+    [TestCase(298,13)]
+    [TestCase(391,1)]
     public void IndependentNamedTransferRejectsForgedVersionKindTargetRootAndSpan(int index, int value)
     {
         var words = Projection(Source, false);
         words[index] = value;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData("break const;", "break Const;")]
-    [InlineData("break const;", "break other;")]
-    [InlineData("@const:", "@const :")]
-    [InlineData("do {", "if (true) {")]
-    [InlineData("break const;", "break;")]
-    [InlineData("break const;", "continue const;")]
-    [InlineData("return 42;", "return 43;")]
+    [TestCase("break const;","break Const;")]
+    [TestCase("break const;","break other;")]
+    [TestCase("@const:","@const :")]
+    [TestCase("do {","if (true) {")]
+    [TestCase("break const;","break;")]
+    [TestCase("break const;","continue const;")]
+    [TestCase("return 42;","return 43;")]
     public void IndependentNamedTransferRejectsContradictingSource(string before, string after)
     {
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(
             Source.Replace(before, after, StringComparison.Ordinal)), Bytes(Projection(Source, false))));
     }
-
-    [Theory]
-    [InlineData("", false)]
-    [InlineData(" ", false)]
-    [InlineData("\t", false)]
-    [InlineData("/* gap */", false)]
-    [InlineData("//** gap **//", false)]
-    [InlineData("\r", true)]
-    [InlineData("\n", true)]
-    [InlineData("\r\n", true)]
-    [InlineData("\u0085", true)]
-    [InlineData("\u2028", true)]
-    [InlineData("\u2029", true)]
-    [InlineData("/*\n*/", true)]
-    [InlineData("/*\r\n*/", true)]
-    [InlineData("/*\u2028*/", true)]
-    [InlineData("// gap\n", true)]
-    [InlineData("/// gap\n", true)]
+    [TestCase("",false)]
+    [TestCase(" ",false)]
+    [TestCase("\t",false)]
+    [TestCase("/* gap */",false)]
+    [TestCase("//** gap **//",false)]
+    [TestCase("\r",true)]
+    [TestCase("\n",true)]
+    [TestCase("\r\n",true)]
+    [TestCase("\u0085",true)]
+    [TestCase("\u2028",true)]
+    [TestCase("\u2029",true)]
+    [TestCase("/*\n*/",true)]
+    [TestCase("/*\r\n*/",true)]
+    [TestCase("/*\u2028*/",true)]
+    [TestCase("// gap\n",true)]
+    [TestCase("/// gap\n",true)]
     public void IndependentHistoricalAndEffectHeadersEnforcePhysicalLineAttachment(string gap, bool invalid)
     {
         foreach (var effects in new[] { false, true })
@@ -129,21 +121,19 @@ public sealed class NamedTransferFrontendProjectionTests
             }
             else
             {
-                Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+                Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
             }
         }
     }
-
-    [Theory]
-    [InlineData(16384, true)]
-    [InlineData(16385, false)]
+    [TestCase(16384,true)]
+    [TestCase(16385,false)]
     public void IndependentNamedTransferEnforcesUtf16SourceBudget(int length, bool valid)
     {
         var source = Source + " /*" + new string('x', length - Source.Length - 5) + "*/";
-        Assert.Equal(length, source.Length);
+        Assert.That(source.Length, Is.EqualTo(length));
         if (valid)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(source), Bytes(Projection(Source, false))).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(source), Bytes(Projection(Source, false))).IsValid, Is.True);
         }
         else
         {
@@ -152,7 +142,7 @@ public sealed class NamedTransferFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void IndependentNamedHeadersPreserveUnnamedNearestTransferRecords()
     {
         var text = Source.Replace("break const;", "break;", StringComparison.Ordinal);
@@ -160,12 +150,12 @@ public sealed class NamedTransferFrontendProjectionTests
         words[342] = 6;
         words[343] = 1;
         words[346] = 6;
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[343] = 0;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
-    [Fact]
+    [Test]
     public void IndependentNamedTransferRejectsDuplicateActiveNormalizedLabelsAndInactiveTargets()
     {
         var duplicate = Source.Replace("do {", "const: do {", StringComparison.Ordinal);

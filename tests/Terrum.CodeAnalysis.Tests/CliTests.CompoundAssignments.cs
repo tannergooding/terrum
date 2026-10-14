@@ -7,33 +7,29 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Fact]
+    [Test]
     public async Task CompoundAssignmentGenericClosersRetainLexicalAndTreeStreamsAsync()
     {
         var input = Encoding.UTF8.GetBytes("void F(Box<Box<int32 /* close */ >> value) {}");
         foreach (var command in new[] { "tokens", "tree" })
         {
             var (exit, output, error) = await RunAsync(input, command, "-", "--json");
-            Assert.True(exit == 0, $"{command} exited {exit}: {output}{error}");
-            Assert.Empty(error);
+            Assert.That(exit == 0, Is.True, $"{command} exited {exit}: {output}{error}");
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             var tokens = document.RootElement.GetProperty("tokens").EnumerateArray().ToArray();
-            Assert.Equal(command == "tokens" ? 1 : 0,
-                tokens.Count(token => token.GetProperty("kind").GetString() == "ShiftRight"));
-            Assert.Equal(command == "tree" ? 2 : 0,
-                tokens.Count(token => token.GetProperty("kind").GetString() == "Greater"));
+            Assert.That(tokens.Count(token => token.GetProperty("kind").GetString() == "ShiftRight"), Is.EqualTo(command == "tokens" ? 1 : 0));
+            Assert.That(tokens.Count(token => token.GetProperty("kind").GetString() == "Greater"), Is.EqualTo(command == "tree" ? 2 : 0));
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task CompoundAssignmentsMatchCompiledScannerAndExecuteAsync(string policy)
     {
         const string source = """
@@ -65,12 +61,12 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(source);
             var (exit, output, error) = await RunAsync(input, "build", "-", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"build {policy} exited {exit}: {output}{error}");
+            Assert.That(exit == 0, Is.True, $"build {policy} exited {exit}: {output}{error}");
             (exit, output, error) = await RunAsync(input, "build-component",
                 Path.Combine(root, "self-host"), "-", "-o", scanned,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"build-component {policy} exited {exit}: {output}{error}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));
+            Assert.That(exit == 0, Is.True, $"build-component {policy} exited {exit}: {output}{error}");
+            Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             using var process = Process.Start(new ProcessStartInfo(scanned) {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -92,9 +88,9 @@ public sealed partial class CliTests
                 }
                 throw;
             }
-            Assert.Equal(40, process.ExitCode);
-            Assert.Empty(await stdout);
-            Assert.Empty(await stderr);
+            Assert.That(process.ExitCode, Is.EqualTo(40));
+            Assert.That(await stdout, Is.Empty);
+            Assert.That(await stderr, Is.Empty);
         }
         finally
         {

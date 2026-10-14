@@ -9,15 +9,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class NativeManagedClassModuleTests
 {
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task LifetimeEndGraphLibraryRetainsPrivateClassRootsThroughDependenciesAsync(NativeRuntimePolicy policy)
     {
         var leaf = NativeModuleCompiler.CreateProducer(Compile(
@@ -48,26 +47,26 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy, NativeModuleCompiler.CreateGraphReference([leaf])),
             ["Middle"], "EndMiddle", [leaf], policy);
-        Assert.Equal(76,GraphSemanticVersion(middle));
-        Assert.Equal("native-19", NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion);
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion, Is.EqualTo("native-19"));
         foreach (var version in new[] { 32, 40, 41, 42, 43, 44, 45, 46, 58, 59, 60, 61, 62, 65, 66, 67, 68, 69, 70, 71 })
         {
             var old = SetGraphSemanticVersion(middle, version);
-            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([old]));
+            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([old]))!;
         }
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile(
             "int32 Main() { return Middle(); }", policy,
             NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
         NativeModuleCompiler.ValidateGraph(root, [middle, leaf]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf, middle],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [leaf, middle],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
 
         var noEnd = NativeModuleCompiler.CreateGraphProducer(Compile("""
             public int32 NoEnd() {
@@ -77,7 +76,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy, NativeModuleCompiler.CreateGraphReference([leaf])),
             ["NoEnd"], "NoEndMiddle", [leaf], policy);
-        Assert.Equal(76,GraphSemanticVersion(noEnd));
+        Assert.That(GraphSemanticVersion(noEnd), Is.EqualTo(76));
         _ = NativeModuleCompiler.CreateGraphReference([noEnd]);
     }
 
@@ -160,10 +159,8 @@ public sealed partial class NativeManagedClassModuleTests
             return int32(result.First + result.Second) + Bias();
         }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PrivateInitInManagedGraphMiddlePreservesDownstreamImagesAsync(NativeRuntimePolicy policy)
     {
         const string Leaf = """
@@ -191,41 +188,39 @@ public sealed partial class NativeManagedClassModuleTests
         var leaf = NativeModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Source.Bias"], "NodeB", policy);
         var middle = NativeModuleCompiler.CreateGraphProducer(Compile(Middle, policy,
             NativeModuleCompiler.CreateGraphReference([leaf])), ["Middle"], "NodeA", [leaf], policy);
-        Assert.Equal(76,GraphSemanticVersion(middle));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
         var middleHash = SHA256.HashData(middle);
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile(Root, policy,
             NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
         var rootHash = SHA256.HashData(root);
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
 
         var replacement = NativeModuleCompiler.CreateProducer(Compile(
             Leaf.Replace("return 2", "return 3", StringComparison.Ordinal), policy),
             ["Source.Bias"], "NodeB", policy);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(43));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(43, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(rootHash, SHA256.HashData(root));
-        Assert.Equal(middleHash, SHA256.HashData(middle));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(43));
+        Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
+        Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedRootAndMiddleKeepSeparateHeapsAcrossGraphReplacementAsync(NativeRuntimePolicy policy)
     {
         var originalProgram = Compile(ManagedGraphLeaf, policy);
         string[] leafExports = ["Values.Make", "Values.Forward", "Values.Fail", "Values.CollectLeaf"];
         var original = NativeModuleCompiler.CreateProducer(originalProgram, leafExports, "NodeB", policy);
-        Assert.Equal(76,GraphSemanticVersion(original));
+        Assert.That(GraphSemanticVersion(original), Is.EqualTo(76));
         var bias = NativeModuleCompiler.CreateProducer(Compile(ManagedGraphBias, policy),
             ["Source.Bias"], "NodeC", policy);
         var middleProgram = Compile(ManagedMiddle(policy), policy,
@@ -233,48 +228,46 @@ public sealed partial class NativeManagedClassModuleTests
         string[] middleExports = ["Middle", "TryMiddle", "CollectMiddle"];
         var middle = NativeModuleCompiler.CreateGraphProducer(middleProgram, middleExports, "NodeA",
             [original, bias], policy);
-        Assert.Equal(76,GraphSemanticVersion(middle));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
         var middleHash = SHA256.HashData(middle);
         var reference = NativeModuleCompiler.CreateGraphReference([middle, original, bias]);
-        Assert.Equal("Values.Payload", Assert.Single(reference.Structures).Name);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).Name, Is.EqualTo("Values.Payload"));
         var rootProgram = Compile(ManagedGraphRoot, policy,
             reference, library: false);
         var root = NativeModuleCompiler.CreateGraphConsumer(rootProgram, [middle, original, bias], policy);
-        Assert.Equal(76,GraphSemanticVersion(root));
+        Assert.That(GraphSemanticVersion(root), Is.EqualTo(76));
         var rootHash = SHA256.HashData(root);
-        Assert.Equal("native-19", NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion);
-        Assert.Equal("native-19", NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion);
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion, Is.EqualTo("native-19"));
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion, Is.EqualTo("native-19"));
 
         NativeModuleCompiler.ValidateGraph(root, [original, bias, middle]);
-        Assert.Equal(41, await NativeModuleCompiler.RunGraphAsync(root, [middle, original, bias],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, original, bias],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(41));
         var replacementProgram = Compile(ManagedGraphLeaf.Replace("box.Data.First + 0", "box.Data.First + 1",
             StringComparison.Ordinal), policy);
         var replacement = NativeModuleCompiler.CreateProducer(replacementProgram, leafExports, "NodeB", policy);
         NativeModuleCompiler.ValidateGraph(root, [middle, bias, replacement]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [replacement, bias, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, bias, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement, bias],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(rootHash, SHA256.HashData(root));
-        Assert.Equal(middleHash, SHA256.HashData(middle));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement, bias],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
+        Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
 
         var downgradedMiddle = SetGraphSemanticVersion(middle, 31);
         var downgradedRoot = SetGraphSemanticVersion(root, 31);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(downgradedMiddle));
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(downgradedRoot));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(downgradedMiddle))!;
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(downgradedRoot))!;
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(downgradedRoot,
-            [original, middle, bias]));
+            [original, middle, bias]))!;
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedGraphSampleKeepsMiddleAndRootUnchangedAcrossLeafReplacementAsync(
         NativeRuntimePolicy policy)
     {
@@ -293,36 +286,34 @@ public sealed partial class NativeManagedClassModuleTests
         var middle = NativeModuleCompiler.CreateGraphProducer(Compile(middleSource, policy,
             NativeModuleCompiler.CreateGraphReference([original])), ["ForwardSnapshot", "MiddleValue"],
             "NodeA", [original], policy);
-        Assert.Equal(76,GraphSemanticVersion(middle));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile(rootSource, policy,
             NativeModuleCompiler.CreateGraphReference([middle, original]), library: false),
             [middle, original], policy);
-        Assert.Equal(76,GraphSemanticVersion(root));
+        Assert.That(GraphSemanticVersion(root), Is.EqualTo(76));
         var rootHash = SHA256.HashData(root);
         var middleHash = SHA256.HashData(middle);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, original],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, original],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(Compile(managedSource, policy),
             leafExports, "NodeB", policy);
-        Assert.Equal(76,GraphSemanticVersion(replacement));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(GraphSemanticVersion(replacement), Is.EqualTo(76));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(44));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [original, middle],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(rootHash, SHA256.HashData(root));
-        Assert.Equal(middleHash, SHA256.HashData(middle));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [original, middle],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
+        Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void UnmanagedGraphsRejectRetiredSemanticModuleRevisions(NativeRuntimePolicy policy)
     {
         var leaf = NativeModuleCompiler.CreateProducer(Compile("public int32 Leaf() { return 40; }", policy),
@@ -333,18 +324,16 @@ public sealed partial class NativeManagedClassModuleTests
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile(
             "int32 Main() { return Middle(); }", policy,
             NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
-        Assert.Equal(76,GraphSemanticVersion(middle));
-        Assert.Equal(76,GraphSemanticVersion(root));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(root), Is.EqualTo(76));
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
         _ = Assert.Throws<ModuleFormatException>(() =>
-            NativeModuleCompiler.InspectGraphArtifact(SetGraphSemanticVersion(middle, 32)));
+            NativeModuleCompiler.InspectGraphArtifact(SetGraphSemanticVersion(middle, 32)))!;
         _ = Assert.Throws<ModuleFormatException>(() =>
-            NativeModuleCompiler.InspectGraphArtifact(SetGraphSemanticVersion(root, 32)));
+            NativeModuleCompiler.InspectGraphArtifact(SetGraphSemanticVersion(root, 32)))!;
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NodeOnlyGraphParticipantsRetainImageLocalRootsAsync(NativeRuntimePolicy policy)
     {
         var leaf = NativeModuleCompiler.CreateProducer(Compile("public int32 Value() { return 42; }", policy),
@@ -366,23 +355,21 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy, NativeModuleCompiler.CreateGraphReference([middle]), library: false),
             [middle], policy);
-        Assert.Equal(76,GraphSemanticVersion(middle));
-        Assert.Equal(76,GraphSemanticVersion(root));
-        Assert.Equal("native-18", NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(root), Is.EqualTo(76));
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion, Is.EqualTo("native-18"));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = framework.Parent?.Name
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.exe");
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, leaf],
-            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [middle, leaf],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void ManagedGraphParticipantsRejectOwningImportsAndExports(NativeRuntimePolicy policy)
     {
         const string OwningProvider = """
@@ -407,7 +394,7 @@ public sealed partial class NativeManagedClassModuleTests
             """;
         var imported = Compilation.CreateLibrary(SyntaxTree.Parse(Managed), reference,
             (BoundRuntimePolicy)policy);
-        Assert.Contains(imported.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(imported.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
         var bias = NativeModuleCompiler.CreateProducer(Compile(ManagedGraphBias, policy),
             ["Source.Bias"], "NodeC", policy);
         var export = Compile(Managed + """
@@ -418,7 +405,7 @@ public sealed partial class NativeManagedClassModuleTests
             public int32 Leak(Owned value) { return value.Value; }
             """, policy, NativeModuleCompiler.CreateGraphReference([bias]));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphProducer(export,
-            ["Leak"], "NodeA", [bias], policy));
+            ["Leak"], "NodeA", [bias], policy))!;
         var handle = Compile(Managed + """
             public ManagedNode Leak() {
                 require ManagedNode.TryCreate(42, out var node);
@@ -426,14 +413,14 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy, NativeModuleCompiler.CreateGraphReference([bias]));
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphProducer(handle,
-            ["Leak"], "NodeA", [bias], policy));
+            ["Leak"], "NodeA", [bias], policy))!;
         var view = Compilation.CreateLibrary(SyntaxTree.Parse(Managed + """
             public int32 Leak(ReadonlyInt32BufferView value) { return value.Length; }
             """), NativeModuleCompiler.CreateGraphReference([bias]), (BoundRuntimePolicy)policy);
-        Assert.True(view.HasErrors);
+        Assert.That(view.HasErrors, Is.True);
         var root = Compilation.Create(SyntaxTree.Parse(Managed + "int32 Main() { return Read(); }"),
             reference, (BoundRuntimePolicy)policy);
-        Assert.Contains(root.Diagnostics, static diagnostic => diagnostic.Code == "TRM3023");
+        Assert.That(global::System.Linq.Enumerable.Any(root.Diagnostics,static diagnostic => diagnostic.Code == "TRM3023"),Is.True);
     }
 
     private static int GraphSemanticVersion(byte[] package)
@@ -442,7 +429,7 @@ public sealed partial class NativeManagedClassModuleTests
         var contractLength = BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(graph ? 11 : 10, 4));
         var imageLength = BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(graph ? 15 : 14, 4));
         var start = package.Length - 32 - imageLength - contractLength;
-        Assert.True(package.AsSpan(start, 4).SequenceEqual("TRRM"u8));
+        Assert.That(package.AsSpan(start, 4).SequenceEqual("TRRM"u8), Is.True);
         return BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(start + 4, 4));
     }
 

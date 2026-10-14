@@ -7,61 +7,59 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class DiscardFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void IndependentDiscardCertifiesHiddenIdentityAndExactHostedLowering()
     {
         const string text = "public int32 Value() { _ = int32(7); return 42; }";
         var source = SourceText.From(text);
         var words = Projection(text);
         var bytes = Bytes(words);
-        Assert.True(ScalarFrontendHost.ReadResult(source, bytes).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, bytes).IsValid, Is.True);
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var actual = ScalarFrontendHost.BindLibrary(source, bytes, policy);
             var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-            var function = Assert.Single(actual.Functions);
-            var variable = Assert.Single(function.Variables);
-            Assert.Equal("<discard>", variable.Name);
-            Assert.False(variable.IsMutable);
-            var block = Assert.IsType<BoundBlock>(function.Body.Statements[0]);
-            Assert.True(block.IsManagedLexicalScope);
-            var local = Assert.IsType<BoundLocal>(Assert.Single(block.Statements));
-            Assert.Equal(0, local.Variable);
-            Assert.Equal(block.Span, local.Span);
-            Assert.Equal(local.Span, variable.Span);
-            Assert.Equal(NativeEmitter.EmitLibrary(Assert.IsType<BoundProgram>(hosted.Program), ["Value"],
-                (NativeRuntimePolicy)policy), NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy));
+            Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+            var function = global::System.Linq.Enumerable.Single(actual.Functions);
+            var variable = global::System.Linq.Enumerable.Single(function.Variables);
+            Assert.That(variable.Name, Is.EqualTo("<discard>"));
+            Assert.That(variable.IsMutable, Is.False);
+            var block = ((global::System.Func<BoundBlock>)(() => { var __nunitActual0 = function.Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundBlock>()); return (BoundBlock)__nunitActual0!; }))();
+            Assert.That(block.IsManagedLexicalScope, Is.True);
+            var local = ((global::System.Func<BoundLocal>)(() => { var __nunitActual1 = global::System.Linq.Enumerable.Single(block.Statements); Assert.That(__nunitActual1, Is.TypeOf<BoundLocal>()); return (BoundLocal)__nunitActual1!; }))();
+            Assert.That(local.Variable, Is.EqualTo(0));
+            Assert.That(local.Span, Is.EqualTo(block.Span));
+            Assert.That(variable.Span, Is.EqualTo(local.Span));
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = hosted.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Value"],
+                (NativeRuntimePolicy)policy)));
         }
     }
-
-    [Theory]
-    [InlineData(0, 52)]
-    [InlineData(0, 49)]
-    [InlineData(0, 48)]
-    [InlineData(0, 21)]
-    [InlineData(0, 54)]
-    [InlineData(299, 0)]
-    [InlineData(299, 9)]
-    [InlineData(298, 13)]
-    [InlineData(300, 2)]
-    [InlineData(301, 1)]
-    [InlineData(303, 2)]
-    [InlineData(332, 10)]
-    [InlineData(332, 1)]
-    [InlineData(333, 0)]
-    [InlineData(333, 2)]
-    [InlineData(334, 0)]
-    [InlineData(334, 2)]
-    [InlineData(335, 0)]
-    [InlineData(336, 1)]
-    [InlineData(391, 1)]
+    [TestCase(0,52)]
+    [TestCase(0,49)]
+    [TestCase(0,48)]
+    [TestCase(0,21)]
+    [TestCase(0,54)]
+    [TestCase(299,0)]
+    [TestCase(299,9)]
+    [TestCase(298,13)]
+    [TestCase(300,2)]
+    [TestCase(301,1)]
+    [TestCase(303,2)]
+    [TestCase(332,10)]
+    [TestCase(332,1)]
+    [TestCase(333,0)]
+    [TestCase(333,2)]
+    [TestCase(334,0)]
+    [TestCase(334,2)]
+    [TestCase(335,0)]
+    [TestCase(336,1)]
+    [TestCase(391,1)]
     public void IndependentDiscardRejectsForgedVersionTypeIdentityRootAndExtent(int index, int value)
     {
         const string text = "public int32 Value() { _ = int32(7); return 42; }";
@@ -69,13 +67,11 @@ public sealed class DiscardFrontendProjectionTests
         words[index] = value;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData("_= int32(7);")]
-    [InlineData("_ =int32(7);")]
-    [InlineData("_ += int32(7);")]
-    [InlineData("_ = int32(8);")]
-    [InlineData("_ = _;")]
+    [TestCase("_= int32(7);")]
+    [TestCase("_ =int32(7);")]
+    [TestCase("_ += int32(7);")]
+    [TestCase("_ = int32(8);")]
+    [TestCase("_ = _;")]
     public void IndependentDiscardRejectsContradictingSource(string statement)
     {
         const string text = "public int32 Value() { _ = int32(7); return 42; }";
@@ -84,7 +80,7 @@ public sealed class DiscardFrontendProjectionTests
             Bytes(Projection(text))));
     }
 
-    [Fact]
+    [Test]
     public void IndependentDiscardCannotClaimUntypedLiteralConstruction()
     {
         const string text = "public int32 Value() { _ = 7; return 42; }";
@@ -101,7 +97,7 @@ public sealed class DiscardFrontendProjectionTests
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
 
-    [Fact]
+    [Test]
     public void IndependentDiscardRejectsSharedHiddenAnchorsAndReusedExpressionRoots()
     {
         const string text = "public int32 Value() { _ = int32(7); _ = true; return 42; }";
@@ -118,7 +114,7 @@ public sealed class DiscardFrontendProjectionTests
         Node(words, 3, 3, text.IndexOf("42", StringComparison.Ordinal), 2, -1, 42);
         Statement(words, 1, 15, 2, 2, second, second + 9);
         Statement(words, 2, 8, 0, 3, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';') + 1);
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[306] = words[302];
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         words[306] = second;
@@ -151,10 +147,8 @@ public sealed class DiscardFrontendProjectionTests
         Statement(words, 1, 8, 0, 2, text.IndexOf("return", StringComparison.Ordinal), text.LastIndexOf(';') + 1);
         return words;
     }
-
-    [Theory]
-    [InlineData(15, true)]
-    [InlineData(16, false)]
+    [TestCase(15,true)]
+    [TestCase(16,false)]
     public void IndependentDiscardEnforcesNativeExpressionRecursionNotTreeHeight(int groups, bool valid)
     {
         var text = "public int32 Value() { _ = " + new string('(', groups)
@@ -176,25 +170,23 @@ public sealed class DiscardFrontendProjectionTests
         words[339] = groups + 1;
         if (valid)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         }
         else
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
         }
     }
-
-    [Theory]
-    [InlineData(16384, true)]
-    [InlineData(16385, false)]
+    [TestCase(16384,true)]
+    [TestCase(16385,false)]
     public void IndependentDiscardEnforcesSourceLimitIncludingTrailingTrivia(int length, bool valid)
     {
         const string text = "public int32 Value() { _ = int32(7); return 42; }";
         var padded = text + " /*" + new string('x', length - text.Length - 5) + "*/";
-        Assert.Equal(length, padded.Length);
+        Assert.That(padded.Length, Is.EqualTo(length));
         if (valid)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(padded), Bytes(Projection(text))).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(padded), Bytes(Projection(text))).IsValid, Is.True);
         }
         else
         {

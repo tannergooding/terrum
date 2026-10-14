@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -14,10 +14,8 @@ public sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int PunctuationPredicate(bool condition);
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ContextualPunctuationPreservesScalarJitExeDllAndAtomicOutputAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -43,9 +41,9 @@ public sealed partial class CliTests
                         ? new[] { command, "-", "--runtime", policy, "--json" }
                         : new[] { command, frontend, "-", "--runtime", policy, "--json" };
                     var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
-                    Assert.Equal(42, exit);
-                    Assert.Empty(output);
-                    Assert.Empty(error);
+                    Assert.That(exit, Is.EqualTo(42));
+                    Assert.That(output, Is.Empty);
+                    Assert.That(error, Is.Empty);
                 }
                 foreach (var arguments in new[] {
                     new[] { "build", "-", "-o", hosted, "--runtime", policy, "--json" },
@@ -54,14 +52,14 @@ public sealed partial class CliTests
                 })
                 {
                     var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
-                    Assert.Equal(0, exit);
-                    Assert.Empty(error);
+                    Assert.That(exit, Is.EqualTo(0));
+                    Assert.That(error, Is.Empty);
                 }
-                Assert.Equal(42, await ExecuteNativeImageAsync(hosted));
-                Assert.Equal(42, await ExecuteNativeImageAsync(component));
-                Assert.Equal(42, await ExecuteNativeImageAsync(native));
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(component));
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(component), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(42));
+                Assert.That(await File.ReadAllBytesAsync(component), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             }
             foreach (var (command, path) in new[] { ("build", hosted), ("build-component", component), ("frontend-build", native) })
             {
@@ -73,22 +71,22 @@ public sealed partial class CliTests
                         ? new[] { command, "-", "-o", path, "--runtime", policy, "--json" }
                         : new[] { command, command == "build-component" ? scanner : frontend, "-", "-o", path, "--runtime", policy, "--json" };
                     var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
-                    Assert.Equal(1, exit);
-                    Assert.Empty(error);
-                    Assert.Equal(original, await File.ReadAllBytesAsync(path));
+                    Assert.That(exit, Is.EqualTo(1));
+                    Assert.That(error, Is.Empty);
+                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
                     if (command == "frontend-build")
                     {
                         var (probeExit, output, probeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
                             "frontend-component", frontend, "-", "--runtime", policy, "--json");
-                        Assert.Equal(1, probeExit);
-                        Assert.Empty(probeError);
+                        Assert.That(probeExit, Is.EqualTo(1));
+                        Assert.That(probeError, Is.Empty);
                         using var document = JsonDocument.Parse(output);
                         var result = document.RootElement.GetProperty("result");
-                        Assert.Equal(1, result.GetProperty("errorCode").GetInt32());
+                        Assert.That(result.GetProperty("errorCode").GetInt32(), Is.EqualTo(1));
                         var offending = expression.StartsWith("true?", StringComparison.Ordinal)
                             || expression.StartsWith("true ?42", StringComparison.Ordinal) ? '?' : ':';
-                        Assert.Equal(source.IndexOf(offending), result.GetProperty("errorSpan").GetProperty("start").GetInt32());
-                        Assert.Equal(1, result.GetProperty("errorSpan").GetProperty("length").GetInt32());
+                        Assert.That(result.GetProperty("errorSpan").GetProperty("start").GetInt32(), Is.EqualTo(source.IndexOf(offending)));
+                        Assert.That(result.GetProperty("errorSpan").GetProperty("length").GetInt32(), Is.EqualTo(1));
                     }
                 }
             }
@@ -99,16 +97,16 @@ public sealed partial class CliTests
             })
             {
                 var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(library), arguments);
-                Assert.Equal(0, exit);
-                Assert.Empty(error);
+                Assert.That(exit, Is.EqualTo(0));
+                Assert.That(error, Is.Empty);
             }
-            Assert.Equal(await File.ReadAllBytesAsync(hostedLibrary), await File.ReadAllBytesAsync(nativeLibrary));
+            Assert.That(await File.ReadAllBytesAsync(nativeLibrary), Is.EqualTo(await File.ReadAllBytesAsync(hostedLibrary)));
             var handle = NativeLibrary.Load(nativeLibrary);
             try
             {
                 var invoke = Marshal.GetDelegateForFunctionPointer<PunctuationPredicate>(NativeLibrary.GetExport(handle, "Value"));
-                Assert.Equal(42, invoke(true));
-                Assert.Equal(7, invoke(false));
+                Assert.That(invoke(true), Is.EqualTo(42));
+                Assert.That(invoke(false), Is.EqualTo(7));
             }
             finally
             {

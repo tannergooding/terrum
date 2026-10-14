@@ -8,15 +8,14 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task KeywordEscapesExecuteAcrossHostedComponentAndFrontendAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -29,9 +28,9 @@ public sealed partial class CliTests
         })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), arguments);
-            Assert.Equal(42, exit);
-            Assert.Empty(output);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(42));
+            Assert.That(output, Is.Empty);
+            Assert.That(error, Is.Empty);
         }
         var prefix = Path.Combine(root, "artifacts", $"keyword-escapes-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
@@ -48,28 +47,28 @@ public sealed partial class CliTests
             })
             {
                 var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), arguments);
-                Assert.Equal(0, exit);
-                Assert.Empty(error);
+                Assert.That(exit, Is.EqualTo(0));
+                Assert.That(error, Is.Empty);
             }
-            Assert.Equal(42, await ExecuteNativeImageAsync(hosted));
-            Assert.Equal(42, await ExecuteNativeImageAsync(component));
-            Assert.Equal(42, await ExecuteNativeImageAsync(native));
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+            Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(42));
+            Assert.That(await ExecuteNativeImageAsync(component), Is.EqualTo(42));
+            Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(42));
+            Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             const string Library = "public int32 @await(int32 @const, int32 some) { mut var @return = const + @some; @return += 2; return @return; }";
             var (libraryExit, _, libraryError) = await RunAsync(Encoding.UTF8.GetBytes(Library),
                 "frontend-build-library", frontend, "-", "-o", library, "--runtime", policy, "--json");
-            Assert.Equal(0, libraryExit);
-            Assert.Empty(libraryError);
+            Assert.That(libraryExit, Is.EqualTo(0));
+            Assert.That(libraryError, Is.Empty);
             var (hostedExit, _, hostedError) = await RunAsync(Encoding.UTF8.GetBytes(Library),
                 "build-library", "-", "--export", "await", "-o", hostedLibrary, "--runtime", policy, "--json");
-            Assert.Equal(0, hostedExit);
-            Assert.Empty(hostedError);
-            Assert.Equal(await File.ReadAllBytesAsync(hostedLibrary), await File.ReadAllBytesAsync(library));
+            Assert.That(hostedExit, Is.EqualTo(0));
+            Assert.That(hostedError, Is.Empty);
+            Assert.That(await File.ReadAllBytesAsync(library), Is.EqualTo(await File.ReadAllBytesAsync(hostedLibrary)));
             var handle = NativeLibrary.Load(library);
             try
             {
                 var invoke = Marshal.GetDelegateForFunctionPointer<ScalarBinary>(NativeLibrary.GetExport(handle, "await"));
-                Assert.Equal(42, invoke(20, 20));
+                Assert.That(invoke(20, 20), Is.EqualTo(42));
             }
             finally
             {
@@ -79,9 +78,9 @@ public sealed partial class CliTests
             var (invalidExit, _, invalidError) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { int32 @out = 42; return @out; }"),
                 "frontend-build", frontend, "-", "-o", native, "--runtime", policy, "--json");
-            Assert.Equal(1, invalidExit);
-            Assert.Empty(invalidError);
-            Assert.Equal(original, await File.ReadAllBytesAsync(native));
+            Assert.That(invalidExit, Is.EqualTo(1));
+            Assert.That(invalidError, Is.Empty);
+            Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(original));
         }
         finally
         {
@@ -91,27 +90,23 @@ public sealed partial class CliTests
             }
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task KeywordEscapeScannerComponentPreservesRawNamesAndSpansAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/* heading */ @await @const @union @via @out @int32 @ await";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
             Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
-        Assert.Equal(1, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(1));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(ScannerHost.SchemaVersion, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.That(document.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(ScannerHost.SchemaVersion));
         var tokens = document.RootElement.GetProperty("tokens").EnumerateArray().ToArray();
-        Assert.Equal(new[] { "@await", "@const", "@union", "@via", "@out", "@int32", "@", "await", "" },
-            tokens.Select(token => Source.Substring(token.GetProperty("start").GetInt32(),
-                token.GetProperty("length").GetInt32())));
-        Assert.Equal(new[] { "Identifier", "Identifier", "Identifier", "Identifier", "Bad", "Bad", "Bad", "AwaitKeyword", "EndOfFile" },
-            tokens.Select(token => token.GetProperty("kind").GetString()));
-        Assert.Equal(14, tokens[0].GetProperty("start").GetInt32());
-        Assert.Equal(6, tokens[0].GetProperty("length").GetInt32());
+        Assert.That(tokens.Select(token => Source.Substring(token.GetProperty("start").GetInt32(),
+                token.GetProperty("length").GetInt32())), Is.EqualTo(new[] { "@await", "@const", "@union", "@via", "@out", "@int32", "@", "await", "" }));
+        Assert.That(tokens.Select(token => token.GetProperty("kind").GetString()), Is.EqualTo(new[] { "Identifier", "Identifier", "Identifier", "Identifier", "Bad", "Bad", "Bad", "AwaitKeyword", "EndOfFile" }));
+        Assert.That(tokens[0].GetProperty("start").GetInt32(), Is.EqualTo(14));
+        Assert.That(tokens[0].GetProperty("length").GetInt32(), Is.EqualTo(6));
     }
 }

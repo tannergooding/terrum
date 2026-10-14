@@ -3,7 +3,7 @@
 using System;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -16,14 +16,12 @@ public sealed class StaticProtocolOutputTests
             public Value(int64 first) { First = first; Second = 2; }
         }
         """;
-
-    [Theory]
-    [InlineData("int32", "-2147483648", PrimitiveType.Int32)]
-    [InlineData("uint32", "4294967295", PrimitiveType.UInt32)]
-    [InlineData("int64", "-9223372036854775808", PrimitiveType.Int64)]
-    [InlineData("uint64", "18446744073709551615", PrimitiveType.UInt64)]
-    [InlineData("char16", "char16(55296)", PrimitiveType.Char16)]
-    [InlineData("bool", "true", PrimitiveType.Bool)]
+    [TestCase("int32","-2147483648",PrimitiveType.Int32)]
+    [TestCase("uint32","4294967295",PrimitiveType.UInt32)]
+    [TestCase("int64","-9223372036854775808",PrimitiveType.Int64)]
+    [TestCase("uint64","18446744073709551615",PrimitiveType.UInt64)]
+    [TestCase("char16","char16(55296)",PrimitiveType.Char16)]
+    [TestCase("bool","true",PrimitiveType.Bool)]
     public void GenericKnownResultTypeComesFromReturnSignature(string type, string literal, PrimitiveType expected)
     {
         var source = Value + $$"""
@@ -35,17 +33,13 @@ public sealed class StaticProtocolOutputTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(expected, Assert.Single(program.Functions,
-            function => function.Name == "Echo<Value>").ReturnType);
-        Assert.Equal(expected, Assert.Single(program.Functions[program.EntryPoint].Variables,
-            variable => variable.Name == "actual").Type);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Echo<Value>").ReturnType, Is.EqualTo(expected));
+        Assert.That(global::System.Linq.Enumerable.Single(program.Functions[program.EntryPoint].Variables, variable => variable.Name == "actual").Type, Is.EqualTo(expected));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void ConditionalHelpersForwardWholeCopyAndScalarOutputs(bool instantiate)
     {
         var entry = instantiate
@@ -62,24 +56,22 @@ public sealed class StaticProtocolOutputTests
             }
             """ + entry;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.DoesNotContain(program.Functions, function => function.IsExternal
-            || function.Name.Contains('$', StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(global::System.Linq.Enumerable.Any(program.Functions,function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
         if (instantiate)
         {
-            var helper = Assert.Single(program.Functions, function => function.Name == "Forward<Value>");
-            Assert.Equal(PrimitiveType.Bool, helper.ReturnType);
-            Assert.True(helper.Variables[1].IsOut);
-            Assert.True(helper.Variables[2].IsOut);
+            var helper = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Forward<Value>");
+            Assert.That(helper.ReturnType, Is.EqualTo(PrimitiveType.Bool));
+            Assert.That(helper.Variables[1].IsOut, Is.True);
+            Assert.That(helper.Variables[2].IsOut, Is.True);
         }
     }
-
-    [Theory]
-    [InlineData("return true;")]
-    [InlineData("T old = result; result = value; return true;")]
-    [InlineData("if (publish) { result = value; } return true;")]
-    [InlineData("Other<T>(value, out result); return true;")]
+    [TestCase("return true;")]
+    [TestCase("T old = result; result = value; return true;")]
+    [TestCase("if (publish) { result = value; } return true;")]
+    [TestCase("Other<T>(value, out result); return true;")]
     public void InvalidOutputFlowRejectsEvenInAnUnusedGenericDefinition(string body)
     {
         var source = Value + """
@@ -87,26 +79,24 @@ public sealed class StaticProtocolOutputTests
             bool Pick<T>(T value, bool publish, out T result) where T : [Copy] {
             """ + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericOutputCannotDependOnAFormalReturnType()
     {
         var source = Value
             + "T Pick<T>(T value, out T result) where T : [Copy] { result = value; return value; }"
             + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32", false)]
-    [InlineData("uint64", true)]
-    [InlineData("void", false)]
-    [InlineData("void", true)]
+    [TestCase("int32",false)]
+    [TestCase("uint64",true)]
+    [TestCase("void",false)]
+    [TestCase("void",true)]
     public void GenericNonBooleanOutputsUseNormalReturnPublication(string resultType, bool explicitType)
     {
         var call = explicitType
@@ -123,27 +113,25 @@ public sealed class StaticProtocolOutputTests
             + " Fill<T>(T value, out T result) where T : [Copy] { "
             + body + "} int32 Main() { " + completion + " }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
-        Assert.Equal(resultType == "void" ? PrimitiveType.Void
-            : resultType == "uint64" ? PrimitiveType.UInt64 : PrimitiveType.Int32, fill.ReturnType);
-        Assert.True(fill.Variables[1].IsOut);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.That(fill.ReturnType, Is.EqualTo(resultType == "void" ? PrimitiveType.Void
+            : resultType == "uint64" ? PrimitiveType.UInt64 : PrimitiveType.Int32));
+        Assert.That(fill.Variables[1].IsOut, Is.True);
     }
-
-    [Theory]
-    [InlineData("int32", false)]
-    [InlineData("int32", true)]
-    [InlineData("uint32", false)]
-    [InlineData("uint32", true)]
-    [InlineData("int64", false)]
-    [InlineData("int64", true)]
-    [InlineData("uint64", false)]
-    [InlineData("uint64", true)]
-    [InlineData("char16", false)]
-    [InlineData("char16", true)]
-    [InlineData("void", false)]
-    [InlineData("void", true)]
+    [TestCase("int32",false)]
+    [TestCase("int32",true)]
+    [TestCase("uint32",false)]
+    [TestCase("uint32",true)]
+    [TestCase("int64",false)]
+    [TestCase("int64",true)]
+    [TestCase("uint64",false)]
+    [TestCase("uint64",true)]
+    [TestCase("char16",false)]
+    [TestCase("char16",true)]
+    [TestCase("void",false)]
+    [TestCase("void",true)]
     public void GenericNonBooleanInitOutputsPublishOnNormalReturn(string resultType, bool explicitType)
     {
         var call = explicitType
@@ -161,9 +149,9 @@ public sealed class StaticProtocolOutputTests
             + " Fill<T>(T value, init ref<T> result) where T : [Copy] { "
             + body + "} int32 Main() { " + completion + " }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         var expectedReturn = resultType switch {
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
@@ -172,45 +160,41 @@ public sealed class StaticProtocolOutputTests
             "char16" => PrimitiveType.Char16,
             _ => PrimitiveType.Void,
         };
-        Assert.Equal(expectedReturn, fill.ReturnType);
-        Assert.True(fill.Variables[1].IsInit);
+        Assert.That(fill.ReturnType, Is.EqualTo(expectedReturn));
+        Assert.That(fill.Variables[1].IsInit, Is.True);
     }
-
-    [Theory]
-    [InlineData("int32", "if (publish) { result = value; } return 7;")]
-    [InlineData("void", "if (publish) { result = value; }")]
+    [TestCase("int32","if (publish) { result = value; } return 7;")]
+    [TestCase("void","if (publish) { result = value; }")]
     public void GenericNonBooleanOutputsRequirePublicationOnEveryNormalReturn(string resultType, string body)
     {
         var source = Value + resultType
             + " Fill<T>(T value, bool publish, out T result) where T : [Copy] { "
             + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32", "if (publish) { result = value; } return 7;")]
-    [InlineData("void", "if (publish) { result = value; }")]
+    [TestCase("int32","if (publish) { result = value; } return 7;")]
+    [TestCase("void","if (publish) { result = value; }")]
     public void GenericNonBooleanInitOutputsRequirePublicationOnEveryNormalReturn(string resultType, string body)
     {
         var source = Value + resultType
             + " Fill<T>(T value, bool publish, init ref<T> result) where T : [Copy] { "
             + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericNonBooleanOutputsKeepVoidTemplatesAndManagedHandlesOutsideTheOutExtension()
     {
         var voidWithoutOutput = Compilation.Create(SyntaxTree.Parse("""
             void Ignore<T>(T value) where T : [Copy] { }
             int32 Main() { return 0; }
             """));
-        Assert.True(voidWithoutOutput.HasErrors);
-        Assert.Null(voidWithoutOutput.Program);
+        Assert.That(voidWithoutOutput.HasErrors, Is.True);
+        Assert.That(voidWithoutOutput.Program, Is.Null);
 
         var managedHandle = Compilation.Create(SyntaxTree.Parse("""
             int32 Fill<T>(T value, out T result) where T : [Copy] {
@@ -223,8 +207,8 @@ public sealed class StaticProtocolOutputTests
                 return status + copy.Value;
             }
             """));
-        Assert.True(managedHandle.HasErrors);
-        Assert.Null(managedHandle.Program);
+        Assert.That(managedHandle.HasErrors, Is.True);
+        Assert.That(managedHandle.Program, Is.Null);
 
         var fixedOutput = Compilation.Create(SyntaxTree.Parse(Value + """
             int32 Fill<T>(T value, out int32 result) where T : [Copy] {
@@ -233,23 +217,21 @@ public sealed class StaticProtocolOutputTests
             }
             int32 Main() { return 0; }
             """));
-            Assert.True(fixedOutput.HasErrors);
-            Assert.Null(fixedOutput.Program);
+        Assert.That(fixedOutput.HasErrors, Is.True);
+        Assert.That(fixedOutput.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32", false)]
-    [InlineData("int32", true)]
-    [InlineData("uint32", false)]
-    [InlineData("uint32", true)]
-    [InlineData("int64", false)]
-    [InlineData("int64", true)]
-    [InlineData("uint64", false)]
-    [InlineData("uint64", true)]
-    [InlineData("char16", false)]
-    [InlineData("char16", true)]
-    [InlineData("void", false)]
-    [InlineData("void", true)]
+    [TestCase("int32",false)]
+    [TestCase("int32",true)]
+    [TestCase("uint32",false)]
+    [TestCase("uint32",true)]
+    [TestCase("int64",false)]
+    [TestCase("int64",true)]
+    [TestCase("uint64",false)]
+    [TestCase("uint64",true)]
+    [TestCase("char16",false)]
+    [TestCase("char16",true)]
+    [TestCase("void",false)]
+    [TestCase("void",true)]
     public void GenericNonBooleanMixedOutputsPreserveEachMode(string resultType, bool explicitType)
     {
         var call = explicitType
@@ -277,9 +259,9 @@ public sealed class StaticProtocolOutputTests
             .Replace("COMPLETION", completion, StringComparison.Ordinal)
             .Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value, int32>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value, int32>");
         var expectedReturn = resultType switch {
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
@@ -288,30 +270,28 @@ public sealed class StaticProtocolOutputTests
             "char16" => PrimitiveType.Char16,
             _ => PrimitiveType.Void,
         };
-        Assert.Equal(expectedReturn, fill.ReturnType);
-        Assert.True(fill.Variables[2].IsOut);
-        Assert.False(fill.Variables[2].IsInit);
-        Assert.True(fill.Variables[3].IsOut);
-        Assert.True(fill.Variables[3].IsInit);
+        Assert.That(fill.ReturnType, Is.EqualTo(expectedReturn));
+        Assert.That(fill.Variables[2].IsOut, Is.True);
+        Assert.That(fill.Variables[2].IsInit, Is.False);
+        Assert.That(fill.Variables[3].IsOut, Is.True);
+        Assert.That(fill.Variables[3].IsInit, Is.True);
     }
-
-    [Theory]
-    [InlineData("bool", false)]
-    [InlineData("bool", true)]
-    [InlineData("char16", false)]
-    [InlineData("char16", true)]
-    [InlineData("int32", false)]
-    [InlineData("int32", true)]
-    [InlineData("uint32", false)]
-    [InlineData("uint32", true)]
-    [InlineData("int64", false)]
-    [InlineData("int64", true)]
-    [InlineData("uint64", false)]
-    [InlineData("uint64", true)]
-    [InlineData("float32", false)]
-    [InlineData("float32", true)]
-    [InlineData("float64", false)]
-    [InlineData("float64", true)]
+    [TestCase("bool",false)]
+    [TestCase("bool",true)]
+    [TestCase("char16",false)]
+    [TestCase("char16",true)]
+    [TestCase("int32",false)]
+    [TestCase("int32",true)]
+    [TestCase("uint32",false)]
+    [TestCase("uint32",true)]
+    [TestCase("int64",false)]
+    [TestCase("int64",true)]
+    [TestCase("uint64",false)]
+    [TestCase("uint64",true)]
+    [TestCase("float32",false)]
+    [TestCase("float32",true)]
+    [TestCase("float64",false)]
+    [TestCase("float64",true)]
     public void GenericFixedScalarOutputTypesRetainTheirMode(string outputType, bool isInit)
     {
         var parameter = isInit ? $"init ref<{outputType}> side" : $"out {outputType} side";
@@ -337,13 +317,13 @@ public sealed class StaticProtocolOutputTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
-        Assert.True(fill.Variables[1].IsOut);
-        Assert.False(fill.Variables[1].IsInit);
-        Assert.True(fill.Variables[2].IsOut);
-        Assert.Equal(isInit, fill.Variables[2].IsInit);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsInit, Is.False);
+        Assert.That(fill.Variables[2].IsOut, Is.True);
+        Assert.That(fill.Variables[2].IsInit, Is.EqualTo(isInit));
         var expectedType = outputType switch {
             "bool" => PrimitiveType.Bool,
             "char16" => PrimitiveType.Char16,
@@ -354,12 +334,10 @@ public sealed class StaticProtocolOutputTests
             "float32" => PrimitiveType.Float32,
             _ => PrimitiveType.Float64,
         };
-        Assert.Equal(expectedType, fill.Variables[2].Type);
+        Assert.That(fill.Variables[2].Type, Is.EqualTo(expectedType));
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void GenericMixedOutputsCanShareOneTypeParameter(bool explicitType)
     {
         var call = explicitType
@@ -379,20 +357,18 @@ public sealed class StaticProtocolOutputTests
             }
             """.Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
-        Assert.True(fill.Variables[1].IsOut);
-        Assert.False(fill.Variables[1].IsInit);
-        Assert.True(fill.Variables[2].IsOut);
-        Assert.True(fill.Variables[2].IsInit);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsInit, Is.False);
+        Assert.That(fill.Variables[2].IsOut, Is.True);
+        Assert.That(fill.Variables[2].IsInit, Is.True);
     }
-
-    [Theory]
-    [InlineData("Fill(new Value(1), new Value(2), init copied, out var initialized);")]
-    [InlineData("Fill(new Value(1), new Value(2), out copied, init copied);")]
-    [InlineData("Fill(new Value(1), new Value(2), out copied, init initialized);")]
-    [InlineData("Fill(new Value(1), new Value(2), out wrong, init var initialized);")]
+    [TestCase("Fill(new Value(1), new Value(2), init copied, out var initialized);")]
+    [TestCase("Fill(new Value(1), new Value(2), out copied, init copied);")]
+    [TestCase("Fill(new Value(1), new Value(2), out copied, init initialized);")]
+    [TestCase("Fill(new Value(1), new Value(2), out wrong, init var initialized);")]
     public void GenericMixedOutputsRejectModeAndDestinationMismatches(string call)
     {
         var source = Value + """
@@ -411,23 +387,21 @@ public sealed class StaticProtocolOutputTests
             }
             """.Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32", false)]
-    [InlineData("int32", true)]
-    [InlineData("uint32", false)]
-    [InlineData("uint32", true)]
-    [InlineData("int64", false)]
-    [InlineData("int64", true)]
-    [InlineData("uint64", false)]
-    [InlineData("uint64", true)]
-    [InlineData("char16", false)]
-    [InlineData("char16", true)]
-    [InlineData("void", false)]
-    [InlineData("void", true)]
+    [TestCase("int32",false)]
+    [TestCase("int32",true)]
+    [TestCase("uint32",false)]
+    [TestCase("uint32",true)]
+    [TestCase("int64",false)]
+    [TestCase("int64",true)]
+    [TestCase("uint64",false)]
+    [TestCase("uint64",true)]
+    [TestCase("char16",false)]
+    [TestCase("char16",true)]
+    [TestCase("void",false)]
+    [TestCase("void",true)]
     public void GenericFixedScalarOutputsCanAccompanyGenericOutputs(string resultType, bool explicitType)
     {
         var call = explicitType
@@ -454,9 +428,9 @@ public sealed class StaticProtocolOutputTests
             .Replace("COMPLETION", completion, StringComparison.Ordinal)
             .Replace("CALL", call, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
         var expectedReturn = resultType switch {
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
@@ -465,18 +439,16 @@ public sealed class StaticProtocolOutputTests
             "char16" => PrimitiveType.Char16,
             _ => PrimitiveType.Void,
         };
-        Assert.Equal(expectedReturn, fill.ReturnType);
-        Assert.True(fill.Variables[1].IsOut);
-        Assert.False(fill.Variables[1].IsInit);
-        Assert.True(fill.Variables[2].IsOut);
-        Assert.False(fill.Variables[2].IsInit);
-        Assert.True(fill.Variables[3].IsOut);
-        Assert.True(fill.Variables[3].IsInit);
+        Assert.That(fill.ReturnType, Is.EqualTo(expectedReturn));
+        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsInit, Is.False);
+        Assert.That(fill.Variables[2].IsOut, Is.True);
+        Assert.That(fill.Variables[2].IsInit, Is.False);
+        Assert.That(fill.Variables[3].IsOut, Is.True);
+        Assert.That(fill.Variables[3].IsInit, Is.True);
     }
-
-    [Theory]
-    [InlineData("count = 2;")]
-    [InlineData("score = float64(3.5);")]
+    [TestCase("count = 2;")]
+    [TestCase("score = float64(3.5);")]
     public void GenericFixedOutputsRequirePublicationOnEveryNormalReturn(string body)
     {
         var source = Value
@@ -484,13 +456,11 @@ public sealed class StaticProtocolOutputTests
             + " where T : [Copy] { result = value; " + body + " return 7; }"
             + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("count = 2;")]
-    [InlineData("score = float64(3.5);")]
+    [TestCase("count = 2;")]
+    [TestCase("score = float64(3.5);")]
     public void GenericFixedVoidOutputsRequirePublicationOnFallthrough(string body)
     {
         var source = Value
@@ -498,11 +468,11 @@ public sealed class StaticProtocolOutputTests
             + " where T : [Copy] { result = value; " + body + " }"
             + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericFixedOutputsDoNotInferGenericTypeFromDestinations()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -515,11 +485,11 @@ public sealed class StaticProtocolOutputTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericFixedOutputsRequireAGenericTypedOutput()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -534,13 +504,11 @@ public sealed class StaticProtocolOutputTests
                 return status + count + int32(score);
             }
             """));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("float32", "float32(-0.0)")]
-    [InlineData("float64", "float64(-0.0)")]
+    [TestCase("float32","float32(-0.0)")]
+    [TestCase("float64","float64(-0.0)")]
     public void GenericFloatingResultsPreserveOutputModes(string resultType, string resultValue)
     {
         var source = Value + resultType
@@ -551,20 +519,18 @@ public sealed class StaticProtocolOutputTests
             + resultType + " status2 = Fill<Value>(new Value(42), out copied, init var initialized2);"
             + "return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        var fill = Assert.Single(program.Functions, function => function.Name == "Fill<Value>");
-        Assert.Equal(resultType == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64, fill.ReturnType);
-        Assert.True(fill.Variables[1].IsOut);
-        Assert.False(fill.Variables[1].IsInit);
-        Assert.True(fill.Variables[2].IsInit);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
+        var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill<Value>");
+        Assert.That(fill.ReturnType, Is.EqualTo(resultType == "float32" ? PrimitiveType.Float32 : PrimitiveType.Float64));
+        Assert.That(fill.Variables[1].IsOut, Is.True);
+        Assert.That(fill.Variables[1].IsInit, Is.False);
+        Assert.That(fill.Variables[2].IsInit, Is.True);
     }
-
-    [Theory]
-    [InlineData("float32", "result = value; initialized = value; count = 2; return float32(1.5);")]
-    [InlineData("float64", "result = value; initialized = value; score = float64(3.5); return float64(1.5);")]
-    [InlineData("float32", "initialized = value; count = 2; score = float64(3.5); return float32(1.5);")]
-    [InlineData("float64", "result = value; count = 2; score = float64(3.5); return float64(1.5);")]
+    [TestCase("float32","result = value; initialized = value; count = 2; return float32(1.5);")]
+    [TestCase("float64","result = value; initialized = value; score = float64(3.5); return float64(1.5);")]
+    [TestCase("float32","initialized = value; count = 2; score = float64(3.5); return float32(1.5);")]
+    [TestCase("float64","result = value; count = 2; score = float64(3.5); return float64(1.5);")]
     public void GenericFloatingResultRequiresEveryOutputOnNormalReturn(string resultType, string body)
     {
         var source = Value
@@ -572,22 +538,20 @@ public sealed class StaticProtocolOutputTests
             + " out int32 count, init ref<float64> score)"
             + " where T : [Copy] { " + body + " } int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("float32 Create<T>(T value) where T : [Copy] { return float32(1.5); }")]
-    [InlineData("float32 Fill<T>(T value, float32 threshold, out T result) where T : [Copy] { result = value; return float32(1.5); }")]
+    [TestCase("float32 Create<T>(T value) where T : [Copy] { return float32(1.5); }")]
+    [TestCase("float32 Fill<T>(T value, float32 threshold, out T result) where T : [Copy] { result = value; return float32(1.5); }")]
     public void GenericFloatingResultDoesNotWidenTemplateTypes(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
             declaration + " int32 Main() { return 0; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericFloatingResultRequiresAGenericOutputAnchor()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -602,11 +566,11 @@ public sealed class StaticProtocolOutputTests
                 return 42;
             }
             """));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericFloatingResultAndFixedOutputsDoNotInferOutputTypes()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -620,11 +584,11 @@ public sealed class StaticProtocolOutputTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericFloatingResultDoesNotRelaxFinallyNoThrow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -638,15 +602,13 @@ public sealed class StaticProtocolOutputTests
             }
             int32 Main() { return 0; }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("copied")]
-    [InlineData("initialized")]
-    [InlineData("count")]
-    [InlineData("int32(score)")]
+    [TestCase("copied")]
+    [TestCase("initialized")]
+    [TestCase("count")]
+    [TestCase("int32(score)")]
     public void GenericFloatingResultOutputsAreUnreadableAfterExceptionalDeparture(string catchRead)
     {
         var source = """
@@ -675,15 +637,13 @@ public sealed class StaticProtocolOutputTests
             }
             """.Replace("CATCH_READ", catchRead, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32", "result = value; return 7;")]
-    [InlineData("int32", "initialized = second; return 7;")]
-    [InlineData("void", "result = value;")]
-    [InlineData("void", "initialized = second;")]
+    [TestCase("int32","result = value; return 7;")]
+    [TestCase("int32","initialized = second; return 7;")]
+    [TestCase("void","result = value;")]
+    [TestCase("void","initialized = second;")]
     public void GenericNonBooleanMixedOutputsRequirePublicationOnEveryNormalReturn(
         string resultType, string body)
     {
@@ -691,11 +651,11 @@ public sealed class StaticProtocolOutputTests
             + " Fill<T, U>(T value, U second, bool publish, out T result, init ref<U> initialized)"
             + " where T : [Copy] where U : [Copy] { " + body + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericMixedOutputDoesNotAdmitManagedOrdinaryOut()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -711,15 +671,13 @@ public sealed class StaticProtocolOutputTests
                 return status + copy.Value + count;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32(previous.First)")]
-    [InlineData("int32(initialized)")]
-    [InlineData("count")]
-    [InlineData("int32(score)")]
+    [TestCase("int32(previous.First)")]
+    [TestCase("int32(initialized)")]
+    [TestCase("count")]
+    [TestCase("int32(score)")]
     public void GenericMixedOutputIsNotReadableAfterExceptionalDeparture(string catchRead)
     {
         var source = """
@@ -755,11 +713,11 @@ public sealed class StaticProtocolOutputTests
             }
             """.Replace("CATCH_READ", catchRead, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericNonBooleanOutputIsNotReadableAfterExceptionalDeparture()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -784,11 +742,11 @@ public sealed class StaticProtocolOutputTests
                 return 0;
             }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericNonBooleanInitOutputIsNotReadableAfterExceptionalDeparture()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -813,11 +771,11 @@ public sealed class StaticProtocolOutputTests
                 return 0;
             }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void NonBooleanCopyOutStillRequiresNormalReturnPublication()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -831,11 +789,11 @@ public sealed class StaticProtocolOutputTests
             }
             int32 Main() { return 0; }
             """));
-        Assert.Contains(compilation.Diagnostics, error => error.Code == "TRM3016");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,error => error.Code == "TRM3016"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void NonBooleanUniqueOutRemainsUnsupported()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -850,13 +808,11 @@ public sealed class StaticProtocolOutputTests
             }
             int32 Main() { return 0; }
             """));
-        Assert.Contains(compilation.Diagnostics, error => error.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,error => error.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("return result.First;")]
-    [InlineData("Pick<Value>(new Value(40), out result); return result.First;")]
+    [TestCase("return result.First;")]
+    [TestCase("Pick<Value>(new Value(40), out result); return result.First;")]
     public void FalseOrUnprovenGenericCallsDoNotInitializeCallerOutputs(string after)
     {
         var source = Value + """
@@ -865,11 +821,11 @@ public sealed class StaticProtocolOutputTests
                 Pick<Value>(new Value(40), out var result);
             """ + after + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void AnOutputOnlyTypeParameterCanDescribeAnAlwaysAbsentResult()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
@@ -879,12 +835,11 @@ public sealed class StaticProtocolOutputTests
                 return 42;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.Equal(PrimitiveType.Bool, Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name == "None<Value>").ReturnType);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))().Functions, function => function.Name == "None<Value>").ReturnType, Is.EqualTo(PrimitiveType.Bool));
     }
 
-    [Fact]
+    [Test]
     public void UnusedGenericInitOutputIsCheckedAtDefinition()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
@@ -894,12 +849,11 @@ public sealed class StaticProtocolOutputTests
             }
             int32 Main() { return 42; }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.DoesNotContain(Assert.IsType<BoundProgram>(compilation.Program).Functions,
-            function => function.Name.StartsWith("Fill<", StringComparison.Ordinal));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(global::System.Linq.Enumerable.Any(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))().Functions,function => function.Name.StartsWith("Fill<", StringComparison.Ordinal)),Is.False);
     }
 
-    [Fact]
+    [Test]
     public void UntypedGenericInitDestinationDoesNotInferTheType()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
@@ -909,38 +863,34 @@ public sealed class StaticProtocolOutputTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, error => error.Code == "TRM3011");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,error => error.Code == "TRM3011"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("return true;")]
-    [InlineData("return result.First;")]
-    [InlineData("if (publish) { result = value; } return true;")]
+    [TestCase("return true;")]
+    [TestCase("return result.First;")]
+    [TestCase("if (publish) { result = value; } return true;")]
     public void InvalidGenericInitPublicationRejectsAtDefinition(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
             bool Fill<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
             """ + body + "} int32 Main() { return 0; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("if (Fill<int32>(int32(1), init var result)) { return 1; } return result;", "TRM3016")]
-    [InlineData("require Fill<int32>(int32(1), out var result);", "TRM3011")]
-    [InlineData("require Fill<int32>(int32(1), init var result); require Fill<int32>(int32(2), init result);", "TRM3016")]
+    [TestCase("if (Fill<int32>(int32(1), init var result)) { return 1; } return result;","TRM3016")]
+    [TestCase("require Fill<int32>(int32(1), out var result);","TRM3011")]
+    [TestCase("require Fill<int32>(int32(1), init var result); require Fill<int32>(int32(2), init result);","TRM3016")]
     public void GenericInitCannotReadVacancyChangeModeOrRepublish(string body, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
             bool Fill<T>(T value, init ref<T> result) where T : [Copy] { return false; }
             int32 Main() {
             """ + body + " return 0; }"));
-        Assert.Contains(compilation.Diagnostics, error => error.Code == diagnostic);
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,error => error.Code == diagnostic),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void GenericScalarLookupUsesTheImportedTemplatesDeclaredReturnType()
     {
         var compilation = Compilation.Create([
@@ -959,20 +909,19 @@ public sealed class StaticProtocolOutputTests
                 }
                 """),
         ]);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(PrimitiveType.UInt64, Assert.Single(program.Functions[program.EntryPoint].Variables,
-            variable => variable.Name == "result").Type);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))();
+        Assert.That(global::System.Linq.Enumerable.Single(program.Functions[program.EntryPoint].Variables, variable => variable.Name == "result").Type, Is.EqualTo(PrimitiveType.UInt64));
     }
 
-    [Fact]
+    [Test]
     public void ScalarReturnDoesNotPermitAccessToUndeclaredGenericMembers()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
             int64 Read<T>(T value) where T : [Copy] { return value.First; }
             int32 Main() { return int32(Read<Value>(new Value(42))); }
             """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
-        Assert.Null(compilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 }

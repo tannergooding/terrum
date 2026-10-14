@@ -16,7 +16,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -102,13 +102,11 @@ public sealed class NativeSourceGrantExperimentTests
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong SourceFreeWide(ulong value);
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void ReusesOneDllWithInvocationScopedUtf16Storage(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var program = Compile(policy, [0x1357, 0x2468, 0xABCD]);
         var emitted = EmitExperiment(program,
             [ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport, UnsignedExport, FreeWideExport],
@@ -134,28 +132,25 @@ public sealed class NativeSourceGrantExperimentTests
                     NativeLibrary.GetExport(module, UnsignedExport));
                 var freeWide = Marshal.GetDelegateForFunctionPointer<SourceFreeWide>(
                     NativeLibrary.GetExport(module, FreeWideExport));
-                Assert.Equal((int)'A', generated.Invoke<int>(ReadExport, ['A'], 0, 1, (int)'A'));
-                Assert.Equal(0, generated.Invoke<int>(LengthExport, null));
-                Assert.Equal(0, generated.Invoke<int>(LengthExport, []));
-                Assert.Equal(54321, generated.Invoke<int>(FreeExport, null, 1, 2, 3, 4, 5));
-                Assert.Equal(0xFEDCBA9876543210UL,
-                    generated.Invoke<ulong>(FreeWideExport, null, 0xFEDCBA9876543210UL));
+                Assert.That(generated.Invoke<int>(ReadExport, ['A'], 0, 1, (int)'A'), Is.EqualTo((int)'A'));
+                Assert.That(generated.Invoke<int>(LengthExport, null), Is.EqualTo(0));
+                Assert.That(generated.Invoke<int>(LengthExport, []), Is.EqualTo(0));
+                Assert.That(generated.Invoke<int>(FreeExport, null, 1, 2, 3, 4, 5), Is.EqualTo(54321));
+                Assert.That(generated.Invoke<ulong>(FreeWideExport, null, 0xFEDCBA9876543210UL), Is.EqualTo(0xFEDCBA9876543210UL));
                 Assert.Throws<ArgumentOutOfRangeException>(() =>
                     generated.Invoke<int>(LengthExport, new char[16_385]));
-                Assert.Equal(new[] { ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport,
-                    UnsignedExport, FreeWideExport }.OrderBy(static name => name, StringComparer.Ordinal),
-                    emitted.Exports.Select(static export => export.Name).ToArray());
-                Assert.Equal(54321, free(1, 2, 3, 4, 5));
-                Assert.Equal(12345, free(5, 4, 3, 2, 1));
-                Assert.Equal(0xFEDCBA9876543210UL, freeWide(0xFEDCBA9876543210UL));
-                Assert.Equal(0, WithPinnedSource(null, 0, length.Invoke));
-                Assert.Equal(InvalidRange, WithPinnedSource(null, 0, (pointer, count) => read(pointer, count, 0, 0, 0)));
-                Assert.Equal(0, WithPinnedSource([], 0, length.Invoke));
+                Assert.That(emitted.Exports.Select(static export => export.Name).ToArray(), Is.EqualTo(new[] { ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport,
+                    UnsignedExport, FreeWideExport }.OrderBy(static name => name, StringComparer.Ordinal)));
+                Assert.That(free(1, 2, 3, 4, 5), Is.EqualTo(54321));
+                Assert.That(free(5, 4, 3, 2, 1), Is.EqualTo(12345));
+                Assert.That(freeWide(0xFEDCBA9876543210UL), Is.EqualTo(0xFEDCBA9876543210UL));
+                Assert.That(WithPinnedSource(null, 0, length.Invoke), Is.EqualTo(0));
+                Assert.That(WithPinnedSource(null, 0, (pointer, count) => read(pointer, count, 0, 0, 0)), Is.EqualTo(InvalidRange));
+                Assert.That(WithPinnedSource([], 0, length.Invoke), Is.EqualTo(0));
                 if (policy == BoundRuntimePolicy.CheckedExceptions)
                 {
                     var readableStorage = new[] { 'A' };
-                    WithPinnedSource(readableStorage, 0, (pointer, count) =>
-                    {
+                    WithPinnedSource(readableStorage, 0, (pointer, count) => {
                         Assert.Throws<SEHException>(() => boundary(pointer, count, 0));
                         return 0;
                     });
@@ -170,24 +165,23 @@ public sealed class NativeSourceGrantExperimentTests
                 foreach (var text in fixtures)
                 {
                     var storage = text.ToCharArray();
-                    WithPinnedSource(storage, (uint)storage.Length, (pointer, count) =>
-                    {
-                        Assert.Equal(storage.Length, length(pointer, count));
+                    WithPinnedSource(storage, (uint)storage.Length, (pointer, count) => {
+                        Assert.That(length(pointer, count), Is.EqualTo(storage.Length));
                         for (var at = 0; at < storage.Length; at++)
                         {
                             // The decoder's end bounds lookahead, not the first read.
                             foreach (var end in new[] { at + 1, storage.Length }.Distinct())
                             {
                                 var expected = ExpectedScalar(storage.AsSpan(at, end - at));
-                                Assert.Equal(expected, read(pointer, count, at, end, expected));
+                                Assert.That(read(pointer, count, at, end, expected), Is.EqualTo(expected));
                             }
-                            Assert.Equal((long)storage[at], signed(pointer, count, at));
-                            Assert.Equal((ulong)storage[at], unsigned(pointer, count, at));
+                            Assert.That(signed(pointer, count, at), Is.EqualTo((long)storage[at]));
+                            Assert.That(unsigned(pointer, count, at), Is.EqualTo((ulong)storage[at]));
                         }
-                        Assert.Equal(Mismatch, read(pointer, count, 0, storage.Length, int.MaxValue));
-                        Assert.Equal(InvalidRange, read(pointer, count, -1, storage.Length, 0));
-                        Assert.Equal(InvalidRange, read(pointer, count, storage.Length, storage.Length, 0));
-                        Assert.Equal(InvalidRange, read(pointer, count, 0, storage.Length + 1, 0));
+                        Assert.That(read(pointer, count, 0, storage.Length, int.MaxValue), Is.EqualTo(Mismatch));
+                        Assert.That(read(pointer, count, -1, storage.Length, 0), Is.EqualTo(InvalidRange));
+                        Assert.That(read(pointer, count, storage.Length, storage.Length, 0), Is.EqualTo(InvalidRange));
+                        Assert.That(read(pointer, count, 0, storage.Length + 1, 0), Is.EqualTo(InvalidRange));
                         return 0;
                     });
                 }
@@ -202,19 +196,17 @@ public sealed class NativeSourceGrantExperimentTests
                         storage[offset] = (char)(start + offset);
                     }
 
-                    Assert.Equal(0, WithPinnedSource(storage, (uint)storage.Length, (pointer, sourceCount) =>
-                    {
-                        Assert.Equal(storage.Length, length(pointer, sourceCount));
+                    Assert.That(WithPinnedSource(storage, (uint)storage.Length, (pointer, sourceCount) => {
+                        Assert.That(length(pointer, sourceCount), Is.EqualTo(storage.Length));
                         for (var at = 0; at < storage.Length; at++)
                         {
-                            Assert.Equal((long)storage[at], signed(pointer, sourceCount, at));
-                            Assert.Equal((ulong)storage[at], unsigned(pointer, sourceCount, at));
+                            Assert.That(signed(pointer, sourceCount, at), Is.EqualTo((long)storage[at]));
+                            Assert.That(unsigned(pointer, sourceCount, at), Is.EqualTo((ulong)storage[at]));
                             var expectedScalar = char.IsSurrogate(storage[at]) ? -1 : storage[at];
-                            Assert.Equal(expectedScalar,
-                                read(pointer, sourceCount, at, at + 1, expectedScalar));
+                            Assert.That(read(pointer, sourceCount, at, at + 1, expectedScalar), Is.EqualTo(expectedScalar));
                         }
                         return 0;
-                    }));
+                    }), Is.EqualTo(0));
                 }
 
                 const int firstSupplementaryScalar = 0x10000;
@@ -237,48 +229,44 @@ public sealed class NativeSourceGrantExperimentTests
                         storage[3 + index * 2] = pairBuffer[1];
                     }
 
-                    Assert.Equal(0, WithPinnedSource(storage, (uint)storage.Length, (pointer, sourceCount) =>
-                    {
-                        Assert.Equal(storage.Length, length(pointer, sourceCount));
+                    Assert.That(WithPinnedSource(storage, (uint)storage.Length, (pointer, sourceCount) => {
+                        Assert.That(length(pointer, sourceCount), Is.EqualTo(storage.Length));
                         for (var index = 0; index < pairCount; index++)
                         {
                             var at = 2 + index * 2;
                             var expected = scalarStart + index;
-                            Assert.Equal(-1, read(pointer, sourceCount, at, at + 1, -1));
-                            Assert.Equal(expected, read(pointer, sourceCount, at, at + 2, expected));
+                            Assert.That(read(pointer, sourceCount, at, at + 1, -1), Is.EqualTo(-1));
+                            Assert.That(read(pointer, sourceCount, at, at + 2, expected), Is.EqualTo(expected));
                         }
                         return 0;
-                    }));
+                    }), Is.EqualTo(0));
                 }
 
                 var sameStorage = "\uD83D\uDE00Z".ToCharArray();
-                WithPinnedSource(sameStorage, 3, (pointer, _) =>
-                {
+                WithPinnedSource(sameStorage, 3, (pointer, _) => {
                     foreach (var count in new uint[] { 0, 1, 2, 3 })
                     {
-                        Assert.Equal((int)count, length(pointer, count));
+                        Assert.That(length(pointer, count), Is.EqualTo((int)count));
                         var expected = count == 1 ? -1 : 0x1F600;
-                        Assert.Equal(count == 0 ? InvalidRange : expected,
-                            read(pointer, count, 0, (int)Math.Min(count, 2), expected));
+                        Assert.That(read(pointer, count, 0, (int)Math.Min(count, 2), expected), Is.EqualTo(count == 0 ? InvalidRange : expected));
                     }
                     return 0;
                 });
                 var left = new[] { 'A' };
                 var right = new[] { '\uFFFF' };
                 WithPinnedSource(left, 1, (leftPointer, count) =>
-                    WithPinnedSource(right, 1, (rightPointer, _) =>
-                    {
-                        Assert.NotEqual(leftPointer, rightPointer);
-                        Assert.Equal('A', read(leftPointer, count, 0, 1, 'A'));
-                        Assert.Equal(65535, read(rightPointer, count, 0, 1, 65535));
-                        Assert.Equal('A', read(leftPointer, count, 0, 1, 'A'));
+                    WithPinnedSource(right, 1, (rightPointer, _) => {
+                        Assert.That(rightPointer, Is.Not.EqualTo(leftPointer));
+                        Assert.That(read(leftPointer, count, 0, 1, 'A'), Is.EqualTo('A'));
+                        Assert.That(read(rightPointer, count, 0, 1, 65535), Is.EqualTo(65535));
+                        Assert.That(read(leftPointer, count, 0, 1, 'A'), Is.EqualTo('A'));
                         return 0;
                     }));
 
                 Assert.Throws<ArgumentException>(() => InvokeChecked(0, 1, length.Invoke));
                 Assert.Throws<ArgumentOutOfRangeException>(() => InvokeChecked(0, 16_385, length.Invoke));
                 Assert.Throws<ArgumentOutOfRangeException>(() => WithPinnedSource(new char[16_385], 16_385, length.Invoke));
-                Assert.Equal(54321, free(1, 2, 3, 4, 5));
+                Assert.That(free(1, 2, 3, 4, 5), Is.EqualTo(54321));
             }
             finally
             {
@@ -291,7 +279,7 @@ public sealed class NativeSourceGrantExperimentTests
         }
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidCallShapesBeforeInvokingNativeCode()
     {
         var calls = 0;
@@ -304,20 +292,18 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.Throws<ArgumentException>(() => InvokeChecked(1, 0, Invoke));
         Assert.Throws<ArgumentOutOfRangeException>(() => InvokeChecked(0, uint.MaxValue, Invoke));
         Assert.Throws<ArgumentOutOfRangeException>(() => WithPinnedSource(['A'], 2, Invoke));
-        Assert.Equal(0, calls);
+        Assert.That(calls, Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void GeneratedBindingsFollowPrivateCalleeSourceDependence(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var sourceFreeProgram = CompileBindingFixture(policy, privateCalleeReadsSource: false);
         var sourceFree = EmitExperiment(sourceFreeProgram, [FlowExport], (NativeRuntimePolicy)policy);
-        var sourceFreeExport = Assert.Single(sourceFree.Exports);
-        Assert.False(sourceFreeExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, Assert.Single(sourceFreeExport.ParameterTypes));
+        var sourceFreeExport = global::System.Linq.Enumerable.Single(sourceFree.Exports);
+        Assert.That(sourceFreeExport.SourceDependent, Is.False);
+        Assert.That(global::System.Linq.Enumerable.Single(sourceFreeExport.ParameterTypes), Is.EqualTo(PrimitiveType.Int32));
         Assert.Throws<NotSupportedException>(() =>
             NativeEmitter.EmitLibrary(sourceFreeProgram, [FlowExport], (NativeRuntimePolicy)policy));
 
@@ -330,7 +316,7 @@ public sealed class NativeSourceGrantExperimentTests
             try
             {
                 var bindings = new NativeSourceGrantTestBindings(module, sourceFree.Exports);
-                Assert.Equal(42, bindings.Invoke<int>(FlowExport, null, 42));
+                Assert.That(bindings.Invoke<int>(FlowExport, null, 42), Is.EqualTo(42));
                 Assert.Throws<ArgumentException>(() => bindings.Invoke<int>(FlowExport, ['A'], 42));
             }
             finally
@@ -345,9 +331,9 @@ public sealed class NativeSourceGrantExperimentTests
 
         var sourceDependentProgram = CompileBindingFixture(policy, privateCalleeReadsSource: true);
         var sourceDependent = EmitExperiment(sourceDependentProgram, [FlowExport], (NativeRuntimePolicy)policy);
-        var sourceDependentExport = Assert.Single(sourceDependent.Exports);
-        Assert.True(sourceDependentExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, Assert.Single(sourceDependentExport.ParameterTypes));
+        var sourceDependentExport = global::System.Linq.Enumerable.Single(sourceDependent.Exports);
+        Assert.That(sourceDependentExport.SourceDependent, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Single(sourceDependentExport.ParameterTypes), Is.EqualTo(PrimitiveType.Int32));
         Assert.Throws<NotSupportedException>(() =>
             NativeEmitter.EmitLibrary(sourceDependentProgram, [FlowExport], (NativeRuntimePolicy)policy));
 
@@ -361,7 +347,7 @@ public sealed class NativeSourceGrantExperimentTests
             {
                 var bindings = new NativeSourceGrantTestBindings(module, sourceDependent.Exports);
                 var source = new[] { 'A' };
-                Assert.Equal((int)source[0], bindings.Invoke<int>(FlowExport, source, 0));
+                Assert.That(bindings.Invoke<int>(FlowExport, source, 0), Is.EqualTo((int)source[0]));
                 Assert.Throws<ArgumentOutOfRangeException>(() =>
                     bindings.Invoke<int>(FlowExport, new char[16_385], 0));
             }
@@ -375,13 +361,11 @@ public sealed class NativeSourceGrantExperimentTests
             File.Delete(sourceDependentPath);
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void GeneratedBindingsMatchBoundedSourceLineQueriesAgainstHostedSourceText(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         const string LineQueryFixture = """
             public int32 SourceLineCountForSourceAbiTest() {
                 mut int32 lineCount = 1;
@@ -514,47 +498,37 @@ public sealed class NativeSourceGrantExperimentTests
             }
             """;
         var program = Compile(policy, [], LineQueryFixture);
-        var function = Assert.Single(program.Functions,
-            static function => function.Name == LineCountExport);
-        var positionFunction = Assert.Single(program.Functions,
-            static function => function.Name == LinePositionExport);
-        var offsetFunction = Assert.Single(program.Functions,
-            static function => function.Name == LineOffsetExport);
-        var lineContentExtentFunction = Assert.Single(program.Functions,
-            static function => function.Name == LineContentExtentExport);
-        var lineExtentFunction = Assert.Single(program.Functions,
-            static function => function.Name == LineExtentExport);
+        var function = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == LineCountExport);
+        var positionFunction = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == LinePositionExport);
+        var offsetFunction = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == LineOffsetExport);
+        var lineContentExtentFunction = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == LineContentExtentExport);
+        var lineExtentFunction = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == LineExtentExport);
         var dependencies = Classify(program);
-        Assert.True(dependencies[program.Functions.IndexOf(function)]);
-        Assert.True(dependencies[program.Functions.IndexOf(positionFunction)]);
-        Assert.True(dependencies[program.Functions.IndexOf(offsetFunction)]);
-        Assert.True(dependencies[program.Functions.IndexOf(lineContentExtentFunction)]);
-        Assert.True(dependencies[program.Functions.IndexOf(lineExtentFunction)]);
+        Assert.That(dependencies[program.Functions.IndexOf(function)], Is.True);
+        Assert.That(dependencies[program.Functions.IndexOf(positionFunction)], Is.True);
+        Assert.That(dependencies[program.Functions.IndexOf(offsetFunction)], Is.True);
+        Assert.That(dependencies[program.Functions.IndexOf(lineContentExtentFunction)], Is.True);
+        Assert.That(dependencies[program.Functions.IndexOf(lineExtentFunction)], Is.True);
 
         var emitted = EmitExperiment(program,
             [LineCountExport, LinePositionExport, LineOffsetExport, LineContentExtentExport, LineExtentExport],
             (NativeRuntimePolicy)policy);
-        var lineCountExport = Assert.Single(emitted.Exports,
-            static export => export.Name == LineCountExport);
-        Assert.True(lineCountExport.SourceDependent);
-        Assert.Empty(lineCountExport.ParameterTypes);
-        var linePositionExport = Assert.Single(emitted.Exports,
-            static export => export.Name == LinePositionExport);
-        Assert.True(linePositionExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, Assert.Single(linePositionExport.ParameterTypes));
-        var lineOffsetExport = Assert.Single(emitted.Exports,
-            static export => export.Name == LineOffsetExport);
-        Assert.True(lineOffsetExport.SourceDependent);
-        Assert.Equal(2, lineOffsetExport.ParameterTypes.Length);
-        Assert.All(lineOffsetExport.ParameterTypes, static type => Assert.Equal(PrimitiveType.Int32, type));
-        var lineContentExtentExport = Assert.Single(emitted.Exports,
-            static export => export.Name == LineContentExtentExport);
-        Assert.True(lineContentExtentExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, Assert.Single(lineContentExtentExport.ParameterTypes));
-        var lineExtentExport = Assert.Single(emitted.Exports,
-            static export => export.Name == LineExtentExport);
-        Assert.True(lineExtentExport.SourceDependent);
-        Assert.Equal(PrimitiveType.Int32, Assert.Single(lineExtentExport.ParameterTypes));
+        var lineCountExport = global::System.Linq.Enumerable.Single(emitted.Exports, static export => export.Name == LineCountExport);
+        Assert.That(lineCountExport.SourceDependent, Is.True);
+        Assert.That(lineCountExport.ParameterTypes, Is.Empty);
+        var linePositionExport = global::System.Linq.Enumerable.Single(emitted.Exports, static export => export.Name == LinePositionExport);
+        Assert.That(linePositionExport.SourceDependent, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Single(linePositionExport.ParameterTypes), Is.EqualTo(PrimitiveType.Int32));
+        var lineOffsetExport = global::System.Linq.Enumerable.Single(emitted.Exports, static export => export.Name == LineOffsetExport);
+        Assert.That(lineOffsetExport.SourceDependent, Is.True);
+        Assert.That(lineOffsetExport.ParameterTypes.Length, Is.EqualTo(2));
+        {var __nunitItems0 = lineOffsetExport.ParameterTypes;        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0, Is.EqualTo(PrimitiveType.Int32)); } });}
+        var lineContentExtentExport = global::System.Linq.Enumerable.Single(emitted.Exports, static export => export.Name == LineContentExtentExport);
+        Assert.That(lineContentExtentExport.SourceDependent, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Single(lineContentExtentExport.ParameterTypes), Is.EqualTo(PrimitiveType.Int32));
+        var lineExtentExport = global::System.Linq.Enumerable.Single(emitted.Exports, static export => export.Name == LineExtentExport);
+        Assert.That(lineExtentExport.SourceDependent, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Single(lineExtentExport.ParameterTypes), Is.EqualTo(PrimitiveType.Int32));
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-lines-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, emitted.Image);
         try
@@ -575,7 +549,7 @@ public sealed class NativeSourceGrantExperimentTests
                 {
                     var source = text.ToCharArray();
                     var snapshot = SourceText.From(text);
-                    Assert.Equal(snapshot.Lines.Length, bindings.Invoke<int>(LineCountExport, source));
+                    Assert.That(bindings.Invoke<int>(LineCountExport, source), Is.EqualTo(snapshot.Lines.Length));
                     int[] positions = text.Length <= 256
                         ? Enumerable.Range(0, text.Length + 1).ToArray()
                         : [0, 1, text.Length / 2, text.Length - 1, text.Length];
@@ -583,12 +557,11 @@ public sealed class NativeSourceGrantExperimentTests
                     {
                         var expected = snapshot.GetLinePosition(position);
                         var packed = bindings.Invoke<int>(LinePositionExport, source, position);
-                        Assert.Equal(expected.Line, packed >> 16);
-                        Assert.Equal(expected.Character, packed & 0xFFFF);
-                        Assert.True(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset));
-                        Assert.Equal(position, expectedOffset);
-                        Assert.Equal(expectedOffset,
-                            bindings.Invoke<int>(LineOffsetExport, source, expected.Line, expected.Character));
+                        Assert.That(packed >> 16, Is.EqualTo(expected.Line));
+                        Assert.That(packed & 0xFFFF, Is.EqualTo(expected.Character));
+                        Assert.That(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset), Is.True);
+                        Assert.That(expectedOffset, Is.EqualTo(position));
+                        Assert.That(bindings.Invoke<int>(LineOffsetExport, source, expected.Line, expected.Character), Is.EqualTo(expectedOffset));
                     }
                     int[] lineIndices = snapshot.Lines.Length <= 256
                         ? Enumerable.Range(0, snapshot.Lines.Length).ToArray()
@@ -597,11 +570,11 @@ public sealed class NativeSourceGrantExperimentTests
                     {
                         var expected = snapshot.Lines[lineIndex];
                         var content = bindings.Invoke<int>(LineContentExtentExport, source, lineIndex);
-                        Assert.Equal(expected.Span.Start, content >> 15);
-                        Assert.Equal(expected.Span.Length, content & 0x7FFF);
+                        Assert.That(content >> 15, Is.EqualTo(expected.Span.Start));
+                        Assert.That(content & 0x7FFF, Is.EqualTo(expected.Span.Length));
                         var includingBreak = bindings.Invoke<int>(LineExtentExport, source, lineIndex);
-                        Assert.Equal(expected.SpanIncludingLineBreak.Start, includingBreak >> 15);
-                        Assert.Equal(expected.SpanIncludingLineBreak.Length, includingBreak & 0x7FFF);
+                        Assert.That(includingBreak >> 15, Is.EqualTo(expected.SpanIncludingLineBreak.Start));
+                        Assert.That(includingBreak & 0x7FFF, Is.EqualTo(expected.SpanIncludingLineBreak.Length));
                     }
                 }
                 var singleCodeUnitSource = new char[1];
@@ -609,18 +582,17 @@ public sealed class NativeSourceGrantExperimentTests
                 {
                     singleCodeUnitSource[0] = (char)codeUnit;
                     var snapshot = SourceText.From(new string(singleCodeUnitSource));
-                    Assert.Equal(snapshot.Lines.Length,
-                        bindings.Invoke<int>(LineCountExport, singleCodeUnitSource));
+                    Assert.That(bindings.Invoke<int>(LineCountExport, singleCodeUnitSource), Is.EqualTo(snapshot.Lines.Length));
                     for (var position = 0; position <= 1; position++)
                     {
                         var expected = snapshot.GetLinePosition(position);
                         var packed = bindings.Invoke<int>(LinePositionExport, singleCodeUnitSource, position);
-                        Assert.Equal(expected.Line, packed >> 16);
-                        Assert.Equal(expected.Character, packed & 0xFFFF);
-                        Assert.True(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset));
-                        Assert.Equal(position, expectedOffset);
-                        Assert.Equal(expectedOffset, bindings.Invoke<int>(LineOffsetExport, singleCodeUnitSource,
-                            expected.Line, expected.Character));
+                        Assert.That(packed >> 16, Is.EqualTo(expected.Line));
+                        Assert.That(packed & 0xFFFF, Is.EqualTo(expected.Character));
+                        Assert.That(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset), Is.True);
+                        Assert.That(expectedOffset, Is.EqualTo(position));
+                        Assert.That(bindings.Invoke<int>(LineOffsetExport, singleCodeUnitSource,
+                            expected.Line, expected.Character), Is.EqualTo(expectedOffset));
                     }
                 }
                 var crPrefixSource = new[] { '\r', '\0' };
@@ -628,28 +600,27 @@ public sealed class NativeSourceGrantExperimentTests
                 {
                     crPrefixSource[1] = (char)codeUnit;
                     var snapshot = SourceText.From(new string(crPrefixSource));
-                    Assert.Equal(snapshot.Lines.Length, bindings.Invoke<int>(LineCountExport, crPrefixSource));
+                    Assert.That(bindings.Invoke<int>(LineCountExport, crPrefixSource), Is.EqualTo(snapshot.Lines.Length));
                     for (var position = 0; position <= 2; position++)
                     {
                         var expected = snapshot.GetLinePosition(position);
                         var packed = bindings.Invoke<int>(LinePositionExport, crPrefixSource, position);
-                        Assert.Equal(expected.Line, packed >> 16);
-                        Assert.Equal(expected.Character, packed & 0xFFFF);
-                        Assert.True(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset));
-                        Assert.Equal(position, expectedOffset);
-                        Assert.Equal(expectedOffset, bindings.Invoke<int>(LineOffsetExport, crPrefixSource,
-                            expected.Line, expected.Character));
+                        Assert.That(packed >> 16, Is.EqualTo(expected.Line));
+                        Assert.That(packed & 0xFFFF, Is.EqualTo(expected.Character));
+                        Assert.That(snapshot.TryGetOffset(expected.Line, expected.Character, out var expectedOffset), Is.True);
+                        Assert.That(expectedOffset, Is.EqualTo(position));
+                        Assert.That(bindings.Invoke<int>(LineOffsetExport, crPrefixSource,
+                            expected.Line, expected.Character), Is.EqualTo(expectedOffset));
                     }
                 }
-                Assert.Equal(1, bindings.Invoke<int>(LineCountExport, null));
-                Assert.Equal(1, bindings.Invoke<int>(LineCountExport, []));
-                Assert.Equal(1, bindings.Invoke<int>(LineCountExport, new string('x', 16_384).ToCharArray()));
-                Assert.Equal(16_385,
-                    bindings.Invoke<int>(LineCountExport, new string('\n', 16_384).ToCharArray()));
-                Assert.Equal(8_193, bindings.Invoke<int>(LineCountExport,
-                    string.Concat(Enumerable.Repeat("\r\n", 8_192)).ToCharArray()));
-                Assert.Equal(2, bindings.Invoke<int>(LineCountExport,
-                    (new string('x', 16_383) + "\r").ToCharArray()));
+                Assert.That(bindings.Invoke<int>(LineCountExport, null), Is.EqualTo(1));
+                Assert.That(bindings.Invoke<int>(LineCountExport, []), Is.EqualTo(1));
+                Assert.That(bindings.Invoke<int>(LineCountExport, new string('x', 16_384).ToCharArray()), Is.EqualTo(1));
+                Assert.That(bindings.Invoke<int>(LineCountExport, new string('\n', 16_384).ToCharArray()), Is.EqualTo(16_385));
+                Assert.That(bindings.Invoke<int>(LineCountExport,
+                    string.Concat(Enumerable.Repeat("\r\n", 8_192)).ToCharArray()), Is.EqualTo(8_193));
+                Assert.That(bindings.Invoke<int>(LineCountExport,
+                    (new string('x', 16_383) + "\r").ToCharArray()), Is.EqualTo(2));
                 Assert.Throws<ArgumentOutOfRangeException>(() =>
                     bindings.Invoke<int>(LineCountExport, new char[16_385]));
             }
@@ -664,7 +635,7 @@ public sealed class NativeSourceGrantExperimentTests
         }
     }
 
-    [Fact]
+    [Test]
     public void KeepsProductionEmissionAndUnsupportedExperimentShapesRejected()
     {
         var program = Compile(BoundRuntimePolicy.FailFast, []);
@@ -675,8 +646,12 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.Throws<NotSupportedException>(() => NativeModuleCompiler.CreateProducer(program, [ReadExport], "source_test",
             NativeRuntimePolicy.FailFast));
         var scanner = program with { };
-        var profileProperty = Assert.IsType<PropertyInfo>(typeof(BoundProgram).GetProperty(
-            nameof(BoundProgram.InvocationProfileId)), exactMatch: false);
+        var profileProperty = ((global::System.Func<PropertyInfo>)(() => {
+            var __nunitActual1 = typeof(BoundProgram).GetProperty(
+            nameof(BoundProgram.InvocationProfileId));
+            Assert.That(__nunitActual1, Is.InstanceOf<PropertyInfo>());
+            return (PropertyInfo)__nunitActual1!;
+        }))();
         profileProperty.SetValue(scanner, "scanner");
         Assert.Throws<ArgumentException>(() => EmitExperiment(scanner, [ReadExport], NativeRuntimePolicy.FailFast));
         Assert.Throws<ArgumentException>(() => EmitExperiment(
@@ -691,40 +666,38 @@ public sealed class NativeSourceGrantExperimentTests
         })
         {
             var unsupported = Compile(BoundRuntimePolicy.FailFast, [], extra);
-            var exception = Record.Exception(() =>
+            var exception = TestExceptionCapture.Capture(() =>
                 EmitExperiment(unsupported, [ReadExport], NativeRuntimePolicy.FailFast));
-            Assert.True(exception is NotSupportedException, $"{extra}: {exception}");
+            Assert.That(exception is NotSupportedException, Is.True, $"{extra}: {exception}");
         }
         var external = program.Functions[0] with { IsExternal = true, Body = new BoundBlock([], default) };
         Assert.Throws<ArgumentException>(() => EmitExperiment(
             program with { Functions = program.Functions.SetItem(0, external) }, [ReadExport], NativeRuntimePolicy.FailFast));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void PropagatesSourceDependenceAcrossMutuallyRecursiveCalls(BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         const int at = 1;
         var source = new[] { (char)0x1357, (char)0x2468, (char)0xABCD };
         var program = Compile(policy, [.. source.Select(static value => (int)value)],
             recursiveEntryPoint: true);
         var dependencies = Classify(program);
-        Assert.True(dependencies[program.Functions.IndexOf(
-            Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.SourceCycleFirst"))]);
-        Assert.True(dependencies[program.Functions.IndexOf(
-            Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.SourceCycleSecond"))]);
+        Assert.That(dependencies[program.Functions.IndexOf(
+            global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.SourceCycleFirst"))], Is.True);
+        Assert.That(dependencies[program.Functions.IndexOf(
+            global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.SourceCycleSecond"))], Is.True);
 
         var image = EmitExperiment(program, [ReadExport], (NativeRuntimePolicy)policy).Image;
         var referenceProgram = program with {
             EntryPoint = program.Functions.IndexOf(
-                Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.Main")),
+                global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.Main")),
         };
         var grant = new HostBuffer("Source", PrimitiveType.Char16,
             [.. source.Select(static value => (int)value)], false) { IsInvocationScoped = true };
         var expected = NativeJit.ExecuteWithSourceGrant(referenceProgram, [grant], (NativeRuntimePolicy)policy);
-        Assert.Equal(source[at], expected);
+        Assert.That(expected, Is.EqualTo(source[at]));
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-cycle-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, image);
@@ -737,7 +710,7 @@ public sealed class NativeSourceGrantExperimentTests
                     NativeLibrary.GetExport(module, ReadExport));
                 var actual = WithPinnedSource(source, (uint)source.Length,
                     (pointer, count) => read(pointer, count, at, at + 1, expected));
-                Assert.Equal(expected, actual);
+                Assert.That(actual, Is.EqualTo(expected));
             }
             finally
             {
@@ -754,8 +727,7 @@ public sealed class NativeSourceGrantExperimentTests
         bool recursiveEntryPoint = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var trees = new[] { "Utf16CodeUnits", "Utf16Scalar" }.Select(name =>
-        {
+        var trees = new[] { "Utf16CodeUnits", "Utf16Scalar" }.Select(name => {
             var path = Path.Combine(root, "self-host", name + ".terrum");
             return SyntaxTree.Parse(File.ReadAllText(path), path);
         }).Append(SyntaxTree.Parse((recursiveEntryPoint
@@ -764,9 +736,9 @@ public sealed class NativeSourceGrantExperimentTests
             : Adapter) + extra, "source-abi-test.terrum"));
         var compilation = Compilation.Create(trees,
             [new HostBuffer("Source", PrimitiveType.Char16, sample, false) { IsInvocationScoped = true }], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         return program with { EntryPoint = -1 };
     }
 
@@ -784,27 +756,27 @@ public sealed class NativeSourceGrantExperimentTests
             """.Replace("BODY", privateCallee, StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source, "source-flow-test.terrum"),
             [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program) with { EntryPoint = -1 };
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))() with { EntryPoint = -1 };
     }
 
     private static void InspectArtifact(BoundProgram program, byte[] image, NativeCode code, BoundRuntimePolicy policy)
     {
-        Assert.Empty(code.Data);
-        Assert.Empty(code.DataFixups);
-        Assert.Empty(code.BufferOffsets);
-        Assert.Equal(0, code.HostDataLength);
-        Assert.Equal(0, code.ReadOnlyDataLength);
-        Assert.Equal(-1, code.ManagedRuntimeOffset);
+        Assert.That(code.Data, Is.Empty);
+        Assert.That(code.DataFixups, Is.Empty);
+        Assert.That(code.BufferOffsets, Is.Empty);
+        Assert.That(code.HostDataLength, Is.EqualTo(0));
+        Assert.That(code.ReadOnlyDataLength, Is.EqualTo(0));
+        Assert.That(code.ManagedRuntimeOffset, Is.EqualTo(-1));
         var other = Compile(policy, [0xFEFF, 0xD800, 0, 0xFFFF, 0xDC00]);
-        Assert.Equal(image, EmitExperiment(other,
+        Assert.That(EmitExperiment(other,
             [ReadExport, LengthExport, BoundaryExport, FreeExport, SignedExport, UnsignedExport, FreeWideExport],
-            (NativeRuntimePolicy)policy).Image);
+            (NativeRuntimePolicy)policy).Image, Is.EqualTo(image));
         using var reader = new PEReader(new MemoryStream(image));
-        var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
-        Assert.Equal(0, header.ThreadLocalStorageTableDirectory.Size);
-        Assert.Equal(0, header.BaseRelocationTableDirectory.Size);
-        Assert.DoesNotContain(reader.PEHeaders.SectionHeaders, section => section.Name is ".data" or ".rdata");
+        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual4 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual4, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual4!; }))();
+        Assert.That(header.ThreadLocalStorageTableDirectory.Size, Is.EqualTo(0));
+        Assert.That(header.BaseRelocationTableDirectory.Size, Is.EqualTo(0));
+        Assert.That(global::System.Linq.Enumerable.Any(reader.PEHeaders.SectionHeaders,section => section.Name is ".data" or ".rdata"),Is.False);
 
         var dependent = Classify(program);
         Span<byte> bounds = stackalloc byte[6];
@@ -812,59 +784,57 @@ public sealed class NativeSourceGrantExperimentTests
         foreach (var function in program.Functions)
         {
             var index = program.Functions.IndexOf(function);
-            Assert.Equal(function.Name is ReadExport or LengthExport
+            Assert.That(dependent[index], Is.EqualTo(function.Name is ReadExport or LengthExport
                 or BoundaryExport or SignedExport or UnsignedExport
                 or "Terrum.CodeAnalysis.CheckScalar" or "Terrum.CodeAnalysis.ReadUtf16Scalar"
                 or "Terrum.CodeAnalysis.ReadUtf16ScalarChecked"
                 or "Terrum.CodeAnalysis.ReadSignedSourceUnit" or "Terrum.CodeAnalysis.ReadUnsignedSourceUnit"
-                or "Terrum.CodeAnalysis.SourceCycleFirst" or "Terrum.CodeAnalysis.SourceCycleSecond",
-                dependent[index]);
+                or "Terrum.CodeAnalysis.SourceCycleFirst" or "Terrum.CodeAnalysis.SourceCycleSecond"));
             if (dependent[index])
             {
                 var start = code.SourceFunctionOffsets[index];
                 // push rbp; sub rsp,imm32; mov rbp,rsp precede the two context stores.
-                Assert.Equal(new byte[] { 0x48, 0x89, 0x8D }, code.Code.AsSpan(start + 11, 3).ToArray());
-                Assert.Equal(new byte[] { 0x89, 0x95 }, code.Code.AsSpan(start + 18, 2).ToArray());
+                Assert.That(code.Code.AsSpan(start + 11, 3).ToArray(), Is.EqualTo(new byte[] { 0x48, 0x89, 0x8D }));
+                Assert.That(code.Code.AsSpan(start + 18, 2).ToArray(), Is.EqualTo(new byte[] { 0x89, 0x95 }));
                 var pointerSlot = BinaryPrimitives.ReadInt32LittleEndian(code.Code.AsSpan(start + 14, 4));
                 var countSlot = BinaryPrimitives.ReadInt32LittleEndian(code.Code.AsSpan(start + 20, 4));
-                Assert.Equal(pointerSlot + 8, countSlot);
+                Assert.That(countSlot, Is.EqualTo(pointerSlot + 8));
                 if (function.Name == "Terrum.CodeAnalysis.ReadUtf16Scalar")
                 {
-                    var decoderRange = Assert.Single(code.Functions, range => range.Start == start);
+                    var decoderRange = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == start);
                     var decoder = code.Code.AsSpan(start, decoderRange.End - start);
                     bounds[0] = 0x3B;
                     bounds[1] = 0x85;
                     BinaryPrimitives.WriteInt32LittleEndian(bounds[2..], countSlot);
                     var boundsAt = decoder.IndexOf(bounds);
-                    Assert.True(boundsAt >= 0);
-                    Assert.Equal(new byte[] { 0x0F, 0x82 }, decoder.Slice(boundsAt + bounds.Length, 2).ToArray());
-                    Assert.Equal(0xE8, decoder[boundsAt + bounds.Length + 6]);
+                    Assert.That(boundsAt >= 0, Is.True);
+                    Assert.That(decoder.Slice(boundsAt + bounds.Length, 2).ToArray(), Is.EqualTo(new byte[] { 0x0F, 0x82 }));
+                    Assert.That(decoder[boundsAt + bounds.Length + 6], Is.EqualTo(0xE8));
                     load[0] = 0x48;
                     load[1] = 0x8B;
                     load[2] = 0x95;
                     BinaryPrimitives.WriteInt32LittleEndian(load[3..7], pointerSlot);
                     new byte[] { 0x0F, 0xB7, 0x04, 0x42 }.CopyTo(load[7..]);
-                    Assert.True(decoder.IndexOf(load) >= 0);
-                    var text = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".text");
-                    Assert.Equal(decoder.ToArray(), reader.GetSectionData(text.VirtualAddress).GetContent(
-                        start, decoder.Length).ToArray());
+                    Assert.That(decoder.IndexOf(load) >= 0, Is.True);
+                    var text = global::System.Linq.Enumerable.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".text");
+                    Assert.That(reader.GetSectionData(text.VirtualAddress).GetContent(
+                        start, decoder.Length).ToArray(), Is.EqualTo(decoder.ToArray()));
                 }
             }
         }
-        var freeFunction = Assert.Single(program.Functions, function => function.Name == FreeExport);
-        var freeWideFunction = Assert.Single(program.Functions, function => function.Name == FreeWideExport);
-        var mainFunction = Assert.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.Main");
+        var freeFunction = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == FreeExport);
+        var freeWideFunction = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == FreeWideExport);
+        var mainFunction = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Terrum.CodeAnalysis.Main");
         var freeProgram = new BoundProgram([freeFunction, freeWideFunction, mainFunction], 2) { RuntimePolicy = policy };
         var freeCode = NativeEmitter.EmitCode(freeProgram, (NativeRuntimePolicy)policy);
         foreach (var (function, originalIndex) in new[] { (freeFunction, 0), (freeWideFunction, 1) })
         {
             var index = program.Functions.IndexOf(function);
             var offset = code.SourceFunctionOffsets[index];
-            var range = Assert.Single(code.Functions, range => range.Start == offset);
+            var range = global::System.Linq.Enumerable.Single(code.Functions, range => range.Start == offset);
             var originalOffset = freeCode.SourceFunctionOffsets[originalIndex];
-            var originalRange = Assert.Single(freeCode.Functions, range => range.Start == originalOffset);
-            Assert.Equal(freeCode.Code.AsSpan(originalOffset, originalRange.End - originalOffset).ToArray(),
-                code.Code.AsSpan(offset, range.End - offset).ToArray());
+            var originalRange = global::System.Linq.Enumerable.Single(freeCode.Functions, range => range.Start == originalOffset);
+            Assert.That(code.Code.AsSpan(offset, range.End - offset).ToArray(), Is.EqualTo(freeCode.Code.AsSpan(originalOffset, originalRange.End - originalOffset).ToArray()));
         }
     }
 
@@ -873,13 +843,22 @@ public sealed class NativeSourceGrantExperimentTests
             ImmutableArray<PrimitiveType> ParameterTypes)> Exports) EmitExperiment(
         BoundProgram program, string[] exports, NativeRuntimePolicy policy)
     {
-        var method = Assert.IsType<MethodInfo>(typeof(NativeEmitter).GetMethod("EmitSourceGrantLibraryForTest",
-            BindingFlags.NonPublic | BindingFlags.Static), exactMatch: false);
+        var method = ((global::System.Func<MethodInfo>)(() => {
+            var __nunitActual5 = typeof(NativeEmitter).GetMethod("EmitSourceGrantLibraryForTest",
+            BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(__nunitActual5, Is.InstanceOf<MethodInfo>());
+            return (MethodInfo)__nunitActual5!;
+        }))();
         try
         {
-            return Assert.IsType<(byte[], NativeCode,
-                ImmutableArray<(string, bool, PrimitiveType, ImmutableArray<PrimitiveType>)>)>(
-                method.Invoke(null, [program, exports, policy]));
+            return ((global::System.Func<(byte[], NativeCode,
+                ImmutableArray<(string, bool, PrimitiveType, ImmutableArray<PrimitiveType>)>)>)(() => {
+                    var __nunitActual6 = method.Invoke(null, [program, exports, policy]);
+                    Assert.That(__nunitActual6, Is.TypeOf<(byte[], NativeCode,
+                ImmutableArray<(string, bool, PrimitiveType, ImmutableArray<PrimitiveType>)>)>());
+                    return ((byte[], NativeCode,
+                ImmutableArray<(string, bool, PrimitiveType, ImmutableArray<PrimitiveType>)>))__nunitActual6!;
+                }))();
         }
         catch (TargetInvocationException exception) when (exception.InnerException is Exception inner)
         {
@@ -890,11 +869,19 @@ public sealed class NativeSourceGrantExperimentTests
 
     private static bool[] Classify(BoundProgram program)
     {
-        var classifier = Assert.IsType<Type>(typeof(NativeEmitter).Assembly.GetType(
-            "Terrum.CodeAnalysis.Native.NativeSourceGrantExperiment"), exactMatch: false);
-        var classify = Assert.IsType<MethodInfo>(classifier.GetMethod("Classify",
-            BindingFlags.NonPublic | BindingFlags.Static), exactMatch: false);
-        return Assert.IsType<bool[]>(classify.Invoke(null, [program]));
+        var classifier = ((global::System.Func<Type>)(() => {
+            var __nunitActual7 = typeof(NativeEmitter).Assembly.GetType(
+            "Terrum.CodeAnalysis.Native.NativeSourceGrantExperiment");
+            Assert.That(__nunitActual7, Is.InstanceOf<Type>());
+            return (Type)__nunitActual7!;
+        }))();
+        var classify = ((global::System.Func<MethodInfo>)(() => {
+            var __nunitActual8 = classifier.GetMethod("Classify",
+            BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(__nunitActual8, Is.InstanceOf<MethodInfo>());
+            return (MethodInfo)__nunitActual8!;
+        }))();
+        return ((global::System.Func<bool[]>)(() => { var __nunitActual9 = classify.Invoke(null, [program]); Assert.That(__nunitActual9, Is.TypeOf<bool[]>()); return (bool[])__nunitActual9!; }))();
     }
 
     private static int ExpectedScalar(ReadOnlySpan<char> source)

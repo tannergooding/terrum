@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TransferFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReaderRequiresNearestLoopAndSourceBoundTransfersAcrossBranches()
     {
         const string text = "public int32 Value() { while (true) { if (true) { break; } else { continue; } } return 42; }";
@@ -44,9 +44,9 @@ public sealed class TransferFrontendProjectionTests
         Statement(4, 7, 0, -1, next, next + 9);
 
         var result = ScalarFrontendHost.ReadResult(source, Bytes());
-        Assert.Equal(5, result.Statements.Length);
-        Assert.Equal(0, result.Statements[2].Slot);
-        Assert.Equal(0, result.Statements[4].Slot);
+        Assert.That(result.Statements.Length, Is.EqualTo(5));
+        Assert.That(result.Statements[2].Slot, Is.EqualTo(0));
+        Assert.That(result.Statements[4].Slot, Is.EqualTo(0));
         Reject(0, 36);
         Reject(0, 40);
         Reject(0, 45);
@@ -111,7 +111,7 @@ public sealed class TransferFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReaderRejectsTransferToOuterLoopAndOutsideLoop()
     {
         const string text = "public int32 Value() { while (true) { while (true) { break; } continue; } return 42; }";
@@ -139,7 +139,7 @@ public sealed class TransferFrontendProjectionTests
         Statement(2, 6, 1, -1, exit, exit + 6);
         Statement(3, 7, 0, -1, next, next + 9);
         var source = SourceText.From(text);
-        Assert.Equal(4, ScalarFrontendHost.ReadResult(source, Bytes()).Statements.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Statements.Length, Is.EqualTo(4));
         Reject(343, 0);
         Reject(348, 1);
         Reject(343, 2);
@@ -187,7 +187,8 @@ public sealed class TransferFrontendProjectionTests
             words[offset + 3] = operation == 20 ? 4 : 2;
             words[offset + 4] = -1;
             words[offset + 5] = -1;
-            if (operation == 3) { words[offset + 6] = 42; }
+            if (operation == 3)
+            { words[offset + 6] = 42; }
         }
 
         void Statement(int index, int kind, int slot, int root, int start, int end)

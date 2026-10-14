@@ -12,7 +12,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -80,9 +80,7 @@ public sealed class OperatorSpacingTests
         }
         yield return [form, op, "", "", true];
     }
-
-    [Theory]
-    [MemberData(nameof(SeparatedOperators))]
+    [TestCaseSource(nameof(SeparatedOperators))]
     public void BinaryBindingAndArrowRolesRequireBothSeparators(string form, string op, string left, string right, bool invalid)
     {
         if (op == "/" && right.StartsWith("/", StringComparison.Ordinal))
@@ -98,9 +96,7 @@ public sealed class OperatorSpacingTests
         from operand in new[] { "@await", "( /* interior */ value)", "values[0]", "\U00010400" }
         from gap in new[] { "" }.Concat(Gaps)
         select new object[] { op, operand, gap };
-
-    [Theory]
-    [MemberData(nameof(UnaryOperators))]
+    [TestCaseSource(nameof(UnaryOperators))]
     public void PrefixAttachesToTheImmediateOperandToken(string op, string operand, string gap)
     {
         var source = ReturnPrefix + op + gap + operand + "; }";
@@ -112,63 +108,66 @@ public sealed class OperatorSpacingTests
         from operand in new[] { "@await", "(value)", "values[0]", "Get()", "\U00010400" }
         from gap in new[] { "" }.Concat(Gaps)
         select new object[] { op, operand, gap };
-
-    [Theory]
-    [MemberData(nameof(PostfixOperators))]
+    [TestCaseSource(nameof(PostfixOperators))]
     public void PostfixAttachesToTheReceiversFinalToken(string op, string operand, string gap)
     {
         var source = ReturnPrefix + operand + gap + op + "; }";
         Check(source, gap.Length == 0 ? null : "TRM1009", new TextSpan(ReturnPrefix.Length + operand.Length + gap.Length, op.Length));
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return x++ + y; }")]
-    [InlineData("int32 Main() { return x + ++y; }")]
-    [InlineData("int32 Main() { return x-- - y; }")]
-    [InlineData("int32 Main() { return x - --y; }")]
-    [InlineData("int32 Main() { return -( /* interior */ value); }")]
-    [InlineData("int32 Main() { return const (value + other); }")]
-    [InlineData("int32 Main() { return const(value); }")]
-    [InlineData("int32 Main() { return move /* word */ value; }")]
-    [InlineData("int32 Main() { return flag ? left : right; }")]
-    [InlineData("Node? F(Node? value) { return value; }")]
-    [InlineData("int32 Main() { return F<Box<Box<int32>>>() >> 1; }")]
-    [InlineData("struct Box { public static Box operator +(Box a, Box b) { return a; } }")]
-    [InlineData("struct Box { public static Box operator ++(Box a) { return a; } }")]
+    [TestCase("int32 Main() { return x++ + y; }")]
+    [TestCase("int32 Main() { return x + ++y; }")]
+    [TestCase("int32 Main() { return x-- - y; }")]
+    [TestCase("int32 Main() { return x - --y; }")]
+    [TestCase("int32 Main() { return -( /* interior */ value); }")]
+    [TestCase("int32 Main() { return const (value + other); }")]
+    [TestCase("int32 Main() { return const(value); }")]
+    [TestCase("int32 Main() { return move /* word */ value; }")]
+    [TestCase("int32 Main() { return flag ? left : right; }")]
+    [TestCase("Node? F(Node? value) { return value; }")]
+    [TestCase("int32 Main() { return F<Box<Box<int32>>>() >> 1; }")]
+    [TestCase("struct Box { public static Box operator +(Box a, Box b) { return a; } }")]
+    [TestCase("struct Box { public static Box operator ++(Box a) { return a; } }")]
     public void ExistingRolesAndExcludedPunctuationRemainDistinct(string source) => Check(source, null, default);
-
-    [Theory]
-    [InlineData("int32 Main() { return value+")]
-    [InlineData("int32 Main() { return - ")]
-    [InlineData("int32 Main()=>")]
-    [InlineData("int32 Main() { int32 value=")]
+    [TestCase("int32 Main() { return value+")]
+    [TestCase("int32 Main() { return - ")]
+    [TestCase("int32 Main()=>")]
+    [TestCase("int32 Main() { int32 value=")]
     public void InvalidIncompleteOperatorsRemainLossless(string source)
     {
         var tree = SyntaxTree.Parse(source);
-        Assert.True(tree.HasErrors);
-        Assert.Equal(source, tree.Root.ToFullString());
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
-
-    [Theory]
-    [InlineData("", " ")]
-    [InlineData(" ", "")]
-    [InlineData("", "")]
-    [InlineData(" ", " ")]
+    [TestCase(""," ")]
+    [TestCase(" ","")]
+    [TestCase("","")]
+    [TestCase(" "," ")]
     public void HandAuthoredHistoricalBinaryProjectionChecksCurrentSourceSpacing(string left, string right)
     {
         var text = "int32 F(int32 x, int32 y) { return x" + left + "+" + right + "y; }";
         var words = new int[ScalarFrontendHost.WordCount];
-        words[0] = 87; words[1] = 1; words[5] = 1; words[6] = 2; words[7] = 1; words[8] = 1;
-        words[9] = 6; words[10] = 1;
-        words[11] = text.IndexOf("x,", StringComparison.Ordinal); words[12] = 1;
-        words[13] = text.IndexOf("y)", StringComparison.Ordinal); words[14] = 1;
-        words[22] = 1; words[23] = (int)TokenKind.Plus; words[24] = 1; words[25] = 2;
+        words[0] = 87;
+        words[1] = 1;
+        words[5] = 1;
+        words[6] = 2;
+        words[7] = 1;
+        words[8] = 1;
+        words[9] = 6;
+        words[10] = 1;
+        words[11] = text.IndexOf("x,", StringComparison.Ordinal);
+        words[12] = 1;
+        words[13] = text.IndexOf("y)", StringComparison.Ordinal);
+        words[14] = 1;
+        words[22] = 1;
+        words[23] = (int)TokenKind.Plus;
+        words[24] = 1;
+        words[25] = 2;
         words[26] = text.IndexOf("x", text.IndexOf("return", StringComparison.Ordinal), StringComparison.Ordinal);
         words[27] = text.IndexOf(';', words[26]) - words[26];
         var bytes = Words(words);
         if (left.Length != 0 && right.Length != 0)
         {
-            Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), bytes).IsValid);
+            Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), bytes).IsValid, Is.True);
         }
         else
         {
@@ -185,10 +184,8 @@ public sealed class OperatorSpacingTests
         }
         return bytes;
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CompiledScannerPreservesEveryOperatorRoleAndBoundaryAsync(NativeRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -225,26 +222,23 @@ public sealed class OperatorSpacingTests
             var buffers = ScannerHost.CreateBuffers(source);
             var compilation = Compilation.Create(SyntaxTree.Parse(scanner + "int32 Main() { return Scan(); }"),
                 buffers, (BoundRuntimePolicy)policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var native = NativeJit.ExecuteWithData(Assert.IsType<BoundProgram>(compilation.Program), policy);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var native = NativeJit.ExecuteWithData(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), policy);
             var adapted = ScannerHost.ReadLexResult(source, native.ExitCode, Buffer(3), Buffer(5), Buffer(4));
-            Assert.Equal(Lexer.Lex(source).Tokens.Select(token => new ScannerToken(token.Kind, token.Span)),
-                ScannerHost.ReadTokens(source, native.ExitCode, Buffer(3)));
+            Assert.That(ScannerHost.ReadTokens(source, native.ExitCode, Buffer(3)), Is.EqualTo(Lexer.Lex(source).Tokens.Select(token => new ScannerToken(token.Kind, token.Span))));
             var current = SyntaxTree.Parse(adapted);
-            Assert.Equal(text, current.Root.ToFullString());
-            Assert.Equal(SyntaxTree.Parse(source).Diagnostics.ToArray(), current.Diagnostics.ToArray());
+            Assert.That(current.Root.ToFullString(), Is.EqualTo(text));
+            Assert.That(current.Diagnostics.ToArray(), Is.EqualTo(SyntaxTree.Parse(source).Diagnostics.ToArray()));
             failures += current.Diagnostics.Count(diagnostic => diagnostic.Code is "TRM1008" or "TRM1009");
 
             ReadOnlySpan<byte> Buffer(int index) =>
                 native.Data.AsSpan(native.BufferOffsets[index], buffers[index].Values.Length * sizeof(int));
         }
-        Assert.Equal(SeparatedOperators.Count(row => (bool)row[4])
+        Assert.That(failures, Is.EqualTo(SeparatedOperators.Count(row => (bool)row[4])
             + UnaryOperators.Count(row => ((string)row[2]).Length != 0)
-            + PostfixOperators.Count(row => ((string)row[2]).Length != 0), failures);
+            + PostfixOperators.Count(row => ((string)row[2]).Length != 0)));
     }
-
-    [Theory]
-    [InlineData(20)]
+    [TestCase(20)]
     public void HandAuthoredTreeProjectionChecksArrowAndPrefixSpacing(int version)
     {
         foreach (var (left, right, unary) in new[] {
@@ -254,11 +248,21 @@ public sealed class OperatorSpacingTests
         {
             var text = "public int32 Value(int32 x)" + left + "=>" + right + "-" + unary + "x;";
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = 87; words[1] = 1; words[2] = 1; words[5] = 1;
-            words[6] = 1; words[7] = 1;
-            words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
-            words[11] = text.IndexOf("x)", StringComparison.Ordinal); words[12] = 1;
-            words[37] = 2; words[38] = -1; words[39] = 1; words[40] = -1; words[41] = 1;
+            words[0] = 87;
+            words[1] = 1;
+            words[2] = 1;
+            words[5] = 1;
+            words[6] = 1;
+            words[7] = 1;
+            words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+            words[10] = 5;
+            words[11] = text.IndexOf("x)", StringComparison.Ordinal);
+            words[12] = 1;
+            words[37] = 2;
+            words[38] = -1;
+            words[39] = 1;
+            words[40] = -1;
+            words[41] = 1;
             var start = text.IndexOf('-', StringComparison.Ordinal);
             var end = text.IndexOf(';', StringComparison.Ordinal);
             int[] nodes = [
@@ -268,7 +272,7 @@ public sealed class OperatorSpacingTests
             nodes.CopyTo(words, 42);
             if (left.Length != 0 && right.Length != 0 && unary.Length == 0)
             {
-                Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)).IsValid);
+                Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)).IsValid, Is.True);
             }
             else
             {
@@ -276,9 +280,7 @@ public sealed class OperatorSpacingTests
             }
         }
     }
-
-    [Theory]
-    [InlineData(49)]
+    [TestCase(49)]
     public void HandAuthoredStructuredProjectionChecksBindingsCompoundsAndPostfix(int version)
     {
         foreach (var (binding, compound, postfix) in new[] {
@@ -288,11 +290,22 @@ public sealed class OperatorSpacingTests
         {
             var text = "public int32 Value() { mut int32 x" + binding + "4; x" + compound + "2; return x" + postfix + "++; }";
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = 87; words[1] = 1; words[2] = 1; words[5] = 1;
-            words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
-            words[37] = 6; words[38] = -1; words[39] = -1; words[40] = -1;
-            words[298] = 3; words[299] = 1; words[300] = 1; words[301] = 1;
-            words[302] = text.IndexOf("int32 x", StringComparison.Ordinal) + 6; words[303] = 1;
+            words[0] = 87;
+            words[1] = 1;
+            words[2] = 1;
+            words[5] = 1;
+            words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+            words[10] = 5;
+            words[37] = 6;
+            words[38] = -1;
+            words[39] = -1;
+            words[40] = -1;
+            words[298] = 3;
+            words[299] = 1;
+            words[300] = 1;
+            words[301] = 1;
+            words[302] = text.IndexOf("int32 x", StringComparison.Ordinal) + 6;
+            words[303] = 1;
             var declaration = text.IndexOf("mut int32", StringComparison.Ordinal);
             var assignment = text.IndexOf("; x", StringComparison.Ordinal) + 2;
             var result = text.IndexOf("return", StringComparison.Ordinal);
@@ -310,7 +323,7 @@ public sealed class OperatorSpacingTests
             Statement(2, 8, 0, 5, result, lastEnd);
             if (binding == " = " && compound == " += " && postfix.Length == 0)
             {
-                Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)).IsValid);
+                Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)).IsValid, Is.True);
             }
             else
             {
@@ -330,16 +343,23 @@ public sealed class OperatorSpacingTests
         }
     }
 
-    [Fact]
+    [Test]
     public void HandAuthoredLatestLoopProjectionRejectsSeparatedPrefix()
     {
         foreach (var gap in new[] { "" }.Concat(Gaps))
         {
             var text = "public int32 Value() { do { return +" + gap + "42; } while (false); }";
             var words = new int[ScalarFrontendHost.WordCount];
-            words[0] = 87; words[1] = 1; words[2] = 1; words[5] = 1;
-            words[9] = text.IndexOf("Value", StringComparison.Ordinal); words[10] = 5;
-            words[37] = 3; words[38] = -1; words[39] = -1; words[40] = -1;
+            words[0] = 87;
+            words[1] = 1;
+            words[2] = 1;
+            words[5] = 1;
+            words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+            words[10] = 5;
+            words[37] = 3;
+            words[38] = -1;
+            words[39] = -1;
+            words[40] = -1;
             words[298] = 2;
             var number = text.IndexOf("42", StringComparison.Ordinal);
             var prefix = text.IndexOf('+', StringComparison.Ordinal);
@@ -360,7 +380,7 @@ public sealed class OperatorSpacingTests
             statements.CopyTo(words, 332);
             if (gap.Length == 0)
             {
-                Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)).IsValid);
+                Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Words(words)).IsValid, Is.True);
             }
             else
             {
@@ -372,19 +392,19 @@ public sealed class OperatorSpacingTests
     private static void Check(string source, string? code, TextSpan span)
     {
         var lexed = Lexer.Lex(SourceText.From(source));
-        Assert.Empty(lexed.Diagnostics);
+        Assert.That(lexed.Diagnostics, Is.Empty);
         foreach (var tree in new[] { SyntaxTree.Parse(source), SyntaxTree.Parse(lexed) })
         {
-            Assert.Equal(source, tree.Root.ToFullString());
+            Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
             if (code is null)
             {
-                Assert.Empty(tree.Diagnostics);
+                Assert.That(tree.Diagnostics, Is.Empty);
             }
             else
             {
-                var diagnostic = Assert.Single(tree.Diagnostics);
-                Assert.Equal(code, diagnostic.Code);
-                Assert.Equal(span, diagnostic.Span);
+                var diagnostic = global::System.Linq.Enumerable.Single(tree.Diagnostics);
+                Assert.That(diagnostic.Code, Is.EqualTo(code));
+                Assert.That(diagnostic.Span, Is.EqualTo(span));
             }
         }
     }

@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmFieldDefTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EmitsFieldOwnedBySecondModuleTypeInFramedArtifact()
     {
         var stringBytes = Names();
@@ -24,11 +24,11 @@ public sealed class TrRmFieldDefTableWriterTests
         var fieldBytes = TrRmFieldDefTableWriter.Encode(rows, strings, types, specs);
         var fields = new TrRmFieldDefTableReader(fieldBytes, 1, strings, types, specs);
 
-        Assert.Equal(20, fieldBytes.Length);
-        Assert.Equal("Value", fields.GetName(1));
-        Assert.Equal(2, types.GetFieldOwner(1));
+        Assert.That(fieldBytes.Length, Is.EqualTo(20));
+        Assert.That(fields.GetName(1), Is.EqualTo("Value"));
+        Assert.That(types.GetFieldOwner(1), Is.EqualTo(2));
         rows[0] = rows[0] with { OwnerTypeDefRow = 1 };
-        Assert.Equal("Value", fields.GetName(1));
+        Assert.That(fields.GetName(1), Is.EqualTo("Value"));
 
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 2, moduleBytes),
@@ -40,7 +40,7 @@ public sealed class TrRmFieldDefTableWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidOwnerNameSpecFlagsOffsetAndCount()
     {
         var row = new TrRmFieldDefRow(2, 6, 1, 0, uint.MaxValue);

@@ -9,32 +9,31 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("require true;", 0)]
-    [InlineData("require false;", unchecked((int)0xE0540003))]
-    [InlineData("require true || int32(1) / int32(0) == 0;", 0)]
-    [InlineData("require false && int32(1) / int32(0) == 0;", unchecked((int)0xE0540003))]
-    [InlineData("require int32(1) / int32(0) == 0;", unchecked((int)0xE0540002))]
-    [InlineData("require true ? true : int32(1) / int32(0) == 0;", 0)]
-    [InlineData("require true ? false : true;", unchecked((int)0xE0540003))]
-    [InlineData("_ = true;", 0)]
-    [InlineData("_ = int32(42);", 0)]
-    [InlineData("_ = uint32(0xFFFF_FFFF);", 0)]
-    [InlineData("_ = int64(-9223372036854775808);", 0)]
-    [InlineData("_ = uint64(18446744073709551615);", 0)]
-    [InlineData("_ = char16(65535);", 0)]
-    [InlineData("_ = int32(2147483647) + int32(1);", unchecked((int)0xE0540001))]
-    [InlineData("_ = int32(1) / int32(0);", unchecked((int)0xE0540002))]
-    [InlineData("_ = false && int32(1) / int32(0) == 0;", 0)]
-    [InlineData("_ = false ? int32(1) / int32(0) : int32(42);", 0)]
-    [InlineData("_ = int32(uint64(4294967296));", unchecked((int)0xE0540001))]
-    [InlineData("/*\U0001F600*/ _ = (char16(0xFFFF));", 0)]
+    [TestCase("require true;",0)]
+    [TestCase("require false;",unchecked((int)0xE0540003))]
+    [TestCase("require true || int32(1) / int32(0) == 0;",0)]
+    [TestCase("require false && int32(1) / int32(0) == 0;",unchecked((int)0xE0540003))]
+    [TestCase("require int32(1) / int32(0) == 0;",unchecked((int)0xE0540002))]
+    [TestCase("require true ? true : int32(1) / int32(0) == 0;",0)]
+    [TestCase("require true ? false : true;",unchecked((int)0xE0540003))]
+    [TestCase("_ = true;",0)]
+    [TestCase("_ = int32(42);",0)]
+    [TestCase("_ = uint32(0xFFFF_FFFF);",0)]
+    [TestCase("_ = int64(-9223372036854775808);",0)]
+    [TestCase("_ = uint64(18446744073709551615);",0)]
+    [TestCase("_ = char16(65535);",0)]
+    [TestCase("_ = int32(2147483647) + int32(1);",unchecked((int)0xE0540001))]
+    [TestCase("_ = int32(1) / int32(0);",unchecked((int)0xE0540002))]
+    [TestCase("_ = false && int32(1) / int32(0) == 0;",0)]
+    [TestCase("_ = false ? int32(1) / int32(0) : int32(42);",0)]
+    [TestCase("_ = int32(uint64(4294967296));",unchecked((int)0xE0540001))]
+    [TestCase("/*\U0001F600*/ _ = (char16(0xFFFF));",0)]
     public async Task NativeVoidExpressionMatchesHostedScannerPeAndJitAsync(string statement, int expected)
     {
         var root = RepositoryRoot();
@@ -48,61 +47,59 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(source, "frontend-build",
                     Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{policy}: {output}{error}");
+                Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
-                Assert.True(result.GetProperty("expressionBody").GetBoolean());
+                Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
+                Assert.That(result.GetProperty("expressionBody").GetBoolean(), Is.True);
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build",
                     "-", "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
                 var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component",
                     Path.Combine(root, "self-host"), "-", "-o", scanner, "--runtime", policy, "--json");
-                Assert.True(scanExit == 0, $"{scanOutput}{scanError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanner));
-                Assert.Equal(expected, await ExecuteNativeImageAsync(native));
+                Assert.That(scanExit == 0, Is.True, $"{scanOutput}{scanError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await File.ReadAllBytesAsync(scanner), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(expected));
                 var (runExit, runOutput, runError) = await RunAsync(source, "frontend-run",
                     Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
-                Assert.True(runExit == expected, $"{runOutput}{runError}");
+                Assert.That(runExit == expected, Is.True, $"{runOutput}{runError}");
                 var (jitExit, jitOutput, jitError) = await RunAsync(source, "jit", "-", "--runtime", policy, "--json");
-                Assert.True(jitExit == expected, $"{jitOutput}{jitError}");
+                Assert.That(jitExit == expected, Is.True, $"{jitOutput}{jitError}");
             }
         }
         finally
         {
-            File.Delete(native);
+            await TestFileCleanup.DeleteWithRetryAsync(native).ConfigureAwait(true);
             File.Delete(hosted);
             File.Delete(scanner);
         }
     }
-
-    [Theory]
-    [InlineData("void Main() => ();")]
-    [InlineData("void Main() => return;")]
-    [InlineData("void Main() => return ();")]
-    [InlineData("void Main() => 42;")]
-    [InlineData("void Main() => Missing();")]
-    [InlineData("void Main() => _ = Missing();")]
-    [InlineData("void Main() => _ = ();")]
-    [InlineData("void Main() => _ = 42;")]
-    [InlineData("void Main() => _ = null;")]
-    [InlineData("void Main() => require 1;")]
-    [InlineData("void Main() => require ();")]
-    [InlineData("void Main() => static require true;")]
-    [InlineData("void Main() => require true, 1;")]
-    [InlineData("void Main() => require true; require true;")]
-    [InlineData("void Main() => _ = true; return;")]
-    [InlineData("void Main() => require true")]
-    [InlineData("void Main() => { require true; }")]
-    [InlineData("void Main() => _ += int32(1);")]
-    [InlineData("void Main() => _ = _;")]
-    [InlineData("int32 Main() => require true;")]
-    [InlineData("int32 Main() => _ = int32(42);")]
-    [InlineData("void Main()=> require true;")]
-    [InlineData("void Main() =>require true;")]
-    [InlineData("void Main() => _= true;")]
-    [InlineData("void Main() => _ =true;")]
+    [TestCase("void Main() => ();")]
+    [TestCase("void Main() => return;")]
+    [TestCase("void Main() => return ();")]
+    [TestCase("void Main() => 42;")]
+    [TestCase("void Main() => Missing();")]
+    [TestCase("void Main() => _ = Missing();")]
+    [TestCase("void Main() => _ = ();")]
+    [TestCase("void Main() => _ = 42;")]
+    [TestCase("void Main() => _ = null;")]
+    [TestCase("void Main() => require 1;")]
+    [TestCase("void Main() => require ();")]
+    [TestCase("void Main() => static require true;")]
+    [TestCase("void Main() => require true, 1;")]
+    [TestCase("void Main() => require true; require true;")]
+    [TestCase("void Main() => _ = true; return;")]
+    [TestCase("void Main() => require true")]
+    [TestCase("void Main() => { require true; }")]
+    [TestCase("void Main() => _ += int32(1);")]
+    [TestCase("void Main() => _ = _;")]
+    [TestCase("int32 Main() => require true;")]
+    [TestCase("int32 Main() => _ = int32(42);")]
+    [TestCase("void Main()=> require true;")]
+    [TestCase("void Main() =>require true;")]
+    [TestCase("void Main() => _= true;")]
+    [TestCase("void Main() => _ =true;")]
     public async Task NativeVoidExpressionRejectsUnsupportedSourceAndRetainsPeAsync(string text)
     {
         var path = Path.Combine(RepositoryRoot(), $"void-expression-{Guid.NewGuid():N}.exe");
@@ -112,12 +109,12 @@ public sealed partial class CliTests
             {
                 var (initial, initialOutput, initialError) = await RunAsync(Encoding.UTF8.GetBytes("void Main() => require true;"),
                     "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(initial == 0, $"{initialOutput}{initialError}");
+                Assert.That(initial == 0, Is.True, $"{initialOutput}{initialError}");
                 var bytes = await File.ReadAllBytesAsync(path);
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(text), "frontend-build",
                     Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(exit == 1, $"{exit}: {output}{error}");
-                Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
+                Assert.That(exit == 1, Is.True, $"{exit}: {output}{error}");
+                Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
             }
         }
         finally
@@ -125,13 +122,11 @@ public sealed partial class CliTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData("", "_ = true;")]
-    [InlineData("bool @const", "require const;")]
-    [InlineData("int32 a, uint64 b", "require a > 0 && b == uint64(42);")]
-    [InlineData("char16 a, uint32 b, int64 c", "_ = a == char16(42) && b == uint32(42) && c == int64(42);")]
-    [InlineData("int32 x", "_ = x + 1;")]
+    [TestCase("","_ = true;")]
+    [TestCase("bool @const","require const;")]
+    [TestCase("int32 a, uint64 b","require a > 0 && b == uint64(42);")]
+    [TestCase("char16 a, uint32 b, int64 c","_ = a == char16(42) && b == uint32(42) && c == int64(42);")]
+    [TestCase("int32 x","_ = x + 1;")]
     public async Task NativeVoidExpressionPreservesNormalizedExportAndPrimitiveParameterAbiAsync(string parameters, string statement)
     {
         var root = RepositoryRoot();
@@ -144,22 +139,32 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(source, "frontend-build-library",
                     Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{output}{error}");
+                Assert.That(exit == 0, Is.True, $"{output}{error}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build-library",
                     "-", "--export", "await", "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
                 var handle = NativeLibrary.Load(native);
                 try
                 {
                     var export = NativeLibrary.GetExport(handle, "await");
                     switch (parameters)
                     {
-                        case "": Marshal.GetDelegateForFunctionPointer<NativeVoidZero>(export)(); break;
-                        case "bool @const": Marshal.GetDelegateForFunctionPointer<NativeVoidOne>(export)(true); break;
-                        case "int32 x": Marshal.GetDelegateForFunctionPointer<VoidExpressionInt32>(export)(42); break;
-                        case "int32 a, uint64 b": Marshal.GetDelegateForFunctionPointer<NativeVoidTwo>(export)(42, 42); break;
-                        default: Marshal.GetDelegateForFunctionPointer<NativeVoidThree>(export)(42, 42, 42); break;
+                        case "":
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidZero>(export)();
+                            break;
+                        case "bool @const":
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidOne>(export)(true);
+                            break;
+                        case "int32 x":
+                            Marshal.GetDelegateForFunctionPointer<VoidExpressionInt32>(export)(42);
+                            break;
+                        case "int32 a, uint64 b":
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidTwo>(export)(42, 42);
+                            break;
+                        default:
+                            Marshal.GetDelegateForFunctionPointer<NativeVoidThree>(export)(42, 42, 42);
+                            break;
                     }
                 }
                 finally
@@ -176,26 +181,22 @@ public sealed partial class CliTests
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate void VoidExpressionInt32(int x);
-
-    [Theory]
-    [InlineData("x = 1;")]
-    [InlineData("x++;")]
-    [InlineData("_ = x++;")]
-    [InlineData("require ++x > 0;")]
-    [InlineData("int32 y = x;")]
+    [TestCase("x = 1;")]
+    [TestCase("x++;")]
+    [TestCase("_ = x++;")]
+    [TestCase("require ++x > 0;")]
+    [TestCase("int32 y = x;")]
     public async Task NativeVoidExpressionRejectsUnsupportedReadonlyParameterActionsAsync(string statement)
     {
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes($"public void F(int32 x) => {statement}"),
                 "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-", "--runtime", policy, "--json");
-            Assert.True(exit == 1, $"{output}{error}");
+            Assert.That(exit == 1, Is.True, $"{output}{error}");
         }
     }
-
-    [Theory]
-    [InlineData("require false;")]
-    [InlineData("require !true;")]
+    [TestCase("require false;")]
+    [TestCase("require !true;")]
     public async Task NativeVoidExpressionNonFallthroughCompileOnlyAsync(string statement)
     {
         var root = RepositoryRoot();
@@ -208,10 +209,10 @@ public sealed partial class CliTests
                 var source = Encoding.UTF8.GetBytes($"void Main() => {statement}");
                 var (exit, output, error) = await RunAsync(source, "frontend-build",
                     Path.Combine(root, "self-host"), "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{output}{error}");
+                Assert.That(exit == 0, Is.True, $"{output}{error}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build", "-", "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{hostOutput}{hostError}");
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             }
         }
         finally
@@ -220,16 +221,14 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("nodes", 64, true)]
-    [InlineData("nodes", 65, false)]
-    [InlineData("tokens", 64, true)]
-    [InlineData("tokens", 65, true)]
-    [InlineData("source", 16384, true)]
-    [InlineData("source", 16385, false)]
-    [InlineData("expression", 16, true)]
-    [InlineData("expression", 17, false)]
+    [TestCase("nodes",64,true)]
+    [TestCase("nodes",65,false)]
+    [TestCase("tokens",64,true)]
+    [TestCase("tokens",65,true)]
+    [TestCase("source",16384,true)]
+    [TestCase("source",16385,false)]
+    [TestCase("expression",16,true)]
+    [TestCase("expression",17,false)]
     public async Task NativeVoidExpressionRetainsOtherResourceCapsAsync(string resource, int count, bool valid)
     {
         var source = resource switch {
@@ -241,24 +240,26 @@ public sealed partial class CliTests
                 + "true" + new string(')', count - 1) + ";",
             _ => "void Main() => require true;",
         };
-        if (resource == "tokens") { Assert.Equal(count, Lexer.Lex(SourceText.From(source)).Tokens.Length); }
+        if (resource == "tokens")
+        { Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length, Is.EqualTo(count)); }
         if (resource == "source")
         {
             source += " /*" + new string('x', count - source.Length - 5) + "*/";
-            Assert.Equal(count, source.Length);
+            Assert.That(source.Length, Is.EqualTo(count));
         }
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "frontend-component",
                 Path.Combine(RepositoryRoot(), "self-host"), "-", "--runtime", policy, "--json");
-            Assert.True(exit == (valid ? 0 : resource == "source" ? 2 : 1), $"{output}{error}");
+            Assert.That(exit == (valid ? 0 : resource == "source" ? 2 : 1), Is.True, $"{output}{error}");
             if (valid)
             {
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
-                Assert.Single(result.GetProperty("statements").EnumerateArray());
-                if (resource == "nodes") { Assert.Equal(count, result.GetProperty("nodes").GetArrayLength()); }
+                Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
+                Assert.That(result.GetProperty("statements").EnumerateArray(), Has.Exactly(1).Items);
+                if (resource == "nodes")
+                { Assert.That(result.GetProperty("nodes").GetArrayLength(), Is.EqualTo(count)); }
             }
         }
     }

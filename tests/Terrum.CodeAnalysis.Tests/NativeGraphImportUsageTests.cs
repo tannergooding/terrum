@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -37,14 +37,12 @@ public sealed class NativeGraphImportUsageTests
         var compilation = library
             ? reference is null ? Compilation.CreateLibrary(syntax, runtime)
                 : Compilation.CreateLibrary(syntax, reference, runtime)
-            : Compilation.Create(syntax, Assert.IsType<CompilationReference>(reference), runtime);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), runtime);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task PairAndSetValidateGeneratedChildCleanupImportsAsync(NativeRuntimePolicy policy)
     {
         var leaf = NativeModuleCompiler.CreateProducer(Compile(ProducerSource, policy),
@@ -56,7 +54,7 @@ public sealed class NativeGraphImportUsageTests
             }
             """, policy, NativeModuleCompiler.CreateReference(leaf), library: false), leaf, policy);
         NativeModuleCompiler.Validate(pair, leaf);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(pair, leaf, TimeSpan.FromSeconds(10), policy));
+        Assert.That(await NativeModuleCompiler.RunAsync(pair, leaf, TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
 
         var addition = NativeModuleCompiler.CreateProducer(Compile(
             "public int32 Add() { return 2; }", policy), ["Add"], "Addition", policy);
@@ -68,21 +66,21 @@ public sealed class NativeGraphImportUsageTests
             """, policy, NativeModuleCompiler.CreateReferenceSet([leaf, addition]), library: false),
             [leaf, addition], policy);
         NativeModuleCompiler.ValidateConsumerSet(set, [addition, leaf]);
-        Assert.Equal(42, await NativeModuleCompiler.RunConsumerSetAsync(set, [leaf, addition],
-            TimeSpan.FromSeconds(10), policy));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(set, [leaf, addition],
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
         var originalPair = pair.ToArray();
         var originalSet = set.ToArray();
         var replacement = NativeModuleCompiler.CreateProducer(Compile(
             ProducerSource.Replace("new Parent(40)", "new Parent(41)", StringComparison.Ordinal), policy),
             ["Make", "Child.Close"], "Leaf", policy);
-        Assert.Equal(43, await NativeModuleCompiler.RunAsync(pair, replacement, TimeSpan.FromSeconds(10), policy));
-        Assert.Equal(43, await NativeModuleCompiler.RunConsumerSetAsync(set, [addition, replacement],
-            TimeSpan.FromSeconds(10), policy));
-        Assert.Equal(originalPair, pair);
-        Assert.Equal(originalSet, set);
+        Assert.That(await NativeModuleCompiler.RunAsync(pair, replacement, TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(set, [addition, replacement],
+            TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
+        Assert.That(pair, Is.EqualTo(originalPair));
+        Assert.That(set, Is.EqualTo(originalSet));
     }
 
-    [Fact]
+    [Test]
     public void RecalculatedPairAndSetImportMappingTamperingIsRejected()
     {
         const NativeRuntimePolicy Policy = NativeRuntimePolicy.FailFast;
@@ -91,7 +89,7 @@ public sealed class NativeGraphImportUsageTests
         var pair = NativeModuleCompiler.CreateConsumer(Compile(
             "int32 Main() { Parent value = Make(); return value.Owned.Value; }", Policy,
             NativeModuleCompiler.CreateReference(leaf), library: false), leaf, Policy);
-        Assert.Equal(2, pair[4]);
+        Assert.That(pair[4], Is.EqualTo(2));
         var damagedPair = pair.ToArray();
         var offset = 18 + damagedPair[7] + damagedPair[8];
         var count = ReadCount(damagedPair, ref offset);
@@ -105,9 +103,9 @@ public sealed class NativeGraphImportUsageTests
                 replaced = true;
             }
         }
-        Assert.True(replaced);
+        Assert.That(replaced, Is.True);
         Rehash(damagedPair);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(damagedPair, leaf));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(damagedPair, leaf))!;
 
         var addition = NativeModuleCompiler.CreateProducer(Compile(
             "public int32 Add() { return 2; }", Policy), ["Add"], "Addition", Policy);
@@ -115,7 +113,7 @@ public sealed class NativeGraphImportUsageTests
             "int32 Main() { Parent value = Make(); return value.Owned.Value + Add(); }", Policy,
             NativeModuleCompiler.CreateReferenceSet([leaf, addition]), library: false),
             [leaf, addition], Policy);
-        Assert.Equal(2, set[4]);
+        Assert.That(set[4], Is.EqualTo(2));
         var damagedSet = set.ToArray();
         offset = 16;
         for (var dependency = 0; dependency < 2; dependency++)
@@ -137,10 +135,10 @@ public sealed class NativeGraphImportUsageTests
                 }
             }
         }
-        Assert.True(damagedSet.AsSpan().IndexOf("Bad"u8) >= 0);
+        Assert.That(damagedSet.AsSpan().IndexOf("Bad"u8) >= 0, Is.True);
         Rehash(damagedSet);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateConsumerSet(
-            damagedSet, [leaf, addition]));
+            damagedSet, [leaf, addition]))!;
     }
 
     private static int ReadCount(byte[] bytes, ref int offset)

@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ReturnFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReaderConsumesEveryReturnRootAndRejectsForgedSourceOrControl()
     {
         const string text = "public int32 Value(bool flag) { if (flag) { return 42; } else { return 43; } }";
@@ -45,9 +45,9 @@ public sealed class ReturnFrontendProjectionTests
         Statement(3, 8, 0, 2, secondReturn, secondReturn + 10);
 
         var result = ScalarFrontendHost.ReadResult(source, Bytes());
-        Assert.Equal(4, result.Statements.Length);
-        Assert.Equal(8, result.Statements[1].Kind);
-        Assert.Equal(8, result.Statements[3].Kind);
+        Assert.That(result.Statements.Length, Is.EqualTo(4));
+        Assert.That(result.Statements[1].Kind, Is.EqualTo(8));
+        Assert.That(result.Statements[3].Kind, Is.EqualTo(8));
         Reject(0, 47);
         Reject(15, 1);
         Reject(39, 1);

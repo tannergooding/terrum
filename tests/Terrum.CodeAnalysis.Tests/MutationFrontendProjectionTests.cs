@@ -8,13 +8,13 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class MutationFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReaderRequiresInt32ShiftCountAndExactExpressionBodySource()
     {
         const string text = "public int64 Shift(int64 value, int32 count) => value >>> count;";
@@ -43,7 +43,7 @@ public sealed class MutationFrontendProjectionTests
         Node(0, 0, 3, value, 5, 1, -1);
         Node(1, 0, 1, count, 5, 2, -1);
         Node(2, 90, 3, value, count + 5 - value, 0, 1);
-        Assert.Equal(3, ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Nodes.Length, Is.EqualTo(3));
         Reject(0, 48);
         Reject(37, 33);
         Reject(42 + 1 * 8 + 1, 3);
@@ -86,7 +86,7 @@ public sealed class MutationFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReaderRejectsForgedMutationSourceAndOlderProfiles()
     {
         const string text = "public int32 Value() { mut int32 x = 4; x += 2; return x++; }";
@@ -122,23 +122,21 @@ public sealed class MutationFrontendProjectionTests
         Statement(2, 8, 0, 5, result, text.LastIndexOf(';') + 1);
 
         var accepted = ScalarFrontendHost.ReadResult(source, Bytes());
-        Assert.Equal(3, accepted.Statements.Length);
+        Assert.That(accepted.Statements.Length, Is.EqualTo(3));
         var program = ScalarFrontendHost.BindLibrary(source, Bytes(), BoundRuntimePolicy.FailFast);
         var statements = program.Functions[0].Body.Statements;
-        Assert.IsType<BoundCompoundAssignment>(
-            Assert.IsType<BoundExpressionStatement>(statements[1]).Expression);
-        var update = Assert.IsType<BoundUpdate>(
-            Assert.IsType<BoundReturn>(statements[2]).Value);
-        Assert.False(update.IsPrefix);
+        Assert.That(((global::System.Func<BoundExpressionStatement>)(() => { var __nunitActual0 = statements[1]; Assert.That(__nunitActual0, Is.TypeOf<BoundExpressionStatement>()); return (BoundExpressionStatement)__nunitActual0!; }))().Expression, Is.TypeOf<BoundCompoundAssignment>());
+        var update = ((global::System.Func<BoundUpdate>)(() => { var __nunitActual2 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = statements[2]; Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))().Value; Assert.That(__nunitActual2, Is.TypeOf<BoundUpdate>()); return (BoundUpdate)__nunitActual2!; }))();
+        Assert.That(update.IsPrefix, Is.False);
         var producer = ModuleCompiler.CreateProducer(program, ["Value"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Value(); }"),
             ModuleCompiler.CreateReference(producer));
-        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(client.Program),
+        Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = client.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
             producer);
-        Assert.Equal(6, NativeJit.Execute(ModuleCompiler.Link(consumer, producer),
-            NativeRuntimePolicy.FailFast));
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(6));
 
         Reject(0, 48);
         Reject(0, 47);

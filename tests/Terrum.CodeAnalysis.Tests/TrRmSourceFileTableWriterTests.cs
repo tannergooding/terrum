@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmSourceFileTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EmitsOwnedSourcePathsForTwoModulesInOneArtifact()
     {
         var names = TrRmStringTableWriter.EncodeNames([
@@ -33,15 +33,15 @@ public sealed class TrRmSourceFileTableWriterTests
 
         paths[0] = 4;
         var reader = new TrRmSourceFileTableReader(files, 2, strings, moduleReader);
-        Assert.Equal(2, reader.Count);
-        Assert.Equal("src/A.terrum", reader.GetPath(1));
-        Assert.Equal("src/B.terrum", reader.GetPath(2));
-        Assert.Equal(1, reader.GetOwnerModule(1));
-        Assert.Equal(2, reader.GetOwnerModule(2));
-        Assert.Equal(0u, BinaryPrimitives.ReadUInt32LittleEndian(files.AsSpan(4)));
+        Assert.That(reader.Count, Is.EqualTo(2));
+        Assert.That(reader.GetPath(1), Is.EqualTo("src/A.terrum"));
+        Assert.That(reader.GetPath(2), Is.EqualTo("src/B.terrum"));
+        Assert.That(reader.GetOwnerModule(1), Is.EqualTo(1));
+        Assert.That(reader.GetOwnerModule(2), Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(files.AsSpan(4)), Is.EqualTo(0u));
     }
 
-    [Fact]
+    [Test]
     public void RejectsMissingEmptyAndOutOfRangePathsAndWrongPartitions()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
@@ -50,7 +50,7 @@ public sealed class TrRmSourceFileTableWriterTests
         Assert.Throws<InvalidDataException>(() => Encode([3]));
         Assert.Throws<InvalidDataException>(() => Encode([3, 4, 4]));
 
-        Assert.Throws<InvalidDataException>(EncodeEmptyPath);
+        Assert.Throws<InvalidDataException>(() => EncodeEmptyPath());
     }
 
     private static byte[] Encode(int[] paths)

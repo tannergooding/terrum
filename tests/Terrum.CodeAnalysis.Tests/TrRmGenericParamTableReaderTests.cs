@@ -4,21 +4,21 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmGenericParamTableReaderTests
 {
-    [Fact]
+    [Test]
     public void TypeAndMethodFormalsHaveDistinctOwnersAndConstraintRanges()
     {
-        Assert.Equal(1, GetConstraintOwner(Formals(), 1));
+        Assert.That(GetConstraintOwner(Formals(), 1), Is.EqualTo(1));
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(Formals(), 0));
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(Formals(), 2));
     }
 
-    [Fact]
+    [Test]
     public void MultipleFormalsOfOneTypeRequireIncreasingOrdinals()
     {
         var type = Type();
@@ -29,28 +29,26 @@ public sealed class TrRmGenericParamTableReaderTests
         var formals = Formals();
         Write(formals, 20, 0x1300_0001);
         Write(formals, 24, 1);
-        Assert.Equal(1, GetConstraintOwner(formals, 1, signature, type));
+        Assert.That(GetConstraintOwner(formals, 1, signature, type), Is.EqualTo(1));
 
         Write(formals, 24, 0);
         Assert.Throws<InvalidDataException>(() =>
             GetConstraintOwner(formals, 1, signature, type));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, 2)]
-    [InlineData(3, 0)]
-    [InlineData(3, 0x16)]
-    [InlineData(4, 1)]
-    [InlineData(8, 0)]
-    [InlineData(12, 0)]
-    [InlineData(12, 2)]
-    [InlineData(16, 0)]
-    [InlineData(20, 0)]
-    [InlineData(20, 2)]
-    [InlineData(23, 0)]
-    [InlineData(24, 1)]
-    [InlineData(28, 0)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(0,(byte)(2))]
+    [TestCase(3,(byte)(0))]
+    [TestCase(3,(byte)(0x16))]
+    [TestCase(4,(byte)(1))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(12,(byte)(0))]
+    [TestCase(12,(byte)(2))]
+    [TestCase(16,(byte)(0))]
+    [TestCase(20,(byte)(0))]
+    [TestCase(20,(byte)(2))]
+    [TestCase(23,(byte)(0))]
+    [TestCase(24,(byte)(1))]
+    [TestCase(28,(byte)(0))]
     public void RejectsBadFormalOwnerOrdinalNameAndConstraintRange(int offset, byte replacement)
     {
         var bytes = Formals();
@@ -58,7 +56,7 @@ public sealed class TrRmGenericParamTableReaderTests
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(bytes, 1));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOverlappingOrUnownedFormalAndConstraintRows()
     {
         var expandedTypeRange = Type();
@@ -78,7 +76,7 @@ public sealed class TrRmGenericParamTableReaderTests
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(Formals()[..^1], 1));
     }
 
-    [Fact]
+    [Test]
     public void ConstraintRowChecksOwnershipWithoutAssigningKindsOrWitnesses()
     {
         var row = Constraint();
@@ -87,14 +85,12 @@ public sealed class TrRmGenericParamTableReaderTests
         row[5] = 0xFF;
         CreateConstraint(row);
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(0, 2)]
-    [InlineData(6, 1)]
-    [InlineData(7, 1)]
-    [InlineData(8, 0)]
-    [InlineData(8, 2)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(0,(byte)(2))]
+    [TestCase(6,(byte)(1))]
+    [TestCase(7,(byte)(1))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(2))]
     public void RejectsInvalidConstraintOwnerFlagsAndTarget(int offset, byte replacement)
     {
         var row = Constraint();
@@ -102,7 +98,7 @@ public sealed class TrRmGenericParamTableReaderTests
         Assert.Throws<InvalidDataException>(() => CreateConstraint(row));
     }
 
-    [Fact]
+    [Test]
     public void ConstraintSectionMustMatchFormalOwnedRowCount()
     {
         Assert.Throws<InvalidDataException>(() => CreateConstraint(Constraint()[..^1]));

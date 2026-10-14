@@ -5,15 +5,14 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendCleanupSwitchTransfersMatchHostedImagesAsync(string policy)
     {
         var cases = new (string Name, string Body, string Equivalent, int Expected)[] {
@@ -64,24 +63,22 @@ public sealed partial class CliTests
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build", directory, "-", "-o", native, "--runtime", policy, "--json");
-                Assert.True(exit == 0, $"{testCase.Name} {policy}: {exit}: {output}{error}");
+                Assert.That(exit == 0, Is.True, $"{testCase.Name} {policy}: {exit}: {output}{error}");
                 var (hostExit, hostOutput, hostError) = await RunAsync(Encoding.UTF8.GetBytes(equivalent),
                     "build", "-", "-o", hosted, "--runtime", policy, "--json");
-                Assert.True(hostExit == 0, $"{testCase.Name} {policy}: {hostExit}: {hostOutput}{hostError}");
-                Assert.Equal(testCase.Expected, await ExecuteNativeImageAsync(native));
-                Assert.Equal(testCase.Expected, await ExecuteNativeImageAsync(hosted));
+                Assert.That(hostExit == 0, Is.True, $"{testCase.Name} {policy}: {hostExit}: {hostOutput}{hostError}");
+                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(testCase.Expected));
+                Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(testCase.Expected));
             }
             finally
             {
-                File.Delete(native);
-                File.Delete(hosted);
+                await TestFileCleanup.DeleteWithRetryAsync(native).ConfigureAwait(true);
+                await TestFileCleanup.DeleteWithRetryAsync(hosted).ConfigureAwait(true);
             }
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendCleanupSwitchTransfersComposeNestedDispatchersAsync(string policy)
     {
         const string source = """
@@ -104,18 +101,16 @@ public sealed partial class CliTests
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-",
                 "-o", path, "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {exit}: {output}{error}");
-            Assert.Equal(42, await ExecuteNativeImageAsync(path));
+            Assert.That(exit == 0, Is.True, $"{policy}: {exit}: {output}{error}");
+            Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(42));
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendCleanupSwitchTransfersRejectCyclesAndEscapesAsync(string policy)
     {
         var sources = new[] {
@@ -145,23 +140,23 @@ public sealed partial class CliTests
             var (initial, initialOutput, initialError) = await RunAsync(
                 Encoding.UTF8.GetBytes("public int32 Main() => 42;"), "frontend-build",
                 directory, "-", "-o", path, "--runtime", policy, "--json");
-            Assert.True(initial == 0, $"{initial}: {initialOutput}{initialError}");
+            Assert.That(initial == 0, Is.True, $"{initial}: {initialOutput}{initialError}");
             var image = await File.ReadAllBytesAsync(path);
             for (var index = 0; index < sources.Length; index++)
             {
                 var source = sources[index];
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build", directory, "-", "-o", path, "--runtime", policy, "--json");
-                Assert.True(exit == 1, $"{policy}: {source}: {exit}: {output}{error}");
-                Assert.Empty(error);
+                Assert.That(exit == 1, Is.True, $"{policy}: {source}: {exit}: {output}{error}");
+                Assert.That(error, Is.Empty);
                 using var document = JsonDocument.Parse(output);
-                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+                Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
                 if (index < 9)
                 {
-                    Assert.Equal("TRM5001", document.RootElement.GetProperty("diagnostics")[0]
-                        .GetProperty("code").GetString());
+                    Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                        .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
                 }
-                Assert.Equal(image, await File.ReadAllBytesAsync(path));
+                Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(image));
             }
         }
         finally

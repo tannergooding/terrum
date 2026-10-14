@@ -5,15 +5,14 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task CoalescingMatchesCompiledScannerAndRunsAotAsync(string policy)
     {
         const string source = """
@@ -36,18 +35,18 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(source);
             var (result, output, error) = await RunAsync(input, "build", "-", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(result == 0, output + error);
+            Assert.That(result == 0, Is.True, output + error);
             (result, output, error) = await RunAsync(input, "build-component",
                 Path.Combine(root, "self-host"), "-", "-o", scanned,
                 "--runtime", policy, "--json");
-            Assert.True(result == 0, output + error);
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));
+            Assert.That(result == 0, Is.True, output + error);
+            Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             using var process = Process.Start(new ProcessStartInfo(scanned) {
                 UseShellExecute = false,
                 CreateNoWindow = true,
             }) ?? throw new InvalidOperationException("Could not start coalescing executable.");
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
-            Assert.Equal(42, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(42));
         }
         finally
         {

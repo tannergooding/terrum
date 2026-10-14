@@ -6,13 +6,13 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Fact]
+    [Test]
     public async Task CheckedInt32PredicatesMatchWidenedArithmeticAcrossAotAndJitAsync()
     {
         var checks = new List<string>();
@@ -65,7 +65,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedUInt32PredicatesMatchWidenedArithmeticAcrossAotAndJitAsync()
     {
         var checks = new List<string>();
@@ -113,7 +113,7 @@ public sealed partial class JitTests
         }
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedInt64PredicatesMatchExactArithmeticAcrossAotAndJitAsync()
     {
         var checks = new List<string>();
@@ -159,7 +159,7 @@ public sealed partial class JitTests
             """).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task CheckedUInt64PredicatesMatchExactArithmeticAcrossAotAndJitAsync()
     {
         var checks = new List<string>();

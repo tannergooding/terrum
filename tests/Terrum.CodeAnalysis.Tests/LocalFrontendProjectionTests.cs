@@ -7,20 +7,20 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class LocalFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReadResultRejectsForgedLocalDeclarationsAndAnchors()
     {
         const string text = "public int32 Value(int32 x) { mut var y = x; return y; }";
         var words = Projection(text, assignment: false);
         var source = SourceText.From(text);
-        Assert.True(ScalarFrontendHost.ReadResult(source, Bytes(words)).IsValid);
-        Assert.Single(ScalarFrontendHost.ReadResult(source, Bytes(words)).Locals);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words)).IsValid, Is.True);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words)).Locals, Has.Exactly(1).Items);
 
         Reject(0, 20);
         Reject(298, 13);
@@ -48,13 +48,13 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultRejectsForgedAssignmentOrderAndMutability()
     {
         const string text = "public int32 Value(int32 x) { mut var y = x; y = y; return y; }";
         var words = Projection(text, assignment: true);
         var source = SourceText.From(text);
-        Assert.Equal(2, ScalarFrontendHost.ReadResult(source, Bytes(words)).Statements.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words)).Statements.Length, Is.EqualTo(2));
 
         Reject(301, 0);
         Reject(337, 1);
@@ -74,15 +74,15 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultAuditsTypedVacantLocalInitializationAuthority()
     {
         const string text = "public int32 Value(int32 x) { init int32 y; y = x; return y; }";
         var words = InitializationProjection(text);
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.True(result.IsValid);
-        Assert.True(Assert.Single(result.Locals).IsInitialization);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Single(result.Locals).IsInitialization, Is.True);
 
         Reject(0, 60);
         Reject(301, 0);
@@ -101,16 +101,16 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultAuditsInferredVacantLocalTypeFromInitialization()
     {
         const string text = "public int32 Value(int32 x) { init var y; y = x; return y; }";
         var words = InitializationProjection(text, inferred: true);
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.True(result.IsValid);
-        Assert.Equal(87, words[0]);
-        Assert.True(Assert.Single(result.Locals).IsInitialization);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(words[0], Is.EqualTo(87));
+        Assert.That(global::System.Linq.Enumerable.Single(result.Locals).IsInitialization, Is.True);
 
         Reject(0, 61);
         Reject(300, 2);
@@ -127,16 +127,16 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultAuditsLiteralConstantLocalsAndVersionGate()
     {
         const string text = "public int32 Value() { const int32 value = 42; return value; }";
         var words = ConstantProjection(text);
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.True(result.IsValid);
-        Assert.Equal(87, words[0]);
-        Assert.True(Assert.Single(result.Locals).IsConstant);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(words[0], Is.EqualTo(87));
+        Assert.That(global::System.Linq.Enumerable.Single(result.Locals).IsConstant, Is.True);
 
         Reject(0, 62);
         Reject(301, 0);
@@ -156,16 +156,16 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultAuditsTryFinallyExtentsAndVersionGate()
     {
         const string text = "int32 Main() { try { return 42; } finally { } }";
         var words = TryFinallyProjection(text);
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.True(result.IsValid);
-        Assert.Equal(87, words[0]);
-        Assert.Equal(3, result.Statements.Length);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(words[0], Is.EqualTo(87));
+        Assert.That(result.Statements.Length, Is.EqualTo(3));
 
         Reject(0, 64);
         Reject(333, 3);
@@ -180,14 +180,14 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultAuditsUnsafeCatchExtentsAndRuntimePolicy()
     {
         const string text = "int32 Main() { unsafe { try { return 42; } catch { return 0; } } }";
         var words = CheckedCatchProjection(text);
         var source = SourceText.From(text);
-        Assert.True(ScalarFrontendHost.ReadResult(source, Bytes(words),
-            BoundRuntimePolicy.CheckedExceptions).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words),
+            BoundRuntimePolicy.CheckedExceptions).IsValid, Is.True);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, Bytes(words)));
 
         Reject(0, 65);
@@ -205,14 +205,14 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultAuditsCheckedCatchFinallyExtent()
     {
         const string text = "int32 Main() { unsafe { try { return 42; } catch { return 0; } finally { } } }";
         var words = CheckedCatchProjection(text, includeFinally: true);
         var source = SourceText.From(text);
-        Assert.True(ScalarFrontendHost.ReadResult(source, Bytes(words),
-            BoundRuntimePolicy.CheckedExceptions).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes(words),
+            BoundRuntimePolicy.CheckedExceptions).IsValid, Is.True);
 
         Reject(0, 66);
         Reject(348, 6);
@@ -228,26 +228,26 @@ public sealed class LocalFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void ReadResultAuditsClosedStaticProofStatement()
     {
         const string text = "public int32 Value() { static require true; return 42; }";
         var words = StaticProofProjection(text);
         var source = SourceText.From(text);
         var result = ScalarFrontendHost.ReadResult(source, Bytes(words));
-        Assert.True(result.IsValid);
-        Assert.Equal(2, result.Statements.Length);
-        Assert.Equal(35, result.Statements[0].Kind);
-        Assert.Equal(8, result.Statements[1].Kind);
+        Assert.That(result.IsValid, Is.True);
+        Assert.That(result.Statements.Length, Is.EqualTo(2));
+        Assert.That(result.Statements[0].Kind, Is.EqualTo(35));
+        Assert.That(result.Statements[1].Kind, Is.EqualTo(8));
 
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var actual = ScalarFrontendHost.BindLibrary(source, Bytes(words), policy);
             var hosted = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
-            Assert.Equal(NativeEmitter.EmitLibrary(Assert.IsType<BoundProgram>(hosted.Program), ["Value"],
-                (NativeRuntimePolicy)policy), NativeEmitter.EmitLibrary(actual, ["Value"],
-                    (NativeRuntimePolicy)policy));
+            Assert.That(hosted.HasErrors, Is.False, string.Join(Environment.NewLine, hosted.Diagnostics));
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["Value"],
+                    (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = hosted.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Value"],
+                (NativeRuntimePolicy)policy)));
         }
 
         Reject(0, 67);

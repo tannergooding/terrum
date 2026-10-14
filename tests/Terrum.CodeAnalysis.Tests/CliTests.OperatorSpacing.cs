@@ -5,7 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -13,10 +13,8 @@ public sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int OperatorUnary(int value);
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task OperatorSpacingPreservesHostedComponentAndNativeExecutionAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -40,9 +38,9 @@ public sealed partial class CliTests
                         ? new[] { command, "-", "--runtime", policy, "--json" }
                         : new[] { command, frontend, "-", "--runtime", policy, "--json" };
                     var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
-                    Assert.Equal(42, exit);
-                    Assert.Empty(output);
-                    Assert.Empty(error);
+                    Assert.That(exit, Is.EqualTo(42));
+                    Assert.That(output, Is.Empty);
+                    Assert.That(error, Is.Empty);
                 }
                 foreach (var arguments in new[] {
                     new[] { "build", "-", "-o", hosted, "--runtime", policy, "--json" },
@@ -51,14 +49,14 @@ public sealed partial class CliTests
                 })
                 {
                     var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(source), arguments);
-                    Assert.Equal(0, exit);
-                    Assert.Empty(error);
+                    Assert.That(exit, Is.EqualTo(0));
+                    Assert.That(error, Is.Empty);
                 }
-                Assert.Equal(42, await ExecuteNativeImageAsync(hosted));
-                Assert.Equal(42, await ExecuteNativeImageAsync(component));
-                Assert.Equal(42, await ExecuteNativeImageAsync(native));
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(component));
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(await ExecuteNativeImageAsync(hosted), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(component), Is.EqualTo(42));
+                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(42));
+                Assert.That(await File.ReadAllBytesAsync(component), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             }
             foreach (var (command, path) in new[] { ("build-component", component), ("frontend-build", native) })
             {
@@ -77,9 +75,9 @@ public sealed partial class CliTests
                     var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(invalid), command,
                         command == "build-component" ? scanner : frontend,
                         "-", "-o", path, "--runtime", policy, "--json");
-                    Assert.Equal(1, exit);
-                    Assert.Empty(error);
-                    Assert.Equal(original, await File.ReadAllBytesAsync(path));
+                    Assert.That(exit, Is.EqualTo(1));
+                    Assert.That(error, Is.Empty);
+                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
                 }
             }
         }
@@ -91,10 +89,8 @@ public sealed partial class CliTests
             }
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task OperatorSpacingPreservesNativeLibraryBytesAndExportsAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -113,16 +109,16 @@ public sealed partial class CliTests
                     "build-library", "-", "--export", "Value", "-o", hosted, "--runtime", policy, "--json");
                 var (nativeExit, _, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build-library", frontend, "-", "-o", native, "--runtime", policy, "--json");
-                Assert.Equal(0, hostedExit);
-                Assert.Equal(0, nativeExit);
-                Assert.Empty(hostedError);
-                Assert.Empty(nativeError);
-                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(native));
+                Assert.That(hostedExit, Is.EqualTo(0));
+                Assert.That(nativeExit, Is.EqualTo(0));
+                Assert.That(hostedError, Is.Empty);
+                Assert.That(nativeError, Is.Empty);
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
                 var handle = NativeLibrary.Load(native);
                 try
                 {
                     var invoke = Marshal.GetDelegateForFunctionPointer<OperatorUnary>(NativeLibrary.GetExport(handle, "Value"));
-                    Assert.Equal(42, invoke(22));
+                    Assert.That(invoke(22), Is.EqualTo(42));
                 }
                 finally
                 {

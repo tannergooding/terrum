@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmMethodSigAndParamTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EmitsCallableRowsInAFramedArtifact()
     {
         var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 0, 0, 0, 0);
@@ -24,14 +24,14 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         };
         var paramBytes = TrRmParamTableWriter.Encode(paramRows, sigs, types);
         var parameters = new TrRmParamTableReader(paramBytes, 2, sigs, types);
-        Assert.Equal(24, sigBytes.Length);
-        Assert.Equal(32, paramBytes.Length);
-        Assert.Equal((byte)4, parameters.GetMode(2));
+        Assert.That(sigBytes.Length, Is.EqualTo(24));
+        Assert.That(paramBytes.Length, Is.EqualTo(32));
+        Assert.That(parameters.GetMode(2), Is.EqualTo((byte)4));
 
         rows[0] = rows[0] with { ResultTypeSpecRow = 0 };
         paramRows[1] = paramRows[1] with { Mode = 9 };
-        Assert.Equal(1, sigs.GetResultTypeSpec(1));
-        Assert.Equal((byte)4, parameters.GetMode(2));
+        Assert.That(sigs.GetResultTypeSpec(1), Is.EqualTo(1));
+        Assert.That(parameters.GetMode(2), Is.EqualTo((byte)4));
 
         var nameBytes = TrRmStringTableWriter.EncodeNames([("Only", 0), ("Run", 0)]);
         var strings = new TrRmStringTableReader(nameBytes, 2);
@@ -44,7 +44,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         ], strings, modules, nominalTypes, sigs, 0, 0);
         var methods = new TrRmMethodDefTableReader(methodBytes, 1, strings, modules,
             nominalTypes, sigs, 0, 0);
-        Assert.Equal("Run", methods.GetName(1));
+        Assert.That(methods.GetName(1), Is.EqualTo("Run"));
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleBytes),
             new TrRmSection(0x0002, 0, 2, nameBytes),
@@ -56,7 +56,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
-    [Fact]
+    [Test]
     public void SupportsDisjointParamRangesOutOfSignatureOrder()
     {
         var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 0, 0, 0, 0);
@@ -71,11 +71,11 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
             new TrRmParamRow(1, 0, 1, 4),
         ], sigs, types);
         _ = new TrRmParamTableReader(parameters, 2, sigs, types);
-        Assert.Equal(2, sigs.GetParamOwner(1));
-        Assert.Equal(1, sigs.GetParamOwner(2));
+        Assert.That(sigs.GetParamOwner(1), Is.EqualTo(2));
+        Assert.That(sigs.GetParamOwner(2), Is.EqualTo(1));
     }
 
-    [Fact]
+    [Test]
     public void RejectsBadSignatureReferencesRangesAndMissingParams()
     {
         var row = new TrRmMethodSigRow(1, 0, 1, 2, 0, 0);
@@ -87,7 +87,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { GenericFirst = 1 }]));
     }
 
-    [Fact]
+    [Test]
     public void RejectsBadParameterOwnershipOrdinalsTypesAndModes()
     {
         var first = new TrRmParamRow(1, 0, 1, 0);
@@ -100,7 +100,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         Assert.Throws<InvalidDataException>(() => EncodeParams([first]));
     }
 
-    [Fact]
+    [Test]
     public void RejectsBadMethodNamesSignaturesAndUnownedBodies()
     {
         var row = new TrRmMethodDefRow(0, 2, 1, 0, 0, 0, 0);

@@ -5,15 +5,14 @@ using System.IO;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task IndependentCallBytesRunAndBuildWithoutSourceAsync(bool indexed)
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-raw-call-{Guid.NewGuid():N}");
@@ -27,26 +26,25 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(artifact, bytes);
             var (ran, output, error) = await RunAsync([], "run-trrm", artifact,
                 "--runtime", "fail-fast", "--json");
-            Assert.True(ran == 41, $"Exit {ran}: {output}{Environment.NewLine}{error}");
-            Assert.Empty(output);
-            Assert.Empty(error);
+            Assert.That(ran == 41, Is.True, $"Exit {ran}: {output}{Environment.NewLine}{error}");
+            Assert.That(output, Is.Empty);
+            Assert.That(error, Is.Empty);
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
                 "-o", executable, "--runtime", "fail-fast", "--json");
-            Assert.True(built == 0, $"Exit {built}: {buildOutput}{Environment.NewLine}{buildError}");
-            Assert.Empty(buildError);
-            Assert.Equal(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast),
-                await File.ReadAllBytesAsync(executable));
-            Assert.Equal(41, await ExecuteTrRmImageAsync(executable));
-            Assert.Equal(bytes, await File.ReadAllBytesAsync(artifact));
+            Assert.That(built == 0, Is.True, $"Exit {built}: {buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(NativeEmitter.Emit(TrRmExecutableCompiler.Load(bytes), NativeRuntimePolicy.FailFast)));
+            Assert.That(await ExecuteTrRmImageAsync(executable), Is.EqualTo(41));
+            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(bytes));
         }
         finally
         {
             File.Delete(artifact);
-            File.Delete(executable);
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
         }
     }
 
-    [Fact]
+    [Test]
     public async Task InvalidPersistedCallCannotReplaceAnExistingNativeImageAsync()
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-invalid-call-{Guid.NewGuid():N}");
@@ -62,9 +60,9 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(executable, retained);
             var (built, output, error) = await RunAsync([], "build-trrm", artifact,
                 "-o", executable, "--runtime", "fail-fast", "--json");
-            Assert.True(built == 1, $"Exit {built}: {output}{Environment.NewLine}{error}");
-            Assert.True(output.Length != 0 || error.Length != 0);
-            Assert.Equal(retained, await File.ReadAllBytesAsync(executable));
+            Assert.That(built == 1, Is.True, $"Exit {built}: {output}{Environment.NewLine}{error}");
+            Assert.That(output.Length != 0 || error.Length != 0, Is.True);
+            Assert.That(await File.ReadAllBytesAsync(executable), Is.EqualTo(retained));
         }
         finally
         {

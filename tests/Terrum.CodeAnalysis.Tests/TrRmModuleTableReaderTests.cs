@@ -4,25 +4,25 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmModuleTableReaderTests
 {
-    [Fact]
+    [Test]
     public void ResolvesDistinctModuleNamesAndEntryOwnership()
     {
         var strings = new TrRmStringTableReader(TwoNames(), 2);
         var modules = new TrRmModuleTableReader(TwoModules(), 2, strings, 0, 0, 2, 0);
-        Assert.Equal("A", modules.GetIdentity(1));
-        Assert.Equal("B", modules.GetIdentity(2));
-        Assert.True(modules.TryFindModule("B", out var row));
-        Assert.Equal(2, row);
-        Assert.False(modules.TryFindModule("b", out row));
-        Assert.Equal(0, row);
-        Assert.False(modules.TryFindModule("\u00E9\U00010400", out row));
-        Assert.Equal(0, row);
+        Assert.That(modules.GetIdentity(1), Is.EqualTo("A"));
+        Assert.That(modules.GetIdentity(2), Is.EqualTo("B"));
+        Assert.That(modules.TryFindModule("B", out var row), Is.True);
+        Assert.That(row, Is.EqualTo(2));
+        Assert.That(modules.TryFindModule("b", out row), Is.False);
+        Assert.That(row, Is.EqualTo(0));
+        Assert.That(modules.TryFindModule("\u00E9\U00010400", out row), Is.False);
+        Assert.That(row, Is.EqualTo(0));
         Assert.Throws<ArgumentException>(() => FindModule(TwoModules(), ""));
         Assert.Throws<ArgumentException>(() => FindModule(TwoModules(), "A\0"));
         Assert.Throws<ArgumentException>(() => FindModule(TwoModules(), "\uD800"));
@@ -31,29 +31,27 @@ public sealed class TrRmModuleTableReaderTests
         Assert.Throws<InvalidDataException>(() => GetIdentity(TwoModules(), 3));
     }
 
-    [Fact]
+    [Test]
     public void SelectsModulesByDecodedIdentityAcrossStringEncodings()
     {
         var section = TrRmStringTableWriter.EncodeNames([("A", 0), ("B", 2)]);
         var strings = new TrRmStringTableReader(section, 2);
         var modules = new TrRmModuleTableReader(TwoModules(), 2, strings, 0, 0, 2, 0);
-        Assert.True(modules.TryFindModule("B", out var row));
-        Assert.Equal(2, row);
+        Assert.That(modules.TryFindModule("B", out var row), Is.True);
+        Assert.That(row, Is.EqualTo(2));
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(4, 2)]
-    [InlineData(8, 2)]
-    [InlineData(12, 2)]
-    [InlineData(16, 1)]
-    [InlineData(20, 1)]
-    [InlineData(24, 1)]
-    [InlineData(28, 0)]
-    [InlineData(32, 2)]
-    [InlineData(36, 0)]
-    [InlineData(40, 2)]
-    [InlineData(44 + 36, 1)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(4,(byte)(2))]
+    [TestCase(8,(byte)(2))]
+    [TestCase(12,(byte)(2))]
+    [TestCase(16,(byte)(1))]
+    [TestCase(20,(byte)(1))]
+    [TestCase(24,(byte)(1))]
+    [TestCase(28,(byte)(0))]
+    [TestCase(32,(byte)(2))]
+    [TestCase(36,(byte)(0))]
+    [TestCase(40,(byte)(2))]
+    [TestCase(44 + 36,(byte)(1))]
     public void RejectsInvalidFieldsAndModulePartitioning(int byteIndex, byte replacement)
     {
         var moduleBytes = TwoModules();
@@ -61,7 +59,7 @@ public sealed class TrRmModuleTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsDuplicateDecodedIdentitiesAcrossEncodings()
     {
         var bytes = TwoNames();
@@ -70,14 +68,14 @@ public sealed class TrRmModuleTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(TwoModules(), bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsTruncatedRowsAndOutOfRangeTableCounts()
     {
         Assert.Throws<InvalidDataException>(() => Create(TwoModules()[..^1]));
         Assert.Throws<InvalidDataException>(() => Create(TwoModules(), methodDefCount: -1));
     }
 
-    [Fact]
+    [Test]
     public void ReadsFeatureRangesAndRejectsMalformedOrOutOfRangeRanges()
     {
         var moduleBytes = TwoModules();
@@ -86,8 +84,8 @@ public sealed class TrRmModuleTableReaderTests
         var strings = new TrRmStringTableReader(TwoNames(), 2);
         var modules = new TrRmModuleTableReader(moduleBytes, 2, strings,
             0, 0, 2, 0, 1);
-        Assert.Equal((1, 1), modules.GetFeatureRange(1));
-        Assert.Equal((0, 0), modules.GetFeatureRange(2));
+        Assert.That(modules.GetFeatureRange(1), Is.EqualTo((1, 1)));
+        Assert.That(modules.GetFeatureRange(2), Is.EqualTo((0, 0)));
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 0));
 
         Write(moduleBytes, 20, 0);

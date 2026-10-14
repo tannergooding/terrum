@@ -8,7 +8,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -205,10 +205,8 @@ public sealed class CompactIndexedBodyFramingComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedBodyFramingMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var indexedConstant = TrRmBodyExampleTests.IndexedScalarOperation(
@@ -249,13 +247,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
         {
             if (testCase.HasHostedOracle)
             {
-                Assert.Equal(testCase.ExpectedBlockCount,
-                    TrRmBodyExampleTests.InspectIndexed(testCase.Section,
+                Assert.That(TrRmBodyExampleTests.InspectIndexed(testCase.Section,
                         parameterCount: testCase.ParameterCount,
-                        parameterTypeIds: testCase.ParameterTypeIds).Blocks);
-                Assert.Equal(testCase.ExpectedOperationCount,
-                    TrRmBodyExampleTests.CountIndexedOperations(testCase.Section,
-                        testCase.ParameterCount, parameterTypeIds: testCase.ParameterTypeIds));
+                        parameterTypeIds: testCase.ParameterTypeIds).Blocks, Is.EqualTo(testCase.ExpectedBlockCount));
+                Assert.That(TrRmBodyExampleTests.CountIndexedOperations(testCase.Section,
+                        testCase.ParameterCount, parameterTypeIds: testCase.ParameterTypeIds), Is.EqualTo(testCase.ExpectedOperationCount));
             }
 
             var compilation = Compilation.Create(components,
@@ -273,21 +269,17 @@ public sealed class CompactIndexedBodyFramingComponentTests
                 new HostBuffer("BodyBlockOperationCounts", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(-1, 16)], true),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
             var jitResult = NativeJit.Execute(program, (NativeRuntimePolicy)policy);
-            Assert.True(jitResult == 0,
-                $"JIT result {jitResult} for Body {Convert.ToHexString(testCase.Section.AsSpan(8))}.");
+            Assert.That(jitResult == 0, Is.True, $"JIT result {jitResult} for Body {Convert.ToHexString(testCase.Section.AsSpan(8))}.");
             var aotResult = await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
                 .ConfigureAwait(true);
-            Assert.True(aotResult == 0,
-                $"AOT result {aotResult} for Body {Convert.ToHexString(testCase.Section.AsSpan(8))}.");
+            Assert.That(aotResult == 0, Is.True, $"AOT result {aotResult} for Body {Convert.ToHexString(testCase.Section.AsSpan(8))}.");
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedBodyBlockOperationCountsAreFramedPerBlockAsync(
         BoundRuntimePolicy policy)
     {
@@ -311,16 +303,14 @@ public sealed class CompactIndexedBodyFramingComponentTests
             new HostBuffer("BodyBlockOperationCounts", PrimitiveType.Int32,
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedBodyBlockOperationCountsMatchHostedLoopAsync(
         BoundRuntimePolicy policy)
     {
@@ -343,16 +333,14 @@ public sealed class CompactIndexedBodyFramingComponentTests
             new HostBuffer("BodyBlockOperationCounts", PrimitiveType.Int32,
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedBodyBlockOperationCountsRejectOneMissingSlotAsync(
         BoundRuntimePolicy policy)
     {
@@ -372,16 +360,14 @@ public sealed class CompactIndexedBodyFramingComponentTests
             new HostBuffer("BodyBlockOperationCounts", PrimitiveType.Int32,
                 [.. Enumerable.Repeat(-1, 3)], true),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ValidatedBodyIndexSupportsBatchFramingAsync(BoundRuntimePolicy policy)
     {
         const int recordCount = 512;
@@ -402,16 +388,14 @@ public sealed class CompactIndexedBodyFramingComponentTests
             new HostBuffer("BodyBlockOperationCounts", PrimitiveType.Int32,
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CompactIndexedBodyFramingCoversInstructionAndTerminatorSchemasAsync(
         BoundRuntimePolicy policy)
     {
@@ -463,11 +447,11 @@ public sealed class CompactIndexedBodyFramingComponentTests
             new HostBuffer("BodyBlockOperationCounts", PrimitiveType.Int32,
                 [.. Enumerable.Repeat(-1, 16)], true),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static async Task<List<SyntaxTree>> LoadComponentsAsync(string root)
@@ -481,7 +465,7 @@ public sealed class CompactIndexedBodyFramingComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
 

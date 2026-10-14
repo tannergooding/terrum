@@ -3,20 +3,19 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData((ushort)0)]
-    [InlineData((ushort)1)]
-    [InlineData((ushort)0xD7FF)]
-    [InlineData((ushort)0xD800)]
-    [InlineData((ushort)0xDFFF)]
-    [InlineData((ushort)0xE000)]
-    [InlineData(ushort.MaxValue)]
+    [TestCase((ushort)0)]
+    [TestCase((ushort)1)]
+    [TestCase((ushort)0xD7FF)]
+    [TestCase((ushort)0xD800)]
+    [TestCase((ushort)0xDFFF)]
+    [TestCase((ushort)0xE000)]
+    [TestCase(ushort.MaxValue)]
     public async Task CheckedChar16WideningsAlwaysPublishCodeUnitAcrossAotAndJitAsync(ushort codeUnit)
     {
         var component = await File.ReadAllTextAsync(

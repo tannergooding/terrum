@@ -5,68 +5,61 @@ using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class StructuredLoopTests
 {
-    [Theory]
-    [InlineData("do { continue; } while (false);", SyntaxKind.DoStatement)]
-    [InlineData("outer: while (true) { break outer; }", SyntaxKind.LabeledLoopStatement)]
-    [InlineData("outer: for (;;) { do { continue outer; } while (false); }", SyntaxKind.LabeledLoopStatement)]
+    [TestCase("do { continue; } while (false);",SyntaxKind.DoStatement)]
+    [TestCase("outer: while (true) { break outer; }",SyntaxKind.LabeledLoopStatement)]
+    [TestCase("outer: for (;;) { do { continue outer; } while (false); }",SyntaxKind.LabeledLoopStatement)]
     public void SyntaxRetainsLoopLabelsAndPostTestedSemicolon(string statement, SyntaxKind kind)
     {
         var text = "void Main() { /*before*/ " + statement + " /*after*/ }";
         var tree = SyntaxTree.Parse(text);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal(text, tree.Root.ToFullString());
-        var node = Assert.Single(tree.Root.DescendantNodes(), child => child.Kind == kind);
-        Assert.Equal(statement, text.Substring(node.Span.Start, node.Span.Length));
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(text));
+        var node = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), child => child.Kind == kind);
+        Assert.That(text.Substring(node.Span.Start, node.Span.Length), Is.EqualTo(statement));
     }
-
-    [Theory]
-    [InlineData("do { } while (false)", "TRM1001")]
-    [InlineData("do { } (false);", "TRM1001")]
-    [InlineData("outer: do { break absent; } while (false);", "TRM3008")]
-    [InlineData("outer: while (true) { break outer; } break outer;", "TRM3008")]
-    [InlineData("outer: while (true) { try { } finally { break outer; } }", "TRM3019")]
-    [InlineData("outer: for (;;) { try { } finally { continue outer; } }", "TRM3019")]
+    [TestCase("do { } while (false)","TRM1001")]
+    [TestCase("do { } (false);","TRM1001")]
+    [TestCase("outer: do { break absent; } while (false);","TRM3008")]
+    [TestCase("outer: while (true) { break outer; } break outer;","TRM3008")]
+    [TestCase("outer: while (true) { try { } finally { break outer; } }","TRM3019")]
+    [TestCase("outer: for (;;) { try { } finally { continue outer; } }","TRM3019")]
     public void MalformedOrEscapingTransfersAreRejected(string statement, string diagnostic)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("void Main() { " + statement + " }"));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
     }
-
-    [Theory]
-    [InlineData("do { value = 42; } while (value == 0); return value;", false)]
-    [InlineData("while (false) { value = 42; } return value;", true)]
-    [InlineData("do { if (flag) { continue; } value = 42; } while (value == 0); return value;", true)]
-    [InlineData("do { if (flag) { break; } value = 42; } while (false); return value;", true)]
-    [InlineData("do { value = 42; continue; } while (value == 0); return value;", false)]
+    [TestCase("do { value = 42; } while (value == 0); return value;",false)]
+    [TestCase("while (false) { value = 42; } return value;",true)]
+    [TestCase("do { if (flag) { continue; } value = 42; } while (value == 0); return value;",true)]
+    [TestCase("do { if (flag) { break; } value = 42; } while (false); return value;",true)]
+    [TestCase("do { value = 42; continue; } while (value == 0); return value;",false)]
     public void FirstIterationAndTransferPathsPreserveDefiniteAssignment(string body, bool errors)
     {
         var source = "[NoThrow] bool Clear(out int32 output) { return false; }"
             + "int32 Take(bool flag) { mut int32 value = 0; Clear(out value); " + body + " }"
             + "int32 Main() { return Take(false); }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Equal(errors, compilation.HasErrors);
+        Assert.That(compilation.HasErrors, Is.EqualTo(errors));
     }
-
-    [Theory]
-    [InlineData("outer: while (true) { while (true) { break outer; } }", 2)]
-    [InlineData("outer: for (;;) { do { continue outer; } while (false); }", 2)]
-    [InlineData("outer: do { inner: do { continue outer; } while (false); } while (false);", 2)]
+    [TestCase("outer: while (true) { while (true) { break outer; } }",2)]
+    [TestCase("outer: for (;;) { do { continue outer; } while (false); }",2)]
+    [TestCase("outer: do { inner: do { continue outer; } while (false); } while (false);",2)]
     public void NamedTransfersResolveLexicalTarget(string body, int depth)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " return 42; }"));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var transfers = program.Functions[program.EntryPoint].Body.DescendantTransfers();
-        Assert.Contains(transfers, transfer => transfer == depth);
+        Assert.That(global::System.Linq.Enumerable.Any(transfers,transfer => transfer == depth),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void EnclosingLoopLabelsCannotBeShadowed()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -78,10 +71,10 @@ public sealed class StructuredLoopTests
                 return 42;
             }
             """));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3004");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3004"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void DisjointLoopsMayReuseLabels()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -91,18 +84,18 @@ public sealed class StructuredLoopTests
                 return 42;
             }
             """));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.Equal(new[] { 1, 1 }, program.Functions[program.EntryPoint].Body.DescendantTransfers());
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(program.Functions[program.EntryPoint].Body.DescendantTransfers(), Is.EqualTo(new[] { 1, 1 }));
     }
 
-    [Fact]
+    [Test]
     public void ForgedNonEnclosingTargetFailsVerificationAndEmission()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { while (true) { break; } return 42; }"));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var function = program.Functions[program.EntryPoint];
-        var loop = Assert.IsType<BoundWhile>(function.Body.Statements[0]);
+        var loop = ((global::System.Func<BoundWhile>)(() => { var __nunitActual3 = function.Body.Statements[0]; Assert.That(__nunitActual3, Is.TypeOf<BoundWhile>()); return (BoundWhile)__nunitActual3!; }))();
         var invalid = program with {
             Functions = program.Functions.SetItem(program.EntryPoint, function with {
                 Body = function.Body with {
@@ -112,8 +105,8 @@ public sealed class StructuredLoopTests
                 },
             }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(invalid, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(invalid, NativeRuntimePolicy.FailFast))!;
     }
 }
 

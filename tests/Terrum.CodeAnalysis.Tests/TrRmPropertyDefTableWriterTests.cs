@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmPropertyDefTableWriterTests
 {
-    [Fact]
+    [Test]
     public void EmitsGetterIdentityIndependentOfImplementationName()
     {
         var stringBytes = Names();
@@ -30,12 +30,12 @@ public sealed class TrRmPropertyDefTableWriterTests
             rows, strings, types, specs, methods, signatures);
         var properties = new TrRmPropertyDefTableReader(propertyBytes, 1,
             strings, types, specs, methods, signatures);
-        Assert.Equal(20, propertyBytes.Length);
-        Assert.Equal("Value", properties.GetName(1));
-        Assert.Equal("Read", methods.GetName(properties.GetGetterMethod(1)));
+        Assert.That(propertyBytes.Length, Is.EqualTo(20));
+        Assert.That(properties.GetName(1), Is.EqualTo("Value"));
+        Assert.That(methods.GetName(properties.GetGetterMethod(1)), Is.EqualTo("Read"));
 
         rows[0] = rows[0] with { GetterMethodDefRow = 0 };
-        Assert.Equal(1, properties.GetGetterMethod(1));
+        Assert.That(properties.GetGetterMethod(1), Is.EqualTo(1));
 
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleBytes),
@@ -49,7 +49,7 @@ public sealed class TrRmPropertyDefTableWriterTests
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
-    [Fact]
+    [Test]
     public void RejectsInvalidOwnerNameTypeGetterAndVisibility()
     {
         var row = new TrRmPropertyDefRow(1, 5, 1, 1, 0);

@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -19,10 +19,8 @@ public sealed class IntegerParsingRadixModuleTests
 {
     private const int MaximumSourceCodeUnits = 16_384;
     private const string SourceIntegerParsingNamespace = "Terrum.CodeAnalysis.Numerics64.";
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task IntegerParsingRadixModuleMatchesHostOracleAcrossFreshSourceGrantsAsync(
         BoundRuntimePolicy policy)
     {
@@ -34,7 +32,7 @@ public sealed class IntegerParsingRadixModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -119,9 +117,8 @@ public sealed class IntegerParsingRadixModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.Numerics64.VerifyBatch"]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -129,9 +126,8 @@ public sealed class IntegerParsingRadixModuleTests
             int32 Main() { return VerifyBatch(); }
             """, "integer-parsing-radix-consumer.terrum");
         var consumerCompilation = Compilation.Create(consumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         foreach (var radix in Enumerable.Range(2, 35))
@@ -148,7 +144,7 @@ public sealed class IntegerParsingRadixModuleTests
 
         var maximumLengthZeros = new string('0', MaximumSourceCodeUnits - 8);
         var maximumLengthNines = new string('9', MaximumSourceCodeUnits - 8);
-        Assert.Equal(MaximumSourceCodeUnits, 8 + maximumLengthZeros.Length);
+        Assert.That(8 + maximumLengthZeros.Length, Is.EqualTo(MaximumSourceCodeUnits));
         foreach (var api in Enum.GetValues<ParserApi>())
         {
             ExecuteBatch([new ParseFixture(api, 10, maximumLengthZeros)],
@@ -166,14 +162,12 @@ public sealed class IntegerParsingRadixModuleTests
                 linked, policy, $"maximum-length overflow digits in radix {radix}");
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceGrantIntegerParsingScalarExportsMatchHostOracleAsync(
         BoundRuntimePolicy policy)
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = RepositoryRoot();
         var componentNames = new[] { "WideIntegerFacts", "SourceIntegerParsing" };
         var trees = new SyntaxTree[componentNames.Length];
@@ -182,7 +176,7 @@ public sealed class IntegerParsingRadixModuleTests
             var componentPath = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, componentPath);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         var compilation = Compilation.CreateLibrary(trees,
@@ -191,27 +185,29 @@ public sealed class IntegerParsingRadixModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(compilation.HasErrors,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            Assert.IsType<BoundProgram>(compilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
             Enum.GetValues<ParserApi>().SelectMany(static api => new[] {
                 SourceIntegerParsingNamespace + "CanParse" + api + "Base",
                 SourceIntegerParsingNamespace + "Parse" + api + "Base",
             }).ToArray(), (NativeRuntimePolicy)policy);
-        Assert.Equal(Enum.GetValues<ParserApi>().Length * 2, artifact.Exports.Length);
-        Assert.All(artifact.Exports, static export => {
-            Assert.True(export.SourceDependent);
-            Assert.Equal([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.UInt32],
-                export.ParameterTypes.ToArray());
-            var isStatus = export.Name.StartsWith(
-                SourceIntegerParsingNamespace + "CanParse", StringComparison.Ordinal);
-            var parserName = export.Name[(SourceIntegerParsingNamespace.Length
-                + (isStatus ? "CanParse" : "Parse").Length)..];
-            var api = Enum.GetValues<ParserApi>().Single(value => parserName == value + "Base");
-            Assert.Equal(isStatus ? PrimitiveType.Bool : ResultType(api),
-                export.ReturnType);
-        });
+        Assert.That(artifact.Exports.Length, Is.EqualTo(Enum.GetValues<ParserApi>().Length * 2));
+        {var __nunitItems0 = artifact.Exports;        Assert.Multiple(() => {
+            foreach (var __nunitItem3 in __nunitItems0)
+            {
+                {
+                    Assert.That(__nunitItem3.SourceDependent, Is.True);
+                    Assert.That(__nunitItem3.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.UInt32]));
+                    var isStatus = __nunitItem3.Name.StartsWith(
+                        SourceIntegerParsingNamespace + "CanParse", StringComparison.Ordinal);
+                    var parserName = __nunitItem3.Name[(SourceIntegerParsingNamespace.Length
+                        + (isStatus ? "CanParse" : "Parse").Length)..];
+                    var api = Enum.GetValues<ParserApi>().Single(value => parserName == value + "Base");
+                    Assert.That(__nunitItem3.ReturnType, Is.EqualTo(isStatus ? PrimitiveType.Bool : ResultType(api)));
+                }
+            }
+        });}
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-source-integer-parsing-{Guid.NewGuid():N}.dll");
         try
@@ -239,17 +235,17 @@ public sealed class IntegerParsingRadixModuleTests
                     }
 
                     var source = "1".ToCharArray();
-                    Assert.False(InvokeCanParse(bindings, api, source, -1, 1, 10));
-                    Assert.False(InvokeCanParse(bindings, api, source, 0, 0, 10));
-                    Assert.False(InvokeCanParse(bindings, api, source, 0, -1, 10));
-                    Assert.False(InvokeCanParse(bindings, api, source, 1, 1, 10));
-                    Assert.False(InvokeCanParse(bindings, api, source, int.MaxValue, 1, 10));
-                    Assert.False(InvokeCanParse(bindings, api, source, 0, int.MaxValue, 10));
-                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, 0));
-                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, 1));
-                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, 37));
-                    Assert.False(InvokeCanParse(bindings, api, source, 0, 1, uint.MaxValue));
-                    Assert.False(InvokeCanParse(bindings, api, [], 0, 1, 10));
+                    Assert.That(InvokeCanParse(bindings, api, source, -1, 1, 10), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 0, 0, 10), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 0, -1, 10), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 1, 1, 10), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, int.MaxValue, 1, 10), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 0, int.MaxValue, 10), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 0, 1, 0), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 0, 1, 1), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 0, 1, 37), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, source, 0, 1, uint.MaxValue), Is.False);
+                    Assert.That(InvokeCanParse(bindings, api, [], 0, 1, 10), Is.False);
 
                     if (policy == BoundRuntimePolicy.CheckedExceptions)
                     {
@@ -266,24 +262,24 @@ public sealed class IntegerParsingRadixModuleTests
                 var maximumNines = new string('9', MaximumSourceCodeUnits).ToCharArray();
                 foreach (var api in Enum.GetValues<ParserApi>())
                 {
-                    Assert.True(InvokeCanParse(bindings, api, maximumZeros, 0,
-                        MaximumSourceCodeUnits, 10));
-                    Assert.Equal(BigInteger.Zero, InvokeParsedValue(bindings, api, maximumZeros, 0,
-                        MaximumSourceCodeUnits, 10));
-                    Assert.False(InvokeCanParse(bindings, api, maximumNines, 0,
-                        MaximumSourceCodeUnits, 10));
+                    Assert.That(InvokeCanParse(bindings, api, maximumZeros, 0,
+                        MaximumSourceCodeUnits, 10), Is.True);
+                    Assert.That(InvokeParsedValue(bindings, api, maximumZeros, 0,
+                        MaximumSourceCodeUnits, 10), Is.EqualTo(BigInteger.Zero));
+                    Assert.That(InvokeCanParse(bindings, api, maximumNines, 0,
+                        MaximumSourceCodeUnits, 10), Is.False);
                 }
 
                 var maximumZerosForRadix = new string('0', MaximumSourceCodeUnits).ToCharArray();
                 foreach (var radix in Enumerable.Range(2, 35))
                 {
                     var maximumDigitsForRadix = new string(Digit(radix - 1), MaximumSourceCodeUnits).ToCharArray();
-                    Assert.True(InvokeCanParse(bindings, ParserApi.UInt64, maximumZerosForRadix, 0,
-                        MaximumSourceCodeUnits, (uint)radix));
-                    Assert.Equal(BigInteger.Zero, InvokeParsedValue(bindings, ParserApi.UInt64,
-                        maximumZerosForRadix, 0, MaximumSourceCodeUnits, (uint)radix));
-                    Assert.False(InvokeCanParse(bindings, ParserApi.UInt64, maximumDigitsForRadix, 0,
-                        MaximumSourceCodeUnits, (uint)radix));
+                    Assert.That(InvokeCanParse(bindings, ParserApi.UInt64, maximumZerosForRadix, 0,
+                        MaximumSourceCodeUnits, (uint)radix), Is.True);
+                    Assert.That(InvokeParsedValue(bindings, ParserApi.UInt64,
+                        maximumZerosForRadix, 0, MaximumSourceCodeUnits, (uint)radix), Is.EqualTo(BigInteger.Zero));
+                    Assert.That(InvokeCanParse(bindings, ParserApi.UInt64, maximumDigitsForRadix, 0,
+                        MaximumSourceCodeUnits, (uint)radix), Is.False);
                 }
 
                 Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -300,10 +296,8 @@ public sealed class IntegerParsingRadixModuleTests
             File.Delete(path);
         }
     }
-
-    [Theory]
-    [InlineData("ParseUInt64Base(0, 1, 10)")]
-    [InlineData("ParseInt32Base(0, 1, 10)")]
+    [TestCase("ParseUInt64Base(0, 1, 10)")]
+    [TestCase("ParseInt32Base(0, 1, 10)")]
     public async Task InvalidSourceGrantValueQueryFailsFastInSubprocessAsync(string expression)
     {
         ArgumentNullException.ThrowIfNull(expression);
@@ -322,9 +316,8 @@ public sealed class IntegerParsingRadixModuleTests
         var compilation = Compilation.Create(trees,
             [new HostBuffer("Source", PrimitiveType.Char16, [(int)'?'], false)],
             BoundRuntimePolicy.FailFast);
-        Assert.False(compilation.HasErrors,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
 
         var pathToExecutable = Path.Combine(Path.GetTempPath(),
             $"terrum-source-integer-parsing-fail-fast-{Guid.NewGuid():N}.exe");
@@ -349,11 +342,11 @@ public sealed class IntegerParsingRadixModuleTests
                 }
                 throw;
             }
-            Assert.NotEqual(0, process.ExitCode);
+            Assert.That(process.ExitCode, Is.Not.EqualTo(0));
         }
         finally
         {
-            File.Delete(pathToExecutable);
+            await TestFileCleanup.DeleteWithRetryAsync(pathToExecutable).ConfigureAwait(true);
         }
     }
 
@@ -363,11 +356,11 @@ public sealed class IntegerParsingRadixModuleTests
         var expected = ParseOracle(fixture);
         var actualIsValid = InvokeCanParse(bindings, fixture.Api, source, 1, fixture.Text.Length,
             (uint)fixture.Radix);
-        Assert.Equal(expected.HasValue, actualIsValid);
+        Assert.That(actualIsValid, Is.EqualTo(expected.HasValue));
         if (expected.HasValue)
         {
-            Assert.Equal(expected.Value, InvokeParsedValue(bindings, fixture.Api, source, 1,
-                fixture.Text.Length, (uint)fixture.Radix));
+            Assert.That(InvokeParsedValue(bindings, fixture.Api, source, 1,
+                fixture.Text.Length, (uint)fixture.Radix), Is.EqualTo(expected.Value));
         }
     }
 
@@ -380,18 +373,18 @@ public sealed class IntegerParsingRadixModuleTests
 
     private static BigInteger InvokeParsedValue(NativeSourceGrantTestBindings bindings, ParserApi api,
         char[] source, int start, int length, uint radix) => api switch {
-        ParserApi.UInt64 => new BigInteger(bindings.Invoke<ulong>(
-            SourceIntegerParsingNamespace + "ParseUInt64Base", source, start, length, radix)),
-        ParserApi.Int64 => new BigInteger(bindings.Invoke<long>(
-            SourceIntegerParsingNamespace + "ParseInt64Base", source, start, length, radix)),
-        ParserApi.UInt32 => new BigInteger(bindings.Invoke<uint>(
-            SourceIntegerParsingNamespace + "ParseUInt32Base", source, start, length, radix)),
-        ParserApi.Int32 => new BigInteger(bindings.Invoke<int>(
-            SourceIntegerParsingNamespace + "ParseInt32Base", source, start, length, radix)),
-        ParserApi.Char16 => new BigInteger(bindings.Invoke<ushort>(
-            SourceIntegerParsingNamespace + "ParseChar16Base", source, start, length, radix)),
-        _ => throw new ArgumentOutOfRangeException(nameof(api)),
-    };
+            ParserApi.UInt64 => new BigInteger(bindings.Invoke<ulong>(
+                SourceIntegerParsingNamespace + "ParseUInt64Base", source, start, length, radix)),
+            ParserApi.Int64 => new BigInteger(bindings.Invoke<long>(
+                SourceIntegerParsingNamespace + "ParseInt64Base", source, start, length, radix)),
+            ParserApi.UInt32 => new BigInteger(bindings.Invoke<uint>(
+                SourceIntegerParsingNamespace + "ParseUInt32Base", source, start, length, radix)),
+            ParserApi.Int32 => new BigInteger(bindings.Invoke<int>(
+                SourceIntegerParsingNamespace + "ParseInt32Base", source, start, length, radix)),
+            ParserApi.Char16 => new BigInteger(bindings.Invoke<ushort>(
+                SourceIntegerParsingNamespace + "ParseChar16Base", source, start, length, radix)),
+            _ => throw new ArgumentOutOfRangeException(nameof(api)),
+        };
 
     private static PrimitiveType ResultType(ParserApi api) => api switch {
         ParserApi.UInt64 => PrimitiveType.UInt64,
@@ -427,7 +420,7 @@ public sealed class IntegerParsingRadixModuleTests
             values.AddRange(fixture.Text.Select(static codeUnit => (int)codeUnit));
         }
 
-        Assert.InRange(values.Count, 1, MaximumSourceCodeUnits);
+        Assert.That(values.Count, Is.InRange(1, MaximumSourceCodeUnits));
         var grant = new HostBuffer("Source", PrimitiveType.Char16, [.. values], false) {
             IsInvocationScoped = true,
         };
@@ -435,7 +428,7 @@ public sealed class IntegerParsingRadixModuleTests
         var failure = actual > 0 && actual <= fixtures.Length
             ? $"case {actual - 1}: {fixtures[actual - 1]}"
             : $"unexpected module result {actual}";
-        Assert.True(actual == 0, $"{description}: {failure}.");
+        Assert.That(actual == 0, Is.True, $"{description}: {failure}.");
     }
 
     private static IEnumerable<ParseFixture> FixturesForRadix(int radix)

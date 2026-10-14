@@ -1,19 +1,20 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendProjectsSameFormatFloatingOperatorsAsync(string policy)
     {
         const string Source = """
@@ -31,46 +32,41 @@ public sealed partial class CliTests
             var (componentExit, componentJson, componentError) = await RunAsync(
                 Encoding.UTF8.GetBytes(Source), "frontend-component", directory, "-",
                 "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(88, result.GetProperty("projectionVersion").GetInt32());
+                Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(88));
                 var functions = result.GetProperty("functions");
-                Assert.Contains(functions[0].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 57
-                        && node.GetProperty("type").GetInt32() == 7);
-                Assert.Contains(functions[0].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 58
+                Assert.That(global::System.Linq.Enumerable.Any(functions[0].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 57
+                        && node.GetProperty("type").GetInt32() == 7),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[0].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 58
                         && node.GetProperty("right").GetInt32() == -1
-                        && node.GetProperty("type").GetInt32() == 7);
-                Assert.Contains(functions[0].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 57
+                        && node.GetProperty("type").GetInt32() == 7),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[0].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 57
                         && node.GetProperty("right").GetInt32() == -1
-                        && node.GetProperty("type").GetInt32() == 7);
-                Assert.Contains(functions[1].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 60
-                        && node.GetProperty("type").GetInt32() == 8);
-                Assert.Contains(functions[2].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 66
-                        && node.GetProperty("type").GetInt32() == 5);
+                        && node.GetProperty("type").GetInt32() == 7),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[1].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 60
+                        && node.GetProperty("type").GetInt32() == 8),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[2].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 66
+                        && node.GetProperty("type").GetInt32() == 5),Is.True);
             }
 
             var (exit, json, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
-            Assert.Empty(error);
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
+            Assert.That(error, Is.Empty);
             using (var document = JsonDocument.Parse(json))
             {
-                Assert.Equal(88, document.RootElement.GetProperty("result")
-                    .GetProperty("projectionVersion").GetInt32());
+                Assert.That(document.RootElement.GetProperty("result")
+                    .GetProperty("projectionVersion").GetInt32(), Is.EqualTo(88));
             }
             var (hostedExit, hostedJson, hostedError) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "build-library", "-", "--export", "Arithmetic", "--export", "Divide64",
                 "--export", "NotEqual64", "-o", hosted, "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -78,33 +74,28 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("public char16 Convert(float32 value) { return char16(value); }")]
+    [TestCase("public char16 Convert(float32 value) { return char16(value); }")]
     public async Task ScalarFrontendRejectsUnapprovedFloatingToChar16ConversionsAsync(string source)
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(1, exit);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(1));
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
-        Assert.False(root.GetProperty("success").GetBoolean());
+        Assert.That(root.GetProperty("success").GetBoolean(), Is.False);
         if (root.TryGetProperty("result", out var result))
         {
-            Assert.False(result.GetProperty("valid").GetBoolean());
+            Assert.That(result.GetProperty("valid").GetBoolean(), Is.False);
         }
         else
         {
-            Assert.Contains(root.GetProperty("diagnostics").EnumerateArray(),
-                static diagnostic => diagnostic.GetProperty("code").GetString() == "TRM5001");
+            Assert.That(global::System.Linq.Enumerable.Any(root.GetProperty("diagnostics").EnumerateArray(),static diagnostic => diagnostic.GetProperty("code").GetString() == "TRM5001"),Is.True);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendRejectsNoThrowFloatingToIntegerConversionsAsync(string policy)
     {
         const string Source =
@@ -117,30 +108,28 @@ public sealed partial class CliTests
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
                 "frontend-build-library", directory, "-", "-o", outputPath,
                 "--runtime", policy, "--json");
-            Assert.Equal(1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
         }
         finally
         {
             File.Delete(outputPath);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast", "public float32 Literal() => 0.1;", 7, 3)]
-    [InlineData("checked-exceptions", "public float32 Literal() => 0.1;", 7, 3)]
-    [InlineData("fail-fast", "public float32 Literal() { return 0.1; }", 7, 3)]
-    [InlineData("checked-exceptions", "public float32 Literal() { return 0.1; }", 7, 3)]
-    [InlineData("fail-fast", "public float32 Literal() { return -0.0; }", 7, 3)]
-    [InlineData("checked-exceptions", "public float32 Literal() { return -0.0; }", 7, 3)]
-    [InlineData("fail-fast", "public float32 Literal() { return +0.1; }", 7, 657)]
-    [InlineData("checked-exceptions", "public float32 Literal() { return +0.1; }", 7, 657)]
-    [InlineData("fail-fast", "public float32 Literal() { return 0b101; }", 7, 3)]
-    [InlineData("checked-exceptions", "public float32 Literal() { return 0b101; }", 7, 3)]
-    [InlineData("fail-fast", "public float64 Literal() { return 0x123; }", 8, 3)]
-    [InlineData("checked-exceptions", "public float64 Literal() { return 0x123; }", 8, 3)]
+    [TestCase("fail-fast","public float32 Literal() => 0.1;",7,3)]
+    [TestCase("checked-exceptions","public float32 Literal() => 0.1;",7,3)]
+    [TestCase("fail-fast","public float32 Literal() { return 0.1; }",7,3)]
+    [TestCase("checked-exceptions","public float32 Literal() { return 0.1; }",7,3)]
+    [TestCase("fail-fast","public float32 Literal() { return -0.0; }",7,3)]
+    [TestCase("checked-exceptions","public float32 Literal() { return -0.0; }",7,3)]
+    [TestCase("fail-fast","public float32 Literal() { return +0.1; }",7,657)]
+    [TestCase("checked-exceptions","public float32 Literal() { return +0.1; }",7,657)]
+    [TestCase("fail-fast","public float32 Literal() { return 0b101; }",7,3)]
+    [TestCase("checked-exceptions","public float32 Literal() { return 0b101; }",7,3)]
+    [TestCase("fail-fast","public float64 Literal() { return 0x123; }",8,3)]
+    [TestCase("checked-exceptions","public float64 Literal() { return 0x123; }",8,3)]
     public async Task ScalarFrontendProjectsTargetTypedFloatingLiteralAsync(string policy, string source,
         int expectedType, int expectedOperation)
     {
@@ -152,29 +141,28 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.True(result.GetProperty("valid").GetBoolean());
+                Assert.That(result.GetProperty("valid").GetBoolean(), Is.True);
                 if (result.TryGetProperty("projectionVersion", out var projectionVersion))
                 {
-                    Assert.Equal(87, projectionVersion.GetInt32());
+                    Assert.That(projectionVersion.GetInt32(), Is.EqualTo(87));
                 }
-                Assert.Equal(expectedOperation,
-                    result.GetProperty("whenTrue").GetProperty("operation").GetInt32());
-                Assert.Equal(expectedType, result.GetProperty("whenTrue").GetProperty("type").GetInt32());
+                Assert.That(result.GetProperty("whenTrue").GetProperty("operation").GetInt32(), Is.EqualTo(expectedOperation));
+                Assert.That(result.GetProperty("whenTrue").GetProperty("type").GetInt32(), Is.EqualTo(expectedType));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Literal", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -182,10 +170,8 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendProjectsFloatingLiteralsIntoCompleteProgramsAsync(string policy)
     {
         const string Source = """
@@ -203,44 +189,39 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(Source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var functions = document.RootElement.GetProperty("result")
                     .GetProperty("functions");
-                Assert.Equal(5, functions.GetArrayLength());
-                Assert.Contains(functions[0].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 3
-                        && node.GetProperty("type").GetInt32() == 7);
-                Assert.Contains(functions[1].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 58
-                        && node.GetProperty("type").GetInt32() == 7);
-                Assert.Contains(functions[2].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 3
-                        && node.GetProperty("type").GetInt32() == 8);
-                Assert.Contains(functions[3].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 57
-                        && node.GetProperty("type").GetInt32() == 7);
-                Assert.Contains(functions[4].GetProperty("nodes").EnumerateArray(),
-                    static node => node.GetProperty("operation").GetInt32() == 67
-                        && node.GetProperty("type").GetInt32() == 5);
-                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[0], 7));
-                Assert.Equal(0UL, ProjectedFloatLiteralBits(functions[1], 7));
-                Assert.Equal(0x401F000000000000UL, ProjectedFloatLiteralBits(functions[2], 8));
-                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[3], 7));
-                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[4], 7));
+                Assert.That(functions.GetArrayLength(), Is.EqualTo(5));
+                Assert.That(global::System.Linq.Enumerable.Any(functions[0].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 3
+                        && node.GetProperty("type").GetInt32() == 7),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[1].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 58
+                        && node.GetProperty("type").GetInt32() == 7),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[2].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 3
+                        && node.GetProperty("type").GetInt32() == 8),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[3].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 57
+                        && node.GetProperty("type").GetInt32() == 7),Is.True);
+                Assert.That(global::System.Linq.Enumerable.Any(functions[4].GetProperty("nodes").EnumerateArray(),static node => node.GetProperty("operation").GetInt32() == 67
+                        && node.GetProperty("type").GetInt32() == 5),Is.True);
+                Assert.That(ProjectedFloatLiteralBits(functions[0], 7), Is.EqualTo(0x3DCCCCCDUL));
+                Assert.That(ProjectedFloatLiteralBits(functions[1], 7), Is.EqualTo(0UL));
+                Assert.That(ProjectedFloatLiteralBits(functions[2], 8), Is.EqualTo(0x401F000000000000UL));
+                Assert.That(ProjectedFloatLiteralBits(functions[3], 7), Is.EqualTo(0x3DCCCCCDUL));
+                Assert.That(ProjectedFloatLiteralBits(functions[4], 7), Is.EqualTo(0x3DCCCCCDUL));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Decimal32", "--export", "NegativeZero32",
                 "--export", "Hex64", "--export", "AddLiteral32", "--export",
                 "CompareLiteral32", "-o", hosted, "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -248,10 +229,8 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendProjectsBasedAndDecimalFloatingBitsAsync(string policy)
     {
         const string Source = """
@@ -263,19 +242,17 @@ public sealed partial class CliTests
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
-        Assert.True(exit == 0, $"{policy}: {output}{error}");
+        Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
         using var document = JsonDocument.Parse(output);
         var functions = document.RootElement.GetProperty("result").GetProperty("functions");
-        Assert.Equal(4, functions.GetArrayLength());
-        Assert.Equal(0x3FB999999999999AUL, ProjectedFloatLiteralBits(functions[0], 8));
-        Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[1], 7));
-        Assert.Equal(0x40A00000UL, ProjectedFloatLiteralBits(functions[2], 7));
-        Assert.Equal(0x4072300000000000UL, ProjectedFloatLiteralBits(functions[3], 8));
+        Assert.That(functions.GetArrayLength(), Is.EqualTo(4));
+        Assert.That(ProjectedFloatLiteralBits(functions[0], 8), Is.EqualTo(0x3FB999999999999AUL));
+        Assert.That(ProjectedFloatLiteralBits(functions[1], 7), Is.EqualTo(0x3DCCCCCDUL));
+        Assert.That(ProjectedFloatLiteralBits(functions[2], 7), Is.EqualTo(0x40A00000UL));
+        Assert.That(ProjectedFloatLiteralBits(functions[3], 8), Is.EqualTo(0x4072300000000000UL));
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendDispatchesFloatingLiteralCaseVariantsAsync(string policy)
     {
         const string Source = """
@@ -292,27 +269,27 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(Source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var functions = document.RootElement.GetProperty("result").GetProperty("functions");
-                Assert.Equal(4, functions.GetArrayLength());
-                Assert.Equal(0x40400000UL, ProjectedFloatLiteralBits(functions[0], 7));
-                Assert.Equal(0x4014000000000000UL, ProjectedFloatLiteralBits(functions[1], 8));
-                Assert.Equal(0x4072300000000000UL, ProjectedFloatLiteralBits(functions[2], 8));
-                Assert.Equal(0x3C4CCCCDUL, ProjectedFloatLiteralBits(functions[3], 7));
+                Assert.That(functions.GetArrayLength(), Is.EqualTo(4));
+                Assert.That(ProjectedFloatLiteralBits(functions[0], 7), Is.EqualTo(0x40400000UL));
+                Assert.That(ProjectedFloatLiteralBits(functions[1], 8), Is.EqualTo(0x4014000000000000UL));
+                Assert.That(ProjectedFloatLiteralBits(functions[2], 8), Is.EqualTo(0x4072300000000000UL));
+                Assert.That(ProjectedFloatLiteralBits(functions[3], 7), Is.EqualTo(0x3C4CCCCDUL));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "UpperHexFloat", "--export",
                 "UpperBinary", "--export", "UpperHexInteger", "--export",
                 "DecimalExponent", "-o", hosted, "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -320,10 +297,8 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendProjectsFloatingPayloadsInCallsAndLocalsAsync(string policy)
     {
         const string Source = """
@@ -339,24 +314,24 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(Source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var functions = document.RootElement.GetProperty("result").GetProperty("functions");
-                Assert.Equal(3, functions.GetArrayLength());
-                Assert.Equal(0x3FB999999999999AUL, ProjectedFloatLiteralBits(functions[1], 8));
-                Assert.Equal(0x3DCCCCCDUL, ProjectedFloatLiteralBits(functions[2], 7));
+                Assert.That(functions.GetArrayLength(), Is.EqualTo(3));
+                Assert.That(ProjectedFloatLiteralBits(functions[1], 8), Is.EqualTo(0x3FB999999999999AUL));
+                Assert.That(ProjectedFloatLiteralBits(functions[2], 7), Is.EqualTo(0x3DCCCCCDUL));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Call64", "--export", "Local32",
                 "-o", hosted, "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -364,10 +339,8 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendProjectsFloatingPayloadsThroughOutCallsAsync(string policy)
     {
         const string Source = """
@@ -385,24 +358,24 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(Source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var functions = document.RootElement.GetProperty("result").GetProperty("functions");
-                Assert.Equal(2, functions.GetArrayLength());
-                Assert.Equal(0x3FB999999999999AUL, ProjectedFloatLiteralBits(functions[0], 8));
-                Assert.Equal(0UL, ProjectedFloatLiteralBits(functions[1], 8));
+                Assert.That(functions.GetArrayLength(), Is.EqualTo(2));
+                Assert.That(ProjectedFloatLiteralBits(functions[0], 8), Is.EqualTo(0x3FB999999999999AUL));
+                Assert.That(ProjectedFloatLiteralBits(functions[1], 8), Is.EqualTo(0UL));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -410,12 +383,10 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("float32", "3.5", 7, 0x40600000UL, "fail-fast")]
-    [InlineData("float32", "3.5", 7, 0x40600000UL, "checked-exceptions")]
-    [InlineData("float64", "0x1.fp+2", 8, 0x401F000000000000UL, "fail-fast")]
-    [InlineData("float64", "0x1.fp+2", 8, 0x401F000000000000UL, "checked-exceptions")]
+    [TestCase("float32","3.5",7,0x40600000UL,"fail-fast")]
+    [TestCase("float32","3.5",7,0x40600000UL,"checked-exceptions")]
+    [TestCase("float64","0x1.fp+2",8,0x401F000000000000UL,"fail-fast")]
+    [TestCase("float64","0x1.fp+2",8,0x401F000000000000UL,"checked-exceptions")]
     public async Task ScalarFrontendProjectsFloatingPayloadsThroughInitRefCallsAsync(
         string floatingType, string literal, int type, ulong expectedBits, string policy)
     {
@@ -435,24 +406,24 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var functions = document.RootElement.GetProperty("result").GetProperty("functions");
-                Assert.Equal(2, functions.GetArrayLength());
-                Assert.Equal(expectedBits, ProjectedFloatLiteralBits(functions[0], type));
-                Assert.Equal(0UL, ProjectedFloatLiteralBits(functions[1], type));
+                Assert.That(functions.GetArrayLength(), Is.EqualTo(2));
+                Assert.That(ProjectedFloatLiteralBits(functions[0], type), Is.EqualTo(expectedBits));
+                Assert.That(ProjectedFloatLiteralBits(functions[1], type), Is.EqualTo(0UL));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -460,12 +431,10 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("float32", 7, "fail-fast")]
-    [InlineData("float32", 7, "checked-exceptions")]
-    [InlineData("float64", 8, "fail-fast")]
-    [InlineData("float64", 8, "checked-exceptions")]
+    [TestCase("float32",7,"fail-fast")]
+    [TestCase("float32",7,"checked-exceptions")]
+    [TestCase("float64",8,"fail-fast")]
+    [TestCase("float64",8,"checked-exceptions")]
     public async Task ScalarFrontendProjectsFloatingPayloadsThroughNonBooleanOutCallsAsync(
         string floatingType, int type, string policy)
     {
@@ -486,24 +455,23 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var functions = document.RootElement.GetProperty("result").GetProperty("functions");
-                Assert.Equal(2, functions.GetArrayLength());
-                Assert.Equal(type == 7 ? 0x40F80000UL : 0x401F000000000000UL,
-                    ProjectedFloatLiteralBits(functions[0], type));
+                Assert.That(functions.GetArrayLength(), Is.EqualTo(2));
+                Assert.That(ProjectedFloatLiteralBits(functions[0], type), Is.EqualTo(type == 7 ? 0x40F80000UL : 0x401F000000000000UL));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -511,12 +479,10 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("float32", 7, "fail-fast")]
-    [InlineData("float32", 7, "checked-exceptions")]
-    [InlineData("float64", 8, "fail-fast")]
-    [InlineData("float64", 8, "checked-exceptions")]
+    [TestCase("float32",7,"fail-fast")]
+    [TestCase("float32",7,"checked-exceptions")]
+    [TestCase("float64",8,"fail-fast")]
+    [TestCase("float64",8,"checked-exceptions")]
     public async Task ScalarFrontendProjectsFloatingPayloadsThroughVoidOutCallsAsync(
         string floatingType, int type, string policy)
     {
@@ -536,24 +502,23 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var functions = document.RootElement.GetProperty("result").GetProperty("functions");
-                Assert.Equal(2, functions.GetArrayLength());
-                Assert.Equal(type == 7 ? 0x40F80000UL : 0x401F000000000000UL,
-                    ProjectedFloatLiteralBits(functions[0], type));
+                Assert.That(functions.GetArrayLength(), Is.EqualTo(2));
+                Assert.That(ProjectedFloatLiteralBits(functions[0], type), Is.EqualTo(type == 7 ? 0x40F80000UL : 0x401F000000000000UL));
             }
 
             var (exit, json, error) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(exit == 0, $"{policy}: {json}{error}");
+            Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Read", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -561,12 +526,10 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("float32", "3.5", "fail-fast")]
-    [InlineData("float32", "3.5", "checked-exceptions")]
-    [InlineData("float64", "0x1.fp+2", "fail-fast")]
-    [InlineData("float64", "0x1.fp+2", "checked-exceptions")]
+    [TestCase("float32","3.5","fail-fast")]
+    [TestCase("float32","3.5","checked-exceptions")]
+    [TestCase("float64","0x1.fp+2","fail-fast")]
+    [TestCase("float64","0x1.fp+2","checked-exceptions")]
     public async Task ScalarFrontendSingleFunctionProjectsFloatingOutAsync(
         string floatingType, string literal, string policy)
     {
@@ -578,30 +541,30 @@ public sealed partial class CliTests
             """;
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
-            var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
-            try
-            {
+        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
+        try
+        {
             var input = Encoding.UTF8.GetBytes(source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(2, result.GetProperty("outParameterMask").GetInt32());
-                Assert.Equal(0, result.GetProperty("initRefParameterMask").GetInt32());
+                Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
+                Assert.That(result.GetProperty("outParameterMask").GetInt32(), Is.EqualTo(2));
+                Assert.That(result.GetProperty("initRefParameterMask").GetInt32(), Is.EqualTo(0));
             }
 
             var (buildExit, buildJson, buildError) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(buildExit == 0, $"{policy}: {buildJson}{buildError}");
+            Assert.That(buildExit == 0, Is.True, $"{policy}: {buildJson}{buildError}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Fill", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -609,12 +572,10 @@ public sealed partial class CliTests
             File.Delete(hosted);
         }
     }
-
-    [Theory]
-    [InlineData("float32", "3.5", "fail-fast")]
-    [InlineData("float32", "3.5", "checked-exceptions")]
-    [InlineData("float64", "0x1.fp+2", "fail-fast")]
-    [InlineData("float64", "0x1.fp+2", "checked-exceptions")]
+    [TestCase("float32","3.5","fail-fast")]
+    [TestCase("float32","3.5","checked-exceptions")]
+    [TestCase("float64","0x1.fp+2","fail-fast")]
+    [TestCase("float64","0x1.fp+2","checked-exceptions")]
     public async Task ScalarFrontendSingleFunctionProjectsFloatingInitRefAsync(
         string floatingType, string literal, string policy)
     {
@@ -626,30 +587,30 @@ public sealed partial class CliTests
             """;
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
-            var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
-            try
-            {
+        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
+        try
+        {
             var input = Encoding.UTF8.GetBytes(source);
             var (componentExit, componentJson, componentError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
+            Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
             using (var document = JsonDocument.Parse(componentJson))
             {
                 var result = document.RootElement.GetProperty("result");
-                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
-                Assert.Equal(0, result.GetProperty("outParameterMask").GetInt32());
-                Assert.Equal(2, result.GetProperty("initRefParameterMask").GetInt32());
+                Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
+                Assert.That(result.GetProperty("outParameterMask").GetInt32(), Is.EqualTo(0));
+                Assert.That(result.GetProperty("initRefParameterMask").GetInt32(), Is.EqualTo(2));
             }
 
             var (buildExit, buildJson, buildError) = await RunAsync(input,
                 "frontend-build-library", directory, "-", "-o", output,
                 "--runtime", policy, "--json");
-            Assert.True(buildExit == 0, $"{policy}: {buildJson}{buildError}");
+            Assert.That(buildExit == 0, Is.True, $"{policy}: {buildJson}{buildError}");
             var (hostedExit, hostedJson, hostedError) = await RunAsync(input,
                 "build-library", "-", "--export", "Fill", "-o", hosted,
                 "--runtime", policy, "--json");
-            Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(output));
+            Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+            Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {
@@ -672,7 +633,7 @@ public sealed partial class CliTests
             }
         }
 
-        Assert.Equal(1, matches);
+        Assert.That(matches, Is.EqualTo(1));
         return (ulong)unchecked((uint)literal.GetProperty("low").GetInt32())
             | ((ulong)unchecked((uint)literal.GetProperty("high").GetInt32()) << 32);
     }
@@ -682,7 +643,7 @@ public sealed partial class CliTests
     {
         using var document = JsonDocument.Parse(json);
         var result = document.RootElement.GetProperty("result");
-        Assert.Equal(projectionVersion, result.GetProperty("projectionVersion").GetInt32());
+        Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(projectionVersion));
         var expressions = new (string Text, int Type, int CodeUnit)[] {
             ("float32(char16(0))", 7, 0),
             ("float32(char16(55296))", 7, 55296),
@@ -712,13 +673,12 @@ public sealed partial class CliTests
                     {
                         continue;
                     }
-                    Assert.Equal(expected.Type, node.GetProperty("type").GetInt32());
+                    Assert.That(node.GetProperty("type").GetInt32(), Is.EqualTo(expected.Type));
                     var bits = expected.Type == 7
                         ? BitConverter.SingleToUInt32Bits((float)expected.CodeUnit)
                         : BitConverter.DoubleToUInt64Bits((double)expected.CodeUnit);
-                    Assert.Equal(unchecked((int)(uint)bits), node.GetProperty("low").GetInt32());
-                    Assert.Equal(expected.Type == 8 ? unchecked((int)(uint)(bits >> 32)) : 0,
-                        node.GetProperty("high").GetInt32());
+                    Assert.That(node.GetProperty("low").GetInt32(), Is.EqualTo(unchecked((int)(uint)bits)));
+                    Assert.That(node.GetProperty("high").GetInt32(), Is.EqualTo(expected.Type == 8 ? unchecked((int)(uint)(bits >> 32)) : 0));
                     matches[index]++;
                 }
             }
@@ -736,12 +696,11 @@ public sealed partial class CliTests
             Inspect(result);
         }
 
-        Assert.All(matches, static count => Assert.Equal(1, count));
+        {var __nunitItems0 = matches;
+        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0, Is.EqualTo(1)); } });}
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendExecutesChar16FloatingConversionsAsync(string policy)
     {
         const string StandaloneSource = """
@@ -779,20 +738,18 @@ public sealed partial class CliTests
             var input = Encoding.UTF8.GetBytes(source);
             var (projectionExit, projectionJson, projectionError) = await RunAsync(input,
                 "frontend-component", directory, "-", "--runtime", policy, "--json");
-            Assert.True(projectionExit == 0, $"{policy}: {projectionJson}{projectionError}");
+            Assert.That(projectionExit == 0, Is.True, $"{policy}: {projectionJson}{projectionError}");
             AssertProjectedChar16FloatLiterals(projectionJson, source,
                 source == StandaloneSource ? 87 : 88);
 
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "frontend-run", directory, "-", "--runtime", policy);
-            Assert.True(exit == 42, $"{policy}: {output}{error}");
-            Assert.Empty(error);
+            Assert.That(exit == 42, Is.True, $"{policy}: {output}{error}");
+            Assert.That(error, Is.Empty);
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task ScalarFrontendExecutesFloatingIntegerConversionsAsync(string policy)
     {
         const string Source = """
@@ -805,19 +762,17 @@ public sealed partial class CliTests
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "frontend-run", directory, "-", "--runtime", policy);
-        Assert.True(exit == 42, $"{policy}: {output}{error}");
-        Assert.Empty(error);
+        Assert.That(exit == 42, Is.True, $"{policy}: {output}{error}");
+        Assert.That(error, Is.Empty);
     }
-
-    [Theory]
-    [InlineData("float32", "int32")]
-    [InlineData("float32", "uint32")]
-    [InlineData("float32", "int64")]
-    [InlineData("float32", "uint64")]
-    [InlineData("float64", "int32")]
-    [InlineData("float64", "uint32")]
-    [InlineData("float64", "int64")]
-    [InlineData("float64", "uint64")]
+    [TestCase("float32","int32")]
+    [TestCase("float32","uint32")]
+    [TestCase("float32","int64")]
+    [TestCase("float32","uint64")]
+    [TestCase("float64","int32")]
+    [TestCase("float64","uint32")]
+    [TestCase("float64","int64")]
+    [TestCase("float64","uint64")]
     public async Task ScalarFrontendFailFastFloatingToIntegerUsesOverflowStatusAsync(
         string sourceType, string targetType)
     {
@@ -826,12 +781,12 @@ public sealed partial class CliTests
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         var (exit, output, error) = await RunAsync(source, "frontend-run", directory, "-",
             "--runtime", "fail-fast");
-        Assert.Equal(unchecked((int)0xE0540001), exit);
-        Assert.Empty(output);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540001)));
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public async Task ScalarFrontendFloatingConversionsMatchHostedLibrariesAsync()
     {
         var directory = Path.Combine(RepositoryRoot(), "self-host");
@@ -840,37 +795,50 @@ public sealed partial class CliTests
         Directory.CreateDirectory(outputDirectory);
         try
         {
+            var sourceTypes = new[] {
+                "int32", "uint32", "int64", "uint64", "char16", "float32", "float64",
+            };
+            var conversions = sourceTypes.SelectMany(sourceType =>
+            {
+                string[] targetTypes = sourceType is "float32" or "float64"
+                    ? ["int32", "uint32", "int64", "uint64", "float32", "float64"]
+                    : ["float32", "float64"];
+                return targetTypes.Select(targetType => (
+                    SourceType: sourceType,
+                    TargetType: targetType,
+                    Name: $"Convert_{sourceType}_to_{targetType}"));
+            }).ToArray();
+            var source = Encoding.UTF8.GetBytes(string.Join(" ", conversions.Select(conversion =>
+            {
+                var noThrow = conversion.SourceType == "char16" ? "[NoThrow] " : string.Empty;
+                return $"{noThrow}public {conversion.TargetType} {conversion.Name}"
+                    + $"({conversion.SourceType} value) => {conversion.TargetType}(value);";
+            })));
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
-                foreach (var sourceType in new[] {
-                    "int32", "uint32", "int64", "uint64", "char16", "float32", "float64",
-                })
+                var output = Path.Combine(outputDirectory, "scalar.dll");
+                var hosted = Path.Combine(outputDirectory, "hosted.dll");
+                var (componentExit, componentJson, componentError) = await RunAsync(source,
+                    "frontend-component", directory, "-", "--runtime", policy, "--json");
+                Assert.That(componentExit == 0, Is.True, $"{policy}: {componentJson}{componentError}");
+                var (exit, json, error) = await RunAsync(source,
+                    "frontend-build-library", directory, "-", "-o", output,
+                    "--runtime", policy, "--json");
+                Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
+                var hostedArguments = new List<string> { "build-library", "-" };
+                foreach (var conversion in conversions)
                 {
-                    string[] targetTypes = sourceType is "float32" or "float64"
-                        ? ["int32", "uint32", "int64", "uint64", "float32", "float64"]
-                        : ["float32", "float64"];
-                    foreach (var targetType in targetTypes)
-                    {
-                        var noThrow = sourceType == "char16" ? "[NoThrow] " : string.Empty;
-                        var source = Encoding.UTF8.GetBytes(
-                            $"{noThrow}public {targetType} Convert({sourceType} value) => {targetType}(value);");
-                        var output = Path.Combine(outputDirectory, "scalar.dll");
-                        var hosted = Path.Combine(outputDirectory, "hosted.dll");
-                        var (componentExit, componentJson, componentError) = await RunAsync(source,
-                            "frontend-component", directory, "-", "--runtime", policy, "--json");
-                        Assert.True(componentExit == 0, $"{policy}: {componentJson}{componentError}");
-                        var (exit, json, error) = await RunAsync(source,
-                            "frontend-build-library", directory, "-", "-o", output,
-                            "--runtime", policy, "--json");
-                        Assert.True(exit == 0, $"{policy}: {json}{error}");
-                        var (hostedExit, hostedJson, hostedError) = await RunAsync(source,
-                            "build-library", "-", "--export", "Convert", "-o", hosted,
-                            "--runtime", policy, "--json");
-                        Assert.True(hostedExit == 0, $"{policy}: {hostedJson}{hostedError}");
-                        Assert.Equal(await File.ReadAllBytesAsync(hosted),
-                            await File.ReadAllBytesAsync(output));
-                    }
+                    hostedArguments.Add("--export");
+                    hostedArguments.Add(conversion.Name);
                 }
+                hostedArguments.Add("-o");
+                hostedArguments.Add(hosted);
+                hostedArguments.Add("--runtime");
+                hostedArguments.Add(policy);
+                hostedArguments.Add("--json");
+                var (hostedExit, hostedJson, hostedError) = await RunAsync(source, [.. hostedArguments]);
+                Assert.That(hostedExit == 0, Is.True, $"{policy}: {hostedJson}{hostedError}");
+                Assert.That(await File.ReadAllBytesAsync(output), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
             }
         }
         finally

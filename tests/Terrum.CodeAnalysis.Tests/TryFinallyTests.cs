@@ -8,46 +8,43 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TryFinallyTests
 {
-    [Theory]
-    [InlineData("int32 Main() { try { return 42; } finally { return 0; } }", "TRM3019")]
-    [InlineData("int32 Main() { try { return 42; } finally { while (true) { } } }", "TRM3020")]
-    [InlineData("int32 Main() { try { return 42; } finally { if (Maybe()) { Stop(); } } } [NoThrow] bool Maybe() { return true; } [NoThrow] [DoesNotReturn] void Stop() { while (true) { } }", "TRM3020")]
-    [InlineData("int32 Main() { try { return 42; } finally { while (Maybe()) { } } } [NoThrow] bool Maybe() { return false; }", "TRM3020")]
-    [InlineData("int32 Main() { try { return 42; } finally { require false; } }", "TRM3017")]
-    [InlineData("int32 Main() { try { return 42; } finally { Unsafe(); } } void Unsafe() { }", "TRM3017")]
-    [InlineData("int32 Main() { try { return 42; } finally { mut int32 x = 1 / 0; } }", "TRM3017")]
-    [InlineData("int32 Main() { try { return 42; } catch { return 0; } }", "TRM")]
-    [InlineData("int32 Main() { try { return 42; } }", "TRM1001")]
-    [InlineData("bool Take(out int32 x) { x = 42; try { return true; } finally { Clear(out x); } } [NoThrow] bool Clear(out int32 x) { return false; } int32 Main() { return 0; }", "TRM3016")]
-    [InlineData("bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; } bool ReadAfterCall(bool publish) { init int32 value; try { return Fill(publish, init value); } finally { int32 observed = value; } } int32 Main() { return 0; }", "TRM3016")]
-    [InlineData("int32 Main() { try { return 42; } finally { use = 0; } int32 use = 1; }", "TRM3006")]
-    [InlineData("int32 Main() { try { int32 hidden = 42; } finally { int32 copy = hidden; } return 0; }", "TRM3006")]
-    [InlineData("bool Take(bool choose, out int32 x) { try { if (choose) { x = 42; return true; } } finally { int32 copy = x; } return false; } int32 Main() { return 0; }", "TRM3016")]
-    [InlineData("bool Take(out int32 x) { try { return true; } finally { int32 copy = x; } } int32 Main() { return 0; }", "TRM3016")]
-    [InlineData("struct V { public int32 Value; public V() { Value = 1; } } int32 Main() { mut V value = new V(); try { return 42; } finally { value.Value = 0; } }", "TRM3008")]
+    [TestCase("int32 Main() { try { return 42; } finally { return 0; } }","TRM3019")]
+    [TestCase("int32 Main() { try { return 42; } finally { while (true) { } } }","TRM3020")]
+    [TestCase("int32 Main() { try { return 42; } finally { if (Maybe()) { Stop(); } } } [NoThrow] bool Maybe() { return true; } [NoThrow] [DoesNotReturn] void Stop() { while (true) { } }","TRM3020")]
+    [TestCase("int32 Main() { try { return 42; } finally { while (Maybe()) { } } } [NoThrow] bool Maybe() { return false; }","TRM3020")]
+    [TestCase("int32 Main() { try { return 42; } finally { require false; } }","TRM3017")]
+    [TestCase("int32 Main() { try { return 42; } finally { Unsafe(); } } void Unsafe() { }","TRM3017")]
+    [TestCase("int32 Main() { try { return 42; } finally { mut int32 x = 1 / 0; } }","TRM3017")]
+    [TestCase("int32 Main() { try { return 42; } catch { return 0; } }","TRM")]
+    [TestCase("int32 Main() { try { return 42; } }","TRM1001")]
+    [TestCase("bool Take(out int32 x) { x = 42; try { return true; } finally { Clear(out x); } } [NoThrow] bool Clear(out int32 x) { return false; } int32 Main() { return 0; }","TRM3016")]
+    [TestCase("bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; } bool ReadAfterCall(bool publish) { init int32 value; try { return Fill(publish, init value); } finally { int32 observed = value; } } int32 Main() { return 0; }","TRM3016")]
+    [TestCase("int32 Main() { try { return 42; } finally { use = 0; } int32 use = 1; }","TRM3006")]
+    [TestCase("int32 Main() { try { int32 hidden = 42; } finally { int32 copy = hidden; } return 0; }","TRM3006")]
+    [TestCase("bool Take(bool choose, out int32 x) { try { if (choose) { x = 42; return true; } } finally { int32 copy = x; } return false; } int32 Main() { return 0; }","TRM3016")]
+    [TestCase("bool Take(out int32 x) { try { return true; } finally { int32 copy = x; } } int32 Main() { return 0; }","TRM3016")]
+    [TestCase("struct V { public int32 Value; public V() { Value = 1; } } int32 Main() { mut V value = new V(); try { return 42; } finally { value.Value = 0; } }","TRM3008")]
     public void InvalidCleanupIsRejected(string source, string diagnostic)
     {
         var result = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.True(result.HasErrors);
-        Assert.Contains(result.Diagnostics, item => item.Code.StartsWith(diagnostic, StringComparison.Ordinal));
+        Assert.That(result.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(result.Diagnostics,item => item.Code.StartsWith(diagnostic, StringComparison.Ordinal)),Is.True);
     }
-
-    [Theory]
-    [InlineData("return")]
-    [InlineData("null-body")]
-    [InlineData("null-finally")]
-    [InlineData("throwing-cleanup")]
+    [TestCase("return")]
+    [TestCase("null-body")]
+    [TestCase("null-finally")]
+    [TestCase("throwing-cleanup")]
     public void MutableIrCannotForgeUnsafeCleanup(string kind)
     {
         var valid = Compile("int32 Main() { try { return 42; } finally { } }");
         var function = valid.Functions[valid.EntryPoint];
-        var region = Assert.IsType<BoundTryFinally>(function.Body.Statements[0]);
+        var region = ((global::System.Func<BoundTryFinally>)(() => { var __nunitActual0 = function.Body.Statements[0]; Assert.That(__nunitActual0, Is.TypeOf<BoundTryFinally>()); return (BoundTryFinally)__nunitActual0!; }))();
         var forged = kind switch {
             "return" => region with {
                 Finally = new BoundBlock([new BoundReturn(new BoundConstant(0,
@@ -65,12 +62,12 @@ public sealed class TryFinallyTests
             Functions = valid.Functions.SetItem(valid.EntryPoint,
             function with { Body = function.Body with { Statements = [forged] } })
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(invalid, NativeRuntimePolicy.FailFast));
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(invalid, ["Main"]));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(invalid, NativeRuntimePolicy.FailFast))!;
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(invalid, ["Main"]))!;
     }
 
-    [Fact]
+    [Test]
     public async Task StructuredRegionsSurviveSourceIndependentModuleRoundTripAsync()
     {
         var producer = CompileLibrary("""
@@ -81,13 +78,13 @@ public sealed class TryFinallyTests
             """);
         var bytes = ModuleCompiler.CreateProducer(producer, ["Compute"]);
         var reference = ModuleCompiler.CreateReference(bytes);
-        Assert.Contains(reference.Functions, function => function.Name == "Compute");
+        Assert.That(global::System.Linq.Enumerable.Any(reference.Functions,function => function.Name == "Compute"),Is.True);
         var consumer = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(42); }"), reference);
-        Assert.False(consumer.HasErrors, string.Join(Environment.NewLine, consumer.Diagnostics));
-        var image = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumer.Program), bytes);
+        Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
+        var image = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumer.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), bytes);
         var linked = ModuleCompiler.Link(image, bytes);
-        Assert.Contains(linked.Functions, function => function.Name == "Compute"
-            && function.Body.Statements[0] is BoundTryFinally);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "Compute"
+            && function.Body.Statements[0] is BoundTryFinally),Is.True);
         var executable = Path.Combine(AppContext.BaseDirectory, $"try-finally-{Guid.NewGuid():N}.exe");
         try
         {
@@ -106,27 +103,27 @@ public sealed class TryFinallyTests
                 await process.WaitForExitAsync();
                 throw;
             }
-            Assert.Equal(42, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(42));
         }
         finally
         {
-            File.Delete(executable);
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
         }
         bytes[4] = 9;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(bytes));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(bytes))!;
     }
 
     private static BoundProgram Compile(string source)
     {
         var result = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = result.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
     }
 
     private static BoundProgram CompileLibrary(string source)
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.False(result.HasErrors, string.Join(Environment.NewLine, result.Diagnostics));
-        return Assert.IsType<BoundProgram>(result.Program);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = result.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
     }
 }

@@ -13,7 +13,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -28,10 +28,8 @@ public sealed class ModuleTableValidationComponentTests
             return valid == (Host.Expected[7] != 0) ? 0 : 1;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ModuleTableValidationMatchesHostedReader(BoundRuntimePolicy policy)
     {
         var names = TrRmStringTableWriter.EncodeNames([
@@ -106,10 +104,14 @@ public sealed class ModuleTableValidationComponentTests
         AddRejected(cases, EncodeStringSection([1, 1, 0, 0, 192, 128, 0, 0]),
             [1], 1, hasHostedOracle: true);
         cases.Add(Valid(names, [1], 8) with {
-            ExpectedValid = false, HasHostedOracle = false, IdentitySlotCount = 1,
+            ExpectedValid = false,
+            HasHostedOracle = false,
+            IdentitySlotCount = 1,
         });
         cases.Add(Valid(names, [1], 8) with {
-            ExpectedValid = false, HasHostedOracle = false, IdentitySlotCount = 3,
+            ExpectedValid = false,
+            HasHostedOracle = false,
+            IdentitySlotCount = 3,
         });
 
         var invalidStringByte = names.Select(static value => (int)value).ToArray();
@@ -144,7 +146,7 @@ public sealed class ModuleTableValidationComponentTests
         {
             var path = Path.Combine(root, "self-host", name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+            Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
         }
         components.Add(SyntaxTree.Parse(VerificationSource, "module-table-validation.terrum"));
@@ -154,8 +156,7 @@ public sealed class ModuleTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                Assert.True(testCase.ExpectedValid == ValidateHosted(testCase),
-                    $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
+                Assert.That(testCase.ExpectedValid == ValidateHosted(testCase), Is.True, $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
             }
 
             var compilation = Compilation.Create(components,
@@ -176,12 +177,10 @@ public sealed class ModuleTableValidationComponentTests
                     testCase.ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = Assert.IsType<BoundProgram>(compilation.Program);
-            Assert.True(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0,
-                $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
-            Assert.True(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0,
-                $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
         }
     }
 
@@ -304,7 +303,7 @@ public sealed class ModuleTableValidationComponentTests
         {
             if (File.Exists(path))
             {
-                File.Delete(path);
+                await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
             }
         }
     }

@@ -4,28 +4,26 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmContractTableReaderTests
 {
-    [Fact]
+    [Test]
     public void DistinctTypeAndMethodRangesOwnAssignedClauses()
     {
         Create(Section(Cleanup(), Effects()));
         Create([], recordCount: 0, declaredCount: 0,
             typeFirst: 0, typeCount: 0, methodFirst: 0, methodCount: 0);
     }
-
-    [Theory]
-    [InlineData(0, 0)]
-    [InlineData(3, 0)]
-    [InlineData(4, 0)]
-    [InlineData(4, 6)]
-    [InlineData(6, 1)]
-    [InlineData(8, 0)]
-    [InlineData(8, 2)]
+    [TestCase(0,(byte)(0))]
+    [TestCase(3,(byte)(0))]
+    [TestCase(4,(byte)(0))]
+    [TestCase(4,(byte)(6))]
+    [TestCase(6,(byte)(1))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(2))]
     public void RejectsMalformedCleanupReferenceKindAndFlags(int offset, byte replacement)
     {
         var row = Cleanup();
@@ -33,7 +31,7 @@ public sealed class TrRmContractTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(Section(row, Effects())));
     }
 
-    [Fact]
+    [Test]
     public void EffectsMaskRejectsUnassignedBitsAndDuplicateSingletons()
     {
         var effects = Effects();
@@ -44,7 +42,7 @@ public sealed class TrRmContractTableReaderTests
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2));
     }
 
-    [Fact]
+    [Test]
     public void CleanupRequiresDeclaredNoThrowEffectOnItsTargetMethod()
     {
         var withoutNoThrow = Effects();
@@ -57,7 +55,7 @@ public sealed class TrRmContractTableReaderTests
         Create(Section(Effects(), Cleanup()), typeFirst: 2, methodFirst: 1);
     }
 
-    [Fact]
+    [Test]
     public void RejectsOverlapsOrphansAndMismatchedDeclaredCounts()
     {
         var rows = Section(Cleanup(), Effects());
@@ -69,7 +67,7 @@ public sealed class TrRmContractTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(rows[..^1]));
     }
 
-    [Fact]
+    [Test]
     public void AssignedButNonexecutableClauseShapesAreBounded()
     {
         var output = Contract(0x1600_0001, 2, [0, 0, 0, 0, 1, 0, 0, 0]);
@@ -98,7 +96,7 @@ public sealed class TrRmContractTableReaderTests
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
     }
 
-    [Fact]
+    [Test]
     public void OutputStateRequiresBooleanResultAndAnOutputParameterOrdinal()
     {
         var output = Contract(0x1600_0001, 2, [0, 0, 0, 0, 1, 0, 0, 0]);
@@ -125,7 +123,7 @@ public sealed class TrRmContractTableReaderTests
             hasOutputParam: true));
     }
 
-    [Fact]
+    [Test]
     public void WrittenClausesComposeAcrossTypeAndMethodInFramedArtifact()
     {
         Create(Section(Cleanup(), Effects()), writeRows: true, frameArtifact: true);
@@ -217,7 +215,7 @@ public sealed class TrRmContractTableReaderTests
 
             var emitted = TrRmContractTableWriter.Encode(
                 rows, types, methods, signatures, parameters, typeSpecs);
-            Assert.Equal(section, emitted);
+            Assert.That(emitted, Is.EqualTo(section));
             section = emitted;
         }
         _ = new TrRmContractTableReader(section, recordCount,

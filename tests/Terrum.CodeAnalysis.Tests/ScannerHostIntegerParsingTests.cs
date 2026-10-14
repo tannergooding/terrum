@@ -5,44 +5,41 @@ using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ScannerHostIntegerParsingTests
 {
-    [Theory]
-    [InlineData("12__34", 1234)]
-    [InlineData("0x__FF_FF", 65535)]
-    [InlineData("0b__10_01", 9)]
+    [TestCase("12__34",(long)(1234))]
+    [TestCase("0x__FF_FF",(long)(65535))]
+    [TestCase("0b__10_01",(long)(9))]
     public void BindsIntegerWithoutDecodedScannerValues(string spelling, long expected)
     {
         var lexical = Lexer.Lex(SourceText.From($"int32 Main() {{ return {spelling}; }}"));
         var compilation = Compilation.Create(SyntaxTree.Parse(lexical));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var function = Assert.IsType<BoundProgram>(compilation.Program).Functions[0];
-        var statement = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
-        Assert.Equal(expected, Assert.IsType<BoundConstant>(statement.Value).Value);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))().Functions[0];
+        var statement = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual2 = statement.Value; Assert.That(__nunitActual2, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual2!; }))().Value, Is.EqualTo(expected));
     }
 
-    [Fact]
+    [Test]
     public void RejectsOverflowingIntegerWithoutDecodedValues()
     {
         var lexical = Lexer.Lex(SourceText.From("uint64 Main() { return 18446744073709551616; }"));
         var compilation = Compilation.Create(SyntaxTree.Parse(lexical));
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3013");
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3013"),Is.True);
     }
-
-    [Theory]
-    [InlineData("public int32 Read() { return -2147483648; }", int.MinValue)]
-    [InlineData("public int64 Read() { return -9223372036854775808; }", long.MinValue)]
+    [TestCase("public int32 Read() { return -2147483648; }",int.MinValue)]
+    [TestCase("public int64 Read() { return -9223372036854775808; }",long.MinValue)]
     public void BindsSignedMinimumWithoutDecodedScannerValues(string source, long expected)
     {
         var lexical = Lexer.Lex(SourceText.From(source));
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(lexical));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var function = Assert.IsType<BoundProgram>(compilation.Program).Functions[0];
-        var statement = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
-        Assert.Equal(expected, Assert.IsType<BoundConstant>(statement.Value).Value);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Functions[0];
+        var statement = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
+        Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = statement.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))().Value, Is.EqualTo(expected));
     }
 }

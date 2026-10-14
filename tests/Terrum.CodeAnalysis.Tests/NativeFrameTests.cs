@@ -5,13 +5,13 @@ using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeFrameTests
 {
-    [Fact]
+    [Test]
     public void SourceFramesSaveRbpWithoutRebasingOutgoingArguments()
     {
         const string Source = """
@@ -28,21 +28,26 @@ public sealed class NativeFrameTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         AssertFunctionRangesAreOrdered(code);
-        Assert.All(code.Functions.Skip(6), function => {
-            Assert.True(function.UsesFramePointer);
-            Assert.Equal((byte)0x55, code.Code[function.Start]);
-            Assert.True(code.Code.AsSpan(function.Start + 8, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0xE5 }));
-            Assert.True(function.StackSize <= 0xF00);
-        });
-        Assert.Contains(code.Functions.Take(6), function => !function.UsesFramePointer);
-        Assert.True(code.Code.AsSpan().IndexOf(new byte[] { 0x48, 0x89, 0x84, 0x24, 0x20, 0x00, 0x00, 0x00 }) >= 0);
+        {var __nunitItems0 = code.Functions.Skip(6);        Assert.Multiple(() => {
+            foreach (var __nunitItem1 in __nunitItems0)
+            {
+                {
+                    Assert.That(__nunitItem1.UsesFramePointer, Is.True);
+                    Assert.That(code.Code[__nunitItem1.Start], Is.EqualTo((byte)0x55));
+                    Assert.That(code.Code.AsSpan(__nunitItem1.Start + 8, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0xE5 }), Is.True);
+                    Assert.That(__nunitItem1.StackSize <= 0xF00, Is.True);
+                }
+            }
+        });}
+        Assert.That(global::System.Linq.Enumerable.Any(code.Functions.Take(6),function => !function.UsesFramePointer),Is.True);
+        Assert.That(code.Code.AsSpan().IndexOf(new byte[] { 0x48, 0x89, 0x84, 0x24, 0x20, 0x00, 0x00, 0x00 }) >= 0, Is.True);
     }
 
-    [Fact]
+    [Test]
     public void CleanupFuncletsUseTheParentFrameWithTheirOwnCallArea()
     {
         const string Source = """
@@ -58,20 +63,25 @@ public sealed class NativeFrameTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         AssertFunctionRangesAreOrdered(code);
         var funclets = code.Functions.Where(function => function.UsesParentFrame).ToArray();
-        Assert.Equal(2, funclets.Length);
-        Assert.All(funclets, function => {
-            Assert.True(function.UsesFramePointer);
-            Assert.Equal((byte)0x55, code.Code[function.Start]);
-            Assert.True(code.Code.AsSpan(function.Start + 8, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0xD5 }));
-        });
+        Assert.That(funclets.Length, Is.EqualTo(2));
+        {var __nunitItems1 = funclets;        Assert.Multiple(() => {
+            foreach (var __nunitItem3 in __nunitItems1)
+            {
+                {
+                    Assert.That(__nunitItem3.UsesFramePointer, Is.True);
+                    Assert.That(code.Code[__nunitItem3.Start], Is.EqualTo((byte)0x55));
+                    Assert.That(code.Code.AsSpan(__nunitItem3.Start + 8, 3).SequenceEqual(new byte[] { 0x48, 0x89, 0xD5 }), Is.True);
+                }
+            }
+        });}
     }
 
-    [Fact]
+    [Test]
     public void OptionalAssignmentToOutParametersEmitsNativeCode()
     {
         const string Source = """
@@ -85,19 +95,19 @@ public sealed class NativeFrameTests
             int32 Main() { return 42; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
         AssertFunctionRangesAreOrdered(code);
-        Assert.True(code.Code.Length > 0);
-        Assert.Contains(code.Functions.Skip(6), function => function.UsesFramePointer);
+        Assert.That(code.Code.Length > 0, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(code.Functions.Skip(6),function => function.UsesFramePointer),Is.True);
     }
 
     private static void AssertFunctionRangesAreOrdered(NativeCode code)
     {
         for (var index = 1; index < code.Functions.Length; index++)
         {
-            Assert.True(code.Functions[index - 1].Start < code.Functions[index].Start);
+            Assert.That(code.Functions[index - 1].Start < code.Functions[index].Start, Is.True);
         }
     }
 }

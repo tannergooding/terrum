@@ -5,13 +5,13 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Fact]
+    [Test]
     public async Task CharacterLiteralsExecuteThroughHostedCompilerAndJitAsync()
     {
         const string Source = """
@@ -24,12 +24,12 @@ public sealed partial class CliTests
             """;
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "jit", "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(42, exit);
-        Assert.Empty(output);
-        Assert.Empty(error);
+        Assert.That(exit, Is.EqualTo(42));
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public async Task CompiledScannerCharacterLiteralsMatchHostedBuildAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -45,15 +45,14 @@ public sealed partial class CliTests
                 hosted, "--runtime", "fail-fast", "--json");
             var (componentExit, componentOutput, componentError) = await RunAsync(input, "build-component",
                 scanner, "-", "-o", compiled, "--runtime", "fail-fast", "--json");
-            Assert.Equal(0, hostExit);
-            Assert.Equal(0, componentExit);
-            Assert.Empty(hostError);
-            Assert.Empty(componentError);
+            Assert.That(hostExit, Is.EqualTo(0));
+            Assert.That(componentExit, Is.EqualTo(0));
+            Assert.That(hostError, Is.Empty);
+            Assert.That(componentError, Is.Empty);
             using var host = JsonDocument.Parse(hostOutput);
             using var component = JsonDocument.Parse(componentOutput);
-            Assert.Equal(host.RootElement.GetProperty("contentId").GetString(),
-                component.RootElement.GetProperty("contentId").GetString());
-            Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(compiled));
+            Assert.That(component.RootElement.GetProperty("contentId").GetString(), Is.EqualTo(host.RootElement.GetProperty("contentId").GetString()));
+            Assert.That(await File.ReadAllBytesAsync(compiled), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
         }
         finally
         {

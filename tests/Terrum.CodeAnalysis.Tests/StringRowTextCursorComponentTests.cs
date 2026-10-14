@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -102,10 +102,8 @@ public sealed class StringRowTextCursorComponentTests
             return 0;
         }
         """;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CursorReadsLongRowsSequentiallyAcrossEncodingsAsync(BoundRuntimePolicy policy)
     {
         const string unicodeBlock = "\u0001A\u007F\u0080\u07FF\u0800\uD7FF\uE000\uFFFF\U00010000\U0001F600\U0010FFFF\uFEFF";
@@ -117,32 +115,28 @@ public sealed class StringRowTextCursorComponentTests
             var row = EncodeRow(text, encoding);
             var expected = text.EnumerateRunes().Select(static rune => rune.Value).ToArray();
             var program = await CompileAsync(row, expected, ReadAllSource, policy).ConfigureAwait(true);
-            Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-            Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
         }
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CursorRetainsEmptyNamespaceAndCompleteRowValidationAsync(BoundRuntimePolicy policy)
     {
         var emptyNamespace = EncodeRow("", 1);
         var emptyProgram = await CompileAsync(emptyNamespace, [0], EdgeVerificationSource, policy)
             .ConfigureAwait(true);
-        Assert.Equal(0, NativeJit.Execute(emptyProgram, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(emptyProgram, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(NativeJit.Execute(emptyProgram, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(emptyProgram, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
 
         byte[] malformedUtf8 = [1, 2, 0, 0, 0x41, 0xC2, 0, 0];
         var malformedProgram = await CompileAsync(malformedUtf8, [1], EdgeVerificationSource, policy)
             .ConfigureAwait(true);
-        Assert.Equal(0, NativeJit.Execute(malformedProgram, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(malformedProgram, (NativeRuntimePolicy)policy).ConfigureAwait(true));
+        Assert.That(NativeJit.Execute(malformedProgram, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(malformedProgram, (NativeRuntimePolicy)policy).ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CursorRejectsMalformedPhysicalRowsWithoutPublishingAsync(
         BoundRuntimePolicy policy)
     {
@@ -174,14 +168,12 @@ public sealed class StringRowTextCursorComponentTests
 
         var program = await CompileRowsAsync(hostRows, expected,
             RejectedRowVerificationSource, policy).ConfigureAwait(true);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CursorRejectsMalformedTextAcrossEncodingsWithoutPublishingAsync(
         BoundRuntimePolicy policy)
     {
@@ -202,9 +194,9 @@ public sealed class StringRowTextCursorComponentTests
 
         var program = await CompileRowsAsync(hostRows, expected,
             RejectedRowVerificationSource, policy).ConfigureAwait(true);
-        Assert.Equal(0, NativeJit.Execute(program, (NativeRuntimePolicy)policy));
-        Assert.Equal(0, await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
-            .ConfigureAwait(true));
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
+        Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+            .ConfigureAwait(true), Is.EqualTo(0));
     }
 
     private static byte[] EncodeRow(string text, int encoding)
@@ -234,8 +226,7 @@ public sealed class StringRowTextCursorComponentTests
         {
             var path = Path.Combine(root, "self-host", names[index]);
             components[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-            Assert.False(components[index].HasErrors,
-                string.Join(Environment.NewLine, components[index].Diagnostics));
+            Assert.That(components[index].HasErrors, Is.False, string.Join(Environment.NewLine, components[index].Diagnostics));
         }
         var entry = SyntaxTree.Parse(source, "string-row-text-cursor-component.terrum");
         var compilation = Compilation.Create([.. components, entry],
@@ -243,8 +234,8 @@ public sealed class StringRowTextCursorComponentTests
             new HostBuffer("Rows", PrimitiveType.Int32, [.. rows], false),
             new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
         ], policy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
     }
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)

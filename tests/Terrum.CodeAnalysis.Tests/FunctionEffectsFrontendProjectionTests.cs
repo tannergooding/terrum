@@ -7,20 +7,19 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class FunctionEffectsFrontendProjectionTests
 {
-    [Theory]
-    [InlineData("[NoThrow]", "void", "{}", false, 2)]
-    [InlineData("[NoThrow]", "void", "{ require true; }", false, 2)]
-    [InlineData("[NoThrow]", "void", "=> require true;", true, 2)]
-    [InlineData("[DoesNotReturn]", "void", "{ require false; }", false, 4)]
-    [InlineData("[DoesNotReturn]", "void", "=> require false;", true, 4)]
-    [InlineData("[NoThrow]", "int32", "{ return 42; }", false, 2)]
-    [InlineData("[NoThrow]", "int32", "=> 42;", true, 2)]
+    [TestCase("[NoThrow]","void","{}",false,2)]
+    [TestCase("[NoThrow]","void","{ require true; }",false,2)]
+    [TestCase("[NoThrow]","void","=> require true;",true,2)]
+    [TestCase("[DoesNotReturn]","void","{ require false; }",false,4)]
+    [TestCase("[DoesNotReturn]","void","=> require false;",true,4)]
+    [TestCase("[NoThrow]","int32","{ return 42; }",false,2)]
+    [TestCase("[NoThrow]","int32","=> 42;",true,2)]
     public void IndependentFunctionEffectsPreserveHostedFlagsCompletionSpansAndPe(
         string attribute, string type, string body, bool arrow, int effects)
     {
@@ -29,42 +28,39 @@ public sealed class FunctionEffectsFrontendProjectionTests
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var expected = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var expected = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var first = expected.Functions[0];
             var second = actual.Functions[0];
-            Assert.Equal(first.IsNoThrow, second.IsNoThrow);
-            Assert.Equal(first.DoesNotReturn, second.DoesNotReturn);
-            Assert.Equal(first.Span, second.Span);
-            Assert.Equal(first.Body.Span, second.Body.Span);
-            Assert.Equal(first.Body.IsManagedLexicalScope, second.Body.IsManagedLexicalScope);
-            Assert.Equal<BoundStatement>(first.Body.Statements, second.Body.Statements);
-            Assert.Equal(NativeEmitter.EmitLibrary(expected, ["await"], (NativeRuntimePolicy)policy),
-                NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy));
+            Assert.That(second.IsNoThrow, Is.EqualTo(first.IsNoThrow));
+            Assert.That(second.DoesNotReturn, Is.EqualTo(first.DoesNotReturn));
+            Assert.That(second.Span, Is.EqualTo(first.Span));
+            Assert.That(second.Body.Span, Is.EqualTo(first.Body.Span));
+            Assert.That(second.Body.IsManagedLexicalScope, Is.EqualTo(first.Body.IsManagedLexicalScope));
+            Assert.That(second.Body.Statements, Is.EqualTo(first.Body.Statements));
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(expected, ["await"], (NativeRuntimePolicy)policy)));
         }
     }
-
-    [Theory]
-    [InlineData(0, 60)]
-    [InlineData(2, 0)]
-    [InlineData(2, 1)]
-    [InlineData(2, 4)]
-    [InlineData(2, 7)]
-    [InlineData(2, 10)]
-    [InlineData(5, 1)]
-    [InlineData(37, 0)]
-    [InlineData(38, 0)]
-    [InlineData(39, 0)]
-    [InlineData(41, 1)]
-    [InlineData(43, 1)]
-    [InlineData(45, 1)]
-    [InlineData(298, 0)]
-    [InlineData(332, 8)]
-    [InlineData(333, 1)]
-    [InlineData(334, -1)]
-    [InlineData(335, 0)]
-    [InlineData(336, 1)]
+    [TestCase(0,60)]
+    [TestCase(2,0)]
+    [TestCase(2,1)]
+    [TestCase(2,4)]
+    [TestCase(2,7)]
+    [TestCase(2,10)]
+    [TestCase(5,1)]
+    [TestCase(37,0)]
+    [TestCase(38,0)]
+    [TestCase(39,0)]
+    [TestCase(41,1)]
+    [TestCase(43,1)]
+    [TestCase(45,1)]
+    [TestCase(298,0)]
+    [TestCase(332,8)]
+    [TestCase(333,1)]
+    [TestCase(334,-1)]
+    [TestCase(335,0)]
+    [TestCase(336,1)]
     public void IndependentFunctionEffectsRejectContradictingFlagsHeadersRootsAndCoverage(int index, int value)
     {
         const string text = "[NoThrow] public void @await() { require true; }";
@@ -72,18 +68,16 @@ public sealed class FunctionEffectsFrontendProjectionTests
         words[index] = value;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData("[nothrow]")]
-    [InlineData("[NoThrow][NoThrow]")]
-    [InlineData("[NoThrow(value)]")]
-    [InlineData("[NoThrow()]")]
-    [InlineData("[DoesNotReturn]")]
-    [InlineData("[Cleanup]")]
-    [InlineData("[ConstEval]")]
-    [InlineData("[@NoThrow]")]
-    [InlineData("")]
-    [InlineData("public [NoThrow]")]
+    [TestCase("[nothrow]")]
+    [TestCase("[NoThrow][NoThrow]")]
+    [TestCase("[NoThrow(value)]")]
+    [TestCase("[NoThrow()]")]
+    [TestCase("[DoesNotReturn]")]
+    [TestCase("[Cleanup]")]
+    [TestCase("[ConstEval]")]
+    [TestCase("[@NoThrow]")]
+    [TestCase("")]
+    [TestCase("public [NoThrow]")]
     public void IndependentFunctionEffectsRejectSpellingDuplicateArgumentUnknownAndAttachmentClaims(string prefix)
     {
         var text = $"{prefix} public void @await() {{ require true; }}";
@@ -91,7 +85,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
             SourceText.From(text), Bytes(Projection(text, true, false, 2))));
     }
 
-    [Fact]
+    [Test]
     public void AllHistoricalVersionsRejectEffectBitsEvenForOtherwiseCompatibleBodies()
     {
         const string text = "[NoThrow] public void @await() {}";
@@ -103,32 +97,28 @@ public sealed class FunctionEffectsFrontendProjectionTests
         }
     }
 
-    [Fact]
+    [Test]
     public void EffectsBracedBodiesCannotClaimHistoricalScalarReturnEnvelopes()
     {
         const string text = "[NoThrow] public int32 @await() { return 42; }";
         var words = Projection(text, false, false, 2);
-        Assert.True(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid);
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[298] = 0;
         Array.Clear(words, 332, 5);
         words[39] = 0;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
     }
-
-    [Theory]
-    [InlineData("[DoesNotReturn] public void @await() {}", true, 4)]
-    [InlineData("[DoesNotReturn] public void @await() { return; }", true, 4)]
-    [InlineData("[DoesNotReturn] public int32 @await() { return 42; }", false, 4)]
-    [InlineData("[NoThrow] public void @await() { require false; }", true, 2)]
+    [TestCase("[DoesNotReturn] public void @await() {}",true,4)]
+    [TestCase("[DoesNotReturn] public void @await() { return; }",true,4)]
+    [TestCase("[DoesNotReturn] public int32 @await() { return 42; }",false,4)]
+    [TestCase("[NoThrow] public void @await() { require false; }",true,2)]
     public void IndependentEffectsUseSharedCompletionAndFailureProof(string text, bool isVoid, int effects)
     {
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text), Bytes(Projection(text, isVoid, false, effects))));
     }
-
-    [Theory]
-    [InlineData("[NoThrow][DoesNotReturn]")]
-    [InlineData("[DoesNotReturn][NoThrow]")]
+    [TestCase("[NoThrow][DoesNotReturn]")]
+    [TestCase("[DoesNotReturn][NoThrow]")]
     public void IndependentCombinedEffectsPreserveUnreachableReturnAndNoImplicitCompletion(string attributes)
     {
         var text = $"{attributes} public void @await() {{ while (true) {{}} return; }}";
@@ -157,16 +147,15 @@ public sealed class FunctionEffectsFrontendProjectionTests
         foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
-            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var hosted = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var function = actual.Functions[0];
-            Assert.True(function.IsNoThrow);
-            Assert.True(function.DoesNotReturn);
-            Assert.Equal(2, function.Body.Statements.Length);
-            Assert.Equal(hosted.Functions[0].Body.Statements[1], function.Body.Statements[1]);
-            Assert.Equal(NativeEmitter.EmitLibrary(hosted, ["await"], (NativeRuntimePolicy)policy),
-                NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy));
+            Assert.That(function.IsNoThrow, Is.True);
+            Assert.That(function.DoesNotReturn, Is.True);
+            Assert.That(function.Body.Statements.Length, Is.EqualTo(2));
+            Assert.That(function.Body.Statements[1], Is.EqualTo(hosted.Functions[0].Body.Statements[1]));
+            Assert.That(NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(hosted, ["await"], (NativeRuntimePolicy)policy)));
         }
         for (var version = 1; version <= 58; version++)
         {

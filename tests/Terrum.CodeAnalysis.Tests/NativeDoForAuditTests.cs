@@ -5,16 +5,15 @@ using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeDoForAuditTests
 {
-    [Theory]
-    [InlineData("")]
-    [InlineData("true")]
-    [InlineData("false")]
+    [TestCase("")]
+    [TestCase("true")]
+    [TestCase("false")]
     public void IndependentForWithoutReturnRequiresProvenNonFallthrough(string condition)
     {
         var text = $"public int32 Value() {{ for (;{condition};) {{ }} }}";
@@ -45,7 +44,7 @@ public sealed class NativeDoForAuditTests
         fixture.Reject(391, 1);
     }
 
-    [Fact]
+    [Test]
     public void IndependentInitializedForClauseHasExactScopeAndRole()
     {
         const string text = "public int32 Value() { for (int32 x = 42; true;) { return x; } }";
@@ -77,10 +76,8 @@ public sealed class NativeDoForAuditTests
         fixture.Reject(62, 2);
         fixture.Reject(0, 50);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public void IndependentDoConditionCannotReadBodyLocal(bool escapedRead)
     {
         var condition = escapedRead ? "x" : "false";
@@ -111,7 +108,7 @@ public sealed class NativeDoForAuditTests
         fixture.Reject(0, 50);
     }
 
-    [Fact]
+    [Test]
     public void IndependentForTransferCannotTargetAClauseRecord()
     {
         const string text = "public int32 Value() { for (; true;) { break; } return 42; }";
@@ -156,7 +153,7 @@ public sealed class NativeDoForAuditTests
         {
             foreach (var policy in new[] { BoundRuntimePolicy.FailFast, BoundRuntimePolicy.CheckedExceptions })
             {
-                Assert.Single(ScalarFrontendHost.BindLibrary(_source, Bytes(), policy).Functions);
+                Assert.That(ScalarFrontendHost.BindLibrary(_source, Bytes(), policy).Functions, Has.Exactly(1).Items);
             }
         }
 

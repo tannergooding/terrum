@@ -6,21 +6,20 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("/**/", new[] { "TRM0003" }, new[] { 0 }, new[] { 4 })]
-    [InlineData("/** ***/", new[] { "TRM0010", "TRM0003" }, new[] { 4, 0 }, new[] { 4, 8 })]
-    [InlineData("//* */", new[] { "TRM0003" }, new[] { 0 }, new[] { 6 })]
-    [InlineData("//* **// *//", new[] { "TRM0010" }, new[] { 4 }, new[] { 4 })]
-    [InlineData("//* **/ *//", new string[] { }, new int[] { }, new int[] { })]
-    [InlineData("/*** **/ x ***/", new string[] { }, new int[] { }, new int[] { })]
-    [InlineData("/** /**/ **/", new[] { "TRM0011" }, new[] { 9 }, new[] { 3 })]
-    [InlineData("//** /* \" \r\n **//", new string[] { }, new int[] { }, new int[] { })]
+    [TestCase("/**/",new[] { "TRM0003" },new[] { 0 },new[] { 4 })]
+    [TestCase("/** ***/",new[] { "TRM0010", "TRM0003" },new[] { 4, 0 },new[] { 4, 8 })]
+    [TestCase("//* */",new[] { "TRM0003" },new[] { 0 },new[] { 6 })]
+    [TestCase("//* **// *//",new[] { "TRM0010" },new[] { 4 },new[] { 4 })]
+    [TestCase("//* **/ *//",new string[] { },new int[] { },new int[] { })]
+    [TestCase("/*** **/ x ***/",new string[] { },new int[] { },new int[] { })]
+    [TestCase("/** /**/ **/",new[] { "TRM0011" },new[] { 9 },new[] { 3 })]
+    [TestCase("//** /* \" \r\n **//",new string[] { },new int[] { },new int[] { })]
     public async Task CompiledFenceAuditHasExactDiagnosticsUnderBothPoliciesAsync(
         string source, string[] codes, int[] starts, int[] lengths)
     {
@@ -29,19 +28,17 @@ public sealed partial class CliTests
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                 "scan-component", Path.Combine(RepositoryRoot(), "self-host"),
                 "-", "--runtime", policy, "--json");
-            Assert.Equal(codes.Length == 0 ? 0 : 1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(codes.Length == 0 ? 0 : 1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             var diagnostics = document.RootElement.GetProperty("diagnostics").EnumerateArray().ToArray();
-            Assert.Equal(codes, diagnostics.Select(value => value.GetProperty("code").GetString()));
-            Assert.Equal(starts, diagnostics.Select(value => value.GetProperty("start").GetInt32()));
-            Assert.Equal(lengths, diagnostics.Select(value => value.GetProperty("length").GetInt32()));
+            Assert.That(diagnostics.Select(value => value.GetProperty("code").GetString()), Is.EqualTo(codes));
+            Assert.That(diagnostics.Select(value => value.GetProperty("start").GetInt32()), Is.EqualTo(starts));
+            Assert.That(diagnostics.Select(value => value.GetProperty("length").GetInt32()), Is.EqualTo(lengths));
         }
     }
-
-    [Theory]
-    [InlineData("fail-fast")]
-    [InlineData("checked-exceptions")]
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task InvalidFenceRetainsNativeFrontendOutputAsync(string policy)
     {
         var image = Path.Combine(RepositoryRoot(), "artifacts", $"comment-audit-{Guid.NewGuid():N}.exe");
@@ -51,19 +48,19 @@ public sealed partial class CliTests
                 Encoding.UTF8.GetBytes("int32 Main() { /** /* */ text **/ return 42; }"),
                 "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", image,
                 "--runtime", policy, "--json");
-            Assert.True(built == 0, $"{buildOutput}{buildError}");
-            Assert.Equal(42, await ExecuteNativeImageAsync(image));
+            Assert.That(built == 0, Is.True, $"{buildOutput}{buildError}");
+            Assert.That(await ExecuteNativeImageAsync(image), Is.EqualTo(42));
             var original = await File.ReadAllBytesAsync(image);
             var (rejected, output, error) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { /** ***/ return 42; }"),
                 "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", image,
                 "--runtime", policy, "--json");
-            Assert.True(rejected == 1, $"{output}{error}");
-            Assert.Equal(original, await File.ReadAllBytesAsync(image));
+            Assert.That(rejected == 1, Is.True, $"{output}{error}");
+            Assert.That(await File.ReadAllBytesAsync(image), Is.EqualTo(original));
         }
         finally
         {
-            File.Delete(image);
+            await TestFileCleanup.DeleteWithRetryAsync(image).ConfigureAwait(true);
         }
     }
 }

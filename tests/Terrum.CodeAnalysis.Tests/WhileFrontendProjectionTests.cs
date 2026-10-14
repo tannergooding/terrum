@@ -4,13 +4,13 @@ using System;
 using System.Buffers.Binary;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class WhileFrontendProjectionTests
 {
-    [Fact]
+    [Test]
     public void ReaderChecksNestedBodyExtentsConditionsAndSourceAnchors()
     {
         const string text = "public int32 Value() { mut int32 x = 0; while (x < 2) { while (x < 1) { x = x + 1; } x = x + 1; } return x; }";
@@ -61,7 +61,7 @@ public sealed class WhileFrontendProjectionTests
         Statement(3, 2, 1, 9, firstAssignment, firstAssignment + 10);
         Statement(4, 2, 1, 12, secondAssignment, secondAssignment + 10);
 
-        Assert.Equal(5, ScalarFrontendHost.ReadResult(source, Bytes()).Statements.Length);
+        Assert.That(ScalarFrontendHost.ReadResult(source, Bytes()).Statements.Length, Is.EqualTo(5));
         Reject(0, 21);
         Reject(0, 29);
         Reject(333 + 5, 4);

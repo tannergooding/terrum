@@ -10,7 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -63,19 +63,19 @@ public sealed class PeRelocationTests
         }
         """;
 
-    [Fact]
+    [Test]
     public void ImagesHaveDeterministicRelocatableRvaLayout()
     {
         var first = NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast);
-        Assert.Equal(first, NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast));
+        Assert.That(NativeEmitter.Emit(Compile(Source), NativeRuntimePolicy.FailFast), Is.EqualTo(first));
         var second = NativeEmitter.Emit(Compile(Source.Replace("Recursive(5)", "Recursive(4)", StringComparison.Ordinal)),
             NativeRuntimePolicy.FailFast);
-        Assert.NotEqual(first, second);
+        Assert.That(second, Is.Not.EqualTo(first));
         ValidateLayout(first);
         ValidateLayout(second);
     }
 
-    [Fact]
+    [Test]
     public async Task FreshProcessesExecuteReadOnlyWritableUnwindAndCliJitPathsAsync()
     {
         var program = Compile(Source);
@@ -93,13 +93,13 @@ public sealed class PeRelocationTests
             await RunAsync(failure, [], unchecked((int)0xE0540003)).ConfigureAwait(true);
 
             var unused = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Unused() { return 0; }"));
-            Assert.False(unused.HasErrors, string.Join(Environment.NewLine, unused.Diagnostics));
-            var producerBytes = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(unused.Program), ["Unused"]);
+            Assert.That(unused.HasErrors, Is.False, string.Join(Environment.NewLine, unused.Diagnostics));
+            var producerBytes = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = unused.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Unused"]);
             var moduleCompilation = Compilation.Create(SyntaxTree.Parse(ModuleSource));
-            Assert.False(moduleCompilation.HasErrors, string.Join(Environment.NewLine, moduleCompilation.Diagnostics));
+            Assert.That(moduleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, moduleCompilation.Diagnostics));
             await File.WriteAllBytesAsync(producer, producerBytes).ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumer, ModuleCompiler.CreateConsumer(
-                Assert.IsType<BoundProgram>(moduleCompilation.Program), producerBytes)).ConfigureAwait(true);
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = moduleCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producerBytes)).ConfigureAwait(true);
             var framework = new DirectoryInfo(AppContext.BaseDirectory);
             var configuration = framework.Parent?.Name ?? throw new InvalidOperationException("Missing configuration.");
             var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -108,8 +108,8 @@ public sealed class PeRelocationTests
         }
         finally
         {
-            File.Delete(executable);
-            File.Delete(failure);
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(failure).ConfigureAwait(true);
             File.Delete(consumer);
             File.Delete(producer);
         }
@@ -122,49 +122,48 @@ public sealed class PeRelocationTests
             new HostBuffer("Output", PrimitiveType.Int32, [0], IsWritable: true),
         ];
         var compilation = Compilation.Create(SyntaxTree.Parse(source), buffers);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
     }
 
     private static void ValidateLayout(byte[] image)
     {
         using var stream = new MemoryStream(image);
         using var reader = new PEReader(stream);
-        Assert.Equal(Machine.Amd64, reader.PEHeaders.CoffHeader.Machine);
-        Assert.Equal(0, (int)reader.PEHeaders.CoffHeader.Characteristics & 1);
-        var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
-        Assert.Equal(PEMagic.PE32Plus, header.Magic);
-        Assert.Equal(0x140000000UL, header.ImageBase);
-        Assert.Equal(0x1000, header.SectionAlignment);
-        Assert.Equal(0x200, header.FileAlignment);
-        Assert.Equal(0x60, (int)header.DllCharacteristics & 0x60);
-        Assert.Equal(0, header.BaseRelocationTableDirectory.RelativeVirtualAddress);
-        Assert.Equal(0, header.BaseRelocationTableDirectory.Size);
-        Assert.NotEqual(0, header.ImportTableDirectory.Size);
-        Assert.NotEqual(0, header.ImportAddressTableDirectory.Size);
-        Assert.NotEqual(0, header.ExceptionTableDirectory.Size);
-        Assert.Equal(0, header.CorHeaderTableDirectory.Size);
-        Assert.DoesNotContain(reader.PEHeaders.SectionHeaders, static section => section.Name == ".reloc");
+        Assert.That(reader.PEHeaders.CoffHeader.Machine, Is.EqualTo(Machine.Amd64));
+        Assert.That((int)reader.PEHeaders.CoffHeader.Characteristics & 1, Is.EqualTo(0));
+        var header = ((global::System.Func<PEHeader>)(() => { var __nunitActual3 = reader.PEHeaders.PEHeader; Assert.That(__nunitActual3, Is.TypeOf<PEHeader>()); return (PEHeader)__nunitActual3!; }))();
+        Assert.That(header.Magic, Is.EqualTo(PEMagic.PE32Plus));
+        Assert.That(header.ImageBase, Is.EqualTo(0x140000000UL));
+        Assert.That(header.SectionAlignment, Is.EqualTo(0x1000));
+        Assert.That(header.FileAlignment, Is.EqualTo(0x200));
+        Assert.That((int)header.DllCharacteristics & 0x60, Is.EqualTo(0x60));
+        Assert.That(header.BaseRelocationTableDirectory.RelativeVirtualAddress, Is.EqualTo(0));
+        Assert.That(header.BaseRelocationTableDirectory.Size, Is.EqualTo(0));
+        Assert.That(header.ImportTableDirectory.Size, Is.Not.EqualTo(0));
+        Assert.That(header.ImportAddressTableDirectory.Size, Is.Not.EqualTo(0));
+        Assert.That(header.ExceptionTableDirectory.Size, Is.Not.EqualTo(0));
+        Assert.That(header.CorHeaderTableDirectory.Size, Is.EqualTo(0));
+        Assert.That(global::System.Linq.Enumerable.Any(reader.PEHeaders.SectionHeaders,static section => section.Name == ".reloc"),Is.False);
         foreach (var section in reader.PEHeaders.SectionHeaders)
         {
-            Assert.Equal(0, section.VirtualAddress % header.SectionAlignment);
-            Assert.Equal(0, section.PointerToRawData % header.FileAlignment);
-            Assert.InRange((long)section.VirtualAddress + section.VirtualSize, 0, header.SizeOfImage);
-            Assert.InRange((long)section.PointerToRawData + section.SizeOfRawData, 0, image.Length);
+            Assert.That(section.VirtualAddress % header.SectionAlignment, Is.EqualTo(0));
+            Assert.That(section.PointerToRawData % header.FileAlignment, Is.EqualTo(0));
+            Assert.That((long)section.VirtualAddress + section.VirtualSize, Is.InRange(0, header.SizeOfImage));
+            Assert.That((long)section.PointerToRawData + section.SizeOfRawData, Is.InRange(0, image.Length));
         }
-        Assert.Contains(reader.PEHeaders.SectionHeaders, static section => section.Name == ".rdata");
-        Assert.Contains(reader.PEHeaders.SectionHeaders, static section => section.Name == ".data");
-        Assert.Contains(reader.PEHeaders.SectionHeaders, static section => section.Name == ".pdata");
-        Assert.Contains(reader.PEHeaders.SectionHeaders, static section => section.Name == ".xdata");
+        Assert.That(global::System.Linq.Enumerable.Any(reader.PEHeaders.SectionHeaders,static section => section.Name == ".rdata"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(reader.PEHeaders.SectionHeaders,static section => section.Name == ".data"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(reader.PEHeaders.SectionHeaders,static section => section.Name == ".pdata"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(reader.PEHeaders.SectionHeaders,static section => section.Name == ".xdata"),Is.True);
         AssertDirectoryInSection(header.ImportTableDirectory, ".idata");
         AssertDirectoryInSection(header.ImportAddressTableDirectory, ".idata");
         AssertDirectoryInSection(header.ExceptionTableDirectory, ".pdata");
 
         void AssertDirectoryInSection(DirectoryEntry directory, string name)
         {
-            var section = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == name);
-            Assert.InRange(directory.RelativeVirtualAddress, section.VirtualAddress,
-                section.VirtualAddress + section.VirtualSize - directory.Size);
+            var section = global::System.Linq.Enumerable.Single(reader.PEHeaders.SectionHeaders, section => section.Name == name);
+            Assert.That(directory.RelativeVirtualAddress, Is.InRange(section.VirtualAddress, section.VirtualAddress + section.VirtualSize - directory.Size));
         }
     }
 
@@ -187,7 +186,7 @@ public sealed class PeRelocationTests
             await process.WaitForExitAsync().ConfigureAwait(true);
             throw;
         }
-        Assert.Equal(expected, process.ExitCode);
-        Assert.Empty(await error.ConfigureAwait(true));
+        Assert.That(process.ExitCode, Is.EqualTo(expected));
+        Assert.That(await error.ConfigureAwait(true), Is.Empty);
     }
 }

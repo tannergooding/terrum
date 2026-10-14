@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -56,34 +56,32 @@ public sealed partial class GenericControlFlowModuleTests
             return int32(pair.First) + scalar;
         }
         """;
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task GenericInitOutputsStayPrivateAcrossIndependentConsumersAsync(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(GenericInitLibrary, policy), ["Read"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Contains(linked.Functions, function => function.Name == "$producer.Forward<Pair>"
-            && function.Variables[1].IsInit);
-        Assert.Contains(linked.Functions, function => function.Name == "$producer.Copy<int32>"
-            && function.Variables[2].IsInit);
-        Assert.Contains(linked.Functions, function => function.Name == "$producer.None<Pair>"
-            && function.Variables[0].IsInit);
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Forward<Pair>"
+            && function.Variables[1].IsInit),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Copy<int32>"
+            && function.Variables[2].IsInit),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.None<Pair>"
+            && function.Variables[0].IsInit),Is.True);
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(Compile(GenericInitLibrary, policy), ["Read"],
             "Leaf", policy);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, NativeModuleCompiler.CreateReference(nativeProducer), library: false), nativeProducer, policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(42));
     }
 
-    [Fact]
+    [Test]
     public async Task GenericInitDoesNotPublishAfterFailureAcrossIndependentModuleReplacementAsync()
     {
         const string ReplacementSource = """
@@ -116,13 +114,13 @@ public sealed partial class GenericControlFlowModuleTests
         var consumerHash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(Compile(ReplacementSource, policy), ["PowerProbe"]);
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Contains(linked.Functions, static function =>
-            function.Name == "$producer.FailAfterWrite<int32>" && function.Variables[1].IsInit);
-        Assert.Contains(linked.Functions, static function =>
-            function.Name == "$producer.Fill<int32>" && function.Variables[1].IsInit);
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function =>
+            function.Name == "$producer.FailAfterWrite<int32>" && function.Variables[1].IsInit),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function =>
+            function.Name == "$producer.Fill<int32>" && function.Variables[1].IsInit),Is.True);
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(consumerHash));
 
         var nativeStub = NativeModuleCompiler.CreateProducer(Compile(Stub, policy),
             ["PowerProbe"], "Leaf", policy);
@@ -133,16 +131,14 @@ public sealed partial class GenericControlFlowModuleTests
         var nativeConsumerHash = SHA256.HashData(nativeConsumer);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(ReplacementSource, policy),
             ["PowerProbe"], "Leaf", policy);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(nativeConsumerHash, SHA256.HashData(nativeConsumer));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeConsumerHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ConcreteHelperArgumentsStayPrivateAcrossCompatibleProducerReplacementAsync(
         NativeRuntimePolicy policy)
     {
@@ -158,27 +154,25 @@ public sealed partial class GenericControlFlowModuleTests
         var consumer = ModuleCompiler.CreateConsumer(Compile(Source, policy,
             ModuleCompiler.CreateReference(stub), library: false), stub);
         var replacement = ModuleCompiler.CreateProducer(Compile(ConcreteHelperReplacement, policy), ["Read"]);
-        Assert.Equal("Read", Assert.Single(ModuleCompiler.CreateReference(replacement).Functions).Name);
+        Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Functions).Name, Is.EqualTo("Read"));
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Contains(linked.Structures, structure => structure.Name == "$producer.Value");
-        Assert.Contains(linked.Functions, function => function.Name == "$producer.Second<Value, int32>");
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Structures,structure => structure.Name == "$producer.Value"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "$producer.Second<Value, int32>"),Is.True);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
 
         var nativeStub = NativeModuleCompiler.CreateProducer(Compile(Original, policy), ["Read"], "Leaf", policy);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(Compile(Source, policy,
             NativeModuleCompiler.CreateReference(nativeStub), library: false), nativeStub, policy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(ConcreteHelperReplacement, policy),
             ["Read"], "Leaf", policy);
-        Assert.Equal(40, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeStub,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
-        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
-            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeStub,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task GenericProofUsesImportedConcreteCopyDeclarationsAsync(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile("""
@@ -196,13 +190,11 @@ public sealed partial class GenericControlFlowModuleTests
             int32 Main() { return Forward(int32(42)); }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task GenericProofInfersImportedFactoryReturnWithoutTypeSyntaxAsync(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile("""
@@ -221,13 +213,11 @@ public sealed partial class GenericControlFlowModuleTests
             int32 Main() { return Forward(int32(42)); }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
-        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ClosedPowerSpecializationsRemainPrivateAfterSemanticReplacementAsync(
         NativeRuntimePolicy policy)
     {
@@ -248,36 +238,34 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """, policy, ModuleCompiler.CreateReference(stub), library: false), stub);
         var consumerHash = SHA256.HashData(consumer);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
 
         var replacement = ModuleCompiler.CreateProducer(Compile(await PowerSourceAsync().ConfigureAwait(true), policy),
             ["PowerProbe"]);
-        Assert.Equal(76,BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
-        Assert.Equal(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11",
-            ModuleCompiler.GetNativeProfileVersion(replacement, false));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(ModuleCompiler.GetNativeProfileVersion(replacement, false), Is.EqualTo(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11"));
         var reference = ModuleCompiler.CreateReference(replacement);
-        Assert.Empty(reference.Structures);
-        Assert.Equal("PowerProbe", Assert.Single(reference.Functions).Name);
+        Assert.That(reference.Structures, Is.Empty);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("PowerProbe"));
 
         var original = ModuleCompiler.Link(consumer, stub);
-        Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(original, policy)).ConfigureAwait(true));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(original, policy)).ConfigureAwait(true), Is.EqualTo(40));
         var linked = ModuleCompiler.Link(consumer, replacement);
-        Assert.Equal(["Int32Value", "Int64Value", "$producer.Int32Value", "$producer.Int64Value"],
-            linked.Structures.Select(static item => item.Name));
-        Assert.Equal(2, linked.Functions.Count(static function =>
-            function.Name.StartsWith("$producer.Power<", StringComparison.Ordinal)));
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Power<Int32Value>");
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Power<Int64Value>");
-        Assert.Equal(2, linked.Functions.Count(static function =>
-            function.Name.StartsWith("$producer.Square<", StringComparison.Ordinal)));
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Square<Int32Value>");
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Square<Int64Value>");
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Int32Value.op_Multiply");
-        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Int64Value.op_Multiply");
-        Assert.DoesNotContain(linked.Functions, static function => function.Name == "$producer.Power");
-        Assert.DoesNotContain(reference.Functions, static function =>
-            function.Name.Contains("Power<", StringComparison.Ordinal));
-        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.That(linked.Structures.Select(static item => item.Name), Is.EqualTo(["Int32Value", "Int64Value", "$producer.Int32Value", "$producer.Int64Value"]));
+        Assert.That(linked.Functions.Count(static function =>
+            function.Name.StartsWith("$producer.Power<", StringComparison.Ordinal)), Is.EqualTo(2));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Power<Int32Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Power<Int64Value>"),Is.True);
+        Assert.That(linked.Functions.Count(static function =>
+            function.Name.StartsWith("$producer.Square<", StringComparison.Ordinal)), Is.EqualTo(2));
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Square<Int32Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Square<Int64Value>"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Int32Value.op_Multiply"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Int64Value.op_Multiply"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.Name == "$producer.Power"),Is.False);
+        Assert.That(global::System.Linq.Enumerable.Any(reference.Functions,static function =>
+            function.Name.Contains("Power<", StringComparison.Ordinal)),Is.False);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
         var consumerPath = Path.Combine(AppContext.BaseDirectory, $"power-{Guid.NewGuid():N}.consumer.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try
@@ -287,26 +275,24 @@ public sealed partial class GenericControlFlowModuleTests
             var (originalExit, originalError) = await RunCliAsync("run-module", consumerPath, producerPath,
                 "--runtime", policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions")
                 .ConfigureAwait(true);
-            Assert.Empty(originalError);
-            Assert.Equal(40, originalExit);
+            Assert.That(originalError, Is.Empty);
+            Assert.That(originalExit, Is.EqualTo(40));
             await File.WriteAllBytesAsync(producerPath, replacement).ConfigureAwait(true);
             var (exit, error) = await RunCliAsync("run-module", consumerPath, producerPath, "--runtime",
                 policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions").ConfigureAwait(true);
-            Assert.Empty(error);
-            Assert.Equal(42, exit);
-            Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
+            Assert.That(error, Is.Empty);
+            Assert.That(exit, Is.EqualTo(42));
+            Assert.That(await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true), Is.EqualTo(consumer));
         }
         finally
         {
             File.Delete(consumerPath);
             File.Delete(producerPath);
         }
-        Assert.Equal(consumerHash, SHA256.HashData(consumer));
+        Assert.That(SHA256.HashData(consumer), Is.EqualTo(consumerHash));
     }
-
-    [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ClosedPowerSpecializationsReplaceUnchangedNativeGraphAsync(NativeRuntimePolicy policy)
     {
         var original = NativeModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"],
@@ -321,19 +307,18 @@ public sealed partial class GenericControlFlowModuleTests
         var replacement = NativeModuleCompiler.CreateProducer(
             Compile(await PowerSourceAsync().ConfigureAwait(true), policy),
             ["PowerProbe"], "NodeB", policy);
-        Assert.Equal(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11",
-            NativeModuleCompiler.Inspect(replacement).NativeProfileVersion);
-        Assert.Equal("PowerProbe", Assert.Single(NativeModuleCompiler.CreateReference(replacement).Functions).Name);
+        Assert.That(NativeModuleCompiler.Inspect(replacement).NativeProfileVersion, Is.EqualTo(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11"));
+        Assert.That(global::System.Linq.Enumerable.Single(NativeModuleCompiler.CreateReference(replacement).Functions).Name, Is.EqualTo("PowerProbe"));
         NativeModuleCompiler.ValidateGraph(root, [middle, original]);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
-        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
-            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
-        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle],
-            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
-        Assert.Equal(rootHash, SHA256.HashData(root));
-        Assert.Equal(middleHash, SHA256.HashData(middle));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(44));
+        Assert.That(SHA256.HashData(root), Is.EqualTo(rootHash));
+        Assert.That(SHA256.HashData(middle), Is.EqualTo(middleHash));
     }
 
     private static async Task<string> PowerSourceAsync() =>
@@ -348,9 +333,9 @@ public sealed partial class GenericControlFlowModuleTests
         var compilation = library
             ? reference is null ? Compilation.CreateLibrary(syntax, boundPolicy)
                 : Compilation.CreateLibrary(syntax, reference, boundPolicy)
-            : Compilation.Create(syntax, Assert.IsType<CompilationReference>(reference), boundPolicy);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return Assert.IsType<BoundProgram>(compilation.Program);
+            : Compilation.Create(syntax, ((global::System.Func<CompilationReference>)(() => { var __nunitActual0 = reference; Assert.That(__nunitActual0, Is.TypeOf<CompilationReference>()); return (CompilationReference)__nunitActual0!; }))(), boundPolicy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
 
     private static async Task<int> ExecuteAsync(byte[] image)
@@ -378,14 +363,14 @@ public sealed partial class GenericControlFlowModuleTests
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 
     private static async Task<(int ExitCode, string Error)> RunCliAsync(params string[] arguments)
     {
         var cli = Apphost();
-        Assert.True(File.Exists(cli), $"CLI was not built: {cli}");
+        Assert.That(File.Exists(cli), Is.True, $"CLI was not built: {cli}");
         var start = new ProcessStartInfo(cli) {
             UseShellExecute = false,
             CreateNoWindow = true,

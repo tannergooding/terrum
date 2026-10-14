@@ -4,107 +4,102 @@ using System;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NoReturnTests
 {
-    [Theory]
-    [InlineData("require false;")]
-    [InlineData("while (true) { }")]
-    [InlineData("for (;;) { }")]
-    [InlineData("if (false) { return; } require false;")]
-    [InlineData("require false; return;")]
-    [InlineData("return Stop(value);")]
-    [InlineData("while (false) { return; } for (;;) { }")]
-    [InlineData("if (value) { require false; } else { for (;;) { } }")]
-    [InlineData("if (value) { Stop(false); } else { require false; }")]
+    [TestCase("require false;")]
+    [TestCase("while (true) { }")]
+    [TestCase("for (;;) { }")]
+    [TestCase("if (false) { return; } require false;")]
+    [TestCase("require false; return;")]
+    [TestCase("return Stop(value);")]
+    [TestCase("while (false) { return; } for (;;) { }")]
+    [TestCase("if (value) { require false; } else { for (;;) { } }")]
+    [TestCase("if (value) { Stop(false); } else { require false; }")]
     public void ProvesAbsenceOfReachableNormalCompletion(string body)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[DoesNotReturn] void Stop(bool value) { " + body + " }"));
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.True(program.Functions[0].DoesNotReturn);
-        Assert.False(program.Functions[0].IsNoThrow);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        Assert.That(program.Functions[0].DoesNotReturn, Is.True);
+        Assert.That(program.Functions[0].IsNoThrow, Is.False);
         SemanticVerifier.VerifyLibrary(program);
     }
-
-    [Theory]
-    [InlineData("void Stop(bool value) { }")]
-    [InlineData("void Stop(bool value) { return; }")]
-    [InlineData("void Stop(bool value) { if (value) { return; } require false; }")]
-    [InlineData("void Stop(bool value) { while (value) { } }")]
-    [InlineData("void Stop(bool value) { while (false) { require false; } }")]
-    [InlineData("void Stop(bool value) { for (; value;) { } }")]
-    [InlineData("void Stop(bool value) { Other(); } void Other() { require false; }")]
-    [InlineData("int32 Stop(bool value) { require false; }")]
+    [TestCase("void Stop(bool value) { }")]
+    [TestCase("void Stop(bool value) { return; }")]
+    [TestCase("void Stop(bool value) { if (value) { return; } require false; }")]
+    [TestCase("void Stop(bool value) { while (value) { } }")]
+    [TestCase("void Stop(bool value) { while (false) { require false; } }")]
+    [TestCase("void Stop(bool value) { for (; value;) { } }")]
+    [TestCase("void Stop(bool value) { Other(); } void Other() { require false; }")]
+    [TestCase("int32 Stop(bool value) { require false; }")]
     public void RejectsUnprovedOrNonVoidDeclarations(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("[DoesNotReturn] " + source));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3018");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3018"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void ConstructorsCannotPublishANoReturnValueContract()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "struct S { public int32 Value; [DoesNotReturn] public S() { Value = 0; require false; } }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3018");
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3018"),Is.True);
     }
 
-    [Fact]
+    [Test]
     public void NoReturnAndNoThrowAreIndependentBounds()
     {
         var valid = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[DoesNotReturn] [NoThrow] void Spin() { for (;;) { } }"));
-        Assert.False(valid.HasErrors, string.Join(Environment.NewLine, valid.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(valid.Program);
-        Assert.True(program.Functions[0].DoesNotReturn);
-        Assert.True(program.Functions[0].IsNoThrow);
+        Assert.That(valid.HasErrors, Is.False, string.Join(Environment.NewLine, valid.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = valid.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        Assert.That(program.Functions[0].DoesNotReturn, Is.True);
+        Assert.That(program.Functions[0].IsNoThrow, Is.True);
         var invalid = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[NoThrow] [DoesNotReturn] void Stop() { require false; }"));
-        Assert.True(invalid.HasErrors);
-        Assert.Contains(invalid.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
+        Assert.That(invalid.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(invalid.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
         var duplicate = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[DoesNotReturn] [DoesNotReturn] void Stop() { require false; }"));
-        Assert.True(duplicate.HasErrors);
-        Assert.Contains(duplicate.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
+        Assert.That(duplicate.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(duplicate.Diagnostics,static diagnostic => diagnostic.Code == "TRM3001"),Is.True);
     }
-
-    [Theory]
-    [InlineData("void Stop() { }")]
-    [InlineData("void Stop() { return; }")]
-    [InlineData("int32 Stop() { return 42; }")]
+    [TestCase("void Stop() { }")]
+    [TestCase("void Stop() { return; }")]
+    [TestCase("int32 Stop() { return 42; }")]
     public void PublicIrCannotForgeNormalContinuationGuarantees(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source + " int32 Main() { return 0; }"));
-        Assert.False(compilation.HasErrors);
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.False);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var forged = program with {
             Functions = program.Functions.SetItem(0, program.Functions[0] with { DoesNotReturn = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
 
-    [Fact]
+    [Test]
     public void CallersRequireTheDeclarationRatherThanInspectingTheBody()
     {
         const string Source = "void Stop() { require false; } int32 Main() { Stop(); }";
         var missing = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.True(missing.HasErrors);
-        Assert.Contains(missing.Diagnostics, static diagnostic => diagnostic.Code == "TRM3012");
+        Assert.That(missing.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(missing.Diagnostics,static diagnostic => diagnostic.Code == "TRM3012"),Is.True);
         var declared = Compilation.Create(SyntaxTree.Parse("[DoesNotReturn] " + Source));
-        Assert.False(declared.HasErrors, string.Join(Environment.NewLine, declared.Diagnostics));
-        SemanticVerifier.Verify(Assert.IsType<BoundProgram>(declared.Program));
+        Assert.That(declared.HasErrors, Is.False, string.Join(Environment.NewLine, declared.Diagnostics));
+        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = declared.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))());
     }
 
-    [Fact]
+    [Test]
     public void NonReturningFailureBranchPublishesOnlyTheSuccessfulOutputs()
     {
         const string Source = """
@@ -119,32 +114,30 @@ public sealed class NoReturnTests
             }
             """;
         var valid = Compilation.Create(SyntaxTree.Parse(Source));
-        Assert.False(valid.HasErrors, string.Join(Environment.NewLine, valid.Diagnostics));
+        Assert.That(valid.HasErrors, Is.False, string.Join(Environment.NewLine, valid.Diagnostics));
         var invalid = Compilation.Create(SyntaxTree.Parse(Source.Replace("if (!Try", "if (Try", StringComparison.Ordinal)));
-        Assert.True(invalid.HasErrors);
-        Assert.Contains(invalid.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.That(invalid.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(invalid.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
     }
-
-    [Theory]
-    [InlineData("if (!false) { return 42; }", true)]
-    [InlineData("if (true && !false) { return 42; }", true)]
-    [InlineData("if (false || true) { return 42; }", true)]
-    [InlineData("while (!false) { }", true)]
-    [InlineData("require true && false;", true)]
-    [InlineData("if (!true) { return 42; }", false)]
-    [InlineData("while (!true) { return 42; }", false)]
-    [InlineData("require !false;", false)]
+    [TestCase("if (!false) { return 42; }",true)]
+    [TestCase("if (true && !false) { return 42; }",true)]
+    [TestCase("if (false || true) { return 42; }",true)]
+    [TestCase("while (!false) { }",true)]
+    [TestCase("require true && false;",true)]
+    [TestCase("if (!true) { return 42; }",false)]
+    [TestCase("while (!true) { return 42; }",false)]
+    [TestCase("require !false;",false)]
     public void BinderAndVerifierUseTheSameBooleanContinuationProof(string body, bool valid)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"));
-        Assert.Equal(!valid, compilation.HasErrors);
+        Assert.That(compilation.HasErrors, Is.EqualTo(!valid));
         if (valid)
         {
-            SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))());
         }
         else
         {
-            Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3012");
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3012"),Is.True);
         }
     }
 }

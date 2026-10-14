@@ -7,15 +7,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class SourceRangeModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task SourceRangeExecutesAcrossPersistedSemanticModulesAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -51,12 +50,11 @@ public sealed class SourceRangeModuleTests
 
             int32 Main() { return 0; }
             """, componentPath);
-        Assert.False(producerTree.HasErrors, string.Join(Environment.NewLine, producerTree.Diagnostics));
+        Assert.That(producerTree.HasErrors, Is.False, string.Join(Environment.NewLine, producerTree.Diagnostics));
         var producerCompilation = Compilation.Create(producerTree, policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program),
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.VerifySourceRange"]);
 
         var consumerTree = SyntaxTree.Parse("""
@@ -65,10 +63,9 @@ public sealed class SourceRangeModuleTests
             """, "source-range-consumer.terrum");
         var consumerCompilation = Compilation.Create(
             consumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
 
         var consumerPath = Path.Combine(AppContext.BaseDirectory, $"source-range-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
@@ -80,7 +77,7 @@ public sealed class SourceRangeModuleTests
             var persistedProducer = await File.ReadAllBytesAsync(producerPath).ConfigureAwait(true);
             var linked = ModuleCompiler.Link(persistedConsumer, persistedProducer);
 
-            Assert.Equal(42, NativeJit.Execute(linked, (NativeRuntimePolicy)policy));
+            Assert.That(NativeJit.Execute(linked, (NativeRuntimePolicy)policy), Is.EqualTo(42));
         }
         finally
         {

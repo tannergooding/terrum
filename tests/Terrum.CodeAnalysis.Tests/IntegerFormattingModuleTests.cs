@@ -9,17 +9,15 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class IntegerFormattingModuleTests
 {
     private const int MaximumSourceCodeUnits = 16_384;
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task IntegerFormattingModuleMatchesFreshSourceGrantsAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -30,7 +28,7 @@ public sealed class IntegerFormattingModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         var fixtures = Fixtures();
@@ -124,19 +122,17 @@ public sealed class IntegerFormattingModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.Numerics64.VerifySnapshot"]);
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis.Numerics64;
             int32 Main() { return VerifySnapshot(); }
             """, "integer-formatting-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
 
         foreach (var (mode, radix, uppercase) in Snapshots())
@@ -148,14 +144,13 @@ public sealed class IntegerFormattingModuleTests
                 codeUnits.AddRange(expected.Select(static character => (int)character));
                 codeUnits.Add(0);
             }
-            Assert.InRange(codeUnits.Count, 1, MaximumSourceCodeUnits);
+            Assert.That(codeUnits.Count, Is.InRange(1, MaximumSourceCodeUnits));
 
             var grant = new HostBuffer("Source", PrimitiveType.Char16, [.. codeUnits], false) {
                 IsInvocationScoped = true,
             };
             var actual = NativeJit.ExecuteWithSourceGrant(linked, [grant], (NativeRuntimePolicy)policy);
-            Assert.True(actual == 0,
-                $"mode {mode}, radix {radix}, uppercase {uppercase}: verifier returned {actual}.");
+            Assert.That(actual == 0, Is.True, $"mode {mode}, radix {radix}, uppercase {uppercase}: verifier returned {actual}.");
         }
     }
 

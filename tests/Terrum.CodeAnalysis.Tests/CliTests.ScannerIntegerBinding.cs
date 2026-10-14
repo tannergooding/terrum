@@ -6,27 +6,26 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("int32 Main() { return 42; }")]
-    [InlineData("int32 Main() { int32 value = 2147483647; return value - 2147483605; }")]
-    [InlineData("int32 Main() { int64 value = int64(-9223372036854775808); if (value == int64.MinValue) { return 42; } return 0; }")]
-    [InlineData("int32 Main() { int64 value = -9223372036854775808; if (value == int64.MinValue) { return 42; } return 0; }")]
-    [InlineData("int32 Main() { int32 value = -2147483648; if (value == int32.MinValue) { return 42; } return 0; }")]
-    [InlineData("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
-    [InlineData("int32 Main() { char16 value = 65535; return int32(value) - 65493; }")]
-    [InlineData("int32 Main() { uint32 a = 4294967295; int64 b = 42; return int32(uint64(a) % 1000) - 295 + int32(b); }")]
-    [InlineData("int32 Main() { uint64 mask = 0xFFFFFFFFFFFFFFFF; return int32(mask % 0X100); }")]
-    [InlineData("int32 Main() { int64 value = 0x8000000000000000; if (value == int64.MinValue) { return 42; } return 0; }")]
-    [InlineData("int32 Main() { int32 value = 0B11111111111111111111111111111111; if (value == -1) { return 42; } return 0; }")]
-    [InlineData("int32 Main() { int32 bits = 0b101010; return bits; }")]
-    [InlineData("int32 Main() { int32 bits = 0x_8000_0000; if (bits == int32.MinValue) { return 42; } return 0; }")]
-    [InlineData("int32 Main() { uint64 bits = 0b_11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111; return int32(bits % 1_000); }")]
+    [TestCase("int32 Main() { return 42; }")]
+    [TestCase("int32 Main() { int32 value = 2147483647; return value - 2147483605; }")]
+    [TestCase("int32 Main() { int64 value = int64(-9223372036854775808); if (value == int64.MinValue) { return 42; } return 0; }")]
+    [TestCase("int32 Main() { int64 value = -9223372036854775808; if (value == int64.MinValue) { return 42; } return 0; }")]
+    [TestCase("int32 Main() { int32 value = -2147483648; if (value == int32.MinValue) { return 42; } return 0; }")]
+    [TestCase("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
+    [TestCase("int32 Main() { char16 value = 65535; return int32(value) - 65493; }")]
+    [TestCase("int32 Main() { uint32 a = 4294967295; int64 b = 42; return int32(uint64(a) % 1000) - 295 + int32(b); }")]
+    [TestCase("int32 Main() { uint64 mask = 0xFFFFFFFFFFFFFFFF; return int32(mask % 0X100); }")]
+    [TestCase("int32 Main() { int64 value = 0x8000000000000000; if (value == int64.MinValue) { return 42; } return 0; }")]
+    [TestCase("int32 Main() { int32 value = 0B11111111111111111111111111111111; if (value == -1) { return 42; } return 0; }")]
+    [TestCase("int32 Main() { int32 bits = 0b101010; return bits; }")]
+    [TestCase("int32 Main() { int32 bits = 0x_8000_0000; if (bits == int32.MinValue) { return 42; } return 0; }")]
+    [TestCase("int32 Main() { uint64 bits = 0b_11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111; return int32(bits % 1_000); }")]
     public async Task CompiledIntegerValuesEmitTheSameImageAsHostBuildAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -41,15 +40,14 @@ public sealed partial class CliTests
                 ordinary, "--runtime", "fail-fast", "--json");
             var (componentExit, componentOutput, componentError) = await RunAsync(input, "build-component",
                 scanner, "-", "-o", compiled, "--runtime", "fail-fast", "--json");
-            Assert.Equal(0, hostExit);
-            Assert.Equal(0, componentExit);
-            Assert.Empty(hostError);
-            Assert.Empty(componentError);
+            Assert.That(hostExit, Is.EqualTo(0));
+            Assert.That(componentExit, Is.EqualTo(0));
+            Assert.That(hostError, Is.Empty);
+            Assert.That(componentError, Is.Empty);
             using var host = JsonDocument.Parse(hostOutput);
             using var component = JsonDocument.Parse(componentOutput);
-            Assert.Equal(host.RootElement.GetProperty("contentId").GetString(),
-                component.RootElement.GetProperty("contentId").GetString());
-            Assert.Equal(await File.ReadAllBytesAsync(ordinary), await File.ReadAllBytesAsync(compiled));
+            Assert.That(component.RootElement.GetProperty("contentId").GetString(), Is.EqualTo(host.RootElement.GetProperty("contentId").GetString()));
+            Assert.That(await File.ReadAllBytesAsync(compiled), Is.EqualTo(await File.ReadAllBytesAsync(ordinary)));
         }
         finally
         {
@@ -57,41 +55,39 @@ public sealed partial class CliTests
             File.Delete(compiled);
         }
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return uint32(4294967296); }")]
-    [InlineData("int32 Main() { char16 value = 65536; return int32(value); }")]
-    [InlineData("int32 Main() { uint64 value = 18446744073709551616; return 42; }")]
-    [InlineData("int32 Main() { int64 value = -9223372036854775809; return 42; }")]
-    [InlineData("int32 Main() { return 18446744073709551616; }")]
-    [InlineData("int32 Main() { return 1i128; }")]
-    [InlineData("int32 Main() { return 1.5; }")]
-    [InlineData("int32 Main() { return 1e+; }")]
-    [InlineData("int32 Main() { return 0x; }")]
-    [InlineData("int32 Main() { return 0xG; }")]
-    [InlineData("int32 Main() { return 0xFFFFFFFFi64; }")]
-    [InlineData("int32 Main() { uint64 value = 0x10000000000000000; return 42; }")]
-    [InlineData("int32 Main() { return 0b; }")]
-    [InlineData("int32 Main() { return 0B2; }")]
-    [InlineData("int32 Main() { return 0b102; }")]
-    [InlineData("int32 Main() { return 0b1_; }")]
-    [InlineData("int32 Main() { return 0x___; }")]
-    [InlineData("int32 Main() { return 0b___; }")]
-    [InlineData("int32 Main() { return 1__e2; }")]
-    [InlineData("int32 Main() { return 1._2; }")]
-    [InlineData("int32 Main() { return 1e_2; }")]
-    [InlineData("int32 Main() { return 1e+_2; }")]
-    [InlineData("int32 Main() { return 0x1_; }")]
-    [InlineData("int32 Main() { return 0b_1f32; }")]
-    [InlineData("int32 Main() { uint64 value = 0x_1_0000_0000_0000_0000; return 42; }")]
-    [InlineData("int32 Main() { uint64 value = 18_446_744_073_709_551_616; return 42; }")]
-    [InlineData("int32 Main() { return 1_000i32; }")]
-    [InlineData("int32 Main() { return 0b1.0; }")]
-    [InlineData("int32 Main() { return 0b1e2; }")]
-    [InlineData("int32 Main() { return 0b1f32; }")]
-    [InlineData("int32 Main() { return 0b1u32; }")]
-    [InlineData("int32 Main() { int32 value = 0b100000000000000000000000000000000; return 0; }")]
-    [InlineData("int32 Main() { uint64 value = 0b10000000000000000000000000000000000000000000000000000000000000000; return 0; }")]
+    [TestCase("int32 Main() { return uint32(4294967296); }")]
+    [TestCase("int32 Main() { char16 value = 65536; return int32(value); }")]
+    [TestCase("int32 Main() { uint64 value = 18446744073709551616; return 42; }")]
+    [TestCase("int32 Main() { int64 value = -9223372036854775809; return 42; }")]
+    [TestCase("int32 Main() { return 18446744073709551616; }")]
+    [TestCase("int32 Main() { return 1i128; }")]
+    [TestCase("int32 Main() { return 1.5; }")]
+    [TestCase("int32 Main() { return 1e+; }")]
+    [TestCase("int32 Main() { return 0x; }")]
+    [TestCase("int32 Main() { return 0xG; }")]
+    [TestCase("int32 Main() { return 0xFFFFFFFFi64; }")]
+    [TestCase("int32 Main() { uint64 value = 0x10000000000000000; return 42; }")]
+    [TestCase("int32 Main() { return 0b; }")]
+    [TestCase("int32 Main() { return 0B2; }")]
+    [TestCase("int32 Main() { return 0b102; }")]
+    [TestCase("int32 Main() { return 0b1_; }")]
+    [TestCase("int32 Main() { return 0x___; }")]
+    [TestCase("int32 Main() { return 0b___; }")]
+    [TestCase("int32 Main() { return 1__e2; }")]
+    [TestCase("int32 Main() { return 1._2; }")]
+    [TestCase("int32 Main() { return 1e_2; }")]
+    [TestCase("int32 Main() { return 1e+_2; }")]
+    [TestCase("int32 Main() { return 0x1_; }")]
+    [TestCase("int32 Main() { return 0b_1f32; }")]
+    [TestCase("int32 Main() { uint64 value = 0x_1_0000_0000_0000_0000; return 42; }")]
+    [TestCase("int32 Main() { uint64 value = 18_446_744_073_709_551_616; return 42; }")]
+    [TestCase("int32 Main() { return 1_000i32; }")]
+    [TestCase("int32 Main() { return 0b1.0; }")]
+    [TestCase("int32 Main() { return 0b1e2; }")]
+    [TestCase("int32 Main() { return 0b1f32; }")]
+    [TestCase("int32 Main() { return 0b1u32; }")]
+    [TestCase("int32 Main() { int32 value = 0b100000000000000000000000000000000; return 0; }")]
+    [TestCase("int32 Main() { uint64 value = 0b10000000000000000000000000000000000000000000000000000000000000000; return 0; }")]
     public async Task CompiledIntegerFailuresRetainHostDiagnosticCodesAndSpansAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -106,22 +102,21 @@ public sealed partial class CliTests
                 ordinary, "--runtime", "fail-fast", "--json");
             var (componentExit, componentOutput, componentError) = await RunAsync(input, "build-component",
                 scanner, "-", "-o", compiled, "--runtime", "fail-fast", "--json");
-            Assert.Equal(1, hostExit);
-            Assert.Equal(hostExit, componentExit);
-            Assert.Empty(hostError);
-            Assert.Empty(componentError);
+            Assert.That(hostExit, Is.EqualTo(1));
+            Assert.That(componentExit, Is.EqualTo(hostExit));
+            Assert.That(hostError, Is.Empty);
+            Assert.That(componentError, Is.Empty);
             using var host = JsonDocument.Parse(hostOutput);
             using var component = JsonDocument.Parse(componentOutput);
-            Assert.Equal(host.RootElement.GetProperty("diagnostics").EnumerateArray()
-                .Select(static diagnostic => (diagnostic.GetProperty("code").GetString(),
-                    diagnostic.GetProperty("span").GetProperty("start").GetInt32(),
-                    diagnostic.GetProperty("span").GetProperty("length").GetInt32())),
-                component.RootElement.GetProperty("diagnostics").EnumerateArray()
+            Assert.That(component.RootElement.GetProperty("diagnostics").EnumerateArray()
                     .Select(static diagnostic => (diagnostic.GetProperty("code").GetString(),
                         diagnostic.GetProperty("span").GetProperty("start").GetInt32(),
-                        diagnostic.GetProperty("span").GetProperty("length").GetInt32())));
-            Assert.False(File.Exists(ordinary));
-            Assert.False(File.Exists(compiled));
+                        diagnostic.GetProperty("span").GetProperty("length").GetInt32())), Is.EqualTo(host.RootElement.GetProperty("diagnostics").EnumerateArray()
+                .Select(static diagnostic => (diagnostic.GetProperty("code").GetString(),
+                    diagnostic.GetProperty("span").GetProperty("start").GetInt32(),
+                    diagnostic.GetProperty("span").GetProperty("length").GetInt32()))));
+            Assert.That(File.Exists(ordinary), Is.False);
+            Assert.That(File.Exists(compiled), Is.False);
         }
         finally
         {
@@ -129,10 +124,8 @@ public sealed partial class CliTests
             File.Delete(compiled);
         }
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task InvalidCompiledIntegerRecordsRejectBuildWithoutReplacingArtifactAsync(bool missing)
     {
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-invalid-decoder-{Guid.NewGuid():N}");
@@ -165,12 +158,11 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(artifact, original);
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("42"),
                 "build-component", scanner, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
-            Assert.Equal(1, exit);
-            Assert.Empty(error);
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
-            Assert.Equal("TRM5001",
-                document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-            Assert.Equal(original, await File.ReadAllBytesAsync(artifact));
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            Assert.That(await File.ReadAllBytesAsync(artifact), Is.EqualTo(original));
         }
         finally
         {

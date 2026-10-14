@@ -9,28 +9,26 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class IntegerCheckedConversionsModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CheckedConversionHelpersPersistAndPublishOnlyRepresentableValuesAsync(
         BoundRuntimePolicy policy)
     {
         var path = Path.Combine(RepositoryRoot(), "self-host", "IntegerCheckedConversions.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
-        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
 
         var producerCompilation = Compilation.CreateLibrary(tree, policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var conversions = CreateConversions();
-        Assert.Equal(20, conversions.Count);
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        Assert.That(conversions.Count, Is.EqualTo(20));
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             conversions.ConvertAll(static conversion =>
                 "Terrum.CodeAnalysis.Numerics64." + conversion.FunctionName));
         var reference = ModuleCompiler.CreateReference(producer);
@@ -95,16 +93,14 @@ public sealed class IntegerCheckedConversionsModuleTests
             .AppendLine("}");
 
         var consumerTree = SyntaxTree.Parse(consumerSource.ToString(), "integer-conversion-consumer.terrum");
-        Assert.False(consumerTree.HasErrors, string.Join(Environment.NewLine, consumerTree.Diagnostics));
+        Assert.That(consumerTree.HasErrors, Is.False, string.Join(Environment.NewLine, consumerTree.Diagnostics));
         var consumerCompilation = Compilation.Create(consumerTree, reference, policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         var actual = NativeJit.Execute(linked, (NativeRuntimePolicy)policy);
-        Assert.True(actual == 0,
-            actual > 0 && actual <= checks.Count
+        Assert.That(actual == 0, Is.True, actual > 0 && actual <= checks.Count
                 ? $"Conversion boundary {actual} failed: {checks[actual - 1]}."
                 : $"Expected all conversion checks to pass, got consumer result {actual}.");
 
@@ -116,9 +112,8 @@ public sealed class IntegerCheckedConversionsModuleTests
             }
             """, "integer-conversion-unpublished-output.terrum");
         var invalidCompilation = Compilation.Create(invalidConsumer, reference, policy);
-        Assert.Contains(invalidCompilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3016");
-        Assert.Null(invalidCompilation.Program);
+        Assert.That(global::System.Linq.Enumerable.Any(invalidCompilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3016"),Is.True);
+        Assert.That(invalidCompilation.Program, Is.Null);
     }
 
     private static List<Conversion> CreateConversions()

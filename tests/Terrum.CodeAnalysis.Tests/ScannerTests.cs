@@ -17,116 +17,109 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ScannerTests
 {
-    [Theory]
-    [InlineData(PrimitiveType.Int64)]
-    [InlineData(PrimitiveType.UInt64)]
+    [TestCase(PrimitiveType.Int64)]
+    [TestCase(PrimitiveType.UInt64)]
     public void WideValuesDoNotImplyWideHostBufferStorage(PrimitiveType type)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return 0; }"),
             [new HostBuffer("Wide", type, [0], true)]);
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("void Main() { Host.Source[0] = (char16)65; }")]
-    [InlineData("int32 Main() { return Host.Missing[0]; }")]
-    [InlineData("int32 Main() { return (int32)Host.Source[true]; }")]
-    [InlineData("void Main() { var borrowed = Host.Source; }")]
-    [InlineData("int32 Main() { Host.Tokens.Length = 1; return 0; }")]
-    [InlineData("int32 Main() { Host.Tokens[0] = true; return 0; }")]
+    [TestCase("void Main() { Host.Source[0] = (char16)65; }")]
+    [TestCase("int32 Main() { return Host.Missing[0]; }")]
+    [TestCase("int32 Main() { return (int32)Host.Source[true]; }")]
+    [TestCase("void Main() { var borrowed = Host.Source; }")]
+    [TestCase("int32 Main() { Host.Tokens.Length = 1; return 0; }")]
+    [TestCase("int32 Main() { Host.Tokens[0] = true; return 0; }")]
     public void BufferCapabilitiesRejectInvalidAccessAndEscape(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), ScannerHost.CreateBuffers(SourceText.From("x")));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
 
-    [Fact]
+    [Test]
     public void NamedBuffersRequireExplicitHostGrants()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Host.Source.Length; }"));
-        Assert.True(compilation.HasErrors);
-        Assert.Null(compilation.Program);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Program, Is.Null);
     }
-
-    [Theory]
-    [InlineData("int32 Main() { return Host.State[-1]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Main() { return Host.State[2]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Main() { return Host.State[^0]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Main() { return Host.State[^3]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Main() { return Host.State[^(-1)]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Main() { Host.State[^1] = 42; return Host.State[^1]; }", 42)]
-    [InlineData("int32 Main() { const int32 last = 1; Host.State[^last] = 42; return Host.State[1]; }", 42)]
-    [InlineData("int32 Offset() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Value() { Host.State[0] = Host.State[0] + 1; return 40; } int32 Main() { Host.State[^Offset()] = Value(); return Host.State[^Offset()] + Host.State[0]; }", 43)]
-    [InlineData("int32 Offset() { return 0; } int32 Main() { Host.State[1] = 42; return Host.State[^(Offset() + 1)]; }", 42)]
-    [InlineData("int32 Offset() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Main() { Host.State[1] = 40; Host.State[^Offset()] += 2; return Host.State[1] + Host.State[0]; }", 43)]
-    [InlineData("int32 Main() { Host.State[2] = Fail(); return 0; } int32 Fail() { require false; return 0; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Offset() { return -1; } int32 Main() { return Host.State[^Offset()]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Offset() { return 0; } int32 Main() { return Host.State[^Offset()]; }", unchecked((int)0xE0540004))]
-    [InlineData("int32 Offset() { return 2; } int32 Main() { Host.State[0] = 42; return Host.State[^Offset()]; }", 42)]
-    [InlineData("int32 Main() { Host.State[Index()] = Value(); return Host.State[0] * 10 + Host.State[1]; } int32 Index() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Value() { return Host.State[0] + 6; }", 17)]
+    [TestCase("int32 Main() { return Host.State[-1]; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Main() { return Host.State[2]; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Main() { return Host.State[^0]; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Main() { return Host.State[^3]; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Main() { return Host.State[^(-1)]; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Main() { Host.State[^1] = 42; return Host.State[^1]; }",42)]
+    [TestCase("int32 Main() { const int32 last = 1; Host.State[^last] = 42; return Host.State[1]; }",42)]
+    [TestCase("int32 Offset() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Value() { Host.State[0] = Host.State[0] + 1; return 40; } int32 Main() { Host.State[^Offset()] = Value(); return Host.State[^Offset()] + Host.State[0]; }",43)]
+    [TestCase("int32 Offset() { return 0; } int32 Main() { Host.State[1] = 42; return Host.State[^(Offset() + 1)]; }",42)]
+    [TestCase("int32 Offset() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Main() { Host.State[1] = 40; Host.State[^Offset()] += 2; return Host.State[1] + Host.State[0]; }",43)]
+    [TestCase("int32 Main() { Host.State[2] = Fail(); return 0; } int32 Fail() { require false; return 0; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Offset() { return -1; } int32 Main() { return Host.State[^Offset()]; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Offset() { return 0; } int32 Main() { return Host.State[^Offset()]; }",unchecked((int)0xE0540004))]
+    [TestCase("int32 Offset() { return 2; } int32 Main() { Host.State[0] = 42; return Host.State[^Offset()]; }",42)]
+    [TestCase("int32 Main() { Host.State[Index()] = Value(); return Host.State[0] * 10 + Host.State[1]; } int32 Index() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Value() { return Host.State[0] + 6; }",17)]
     public async Task BufferAccessChecksBoundsAndPreservesEvaluationOrderAsync(string source, int expected)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("State", PrimitiveType.Int32, [0, 0], true)]);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), expected).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), expected).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(" \t\r\n\u0085\u2028\u2029\u00A0\u3000")]
-    [InlineData("alpha _value 0123 + (beta != 7) >> >= && & || | == =")]
-    [InlineData("a??b a??=b T?? T??? ? ?: ??= ??")]
-    [InlineData("++count count-- count++ + ++count count-- - --count")]
-    [InlineData("int32 F(int32 x) => x == 0; => = > ==> /* arrow */ =>")]
-    [InlineData("_ _name __ _123 _/* trivia */=int32(42);")]
-    [InlineData("\U00010400_var \u2118 \u212E \u2122 \u0301")]
-    [InlineData("a\u200Cb a\u200Db \u200C \u200D \u0661 a\u06612")]
-    [InlineData("a\u00E9 ae\u0301 \U0001F600x")]
-    [InlineData("0x1.fp+2 0x_1_f.0_fP+1_0 0x1p-4 0x1p2 0x1__p2 0x1._p2 0x1p2__")]
-    [InlineData("0x1p2 0X.8P-1 0x1.p2 0x.p2 0x1._p2 0x1__p2 0x1.2__p2")]
-    [InlineData("0x1p 0x1p+ 0x1P- 0x1p2")]
-    [InlineData("0xi32")]
-    [InlineData("if while require int32 2147483648")]
-    [InlineData("abstract operator where abstractly operator_ where2 G<T( ;")]
-    [InlineData("// trailing comment")]
-    [InlineData("alpha/* inner // ignored */+// line\r\n\"quoted\\ntext\"")]
-    [InlineData("1.25e-10f64 2e+3 3i128 4u8 0.5 6. 7efoo 8i32extra")]
-    [InlineData("0i8 0i16 0i32 0i64 0i128 0u8 0u16 0u32 0u64 0u128 0f16 0f32 0f64 0f128")]
-    [InlineData("1f8 2u128x 3i64\u200D 4f128\uD800 5E+6f32 7e+8 9e-0 10e\u00E9")]
-    [InlineData("1e 2e+ 3E-; 4e. 5e_ 6e\uD800 7e+f64")]
-    [InlineData("\u0661 \uFF11 \U0001D7D9 1\u0661 1\uFF11 1\U0001D7D9")]
-    [InlineData("0x_FF 0xFF_FF 0xFF_ 0b_1 0b1__0")]
-    [InlineData("1_000 1__2 1.2_3 1.2__3 1e4_5 1e4__5")]
-    [InlineData("\"\" \"\\u0041\" \"\\U0001F600\" \"\\\"\" \"\\\\\"")]
-    [InlineData("\"\\uD800\" \"\\U00110000\" \"\\u12x\" \"\\q\"")]
-    [InlineData("\"\\UFFFFFFFF\" \"\\U0000DFFF\" \"\\U0010FFFF\" \"\\uFFFF\" \"\\u0000\"")]
-    [InlineData("\"\\U1234567\" \"\\u\" \"\\z\uD800\" \"\uDC00\"")]
-    [InlineData("\"bad\uD800\uDC00\uD800\" //\uDC00\r\n/*\uD800*/")]
-    [InlineData("\"unterminated\nsecond \"ok\"")]
-    [InlineData("\"incomplete\\\r\nnext")]
-    [InlineData("/* unterminated \uD800")]
-    [InlineData("/*a*/ / /*b*/ * / //\U0001F600\uDC00\nx")]
+    [TestCase("")]
+    [TestCase(" \t\r\n\u0085\u2028\u2029\u00A0\u3000")]
+    [TestCase("alpha _value 0123 + (beta != 7) >> >= && & || | == =")]
+    [TestCase("a??b a??=b T?? T??? ? ?: ??= ??")]
+    [TestCase("++count count-- count++ + ++count count-- - --count")]
+    [TestCase("int32 F(int32 x) => x == 0; => = > ==> /* arrow */ =>")]
+    [TestCase("_ _name __ _123 _/* trivia */=int32(42);")]
+    [TestCase("\U00010400_var \u2118 \u212E \u2122 \u0301")]
+    [TestCase("a\u200Cb a\u200Db \u200C \u200D \u0661 a\u06612")]
+    [TestCase("a\u00E9 ae\u0301 \U0001F600x")]
+    [TestCase("0x1.fp+2 0x_1_f.0_fP+1_0 0x1p-4 0x1p2 0x1__p2 0x1._p2 0x1p2__")]
+    [TestCase("0x1p2 0X.8P-1 0x1.p2 0x.p2 0x1._p2 0x1__p2 0x1.2__p2")]
+    [TestCase("0x1p 0x1p+ 0x1P- 0x1p2")]
+    [TestCase("0xi32")]
+    [TestCase("if while require int32 2147483648")]
+    [TestCase("abstract operator where abstractly operator_ where2 G<T( ;")]
+    [TestCase("// trailing comment")]
+    [TestCase("alpha/* inner // ignored */+// line\r\n\"quoted\\ntext\"")]
+    [TestCase("1.25e-10f64 2e+3 3i128 4u8 0.5 6. 7efoo 8i32extra")]
+    [TestCase("0i8 0i16 0i32 0i64 0i128 0u8 0u16 0u32 0u64 0u128 0f16 0f32 0f64 0f128")]
+    [TestCase("1f8 2u128x 3i64\u200D 4f128\uD800 5E+6f32 7e+8 9e-0 10e\u00E9")]
+    [TestCase("1e 2e+ 3E-; 4e. 5e_ 6e\uD800 7e+f64")]
+    [TestCase("\u0661 \uFF11 \U0001D7D9 1\u0661 1\uFF11 1\U0001D7D9")]
+    [TestCase("0x_FF 0xFF_FF 0xFF_ 0b_1 0b1__0")]
+    [TestCase("1_000 1__2 1.2_3 1.2__3 1e4_5 1e4__5")]
+    [TestCase("\"\" \"\\u0041\" \"\\U0001F600\" \"\\\"\" \"\\\\\"")]
+    [TestCase("\"\\uD800\" \"\\U00110000\" \"\\u12x\" \"\\q\"")]
+    [TestCase("\"\\UFFFFFFFF\" \"\\U0000DFFF\" \"\\U0010FFFF\" \"\\uFFFF\" \"\\u0000\"")]
+    [TestCase("\"\\U1234567\" \"\\u\" \"\\z\uD800\" \"\uDC00\"")]
+    [TestCase("\"bad\uD800\uDC00\uD800\" //\uDC00\r\n/*\uD800*/")]
+    [TestCase("\"unterminated\nsecond \"ok\"")]
+    [TestCase("\"incomplete\\\r\nnext")]
+    [TestCase("/* unterminated \uD800")]
+    [TestCase("/*a*/ / /*b*/ * / //\U0001F600\uDC00\nx")]
     public async Task CompiledScannerAgreesWithHostOnTokenBoundariesAndDiagnosticsAsync(string source)
     {
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task MalformedSurrogatesRetainExactCodeUnitBoundariesAsync()
     {
         await CheckScannerAsync("\uD800x \uDC00 \uD800\uD800 \uDC00\uDC00 \U00010400").ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task IntegerMagnitudeOverflowBoundariesMatchAcrossRadicesAsync()
     {
         string binaryMaximum = "0b" + new string('1', 64);
@@ -142,7 +135,7 @@ public sealed class ScannerTests
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task NumericScannerMatchesHostedLexerAcrossDeterministicTokenCorpusAsync()
     {
         const string decimalCharacters = "0123456789_.eE+-iIuUfF";
@@ -184,40 +177,40 @@ public sealed class ScannerTests
         await CheckScannerAsync(source.ToString()).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task LongHexFloatMantissaKeepsScannerParityAsync()
     {
         var source = "0x" + new string('A', 2048) + "." + new string('F', 2048) + "p+10";
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task CharacterLiteralsRetainTokenKindsAndDiagnosticParityAsync()
     {
         await CheckScannerAsync("'A' '\\'' '\\u0041' '\\U0001F600' '😀' '' 'ab' '\\q' '\\uD800' 'unterminated\nnext")
             .ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task LongAsciiStringContentsPreserveScannerParityAsync()
     {
         await CheckScannerAsync("\"" + new string('a', 8_192) + "\"").ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task LongAsciiCommentsPreserveScannerParityAsync()
     {
         var source = "//" + new string('a', 8_000) + "\r\n/*" + new string('b', 8_000) + "*/value";
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task LongAsciiIdentifierPreservesScannerParityAsync()
     {
         await CheckScannerAsync(new string('a', 8_000)).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task CharacterLiteralEscapeDiagnosticsMatchHostedBoundariesAsync()
     {
         string[] literals = [
@@ -232,7 +225,7 @@ public sealed class ScannerTests
             .ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task StringEscapeDiagnosticsMatchHostedBoundariesAsync()
     {
         string[] literals = [
@@ -249,7 +242,7 @@ public sealed class ScannerTests
             .ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task EveryKeywordClassifiesNativelyAsync()
     {
         var keywords = Enum.GetValues<TokenKind>()
@@ -261,27 +254,27 @@ public sealed class ScannerTests
             }).ToArray();
         var source = string.Join(' ', keywords.Select(keyword => keyword.Text)) + " namespace_extra Namespace";
         var lexed = Lexer.Lex(SourceText.From(source));
-        Assert.Equal(keywords.Select(keyword => keyword.Kind).Append(TokenKind.Identifier).Append(TokenKind.Identifier)
-            .Append(TokenKind.EndOfFile), lexed.Tokens.Select(token => token.Kind));
+        Assert.That(lexed.Tokens.Select(token => token.Kind), Is.EqualTo(keywords.Select(keyword => keyword.Kind).Append(TokenKind.Identifier).Append(TokenKind.Identifier)
+            .Append(TokenKind.EndOfFile)));
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public void TokenKindsAppendWithoutRenumberingPublishedKinds()
     {
-        Assert.Equal(24, (int)TokenKind.InterfaceKeyword);
-        Assert.Equal(76, (int)TokenKind.UnsafeKeyword);
-        Assert.Equal(77, (int)TokenKind.AbstractKeyword);
-        Assert.Equal(78, (int)TokenKind.OperatorKeyword);
-        Assert.Equal(79, (int)TokenKind.WhereKeyword);
-        Assert.Equal(102, (int)TokenKind.AliasKeyword);
-        Assert.Equal(103, (int)TokenKind.CharacterLiteral);
-        Assert.Equal(104, (int)TokenKind.DotDot);
-        Assert.Equal(105, (int)TokenKind.DotDotCaret);
-        Assert.Equal(106, (int)TokenKind.QuestionDot);
+        Assert.That((int)TokenKind.InterfaceKeyword, Is.EqualTo(24));
+        Assert.That((int)TokenKind.UnsafeKeyword, Is.EqualTo(76));
+        Assert.That((int)TokenKind.AbstractKeyword, Is.EqualTo(77));
+        Assert.That((int)TokenKind.OperatorKeyword, Is.EqualTo(78));
+        Assert.That((int)TokenKind.WhereKeyword, Is.EqualTo(79));
+        Assert.That((int)TokenKind.AliasKeyword, Is.EqualTo(102));
+        Assert.That((int)TokenKind.CharacterLiteral, Is.EqualTo(103));
+        Assert.That((int)TokenKind.DotDot, Is.EqualTo(104));
+        Assert.That((int)TokenKind.DotDotCaret, Is.EqualTo(105));
+        Assert.That((int)TokenKind.QuestionDot, Is.EqualTo(106));
     }
 
-    [Fact]
+    [Test]
     public async Task EveryOperatorAndTriviaFormExecutesNativelyAsync()
     {
         const string Operators = "_ ( ) { } [ ] ; , . .. ..^ : ? ?. ?? ??= + - ++ -- * / % ! ~ = == => != < <= > >= & && | || ^"
@@ -296,7 +289,7 @@ public sealed class ScannerTests
             {
                 continue;
             }
-            Assert.Contains(kind, actual);
+            Assert.That(actual, Does.Contain(kind));
         }
 
         await CheckScannerAsync(Operators).ConfigureAwait(true);
@@ -305,7 +298,7 @@ public sealed class ScannerTests
         await CheckScannerAsync("/* unterminated \uDC00").ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task ExtendedStaticProtocolSampleAgreesWithCompiledScannerAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -314,11 +307,11 @@ public sealed class ScannerTests
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public Task SelfBoundStaticProtocolAgreesWithCompiledScannerAsync() =>
         CheckScannerAsync(StaticProtocolSelfTests.Source);
 
-    [Fact]
+    [Test]
     public async Task MultipleTypeParameterSampleAgreesWithCompiledScannerAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -327,7 +320,7 @@ public sealed class ScannerTests
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task ManagedGenericSampleAgreesWithCompiledScannerAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -336,7 +329,7 @@ public sealed class ScannerTests
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task ComparisonProtocolSampleAgreesWithCompiledScannerAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -345,46 +338,44 @@ public sealed class ScannerTests
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task DiagnosticAndTokenBuffersHandleDenseInvalidInputAsync()
     {
         await CheckScannerAsync(new string('\uDC00', 256)).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task TriviaBufferHandlesDenseAlternatingRunsAsync()
     {
         await CheckScannerAsync(string.Concat(Enumerable.Repeat(" \n", 512))).ConfigureAwait(true);
     }
-
-    [Theory]
-    [InlineData("0 00 000000000000000000000000000000000000000001 256u8")]
-    [InlineData("9223372036854775807 9223372036854775808i64 -9223372036854775808i64")]
-    [InlineData("18446744073709551615 18446744073709551615u64 18446744073709551616")]
-    [InlineData("0x0 0X2A 0x1f32 0XFFFFFFFFFFFFFFFF 0x10000000000000000")]
-    [InlineData("0x 0X 0xG 0x1g 0x1u32 0x1f32 0x1_2 0x1.2 0x1p2")]
-    [InlineData("0b0 0B1 0b101010 0B11111111111111111111111111111111 0b000000000000000000000000000000000000000000000000000000000000000001")]
-    [InlineData("0b 0B2 0b102 0b1u32 0b1f32 0b1_0 0b1.1 0b1p2")]
-    [InlineData("1_000 1__2 0x_FFFF_FFFF_FFFF_FFFF 0b___1010 0b_11111111_11111111_11111111_11111111")]
-    [InlineData("1_ 0x___ 0b___ 1_.2 1.2_3e+4_5 1.2_ 1e+2_3 1e+2_ 0b1_ 0xF__ 1_000i32 0b_1f32 0x_F_Fi32")]
-    [InlineData("0x_1_0000_0000_0000_0000 0b_1_0000000000000000000000000000000000000000000000000000000000000000")]
-    [InlineData("18_446_744_073_709_551_615 18_446_744_073_709_551_616 1_foo 0xF_tail 0b1_tail")]
-    [InlineData("18446744073709551616i128 340282366920938463463374607431768211455u128")]
-    [InlineData("1i8 2i16 3i32 4i64 5i128 6u8 7u16 8u32 9u64 10u128")]
-    [InlineData("1.25 2e+3 3E- 4e 5f32 6f128 7efoo 8i64extra 9i128\u200D")]
-    [InlineData("12345678901234567890123456789012345678901234567890u128 // trailing")]
+    [TestCase("0 00 000000000000000000000000000000000000000001 256u8")]
+    [TestCase("9223372036854775807 9223372036854775808i64 -9223372036854775808i64")]
+    [TestCase("18446744073709551615 18446744073709551615u64 18446744073709551616")]
+    [TestCase("0x0 0X2A 0x1f32 0XFFFFFFFFFFFFFFFF 0x10000000000000000")]
+    [TestCase("0x 0X 0xG 0x1g 0x1u32 0x1f32 0x1_2 0x1.2 0x1p2")]
+    [TestCase("0b0 0B1 0b101010 0B11111111111111111111111111111111 0b000000000000000000000000000000000000000000000000000000000000000001")]
+    [TestCase("0b 0B2 0b102 0b1u32 0b1f32 0b1_0 0b1.1 0b1p2")]
+    [TestCase("1_000 1__2 0x_FFFF_FFFF_FFFF_FFFF 0b___1010 0b_11111111_11111111_11111111_11111111")]
+    [TestCase("1_ 0x___ 0b___ 1_.2 1.2_3e+4_5 1.2_ 1e+2_3 1e+2_ 0b1_ 0xF__ 1_000i32 0b_1f32 0x_F_Fi32")]
+    [TestCase("0x_1_0000_0000_0000_0000 0b_1_0000000000000000000000000000000000000000000000000000000000000000")]
+    [TestCase("18_446_744_073_709_551_615 18_446_744_073_709_551_616 1_foo 0xF_tail 0b1_tail")]
+    [TestCase("18446744073709551616i128 340282366920938463463374607431768211455u128")]
+    [TestCase("1i8 2i16 3i32 4i64 5i128 6u8 7u16 8u32 9u64 10u128")]
+    [TestCase("1.25 2e+3 3E- 4e 5f32 6f128 7efoo 8i64extra 9i128\u200D")]
+    [TestCase("12345678901234567890123456789012345678901234567890u128 // trailing")]
     public async Task CompiledIntegerDecoderMatchesBigIntegerOracleAsync(string source)
     {
         await CheckScannerAsync(source, repeat: true).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task RepeatedScanReplacesPublishedDiagnosticsAsync()
     {
         await CheckScannerAsync("\"\\q\" /*\uD800*/ 1e+ \uDC00", repeat: true).ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public async Task PinnedIdentifierRangeEdgesExecuteInTerrumAsync()
     {
         var source = new StringBuilder();
@@ -403,29 +394,27 @@ public sealed class ScannerTests
         await CheckScannerAsync("@\U00010400\U00010428").ConfigureAwait(true);
     }
 
-    [Fact]
+    [Test]
     public void HostBufferInputPreservesMalformedUnitsAndRejectsResourceExcess()
     {
         var buffers = ScannerHost.CreateBuffers(SourceText.From("\uD800\0\uDC00"));
-        Assert.Equal<int>([0xD800, 0, 0xDC00], buffers[0].Values);
-        Assert.Equal(UnicodeIdentifierProfile.StartRanges.ToArray(), buffers[1].Values.ToArray());
-        Assert.Equal(UnicodeIdentifierProfile.ContinueRanges.ToArray(), buffers[2].Values.ToArray());
-        Assert.False(buffers[0].IsWritable);
-        Assert.True(buffers[3].IsWritable);
-        Assert.True(buffers[4].IsWritable);
-        Assert.True(buffers[5].IsWritable);
-        Assert.False(buffers[6].IsWritable);
-        Assert.False(buffers[7].IsWritable);
-        Assert.True(buffers[8].IsWritable);
-        Assert.Equal(1 + (4 * 3), buffers[5].Values.Length);
-        Assert.Equal(1 + (5 * 3), buffers[8].Values.Length);
+        Assert.That(buffers[0].Values, Is.EqualTo([0xD800, 0, 0xDC00]));
+        Assert.That(buffers[1].Values.ToArray(), Is.EqualTo(UnicodeIdentifierProfile.StartRanges.ToArray()));
+        Assert.That(buffers[2].Values.ToArray(), Is.EqualTo(UnicodeIdentifierProfile.ContinueRanges.ToArray()));
+        Assert.That(buffers[0].IsWritable, Is.False);
+        Assert.That(buffers[3].IsWritable, Is.True);
+        Assert.That(buffers[4].IsWritable, Is.True);
+        Assert.That(buffers[5].IsWritable, Is.True);
+        Assert.That(buffers[6].IsWritable, Is.False);
+        Assert.That(buffers[7].IsWritable, Is.False);
+        Assert.That(buffers[8].IsWritable, Is.True);
+        Assert.That(buffers[5].Values.Length, Is.EqualTo(1 + (4 * 3)));
+        Assert.That(buffers[8].Values.Length, Is.EqualTo(1 + (5 * 3)));
         _ = Assert.Throws<ArgumentException>(() => ScannerHost.CreateBuffers(
-            SourceText.From(new string('x', ScannerHost.MaximumSourceLength + 1))));
+            SourceText.From(new string('x', ScannerHost.MaximumSourceLength + 1))))!;
     }
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task PersistedScannerProfileRebindsFreshBuffersForEachInvocationAsync(BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -434,35 +423,33 @@ public sealed class ScannerTests
         var seed = SourceText.From("seed 1");
         var providerCompilation = Compilation.Create(SyntaxTree.Parse(scanner + "\nint32 Main() { return 0; }"),
             ScannerHost.CreateInvocationProfileBuffers(seed), policy);
-        Assert.False(providerCompilation.HasErrors, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
-        var provider = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(providerCompilation.Program),
+        Assert.That(providerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = providerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
             ["Terrum.CodeAnalysis.Scan"]);
 
         var alternateCompilation = Compilation.Create(
             SyntaxTree.Parse(scanner + "\nint32 Main() { return 0; }"),
             ScannerHost.CreateInvocationProfileBuffers(SourceText.From("a differently sized seed")), policy);
-        Assert.False(alternateCompilation.HasErrors,
-            string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
+        Assert.That(alternateCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
         var alternateProvider = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(alternateCompilation.Program), ["Terrum.CodeAnalysis.Scan"]);
-        Assert.Equal(provider, alternateProvider);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = alternateCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), ["Terrum.CodeAnalysis.Scan"]);
+        Assert.That(alternateProvider, Is.EqualTo(provider));
 
         var invalidProvider = provider.ToArray();
         var sourceDescriptor = Encoding.UTF8.GetBytes("Source");
         var sourceDescriptorOffset = invalidProvider.AsSpan().IndexOf(sourceDescriptor);
-        Assert.True(sourceDescriptorOffset >= 0);
+        Assert.That(sourceDescriptorOffset >= 0, Is.True);
         invalidProvider[sourceDescriptorOffset] = (byte)'X';
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalidProvider));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalidProvider))!;
 
         var reference = ModuleCompiler.CreateReference(provider);
-        Assert.Equal(ScannerHost.InvocationProfileIdentity, reference.InvocationProfileId);
+        Assert.That(reference.InvocationProfileId, Is.EqualTo(ScannerHost.InvocationProfileIdentity));
         var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse("namespace Terrum.CodeAnalysis; int32 Main() { return Scan(); }"),
             reference, policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
-            Assert.IsType<BoundProgram>(consumerCompilation.Program), provider);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = consumerCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(), provider);
         var linked = ModuleCompiler.Link(consumer, provider);
 
         var sources = new List<string> {
@@ -476,7 +463,7 @@ public sealed class ScannerTests
         {
             maximumTokenAndTriviaSource.Append("a ");
         }
-        Assert.Equal(ScannerHost.MaximumSourceLength, maximumTokenAndTriviaSource.Length);
+        Assert.That(maximumTokenAndTriviaSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         sources.Add(maximumTokenAndTriviaSource.ToString());
 
         var maximumTriviaSource = new string('\n', ScannerHost.MaximumSourceLength);
@@ -487,7 +474,7 @@ public sealed class ScannerTests
         {
             maximumIntegerRecordSource.Append("1 ");
         }
-        Assert.Equal(ScannerHost.MaximumSourceLength, maximumIntegerRecordSource.Length);
+        Assert.That(maximumIntegerRecordSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         var maximumIntegerRecordText = maximumIntegerRecordSource.ToString();
         sources.Add(maximumIntegerRecordText);
 
@@ -557,7 +544,7 @@ public sealed class ScannerTests
                     CultureInfo.InvariantCulture));
             }
             text.Append('"');
-            Assert.InRange(text.Length, 1, ScannerHost.MaximumSourceLength);
+            Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
         }
 
@@ -566,7 +553,7 @@ public sealed class ScannerTests
         {
             rawSurrogateSource.Append('"').Append((char)codeUnit).Append("\" ");
         }
-        Assert.InRange(rawSurrogateSource.Length, 1, ScannerHost.MaximumSourceLength);
+        Assert.That(rawSurrogateSource.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
         sources.Add(rawSurrogateSource.ToString());
 
         const int maximumSupplementaryEscapesPerSource = 1_500;
@@ -581,7 +568,7 @@ public sealed class ScannerTests
                     CultureInfo.InvariantCulture));
             }
             text.Append('"');
-            Assert.InRange(text.Length, 1, ScannerHost.MaximumSourceLength);
+            Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
         }
 
@@ -609,7 +596,7 @@ public sealed class ScannerTests
                 text.Append(char.ConvertFromUtf32(scalarStart + index));
             }
             text.Append('"');
-            Assert.InRange(text.Length, 1, ScannerHost.MaximumSourceLength);
+            Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
         }
 
@@ -625,7 +612,7 @@ public sealed class ScannerTests
                 var scalar = char.ConvertFromUtf32(scalarStart + index);
                 text.Append(scalar).Append("x A").Append(scalar).Append("x ");
             }
-            Assert.InRange(text.Length, 1, ScannerHost.MaximumSourceLength);
+            Assert.That(text.Length, Is.InRange(1, ScannerHost.MaximumSourceLength));
             sources.Add(text.ToString());
         }
 
@@ -635,14 +622,14 @@ public sealed class ScannerTests
             .Append(char.ConvertFromUtf32(0x10FFFF))
             .Append('"')
             .ToString();
-        Assert.Equal(ScannerHost.MaximumSourceLength, maximumLengthSupplementarySource.Length);
+        Assert.That(maximumLengthSupplementarySource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
         sources.Add(maximumLengthSupplementarySource);
 
         foreach (var trailingSurrogate in new[] { '\uD800', '\uDC00' })
         {
             var maximumLengthMalformedSource = new string('x', ScannerHost.MaximumSourceLength - 1)
                 + trailingSurrogate;
-            Assert.Equal(ScannerHost.MaximumSourceLength, maximumLengthMalformedSource.Length);
+            Assert.That(maximumLengthMalformedSource.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
             sources.Add(maximumLengthMalformedSource);
         }
 
@@ -652,10 +639,8 @@ public sealed class ScannerTests
             var source = SourceText.From(text);
             var expected = Lexer.Lex(source);
             var actual = NativeJit.ExecuteWithScannerProfile(linked, source, (NativeRuntimePolicy)policy);
-            Assert.Equal(expected.Tokens.Select(static token => (token.Kind, token.Span)),
-                actual.LexResult.Tokens.Select(static token => (token.Kind, token.Span)));
-            Assert.Equal(expected.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)),
-                actual.LexResult.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)));
+            Assert.That(actual.LexResult.Tokens.Select(static token => (token.Kind, token.Span)), Is.EqualTo(expected.Tokens.Select(static token => (token.Kind, token.Span))));
+            Assert.That(actual.LexResult.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span)), Is.EqualTo(expected.Diagnostics.Select(static diagnostic => (diagnostic.Code, diagnostic.Span))));
 
             var expectedTrivia = ImmutableArray.CreateBuilder<ScannerTrivia>();
             for (var tokenIndex = 0; tokenIndex < expected.Tokens.Length; tokenIndex++)
@@ -665,69 +650,65 @@ public sealed class ScannerTests
                     expectedTrivia.Add(new ScannerTrivia(trivia.Kind, trivia.Span, tokenIndex));
                 }
             }
-            Assert.Equal<ScannerTrivia>(expectedTrivia, actual.LexResult.Tokens
+            Assert.That(actual.LexResult.Tokens
                 .SelectMany(static (token, tokenIndex) => token.LeadingTrivia.Select(trivia =>
-                    new ScannerTrivia(trivia.Kind, trivia.Span, tokenIndex))));
+                    new ScannerTrivia(trivia.Kind, trivia.Span, tokenIndex))), Is.EqualTo(expectedTrivia));
 
             if (text.StartsWith("if ", StringComparison.Ordinal))
             {
-                Assert.Equal<ScannerIntegerValue>(
-                    [new(1, "i8", false, 12), new(2, "u64", true, null)],
-                    actual.IntegerValues);
+                Assert.That(actual.IntegerValues,
+                    Is.EqualTo(new ScannerIntegerValue[] { new(1, "i8", false, 12), new(2, "u64", true, null) }));
                 retained = actual;
             }
             else if (text == integerBoundarySource)
             {
-                Assert.Equal<ScannerIntegerValue>(
-                [
+                Assert.That(actual.IntegerValues, Is.EqualTo(new ScannerIntegerValue[]
+                {
                     new(0, "", false, ulong.MaxValue),
                     new(1, "", true, null),
                     new(2, "", false, ulong.MaxValue),
                     new(3, "", true, null),
                     new(4, "", false, ulong.MaxValue),
                     new(5, "", true, null),
-                ], actual.IntegerValues);
+                }));
             }
             else if (text.Length == 0)
             {
-                Assert.Empty(actual.LexResult.Diagnostics);
-                Assert.Empty(actual.IntegerValues);
+                Assert.That(actual.LexResult.Diagnostics, Is.Empty);
+                Assert.That(actual.IntegerValues, Is.Empty);
             }
             else if (text == maximumDiagnosticSource)
             {
-                Assert.Equal(ScannerHost.MaximumSourceLength, actual.LexResult.Diagnostics.Length);
-                Assert.Equal(ScannerHost.MaximumSourceLength + 1, actual.TokenCount);
+                Assert.That(actual.LexResult.Diagnostics.Length, Is.EqualTo(ScannerHost.MaximumSourceLength));
+                Assert.That(actual.TokenCount, Is.EqualTo(ScannerHost.MaximumSourceLength + 1));
             }
             else if (text == maximumTriviaSource)
             {
-                Assert.Equal(1, actual.TokenCount);
-                Assert.Equal(ScannerHost.MaximumSourceLength, actual.LexResult.Tokens
-                    .SelectMany(static token => token.LeadingTrivia).Count());
+                Assert.That(actual.TokenCount, Is.EqualTo(1));
+                Assert.That(actual.LexResult.Tokens
+                    .SelectMany(static token => token.LeadingTrivia).Count(), Is.EqualTo(ScannerHost.MaximumSourceLength));
             }
             else if (text == maximumIntegerRecordText)
             {
-                Assert.Equal(ScannerHost.MaximumSourceLength / 2, actual.IntegerValues.Length);
+                Assert.That(actual.IntegerValues.Length, Is.EqualTo(ScannerHost.MaximumSourceLength / 2));
                 for (var index = 0; index < actual.IntegerValues.Length; index++)
                 {
-                    Assert.Equal(new ScannerIntegerValue(index, "", false, 1), actual.IntegerValues[index]);
+                    Assert.That(actual.IntegerValues[index], Is.EqualTo(new ScannerIntegerValue(index, "", false, 1)));
                 }
             }
         }
 
-        Assert.NotNull(retained);
-        Assert.Equal(5, retained.TokenCount);
-        Assert.Equal(3, retained.LexResult.Diagnostics.Length);
-        Assert.Equal<ScannerIntegerValue>(
-            [new(1, "i8", false, 12), new(2, "u64", true, null)],
-            retained.IntegerValues);
+        TestAssertions.NotNull(retained);
+        Assert.That(retained.TokenCount, Is.EqualTo(5));
+        Assert.That(retained.LexResult.Diagnostics.Length, Is.EqualTo(3));
+        Assert.That(retained.IntegerValues,
+            Is.EqualTo(new ScannerIntegerValue[] { new(1, "i8", false, 12), new(2, "u64", true, null) }));
     }
-
-    [Theory]
-    [InlineData(0, 0, 0)]
-    [InlineData(int.MaxValue, 0, 1)]
-    [InlineData(1, -1, 1)]
-    [InlineData(1, 0, 2)]
-    [InlineData(1, 0, 0)]
+    [TestCase(0,0,0)]
+    [TestCase(int.MaxValue,0,1)]
+    [TestCase(1,-1,1)]
+    [TestCase(1,0,2)]
+    [TestCase(1,0,0)]
     public void ResultAdapterRejectsInvalidPublishedRecords(int kind, int start, int length)
     {
         var bytes = new byte[24];
@@ -735,16 +716,14 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), start);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), length);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), 1);
-        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(SourceText.From("x"), 2, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(SourceText.From("x"), 2, bytes))!;
     }
-
-    [Theory]
-    [InlineData(2, 0, 0, 1, 0)]
-    [InlineData(1, 6, 0, 1, 0)]
-    [InlineData(1, 0, 1, 0, 0)]
-    [InlineData(1, 0, 0, 3, 0)]
-    [InlineData(1, 0, 0, 2, 0)]
-    [InlineData(1, 0, 0, 1, 1)]
+    [TestCase(2,0,0,1,0)]
+    [TestCase(1,6,0,1,0)]
+    [TestCase(1,0,1,0,0)]
+    [TestCase(1,0,0,3,0)]
+    [TestCase(1,0,0,2,0)]
+    [TestCase(1,0,0,1,1)]
     public void ResultAdapterRejectsInvalidTriviaRecords(int count, int kind, int start, int length, int owner)
     {
         var source = SourceText.From(" x");
@@ -759,16 +738,14 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), start);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), length);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), owner);
-        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTrivia(source, tokens, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTrivia(source, tokens, bytes))!;
     }
-
-    [Theory]
-    [InlineData(2, 1, 0, 1)]
-    [InlineData(1, 0, 0, 1)]
-    [InlineData(1, 13, 0, 1)]
-    [InlineData(1, 1, -1, 1)]
-    [InlineData(1, 1, 0, 0)]
-    [InlineData(1, 1, 0, 2)]
+    [TestCase(2,1,0,1)]
+    [TestCase(1,0,0,1)]
+    [TestCase(1,13,0,1)]
+    [TestCase(1,1,-1,1)]
+    [TestCase(1,1,0,0)]
+    [TestCase(1,1,0,2)]
     public void ResultAdapterRejectsInvalidDiagnosticRecords(int count, int code, int start, int length)
     {
         var bytes = new byte[16];
@@ -776,27 +753,26 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), code);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), start);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), length);
-        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadDiagnostics(SourceText.From("x"), bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadDiagnostics(SourceText.From("x"), bytes))!;
     }
 
-    [Fact]
+    [Test]
     public void ResultAdapterAcceptsStringRecordsAndLexicalDiagnostics()
     {
         var bytes = new byte[24];
         BinaryPrimitives.WriteInt32LittleEndian(bytes, (int)TokenKind.StringLiteral);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), 1);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), 1);
-        Assert.Equal(TokenKind.StringLiteral, ScannerHost.ReadTokens(SourceText.From("\""), 2, bytes)[0].Kind);
+        Assert.That(ScannerHost.ReadTokens(SourceText.From("\""), 2, bytes)[0].Kind, Is.EqualTo(TokenKind.StringLiteral));
 
         var diagnostics = new byte[16];
         BinaryPrimitives.WriteInt32LittleEndian(diagnostics, 1);
         BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(4), 2);
         BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(12), 1);
-        Assert.Equal(new ScannerDiagnostic("TRM0002", new TextSpan(0, 1)),
-            ScannerHost.ReadDiagnostics(SourceText.From("\""), diagnostics)[0]);
+        Assert.That(ScannerHost.ReadDiagnostics(SourceText.From("\""), diagnostics)[0], Is.EqualTo(new ScannerDiagnostic("TRM0002", new TextSpan(0, 1))));
     }
 
-    [Fact]
+    [Test]
     public void ResultAdapterAcceptsTrailingTriviaOwnedByEof()
     {
         var source = SourceText.From("x /*end*/");
@@ -815,18 +791,14 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(24), 2);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(28), 7);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(32), 1);
-        Assert.Equal<ScannerTrivia>(
-            [new ScannerTrivia(TriviaKind.Whitespace, new TextSpan(1, 1), 1),
-                new ScannerTrivia(TriviaKind.MultiLineComment, new TextSpan(2, 7), 1)],
-            ScannerHost.ReadTrivia(source, tokens, bytes));
+        Assert.That(ScannerHost.ReadTrivia(source, tokens, bytes), Is.EqualTo([new ScannerTrivia(TriviaKind.Whitespace, new TextSpan(1, 1), 1),
+                new ScannerTrivia(TriviaKind.MultiLineComment, new TextSpan(2, 7), 1)]));
     }
-
-    [Theory]
-    [InlineData(-1, 0, 0, 0, 1)]
-    [InlineData(1, 0, 0, 0, 1)]
-    [InlineData(0, 2, 0, 0, 1)]
-    [InlineData(0, 1, 1, 0, 1)]
-    [InlineData(0, 0, 0, 0, 6)]
+    [TestCase(-1,0,0,0,1)]
+    [TestCase(1,0,0,0,1)]
+    [TestCase(0,2,0,0,1)]
+    [TestCase(0,1,1,0,1)]
+    [TestCase(0,0,0,0,6)]
     public void IntegerResultAdapterRejectsMalformedRecords(int tokenIndex, int status, int low, int high, int tag)
     {
         var source = SourceText.From("12i8");
@@ -842,16 +814,14 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), low);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), high);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20), tag);
-        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadIntegerValues(source, tokens, bytes));
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadIntegerValues(source, tokens, bytes))!;
     }
-
-    [Theory]
-    [InlineData("2147483648", int.MinValue, 0, 2147483648UL)]
-    [InlineData("9223372036854775808", 0, int.MinValue, 9223372036854775808UL)]
-    [InlineData("18446744073709551615", -1, -1, ulong.MaxValue)]
-    [InlineData("0xFFFFFFFFFFFFFFFF", -1, -1, ulong.MaxValue)]
-    [InlineData("0X8000000000000000", 0, int.MinValue, 9223372036854775808UL)]
-    [InlineData("0b10000000000000000000000000000000", int.MinValue, 0, 2147483648UL)]
+    [TestCase("2147483648",int.MinValue,0,2147483648UL)]
+    [TestCase("9223372036854775808",0,int.MinValue,9223372036854775808UL)]
+    [TestCase("18446744073709551615",-1,-1,ulong.MaxValue)]
+    [TestCase("0xFFFFFFFFFFFFFFFF",-1,-1,ulong.MaxValue)]
+    [TestCase("0X8000000000000000",0,int.MinValue,9223372036854775808UL)]
+    [TestCase("0b10000000000000000000000000000000",int.MinValue,0,2147483648UL)]
     public void IntegerResultAdapterPreservesAll64MagnitudeBits(string text, int low, int high, ulong expected)
     {
         var source = SourceText.From(text);
@@ -864,8 +834,7 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 1);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), low);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), high);
-        Assert.Equal(new ScannerIntegerValue(0, "", false, expected),
-            Assert.Single(ScannerHost.ReadIntegerValues(source, tokens, bytes)));
+        Assert.That(global::System.Linq.Enumerable.Single(ScannerHost.ReadIntegerValues(source, tokens, bytes)), Is.EqualTo(new ScannerIntegerValue(0, "", false, expected)));
     }
 
     internal static async Task CheckScannerAsync(string source, bool repeat = false)
@@ -894,7 +863,7 @@ public sealed class ScannerTests
             _ = reconstructed.Append(token.Text);
             tokenIndex++;
         }
-        Assert.Equal(source, reconstructed.ToString());
+        Assert.That(reconstructed.ToString(), Is.EqualTo(source));
 
         var expectedDiagnostics = ImmutableArray.CreateBuilder<int>();
         foreach (var diagnostic in lexed.Diagnostics)
@@ -958,10 +927,8 @@ public sealed class ScannerTests
         }
         var records = lexed.Tokens.Select(token => new ScannerToken(token.Kind, token.Span)).ToImmutableArray();
         var integerBytes = EncodeWords(expectedIntegers.ToImmutable().Insert(0, integerValues.Count));
-        Assert.Equal<ScannerIntegerValue>(integerValues,
-            ScannerHost.ReadIntegerValues(lexed.Source, records, integerBytes));
-        Assert.Equal<ScannerIntegerValue>(integerValues,
-            ScannerHost.ReadIntegerValues(lexed.Source, lexed.Tokens, integerBytes));
+        Assert.That(ScannerHost.ReadIntegerValues(lexed.Source, records, integerBytes), Is.EqualTo(integerValues));
+        Assert.That(ScannerHost.ReadIntegerValues(lexed.Source, lexed.Tokens, integerBytes), Is.EqualTo(integerValues));
 
         var adapted = ScannerHost.ReadLexResult(lexed.Source, lexed.Tokens.Length,
             EncodeWords(expected.ToImmutable()),
@@ -969,13 +936,11 @@ public sealed class ScannerTests
             EncodeWords(expectedDiagnostics.ToImmutable().Insert(0, expectedDiagnostics.Count / 3)));
         var hostTree = SyntaxTree.Parse(lexed);
         var adaptedTree = SyntaxTree.Parse(adapted);
-        Assert.Same(lexed.Source, adaptedTree.Source);
-        Assert.Equal(source, adaptedTree.Root.ToFullString());
-        Assert.Equal(hostTree.ContentId, adaptedTree.ContentId);
-        Assert.Equal(hostTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span)),
-            adaptedTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span)));
-        Assert.Equal(hostTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span)),
-            adaptedTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span)));
+        Assert.That(adaptedTree.Source, Is.SameAs(lexed.Source));
+        Assert.That(adaptedTree.Root.ToFullString(), Is.EqualTo(source));
+        Assert.That(adaptedTree.ContentId, Is.EqualTo(hostTree.ContentId));
+        Assert.That(adaptedTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span)), Is.EqualTo(hostTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span))));
+        Assert.That(adaptedTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span)), Is.EqualTo(hostTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span))));
 
         var buffers = ScannerHost.CreateBuffers(SourceText.From(source))
             .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false))
@@ -1057,8 +1022,8 @@ public sealed class ScannerTests
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(scanner + Harness + (repeat ? Twice : Once)), buffers);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), 0).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), 0).ConfigureAwait(true);
     }
 
     internal static async Task<string> ReadScannerSourceAsync(string root)
@@ -1088,7 +1053,7 @@ public sealed class ScannerTests
     private static string RemoveFileScopedNamespace(string source)
     {
         const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
-        Assert.StartsWith(NamespaceDeclaration, source, StringComparison.Ordinal);
+        Assert.That(source, Does.StartWith(NamespaceDeclaration));
         var lineEnd = source.IndexOfAny(['\r', '\n']);
         if (lineEnd < 0)
         {
@@ -1138,11 +1103,11 @@ public sealed class ScannerTests
                 throw;
             }
 
-            Assert.Equal(expected, process.ExitCode);
+            Assert.That(process.ExitCode, Is.EqualTo(expected));
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

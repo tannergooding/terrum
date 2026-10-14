@@ -8,15 +8,14 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class IntegerParsingModuleTests
 {
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task IntegerParsingModuleReadsFreshSourceGrants(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -27,7 +26,7 @@ public sealed class IntegerParsingModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -66,8 +65,7 @@ public sealed class IntegerParsingModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var exports = new[] {
             "ParseUInt64",
             "ParseInt64",
@@ -75,7 +73,7 @@ public sealed class IntegerParsingModuleTests
             "ParseInt32",
             "ParseChar16",
         };
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(producerCompilation.Program),
+        var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             [.. exports.Select(static name => "Terrum.CodeAnalysis.Numerics64." + name)]);
 
         var consumers = new BoundProgram[exports.Length];
@@ -84,10 +82,9 @@ public sealed class IntegerParsingModuleTests
             var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
                 $"namespace Terrum.CodeAnalysis.Numerics64; int32 Main() {{ return {exports[index]}(); }}",
                 "integer-parsing-consumer.terrum"), ModuleCompiler.CreateReference(producer), policy);
-            Assert.False(consumerCompilation.HasErrors,
-                string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+            Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
             var consumer = ModuleCompiler.CreateConsumer(
-                Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+                ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
             consumers[index] = ModuleCompiler.Link(consumer, producer);
         }
 
@@ -126,8 +123,7 @@ public sealed class IntegerParsingModuleTests
                 var expected = ExpectedResult(fixture, parser);
                 var actual = NativeJit.ExecuteWithSourceGrant(consumers[parser], [source],
                     (NativeRuntimePolicy)policy);
-                Assert.True(expected == actual,
-                    $"{exports[parser]} on '{fixture.Text}': expected {expected}, got {actual}.");
+                Assert.That(expected == actual, Is.True, $"{exports[parser]} on '{fixture.Text}': expected {expected}, got {actual}.");
             }
         }
     }

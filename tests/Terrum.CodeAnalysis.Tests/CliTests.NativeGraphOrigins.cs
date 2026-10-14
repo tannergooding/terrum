@@ -3,13 +3,13 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Fact]
+    [Test]
     public async Task NativeGraphCliRetainsOriginAndPreservesOutputOnMissingCleanupProviderAsync()
     {
         var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
@@ -34,21 +34,21 @@ public sealed partial class CliTests
             await File.WriteAllTextAsync(middleSource, "public Ticket Forward() { return Make(); }");
             await File.WriteAllTextAsync(rootSource,
                 "int32 Main() { Ticket value = Forward(); return value.Value + 22; }");
-            Assert.Equal(0, (await RunAsync([], "compile-native", "producer", leafSource, "Leaf",
+            Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "Leaf",
                 "--export", "Make", "--export", "Ticket.Close", "-o", leaf,
-                "--runtime", "fail-fast")).ExitCode);
-            Assert.Equal(0, (await RunAsync([], "compile-native-graph", "producer", middleSource, "Middle",
-                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", "fail-fast")).ExitCode);
-            Assert.Equal(0, (await RunAsync([], "compile-native-graph", "consumer", rootSource,
+                "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+            Assert.That((await RunAsync([], "compile-native-graph", "producer", middleSource, "Middle",
+                "--provider", leaf, "--export", "Forward", "-o", middle, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
+            Assert.That((await RunAsync([], "compile-native-graph", "consumer", rootSource,
                 "--provider", middle, "--provider", leaf, "-o", root,
-                "--runtime", "fail-fast")).ExitCode);
+                "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
             var unchanged = await File.ReadAllBytesAsync(root);
-            Assert.Equal(42, (await RunAsync([], "run-native-graph", root, "--provider", leaf,
-                "--provider", middle, "--runtime", "fail-fast")).ExitCode);
+            Assert.That((await RunAsync([], "run-native-graph", root, "--provider", leaf,
+                "--provider", middle, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(42));
             var (failureExit, _, _) = await RunAsync([], "compile-native-graph", "consumer", rootSource,
                 "--provider", middle, "-o", root, "--runtime", "fail-fast");
-            Assert.NotEqual(0, failureExit);
-            Assert.Equal(unchanged, await File.ReadAllBytesAsync(root));
+            Assert.That(failureExit, Is.Not.EqualTo(0));
+            Assert.That(await File.ReadAllBytesAsync(root), Is.EqualTo(unchanged));
         }
         finally
         {

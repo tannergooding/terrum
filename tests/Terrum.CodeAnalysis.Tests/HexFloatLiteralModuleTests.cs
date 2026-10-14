@@ -11,7 +11,7 @@ using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
@@ -121,10 +121,8 @@ public sealed class HexFloatLiteralModuleTests
         "0x1p0p1",
         "0x1\0p0",
     ];
-
-    [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task HexFloatLiteralModuleMatchesHostedTargetRoundingAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
@@ -135,7 +133,7 @@ public sealed class HexFloatLiteralModuleTests
             var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
-            Assert.False(trees[index].HasErrors, string.Join(Environment.NewLine, trees[index].Diagnostics));
+            Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
 
         trees[^1] = SyntaxTree.Parse(VerificationSource, "hex-float-literal-module.terrum");
@@ -144,10 +142,9 @@ public sealed class HexFloatLiteralModuleTests
                 IsInvocationScoped = true,
             },
         ], policy);
-        Assert.False(producerCompilation.HasErrors,
-            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(
-            Assert.IsType<BoundProgram>(producerCompilation.Program), ["Terrum.CodeAnalysis.VerifyRecords"]);
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = producerCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), ["Terrum.CodeAnalysis.VerifyRecords"]);
 
         var consumerTree = SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -155,10 +152,9 @@ public sealed class HexFloatLiteralModuleTests
             """, "hex-float-literal-consumer.terrum");
         var consumerCompilation = Compilation.Create(
             consumerTree, ModuleCompiler.CreateReference(producer), policy);
-        Assert.False(consumerCompilation.HasErrors,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.Link(
-            ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer),
+            ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer),
             producer);
 
         var fixtures = s_fixtures.Concat(CreateRandomFixtures()).ToArray();
@@ -167,7 +163,7 @@ public sealed class HexFloatLiteralModuleTests
         {
             if (s_fixtures[index].KnownBits is ulong knownBits)
             {
-                Assert.Equal(knownBits, hostedBits[index]);
+                Assert.That(hostedBits[index], Is.EqualTo(knownBits));
             }
         }
 
@@ -175,26 +171,26 @@ public sealed class HexFloatLiteralModuleTests
         records.AddRange(CreateRecords(
             s_invalidSpellings.Select(static spelling => new Fixture(32, spelling, null)).ToArray(),
             null));
-        Assert.Equal(0, ExecuteRecords(consumer, records, (NativeRuntimePolicy)policy));
+        Assert.That(ExecuteRecords(consumer, records, (NativeRuntimePolicy)policy), Is.EqualTo(0));
 
         var longFraction = "0x1." + new string('0', 16_000) + "p0";
         var longFixture = new[] { new Fixture(64, longFraction, 0x3FF0000000000000) };
         var longHostedBits = ReadHostedBits(longFixture);
-        Assert.Equal(0x3FF0000000000000UL, longHostedBits[0]);
-        Assert.True(longFraction.Length + 7 <= 16_384);
-        Assert.Equal(0, ExecuteRecords(
-            consumer, CreateRecords(longFixture, longHostedBits), (NativeRuntimePolicy)policy));
+        Assert.That(longHostedBits[0], Is.EqualTo(0x3FF0000000000000UL));
+        Assert.That(longFraction.Length + 7 <= 16_384, Is.True);
+        Assert.That(ExecuteRecords(
+            consumer, CreateRecords(longFixture, longHostedBits), (NativeRuntimePolicy)policy), Is.EqualTo(0));
     }
 
-    [Fact]
+    [Test]
     public void MaintainedSourceGrantCompanionMatchesHostedHexFloatBits()
     {
-        Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name
             ?? throw new InvalidOperationException("Missing configuration directory.");
         var imagePath = Path.Combine(RepositoryRoot(), "artifacts", "bin", "self-host", configuration,
             "terrum-compiler-primitives-source-grant.dll");
-        Assert.True(File.Exists(imagePath), $"Source-grant compiler-primitives companion was not built: {imagePath}");
+        Assert.That(File.Exists(imagePath), Is.True, $"Source-grant compiler-primitives companion was not built: {imagePath}");
 
         var exports = new[]
         {
@@ -213,26 +209,24 @@ public sealed class HexFloatLiteralModuleTests
             {
                 var fixture = fixtures[index];
                 var export = fixture.Precision == 32 ? Float32BitsExport : Float64BitsExport;
-                Assert.Equal(unchecked((long)hostedBits[index]),
-                    bindings.Invoke<long>(export, fixture.Spelling.ToCharArray(), 0, fixture.Spelling.Length));
+                Assert.That(bindings.Invoke<long>(export, fixture.Spelling.ToCharArray(), 0, fixture.Spelling.Length), Is.EqualTo(unchecked((long)hostedBits[index])));
             }
 
             foreach (var spelling in s_invalidSpellings)
             {
                 var source = spelling.ToCharArray();
-                Assert.Equal(-1L, bindings.Invoke<long>(
-                    Float32BitsExport, source, 0, source.Length));
-                Assert.Equal(-1L, bindings.Invoke<long>(
-                    Float64BitsExport, source, 0, source.Length));
+                Assert.That(bindings.Invoke<long>(
+                    Float32BitsExport, source, 0, source.Length), Is.EqualTo(-1L));
+                Assert.That(bindings.Invoke<long>(
+                    Float64BitsExport, source, 0, source.Length), Is.EqualTo(-1L));
             }
 
             var longFraction = "0x1." + new string('0', 16_000) + "p0";
-            Assert.Equal(0x3FF0000000000000L,
-                bindings.Invoke<long>(Float64BitsExport, longFraction.ToCharArray(), 0, longFraction.Length));
-            Assert.Equal(-1L, bindings.Invoke<long>(Float64BitsExport, "0x1p0".ToCharArray(), -1, 5));
-            Assert.Equal(-1L, bindings.Invoke<long>(Float64BitsExport, "0x1p0".ToCharArray(), 0, 6));
+            Assert.That(bindings.Invoke<long>(Float64BitsExport, longFraction.ToCharArray(), 0, longFraction.Length), Is.EqualTo(0x3FF0000000000000L));
+            Assert.That(bindings.Invoke<long>(Float64BitsExport, "0x1p0".ToCharArray(), -1, 5), Is.EqualTo(-1L));
+            Assert.That(bindings.Invoke<long>(Float64BitsExport, "0x1p0".ToCharArray(), 0, 6), Is.EqualTo(-1L));
             _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                bindings.Invoke<long>(Float64BitsExport, new char[16_385], 0, 5));
+                bindings.Invoke<long>(Float64BitsExport, new char[16_385], 0, 5))!;
         }
         finally
         {
@@ -246,24 +240,22 @@ public sealed class HexFloatLiteralModuleTests
             var type = fixture.Precision == 32 ? "float32" : "float64";
             var source = $"public {type} Read{index}() {{ return {fixture.Spelling}; }}";
             var lexed = Lexer.Lex(SourceText.From(fixture.Spelling));
-            Assert.True(lexed.Diagnostics.IsEmpty,
-                $"Hosted lexer rejected generated fixture '{fixture.Spelling}': {string.Join(", ", lexed.Diagnostics)}");
-            Assert.Equal(2, lexed.Tokens.Length);
-            Assert.Equal(fixture.Spelling, lexed.Tokens[0].Text);
+            Assert.That(lexed.Diagnostics.IsEmpty, Is.True, $"Hosted lexer rejected generated fixture '{fixture.Spelling}': {string.Join(", ", lexed.Diagnostics)}");
+            Assert.That(lexed.Tokens.Length, Is.EqualTo(2));
+            Assert.That(lexed.Tokens[0].Text, Is.EqualTo(fixture.Spelling));
             return SyntaxTree.Parse(source, $"hex-float-oracle-{index}.terrum");
         });
         var compilation = Compilation.CreateLibrary(trees);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var results = new ulong[fixtures.Length];
         for (var index = 0; index < fixtures.Length; index++)
         {
-            var function = Assert.Single(program.Functions, function => function.Name == $"Read{index}");
-            var result = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
-            var constant = Assert.IsType<BoundConstant>(result.Value);
-            Assert.Equal(fixtures[index].Precision == 32 ? PrimitiveType.Float32 : PrimitiveType.Float64,
-                constant.Type);
+            var function = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == $"Read{index}");
+            var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual3 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual3, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual3!; }))();
+            var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual4 = result.Value; Assert.That(__nunitActual4, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual4!; }))();
+            Assert.That(constant.Type, Is.EqualTo(fixtures[index].Precision == 32 ? PrimitiveType.Float32 : PrimitiveType.Float64));
             results[index] = unchecked((ulong)constant.Value);
         }
 
@@ -347,7 +339,7 @@ public sealed class HexFloatLiteralModuleTests
 
     private static int ExecuteRecords(BoundProgram consumer, List<int> records, NativeRuntimePolicy policy)
     {
-        Assert.InRange(records.Count, 1, 16_384);
+        Assert.That(records.Count, Is.InRange(1, 16_384));
         var grant = new HostBuffer("Source", PrimitiveType.Char16, [.. records], false) {
             IsInvocationScoped = true,
         };

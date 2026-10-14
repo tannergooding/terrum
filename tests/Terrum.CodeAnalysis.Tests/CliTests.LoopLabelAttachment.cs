@@ -5,14 +5,13 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [MemberData(nameof(LoopLabelAttachmentTests.Boundaries), MemberType = typeof(LoopLabelAttachmentTests))]
+    [TestCaseSource(typeof(LoopLabelAttachmentTests), nameof(LoopLabelAttachmentTests.Boundaries))]
     public async Task NativeLoopLabelsEnforceEveryPhysicalLineBoundaryAsync(string loop, string gap, bool invalid)
     {
         var input = Encoding.UTF8.GetBytes(LoopLabelAttachmentTests.Source(loop, gap));
@@ -20,22 +19,20 @@ public sealed partial class CliTests
         {
             var (exit, output, error) = await RunAsync(input, "frontend-component",
                 Path.Combine(RepositoryRoot(), "self-host"), "-", "--runtime", policy, "--json");
-            Assert.True(exit == (invalid ? 1 : 0), $"{output}{error}");
+            Assert.That(exit == (invalid ? 1 : 0), Is.True, $"{output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
-            Assert.Equal(!invalid, result.GetProperty("valid").GetBoolean());
+            Assert.That(result.GetProperty("valid").GetBoolean(), Is.EqualTo(!invalid));
             if (!invalid)
             {
-                Assert.Equal(87, result.GetProperty("projectionVersion").GetInt32());
-                Assert.True(result.GetProperty("noThrow").GetBoolean());
+                Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
+                Assert.That(result.GetProperty("noThrow").GetBoolean(), Is.True);
             }
         }
     }
-
-    [Theory]
-    [InlineData("a: while (true) { break a; }", "a:\nwhile (true) { break a; }")]
-    [InlineData("a: for (;;) { break a; }", "a: /*\r\n*/ for (;;) { break a; }")]
-    [InlineData("a: do { break a; } while (false);", "a: b: do { break b; } while (false);")]
+    [TestCase("a: while (true) { break a; }","a:\nwhile (true) { break a; }")]
+    [TestCase("a: for (;;) { break a; }","a: /*\r\n*/ for (;;) { break a; }")]
+    [TestCase("a: do { break a; } while (false);","a: b: do { break b; } while (false);")]
     public async Task LoopLabelRejectionPreservesPeAcrossHostedScannerAndNativeAsync(string valid, string invalid)
     {
         var root = RepositoryRoot();
@@ -51,19 +48,19 @@ public sealed partial class CliTests
                             "-", "-o", path, "--runtime", policy, "--json" };
                     var source = Encoding.UTF8.GetBytes($"int32 Main() {{ {valid} return 42; }}");
                     var (exit, output, error) = await RunAsync(source, [mode, .. args]);
-                    Assert.True(exit == 0, $"{output}{error}");
+                    Assert.That(exit == 0, Is.True, $"{output}{error}");
                     var bytes = await File.ReadAllBytesAsync(path);
-                    Assert.Equal(42, await ExecuteNativeImageAsync(path));
+                    Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(42));
                     source = Encoding.UTF8.GetBytes($"int32 Main() {{ {invalid} return 42; }}");
                     (exit, output, error) = await RunAsync(source, [mode, .. args]);
-                    Assert.True(exit == 1, $"{output}{error}");
-                    Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
+                    Assert.That(exit == 1, Is.True, $"{output}{error}");
+                    Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(bytes));
                 }
             }
         }
         finally
         {
-            File.Delete(path);
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
     }
 }

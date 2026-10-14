@@ -1,15 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Threading.Tasks;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task LifetimeEndRetainsGenericCopyAndClosedParameterAuthorityAsync(bool checkedFailures)
     {
         const string Source = """
@@ -23,10 +22,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task LifetimeEndPreservesCopyAndWideStorageAuthorityAsync(bool checkedFailures)
     {
         const string Source = """
@@ -53,10 +50,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task LifetimeEndRetiresOnlyTheSelectedManagedRootAndCanPublishANewLifetimeAsync(bool checkedFailures)
     {
         const string Source = """
@@ -82,10 +77,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task LifetimeEndRetiresClassRootsWithoutDestroyingDuplicateHandlesAsync(bool checkedFailures)
     {
         const string Source = """
@@ -114,10 +107,8 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestCase(false)]
+    [TestCase(true)]
     public Task LifetimeEndRetiresBufferViewsAndPreservesTheirActualBackingAsync(bool checkedFailures)
     {
         const string Source = """
@@ -140,7 +131,7 @@ public sealed partial class JitTests
             : AssertFailFastExecutionAsync(Source, 42);
     }
 
-    [Fact]
+    [Test]
     public Task LifetimeEndFailedReinitializationLeavesVacancyForRecoveryAsync() =>
         AssertCheckedExecutionAsync("""
             int32 Divide(int32 divisor) { return 42 / divisor; }
@@ -156,7 +147,7 @@ public sealed partial class JitTests
             }
             """, 42);
 
-    [Fact]
+    [Test]
     public Task LifetimeEndRetiredManagedRootStaysRetiredAcrossFailedReinitializationAsync() =>
         AssertCheckedExecutionAsync("""
             write ManagedNode Fail() { require false; require ManagedNode.TryCreate(0, out var node); return node; }

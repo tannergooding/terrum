@@ -4,30 +4,28 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class TrRmMethodDefTableReaderTests
 {
-    [Fact]
+    [Test]
     public void ModuleLevelCallableUsesSignatureWithoutNominalTypes()
     {
-        Assert.Equal("Run", GetName(Method(), 1));
+        Assert.That(GetName(Method(), 1), Is.EqualTo("Run"));
         Assert.Throws<InvalidDataException>(() => GetName(Method(), 0));
         Assert.Throws<InvalidDataException>(() => GetName(Method(), 2));
     }
-
-    [Theory]
-    [InlineData(0, 1)]
-    [InlineData(4, 0)]
-    [InlineData(8, 0)]
-    [InlineData(8, 2)]
-    [InlineData(12, 3)]
-    [InlineData(16, 1)]
-    [InlineData(20, 1)]
-    [InlineData(24, 0)]
-    [InlineData(24, 2)]
+    [TestCase(0,(byte)(1))]
+    [TestCase(4,(byte)(0))]
+    [TestCase(8,(byte)(0))]
+    [TestCase(8,(byte)(2))]
+    [TestCase(12,(byte)(3))]
+    [TestCase(16,(byte)(1))]
+    [TestCase(20,(byte)(1))]
+    [TestCase(24,(byte)(0))]
+    [TestCase(24,(byte)(2))]
     public void RejectsBadReferencesVisibilityAndUnownedBodies(int offset, byte replacement)
     {
         var bytes = Method();
@@ -35,7 +33,7 @@ public sealed class TrRmMethodDefTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(bytes));
     }
 
-    [Fact]
+    [Test]
     public void RejectsTruncatedRowAndUnownedSignatureReceiver()
     {
         Assert.Throws<InvalidDataException>(() => Create(Method()[..^1]));
@@ -44,7 +42,7 @@ public sealed class TrRmMethodDefTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(Method(), signature: signature));
     }
 
-    [Fact]
+    [Test]
     public void GenericSignatureCannotBeSharedBetweenMethodDefinitions()
     {
         var rows = new byte[56];
@@ -59,14 +57,14 @@ public sealed class TrRmMethodDefTableReaderTests
             Create(rows, methodCount: 2, bodyCount: 0, signature: signature, genericCount: 1));
     }
 
-    [Fact]
+    [Test]
     public void NominalMethodOwnerMustBelongToTheSameModule()
     {
         CreateTwoModules(wrongOwner: false);
         Assert.Throws<InvalidDataException>(() => CreateTwoModules(wrongOwner: true));
     }
 
-    [Fact]
+    [Test]
     public void SkipsEmptyModuleRangesWhileValidatingOrderedMethods()
     {
         var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
@@ -96,10 +94,10 @@ public sealed class TrRmMethodDefTableReaderTests
         var methods = new TrRmMethodDefTableReader(method, 1, names, modules, types,
             signatures, 0, 1);
 
-        Assert.Equal(2, methods.GetOwnerModule(1));
+        Assert.That(methods.GetOwnerModule(1), Is.EqualTo(2));
     }
 
-    [Fact]
+    [Test]
     public void ValidatesNominalOwnerAfterEmptyMethodRanges()
     {
         var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows([
@@ -125,7 +123,7 @@ public sealed class TrRmMethodDefTableReaderTests
         var methods = new TrRmMethodDefTableReader(method, 1, names, modules, types,
             signatures, 0, 0);
 
-        Assert.Equal(3, methods.GetOwnerModule(1));
+        Assert.That(methods.GetOwnerModule(1), Is.EqualTo(3));
     }
 
     private static void CreateTwoModules(bool wrongOwner)

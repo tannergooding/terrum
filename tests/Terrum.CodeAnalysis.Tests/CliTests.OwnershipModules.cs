@@ -7,19 +7,18 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
-using Xunit;
+using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
-    [Theory]
-    [InlineData("fail-fast", true, false, "native-12")]
-    [InlineData("checked-exceptions", true, false, "native-12")]
-    [InlineData("fail-fast", false, false, "native-10")]
-    [InlineData("checked-exceptions", false, false, "native-11")]
-    [InlineData("fail-fast", true, true, "native-13")]
-    [InlineData("checked-exceptions", true, true, "native-13")]
+    [TestCase("fail-fast",true,false,"native-12")]
+    [TestCase("checked-exceptions",true,false,"native-12")]
+    [TestCase("fail-fast",false,false,"native-10")]
+    [TestCase("checked-exceptions",false,false,"native-11")]
+    [TestCase("fail-fast",true,true,"native-13")]
+    [TestCase("checked-exceptions",true,true,"native-13")]
     public async Task ModuleCommandsReportThePersistedOwnershipProfileAsync(
         string policy, bool exportOwner, bool transferOwner, string profile)
     {
@@ -64,7 +63,7 @@ public sealed partial class CliTests
                     "--runtime", policy, "--json"]);
             await AssertModuleProfileAsync(profile, policy, ["validate-native", nativeConsumer, nativeProvider, "--json"]);
             var bytes = await File.ReadAllBytesAsync(nativeConsumer);
-            Assert.Equal(profile, NativeModuleCompiler.Inspect(bytes).NativeProfileVersion);
+            Assert.That(NativeModuleCompiler.Inspect(bytes).NativeProfileVersion, Is.EqualTo(profile));
             AssertMismatchedNativePolicyRejected(bytes);
         }
         finally
@@ -90,23 +89,23 @@ public sealed partial class CliTests
                 contract += 2 + length;
             }
         }
-        Assert.InRange(contract, 18, bytes.Length - 32 - 1);
+        Assert.That(contract, Is.InRange(18, bytes.Length - 32 - 1));
         var profileLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(contract + 8, 4));
         var policy = contract + 12 + profileLength + 1;
-        Assert.InRange(policy, contract, contract
-            + BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(10, 4)) - 1);
+        Assert.That(policy, Is.InRange(contract, contract
+            + BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(10, 4)) - 1));
         bytes[policy] ^= 1;
         SHA256.HashData(bytes.AsSpan(0, bytes.Length - 32)).CopyTo(bytes, bytes.Length - 32);
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(bytes));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(bytes))!;
     }
 
     private static async Task AssertModuleProfileAsync(string expected, string policy, string[] arguments)
     {
         var (exit, output, error) = await RunAsync([], arguments).ConfigureAwait(true);
-        Assert.True(exit == 0, output + Environment.NewLine + error);
-        Assert.Empty(error);
+        Assert.That(exit == 0, Is.True, output + Environment.NewLine + error);
+        Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(expected, document.RootElement.GetProperty("profile").GetString());
-        Assert.Equal(policy, document.RootElement.GetProperty("runtimePolicy").GetString());
+        Assert.That(document.RootElement.GetProperty("profile").GetString(), Is.EqualTo(expected));
+        Assert.That(document.RootElement.GetProperty("runtimePolicy").GetString(), Is.EqualTo(policy));
     }
 }
