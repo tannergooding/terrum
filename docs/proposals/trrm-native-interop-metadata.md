@@ -80,16 +80,26 @@ Add these contract clauses to the existing `Contract` table:
 | Clause | Owner | Proposed payload and role |
 |---|---|---|
 | `NativeComInterface` | `TypeDef` | Interface IID and optional immediate base-interface `TypeDef`. |
-| `NativeComMethod` | `MethodDef` | Explicit vtable slot. The method's existing signature describes the native call; the owning `TypeDef` identifies the interface. |
+| `NativeComMethod` | `MethodDef` | Explicit vtable slot and any native reference effect required by ownership checking. The method's existing signature describes the native call; the owning `TypeDef` identifies the interface. |
 | `NativeComOwner` | `TypeDef` | The COM interface represented by this unique owner type. Reuse its existing layout and `Cleanup` contract for storage and release behavior. |
-| `NativeComAcquisition` | `MethodDef` | Output parameter ordinal, resulting owner `TypeDef`, success rule, and whether failure may still write an owned output. |
+| `NativeParameter` | `MethodDef` | For an address-passed parameter, its read/write/inout access, retention rule, and any required extent not already determined by its type. |
+| `NativeOutput` | `MethodDef` | Output parameter ordinal, result condition for a valid initialized value, and the value's failure state. |
+| `NativeComAcquisition` | `MethodDef` | Output parameter ordinal, resulting owner `TypeDef`, and whether failure may still write an owned output. It composes with `NativeOutput`'s result condition. |
 
 Payload widths and enum assignments are intentionally unassigned in this
 proposal. The reader must validate all references, unique slots, interface
-inheritance, signature arity, output ordinals, owner/interface compatibility,
-and failure cleanup requirements before accepting the native contract.
+inheritance, signature arity, unique parameter ordinals, output ordinals,
+owner/interface compatibility, and failure cleanup requirements before
+accepting the native contract. A `NativeOutput` must refer to a writable
+parameter and a result condition expressible for that method's result type.
+A `NativeComAcquisition` must refer to that output and to an owner for the
+declared interface.
 Unknown required clauses must reject; readers must not silently ignore
 unsupported interop semantics.
+
+`NativeParameter` and `NativeOutput` are needed because a pointer type alone
+does not say whether the callee reads, writes, or retains the address, and a
+signature alone does not say when an output becomes valid.
 
 Use existing `TypeDef`/`FieldDef`/`Layout` records for native structure
 declarations. Those rows describe physical representation, not API-specific
@@ -109,6 +119,143 @@ adaptation as an ordinary Terrum wrapper in the interop library. The initial
 metadata proposal does not persist catalog-authored argument recipes or
 sample policy. This keeps the compiler responsible for generic import and
 vtable lowering, not for synthesizing an API's wrapper layer.
+
+## Worked examples
+
+The source annotations below illustrate the proposed information flow; their
+exact spelling is still open. Each library method has its ordinary Terrum
+signature and export contract. Native and COM records add only facts that
+cannot be recovered from that signature.
+
+### `QueryPerformanceCounter`
+
+The Windows API is a `BOOL` function with one output pointer to a signed
+64-bit `LARGE_INTEGER`. The Terrum declaration keeps the native return width
+as `int32`; the `out` parameter gives the pointer's pointee type.
+
+**Interop library declaration**
+
+```terrum
+namespace Terrum.Interop.Windows;
+
+[NativeImport("Kernel32.dll", "QueryPerformanceCounter", System32)]
+[NoThrow]
+[NativeParameter(0, Access = Write, NoEscape = true)]
+[NativeOutput(0, Success = NonZero, Failure = Unspecified)]
+public extern int32 QueryPerformanceCounter(out int64 performanceCount);
+```
+
+**Consumer use**
+
+```terrum
+int32 Main() {
+    int32 succeeded = QueryPerformanceCounter(out var ticks);
+    if (succeeded == 0) return 1;
+    ObserveCounter(ticks);
+    return 0;
+}
+
+[NoThrow]
+void ObserveCounter(int64 ticks) {}
+```
+
+The exported declaration produces or reuses these TRRM records:
+
+| Record | Example value |
+|---|---|
+| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(out int64)`; parameter 0 is an output destination. |
+| `NativeImport` | Method `QueryPerformanceCounter` → `Kernel32.dll!QueryPerformanceCounter`, resolved by the selected Windows system-library policy. |
+| `Effects` | `NoThrow`. |
+| `NativeParameter` | Parameter 0 is writable and non-retained; its pointee is one `int64`. |
+| `NativeOutput` | Parameter 0 is valid when the `int32` result is nonzero. On zero, its state is unspecified and the caller must not read it. |
+
+The Windows x64 backend derives the pointer argument and 32-bit result
+classification from the target and signature. TRRM does not store `RCX`,
+`EAX`, or another compiler's register/stack plan. This example also shows why
+an output declaration needs more than a `MethodSig`: the signature identifies
+the return type and output destination, while `NativeOutput` records that the
+destination is usable only when `BOOL` is nonzero.
+
+### `IDXGIDebug`
+
+`DXGIGetDebugInterface1` is the native DLL import; `IDXGIDebug` itself is a
+COM interface. The interface inherits the three `IUnknown` slots and declares
+`ReportLiveObjects` at slot 3.
+
+**Interop library declarations**
+
+```terrum
+namespace Terrum.Interop.Dxgi;
+
+[NativeImport("Dxgi.dll", "DXGIGetDebugInterface1", System32)]
+[NoThrow]
+[NativeParameter(1, Access = Read, NoEscape = true)]
+[NativeParameter(2, Access = Write, NoEscape = true)]
+[NativeOutput(2, Success = HResultSucceeded, Failure = MayBeWritten)]
+[NativeComAcquisition(2, Owner = DxgiDebugOwner)]
+public extern int32 DXGIGetDebugInterface1(
+    uint32 flags,
+    ptr<Guid> riid,
+    out ptr<IDXGIDebug> ppDebug);
+
+[NativeComInterface(
+    Iid = "119E7452-DE9E-40FE-8806-88F90C12B441",
+    Base = IUnknown)]
+public interface IDXGIDebug : IUnknown {
+    [NativeComMethod(Slot = 3)]
+    int32 ReportLiveObjects(Guid apiId, int32 flags);
+}
+
+[NativeComOwner(Interface = IDXGIDebug)]
+public unique struct DxgiDebugOwner {
+    ptr<IDXGIDebug> Pointer;
+
+    [NoThrow] [Cleanup] public void Close() {
+        Pointer.Release();
+    }
+}
+```
+
+**Consumer call**
+
+```terrum
+int32 ReportAllLiveObjects(DxgiDebugOwner debug) {
+    return debug.Pointer.ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
+}
+```
+
+`IUnknown` is supplied by the shared COM declarations: `QueryInterface`,
+`AddRef`, and `Release` occupy slots 0, 1, and 2. The interop library also
+declares `Guid` with the Windows layout (16 bytes, 4-byte alignment), and
+defines the `DXGI_DEBUG_ALL` GUID and `DXGI_DEBUG_RLO_ALL` value (`0x7`).
+An ordinary Terrum wrapper can transfer the raw output pointer into
+`DxgiDebugOwner`; the compiler does not synthesize that wrapper.
+
+| Record | Example value |
+|---|---|
+| `NativeImport` | `DXGIGetDebugInterface1` → `Dxgi.dll!DXGIGetDebugInterface1`, Windows system-library policy. |
+| `MethodSig` / `Param` | `int32(uint32, ptr<Guid>, out ptr<IDXGIDebug>)`; parameter 1 is `REFIID`, parameter 2 is `void**`. |
+| `NativeParameter` | Parameter 1 is read-only and non-retained; parameter 2 is writable and non-retained. |
+| `NativeOutput` | Parameter 2 is valid when the HRESULT is nonnegative. Conservatively, treat it as possibly written on failure. |
+| `NativeComAcquisition` | Parameter 2 produces an owned `IDXGIDebug`, represented by `DxgiDebugOwner`; release any non-null failure output. |
+| `NativeComInterface` | `IDXGIDebug` has IID `119E7452-DE9E-40FE-8806-88F90C12B441` and base `IUnknown`. |
+| `NativeComMethod` | `ReportLiveObjects` is slot 3 with signature `int32(Guid, int32)`; `IUnknown.Release` is slot 2 and releases a reference. The `Guid` layout and target requirement let the backend derive aggregate passing. |
+| `NativeComOwner` / `Cleanup` | `DxgiDebugOwner` represents `IDXGIDebug`; its ordinary `Close` method calls inherited `IUnknown.Release` at slot 2. |
+
+There is no DLL-import row for `ReportLiveObjects`: it is reached through the
+declared COM vtable slot. The failure-write rule above is a conservative
+interop declaration, not a claim that the API documents a non-null output on
+failure. `DXGIGetDebugInterface1` may return `E_NOINTERFACE` when the Windows
+SDK debug components are unavailable, and `IDXGIDebug` requires the DXGI debug
+layer to be enabled. Those are runtime conditions handled by the Terrum
+caller, not facts that change the DLL identity or vtable metadata.
+
+API references:
+
+- Microsoft Learn: [`QueryPerformanceCounter`](https://learn.microsoft.com/en-us/windows/win32/api/profileapi/nf-profileapi-queryperformancecounter)
+- Microsoft Learn: [`DXGIGetDebugInterface1`](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_3/nf-dxgi1_3-dxgigetdebuginterface1)
+- Microsoft Learn: [`IDXGIDebug`](https://learn.microsoft.com/en-us/windows/win32/api/dxgidebug/nn-dxgidebug-idxgidebug) and [`ReportLiveObjects`](https://learn.microsoft.com/en-us/windows/win32/api/dxgidebug/nf-dxgidebug-idxgidebug-reportliveobjects)
+- SDK header mirror: [`dxgidebug.h` interface declaration](https://github.com/apitrace/dxsdk/blob/master/Include/dxgidebug.h)
 
 ## Data flow
 
