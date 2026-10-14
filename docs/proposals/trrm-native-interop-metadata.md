@@ -37,6 +37,54 @@ catalog entry rather than producing the binding metadata that a binary
 dependency can carry. This proposal moves only the irreducible declarations
 into TRRM; it does not preserve catalog-only convenience behavior.
 
+## Unsafe boundary and representation
+
+A native import or COM method is a call across the Terrum boundary into code
+whose implementation and memory behavior are not checked by Terrum. A
+declaration that is callable from non-Terrum code crosses the same boundary
+in the other direction. These raw declarations are caller-unsafe even when
+their signatures contain only scalar values: their `MethodDef` must carry
+the existing `Effects.RequiresUnsafeCaller` contract. A caller must satisfy
+that obligation in an explicit `unsafe { ... }` block or `unsafe(expr)`;
+declaring the caller `unsafe` propagates its obligation but does not make its
+body an implicit unsafe scope. `NoThrow` and other effects are separate
+promises; they do not remove the unsafe obligation.
+
+Every by-value scalar/aggregate and every data region exposed through a
+pointer must have the selected target's fixed `Blittable` representation.
+Opaque native handles, including COM interface pointers, use their explicit
+handle/interface contract rather than pretending the referenced object is a
+blittable Terrum value. The raw declaration spells the actual ABI shape:
+native-width scalar types, pointers, and explicitly laid-out values.
+`NativeParameter` describes pointer access and retention, but it does not
+grant safety or prove that the foreign implementation honors those claims.
+Any temporary required by the target ABI for a by-value `Blittable` aggregate
+is ordinary ABI lowering, not a general-purpose marshalling or pinning step.
+
+This proposal adds no built-in marshaller. It does not implicitly convert
+strings, managed references, or arrays; copy managed values to temporary
+native buffers; root or pin objects; or otherwise extend their lifetimes.
+Any buffer construction, encoding, pinning facility, or safe wrapper must be
+ordinary explicitly authored Terrum code with its own checked contract.
+Blittability fixes representation; it does not make an unsafe call safe.
+An address may refer directly to stack storage only for the duration and
+access permitted by its explicit loan contract; an import with a retention
+contract cannot silently extend that storage's lifetime.
+
+An authored wrapper may contain a raw call in an explicit unsafe block and
+expose a safe API only when it establishes the full safety contract. For
+example, a wrapper over `QueryPerformanceCounter` can check the native
+success result before exposing its output; a COM owner wrapper can keep an
+owned interface pointer private and release it during cleanup. Such wrappers
+do not change the unsafe status of the imported declarations themselves.
+The accepted [caller-unsafe rules](../specs/grammar-spec.md#53-caller-unsafe-declarations-and-explicit-unsafe-scopes)
+and [Blittable contract](../specs/data-layout-and-abi.md#fixed-directly-interoperable-representations)
+remain authoritative.
+
+The intended model is direct blittable FFI, closer to .NET interop with
+runtime marshalling disabled and a generated `LibraryImport` stub than to
+classic runtime-marshalled `DllImport`.
+
 ## Proposed metadata
 
 Reuse existing `Module`, `TypeDef`, `FieldDef`, `Layout`, `MethodDef`,
@@ -93,7 +141,10 @@ owner/interface compatibility, and failure cleanup requirements before
 accepting the native contract. A `NativeOutput` must refer to a writable
 parameter and a result condition expressible for that method's result type.
 A `NativeComAcquisition` must refer to that output and to an owner for the
-declared interface.
+declared interface. Every `MethodDef` carrying `NativeImport` or
+`NativeComMethod` metadata must also carry `Effects.RequiresUnsafeCaller`;
+readers must reject a missing unsafe obligation rather than infer that a
+scalar-only signature is safe.
 Unknown required clauses must reject; readers must not silently ignore
 unsupported interop semantics.
 
@@ -122,52 +173,78 @@ vtable lowering, not for synthesizing an API's wrapper layer.
 
 ## Worked examples
 
-The source annotations below illustrate the proposed information flow; their
-exact spelling is still open. Each library method has its ordinary Terrum
-signature and export contract. Native and COM records add only facts that
-cannot be recovered from that signature.
+The source examples use ordinary Terrum declarations and call syntax. The
+tables show proposed TRRM metadata rows; the source syntax for authoring those
+rows is still open. Each library method has its ordinary Terrum signature and
+export contract. Native and COM records add only facts that cannot be
+recovered from that signature.
 
 ### `QueryPerformanceCounter`
 
 The Windows API is a `BOOL` function with one output pointer to a signed
 64-bit `LARGE_INTEGER`. The Terrum declaration keeps the native return width
-as `int32`; the `out` parameter gives the pointer's pointee type.
+as `int32`; the `init ref<int64>` parameter designates vacant output storage.
 
 **Interop library declaration**
 
 ```terrum
 namespace Terrum.Interop.Windows;
 
-[NativeImport("Kernel32.dll", "QueryPerformanceCounter", System32)]
 [NoThrow]
-[NativeParameter(0, Access = Write, NoEscape = true)]
-[NativeOutput(0, Success = NonZero, Failure = Unspecified)]
-public extern int32 QueryPerformanceCounter(out int64 performanceCount);
+public extern unsafe int32 QueryPerformanceCounter(init ref<int64> performanceCount);
 ```
+
+The bodyless `extern unsafe` declaration is Terrum source syntax. Its
+`Kernel32.dll!QueryPerformanceCounter` binding and pointer/output contracts
+are separate TRRM metadata rows; the source syntax that authors those rows
+remains open in this proposal.
 
 **Consumer use**
 
 ```terrum
-int32 Main() {
-    int32 succeeded = QueryPerformanceCounter(out var ticks);
-    if (succeeded == 0) return 1;
+using Terrum.Interop.Windows;
+
+public int32 Main() {
+    if (!TryGetPerformanceCounter(init var ticks)) {
+        return 1;
+    }
     ObserveCounter(ticks);
     return 0;
 }
 
 [NoThrow]
-void ObserveCounter(int64 ticks) {}
+internal void ObserveCounter(int64 ticks) {}
 ```
+
+An authored safe wrapper can contain the unsafe call and publish its own
+result/output contract:
+
+```terrum
+public bool TryGetPerformanceCounter(init ref<int64> ticks) {
+    unsafe {
+        int32 succeeded = QueryPerformanceCounter(init *ticks);
+        if (succeeded == 0) {
+            return false;
+        }
+        return true;
+    }
+}
+```
+
+That wrapper must state that `ticks` is initialized on `true` and unavailable
+on `false`. It does not marshal or pin the scalar; it only narrows the API's
+result contract.
 
 The exported declaration produces or reuses these TRRM records:
 
 | Record | Example value |
 |---|---|
-| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(out int64)`; parameter 0 is an output destination. |
+| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(init ref<int64>)`; parameter 0 is an output destination. |
 | `NativeImport` | Method `QueryPerformanceCounter` → `Kernel32.dll!QueryPerformanceCounter`, resolved by the selected Windows system-library policy. |
-| `Effects` | `NoThrow`. |
+| `Effects` | `RequiresUnsafeCaller` and `NoThrow`. |
 | `NativeParameter` | Parameter 0 is writable and non-retained; its pointee is one `int64`. |
 | `NativeOutput` | Parameter 0 is valid when the `int32` result is nonzero. On zero, its state is unspecified and the caller must not read it. |
+| `OutputState` | On the safe `TryGetPerformanceCounter` wrapper, `ticks` is initialized on `true` and vacant on `false`. |
 
 The Windows x64 backend derives the pointer argument and 32-bit result
 classification from the target and signature. TRRM does not store `RCX`,
@@ -184,34 +261,42 @@ COM interface. The interface inherits the three `IUnknown` slots and declares
 
 **Interop library declarations**
 
+The source shows only ordinary external and interface signatures. DLL,
+interface-IID, slot, parameter-access, output, and acquisition details are
+separate TRRM records below; their source authoring syntax is deliberately
+not invented here.
+
 ```terrum
 namespace Terrum.Interop.Dxgi;
 
-[NativeImport("Dxgi.dll", "DXGIGetDebugInterface1", System32)]
 [NoThrow]
-[NativeParameter(1, Access = Read, NoEscape = true)]
-[NativeParameter(2, Access = Write, NoEscape = true)]
-[NativeOutput(2, Success = HResultSucceeded, Failure = MayBeWritten)]
-[NativeComAcquisition(2, Owner = DxgiDebugOwner)]
-public extern int32 DXGIGetDebugInterface1(
+public extern unsafe int32 DXGIGetDebugInterface1(
     uint32 flags,
     ptr<Guid> riid,
-    out ptr<IDXGIDebug> ppDebug);
+    init ref<ptr<IDXGIDebug>> ppDebug);
 
-[NativeComInterface(
-    Iid = "119E7452-DE9E-40FE-8806-88F90C12B441",
-    Base = IUnknown)]
 public interface IDXGIDebug : IUnknown {
-    [NativeComMethod(Slot = 3)]
-    int32 ReportLiveObjects(Guid apiId, int32 flags);
+    [NoThrow]
+    public unsafe int32 ReportLiveObjects(Guid apiId, int32 flags);
 }
 
-[NativeComOwner(Interface = IDXGIDebug)]
 public unique struct DxgiDebugOwner {
-    ptr<IDXGIDebug> Pointer;
+    private ptr<IDXGIDebug> Pointer;
+
+    public unsafe DxgiDebugOwner(ptr<IDXGIDebug> pointer) {
+        Pointer = pointer;
+    }
 
     [NoThrow] [Cleanup] public void Close() {
-        Pointer.Release();
+        unsafe {
+            _ = Pointer->Release();
+        }
+    }
+
+    [NoThrow] public int32 ReportLiveObjects(Guid apiId, int32 flags) {
+        unsafe {
+            return Pointer->ReportLiveObjects(apiId, flags);
+        }
     }
 }
 ```
@@ -219,27 +304,36 @@ public unique struct DxgiDebugOwner {
 **Consumer call**
 
 ```terrum
-int32 ReportAllLiveObjects(DxgiDebugOwner debug) {
-    return debug.Pointer.ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
+using Terrum.Interop.Dxgi;
+
+public int32 ReportAllLiveObjects(DxgiDebugOwner debug, Guid apiId, int32 flags) {
+    return debug.ReportLiveObjects(apiId, flags);
 }
 ```
 
 `IUnknown` is supplied by the shared COM declarations: `QueryInterface`,
 `AddRef`, and `Release` occupy slots 0, 1, and 2. The interop library also
-declares `Guid` with the Windows layout (16 bytes, 4-byte alignment), and
-defines the `DXGI_DEBUG_ALL` GUID and `DXGI_DEBUG_RLO_ALL` value (`0x7`).
-An ordinary Terrum wrapper can transfer the raw output pointer into
-`DxgiDebugOwner`; the compiler does not synthesize that wrapper.
+declares `Guid` with the Windows layout (16 bytes, 4-byte alignment).
+`DXGI_DEBUG_ALL` is a GUID and `DXGI_DEBUG_RLO_ALL` is the flag value `0x7`;
+they are passed as ordinary Blittable values. A library can expose them as
+type-owned values rather than relying on namespace-level constants.
+An ordinary Terrum factory calls `DXGIGetDebugInterface1` in an explicit
+unsafe scope, checks the HRESULT, releases a possibly written failure output,
+and transfers a successful pointer into `DxgiDebugOwner`; the compiler does
+not synthesize that wrapper. The owner type itself stays on the Terrum side
+of the boundary; only its opaque interface pointer is passed to COM.
 
 | Record | Example value |
 |---|---|
 | `NativeImport` | `DXGIGetDebugInterface1` → `Dxgi.dll!DXGIGetDebugInterface1`, Windows system-library policy. |
-| `MethodSig` / `Param` | `int32(uint32, ptr<Guid>, out ptr<IDXGIDebug>)`; parameter 1 is `REFIID`, parameter 2 is `void**`. |
+| `MethodSig` / `Param` | `int32(uint32, ptr<Guid>, init ref<ptr<IDXGIDebug>>)`; parameter 1 is `REFIID`, parameter 2 is `void**`. |
+| `Effects` | `RequiresUnsafeCaller` and `NoThrow` on the raw import and COM method. |
 | `NativeParameter` | Parameter 1 is read-only and non-retained; parameter 2 is writable and non-retained. |
 | `NativeOutput` | Parameter 2 is valid when the HRESULT is nonnegative. Conservatively, treat it as possibly written on failure. |
 | `NativeComAcquisition` | Parameter 2 produces an owned `IDXGIDebug`, represented by `DxgiDebugOwner`; release any non-null failure output. |
 | `NativeComInterface` | `IDXGIDebug` has IID `119E7452-DE9E-40FE-8806-88F90C12B441` and base `IUnknown`. |
 | `NativeComMethod` | `ReportLiveObjects` is slot 3 with signature `int32(Guid, int32)`; `IUnknown.Release` is slot 2 and releases a reference. The `Guid` layout and target requirement let the backend derive aggregate passing. |
+| `TypeDef` / `Layout` | `Guid` is 16 bytes, 4-byte aligned, and carries the target's `Blittable` commitment. |
 | `NativeComOwner` / `Cleanup` | `DxgiDebugOwner` represents `IDXGIDebug`; its ordinary `Close` method calls inherited `IUnknown.Release` at slot 2. |
 
 There is no DLL-import row for `ReportLiveObjects`: it is reached through the
@@ -294,6 +388,9 @@ TRRM record alone does not prove provider conformance.
   binding catalogs.
 - It does not add a C header importer, general marshalling, callbacks, or
   application-specific wrapper generation.
+- Native callable exports and callbacks are outside this first slice, but
+  their ABI-crossing signatures inherit the same caller-unsafe and Blittable
+  requirements.
 - It does not change accepted language, ABI, ownership, or lifetime
   semantics.
 - Source syntax for authoring the native binding and COM clauses remains
