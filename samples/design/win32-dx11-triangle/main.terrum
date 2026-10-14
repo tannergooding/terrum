@@ -1,315 +1,473 @@
-// Terrum source sketch. Native declarations come from generated SDK bindings.
-// Working spellings for native exports, inline arrays and ownership helpers.
-using Terrum;
-using Terrum.Interop.DirectX;
-using Terrum.Interop.Windows;
-using Triangle.Interop;
+namespace Triangle.Interop;
 
-namespace Triangle;
+[Terrum.Interop.NativeImport("windows-x64.system32.d3d11.D3D11CreateDeviceAndSwapChain")]
+[NoThrow]
+extern int32 D3D11CreateDeviceAndSwapChain(
+    Terrum.Interop.Windows.NativeNullPointer adapter,
+    int32 driverType,
+    Terrum.Interop.Windows.NativeNullPointer software,
+    uint32 flags,
+    Terrum.Interop.NativeStorageAddress featureLevels,
+    uint32 featureLevelCount,
+    uint32 sdkVersion,
+    Terrum.Interop.NativeStorageAddress swapChainDescription,
+    out Terrum.Interop.Dx11.ProvisionalSwapChainOwner swapChain,
+    out Terrum.Interop.Dx11.ProvisionalDeviceOwner device,
+    Terrum.Interop.NativeStorageAddress selectedFeatureLevel,
+    out Terrum.Interop.Dx11.ProvisionalContextOwner immediateContext);
+
+[Terrum.Interop.NativeImport("windows-x64.system32.d3dcompiler47.D3DCompileFromFile")]
+[NoThrow]
+extern int32 D3DCompileFromFile(
+    ptr<char16> sourceFile,
+    Terrum.Interop.Windows.NativeNullPointer defines,
+    Terrum.Interop.Windows.NativeNullPointer include,
+    ptr<char8> entryPoint,
+    ptr<char8> target,
+    uint32 flags1,
+    uint32 flags2,
+    out Terrum.Interop.Dx11.ProvisionalShaderCodeOwner code,
+    Terrum.Interop.Windows.NativeNullPointer diagnostics);
 
 [Layout(Sequential)]
-public struct Vertex
-{
-    public float32 X;
-    public float32 Y;
-    public float32 Z;
+struct ModeDescription {
+    uint32 Width;
+    uint32 Height;
+    uint32 RefreshNumerator;
+    uint32 RefreshDenominator;
+    uint32 Format;
+    uint32 ScanlineOrdering;
+    uint32 Scaling;
 
-    public Vertex(float32 x, float32 y, float32 z)
-    {
-        X = x;
-        Y = y;
-        Z = z;
+    public ModeDescription(uint32 width, uint32 height, uint32 refreshNumerator,
+        uint32 refreshDenominator, uint32 format, uint32 scanlineOrdering, uint32 scaling) {
+        Width = width;
+        Height = height;
+        RefreshNumerator = refreshNumerator;
+        RefreshDenominator = refreshDenominator;
+        Format = format;
+        ScanlineOrdering = scanlineOrdering;
+        Scaling = scaling;
     }
 }
 
-internal static class Program
-{
-    public static int32 Main(Span<TextSpan> args)
-    {
-        if (args.Length > 1 || (args.Length == 1 && !args[0].EqualsOrdinal("--warp")))
-        {
-            Terminal.WriteLine("usage: triangle [--warp]", output: TerminalOutput.Error);
+[Layout(Sequential)]
+struct SampleDescription {
+    uint32 Count;
+    uint32 Quality;
 
-            return 2;
-        }
-
-        return TriangleApplication.Run(args.Length == 1);
+    public SampleDescription(uint32 count, uint32 quality) {
+        Count = count;
+        Quality = quality;
     }
 }
 
-internal static class TriangleApplication
-{
-    public static int32 Run(bool useWarp)
-    {
-        unsafe
-        {
-            var instance = Win32.GetModuleHandleW(null);
-            NativeError.RequireHandle(instance, "GetModuleHandleW");
+[Layout(Sequential)]
+struct SwapChainDescription {
+    ModeDescription BufferDescription;
+    SampleDescription SampleDescription;
+    uint32 BufferUsage;
+    uint32 BufferCount;
+    Terrum.Interop.Windows.HWND OutputWindow;
+    int32 Windowed;
+    uint32 SwapEffect;
+    uint32 Flags;
 
-            mut var windowClass = WNDCLASSEXW.Zero;
-            windowClass.cbSize = uint32(sizeof(WNDCLASSEXW));
-            windowClass.lpfnWndProc = &WindowProcedure;
-            windowClass.hInstance = instance;
-            windowClass.lpszClassName = utf16z("TerrumTriangle");
+    public SwapChainDescription(ModeDescription bufferDescription,
+        SampleDescription sampleDescription, uint32 bufferUsage, uint32 bufferCount,
+        Terrum.Interop.Windows.HWND outputWindow, int32 windowed, uint32 swapEffect, uint32 flags) {
+        BufferDescription = bufferDescription;
+        SampleDescription = sampleDescription;
+        BufferUsage = bufferUsage;
+        BufferCount = bufferCount;
+        OutputWindow = outputWindow;
+        Windowed = windowed;
+        SwapEffect = swapEffect;
+        Flags = flags;
+    }
+}
 
-            var atom = Win32.RegisterClassExW(&windowClass);
-            NativeError.RequireAtom(atom, "RegisterClassExW");
+[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.ExitProcess")]
+[NoThrow] [DoesNotReturn]
+extern void ExitProcess(uint32 exitCode);
 
-            using var registration = WindowClassOwner.Adopt(instance, atom);
+[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetCurrentThreadId")]
+[NoThrow]
+extern uint32 GetCurrentThreadId();
 
-            uint32 style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-            mut var rectangle = RECT.Zero;
-            rectangle.right = 800;
-            rectangle.bottom = 600;
+[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetModuleHandleW")]
+[NoThrow]
+extern Terrum.Interop.Windows.HINSTANCE GetModuleHandleW(
+    Terrum.Interop.Windows.NativeNullPointer moduleName);
 
-            NativeError.RequireTrue(Win32.AdjustWindowRect(&rectangle, style, 0), "AdjustWindowRect");
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.RegisterClassExW")]
+[NoThrow]
+extern char16 RegisterClassExW(Terrum.Interop.Windows.ReadonlyWNDCLASSEXW windowClass);
 
-            var handle = Win32.CreateWindowExW(
-                0, utf16z("TerrumTriangle"), utf16z("Terrum - Direct3D 11"),
-                style, CW_USEDEFAULT, CW_USEDEFAULT,
-                rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
-                null, null, instance, null);
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.UnregisterClassW")]
+[NoThrow]
+extern int32 UnregisterClassW(
+    ptr<char16> className, Terrum.Interop.Windows.HINSTANCE instance);
 
-            NativeError.RequireHandle(handle, "CreateWindowExW");
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.CreateWindowExW")]
+[NoThrow]
+extern Terrum.Interop.Windows.HWND CreateWindowExW(
+    uint32 exStyle,
+    ptr<char16> className,
+    ptr<char16> windowName,
+    uint32 style,
+    int32 x,
+    int32 y,
+    int32 width,
+    int32 height,
+    Terrum.Interop.Windows.HWND parent,
+    Terrum.Interop.Windows.HMENU menu,
+    Terrum.Interop.Windows.HINSTANCE instance,
+    Terrum.Interop.Windows.LPVOID parameter);
 
-            using var window = WindowOwner.Adopt(handle);
-            Win32.ShowWindow(window.Handle, SW_SHOWNORMAL); // Return describes prior visibility.
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.DestroyWindow")]
+[NoThrow]
+extern int32 DestroyWindow(Terrum.Interop.Windows.HWND window);
 
-            mut var client = RECT.Zero;
-            NativeError.RequireTrue(Win32.GetClientRect(window.Handle, &client), "GetClientRect");
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.ShowWindow")]
+[NoThrow]
+extern int32 ShowWindow(Terrum.Interop.Windows.HWND window, int32 command);
 
-            uint32 width = uint32(client.right - client.left);
-            uint32 height = uint32(client.bottom - client.top);
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.GetMessageW")]
+[NoThrow]
+extern int32 GetMessageW(
+    Terrum.Interop.Windows.MSGAddress message,
+    Terrum.Interop.Windows.HWND window,
+    uint32 minimum,
+    uint32 maximum);
 
-            mut var swapDescription = DXGI_SWAP_CHAIN_DESC.Zero;
-            swapDescription.BufferDesc.Width = width;
-            swapDescription.BufferDesc.Height = height;
-            swapDescription.BufferDesc.Format = DXGI_FORMAT.R8G8B8A8_UNORM;
-            swapDescription.SampleDesc.Count = 1;
-            swapDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-            swapDescription.BufferCount = 1;
-            swapDescription.OutputWindow = window.Handle;
-            swapDescription.Windowed = 1;
-            swapDescription.SwapEffect = DXGI_SWAP_EFFECT.DISCARD;
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.TranslateMessage")]
+[NoThrow]
+extern int32 TranslateMessage(Terrum.Interop.Windows.MSGAddress message);
 
-            D3D_DRIVER_TYPE driver = useWarp ? D3D_DRIVER_TYPE.WARP : D3D_DRIVER_TYPE.HARDWARE;
-            InlineArray<D3D_FEATURE_LEVEL, 1> levels = [D3D_FEATURE_LEVEL.LEVEL_11_0];
-            mut D3D_FEATURE_LEVEL selectedLevel = D3D_FEATURE_LEVEL.LEVEL_11_0;
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.DispatchMessageW")]
+[NoThrow]
+extern nint DispatchMessageW(Terrum.Interop.Windows.MSGAddress message);
 
-            using mut var deviceOutput = new ComSlot<ID3D11Device>();
-            using mut var contextOutput = new ComSlot<ID3D11DeviceContext>();
-            using mut var swapOutput = new ComSlot<IDXGISwapChain>();
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.DefWindowProcW")]
+[NoThrow]
+extern nint DefWindowProcW(
+    Terrum.Interop.Windows.HWND window,
+    uint32 message,
+    nuint wParam,
+    nint lParam);
 
-            NativeError.ThrowIfFailed(D3D11CreateDeviceAndSwapChain(
-                null, driver, null, 0, &levels[0], 1, D3D11_SDK_VERSION,
-                &swapDescription, swapOutput.Address(), deviceOutput.Address(),
-                &selectedLevel, contextOutput.Address()), "D3D11CreateDeviceAndSwapChain");
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.PostQuitMessage")]
+[NoThrow]
+extern void PostQuitMessage(int32 exitCode);
 
-            using var device = deviceOutput.Take();
-            using var context = contextOutput.Take();
-            using var swap = swapOutput.Take();
+struct Host {
+    int32 Value;
 
-            using mut var factoryOutput = new ComSlot<IDXGIFactory>();
-            // COM's `void**` output ABI writes the pointer slot only. The cast does
-            // not establish access through the returned interface pointer.
-            NativeError.ThrowIfFailed(swap.Pointer->GetParent(
-                IDXGIFactory.IidPointer, (write ptr<ptr<void>>)factoryOutput.Address()), "GetParent");
-
-            using var factory = factoryOutput.Take();
-            NativeError.ThrowIfFailed(factory.Pointer->MakeWindowAssociation(
-                window.Handle, DXGI_MWA_NO_ALT_ENTER), "MakeWindowAssociation");
-
-            using mut var backBufferOutput = new ComSlot<ID3D11Texture2D>();
-            NativeError.ThrowIfFailed(swap.Pointer->GetBuffer(
-                0, ID3D11Texture2D.IidPointer, (write ptr<ptr<void>>)backBufferOutput.Address()), "GetBuffer");
-
-            using var backBuffer = backBufferOutput.Take();
-
-            using mut var targetOutput = new ComSlot<ID3D11RenderTargetView>();
-            NativeError.ThrowIfFailed(device.Pointer->CreateRenderTargetView(
-                backBuffer.Pointer, null, targetOutput.Address()), "CreateRenderTargetView");
-
-            using var target = targetOutput.Take();
-
-            using var shaderPath = NativeUtf16Z.FromApplicationAsset("triangle.hlsl");
-            using var vertexCode = CompileShader(shaderPath.Pointer, utf8z("VertexMain"), utf8z("vs_5_0"));
-            using var pixelCode = CompileShader(shaderPath.Pointer, utf8z("PixelMain"), utf8z("ps_5_0"));
-
-            using mut var vertexShaderOutput = new ComSlot<ID3D11VertexShader>();
-            using mut var pixelShaderOutput = new ComSlot<ID3D11PixelShader>();
-
-            NativeError.ThrowIfFailed(device.Pointer->CreateVertexShader(
-                vertexCode.Pointer->GetBufferPointer(), vertexCode.Pointer->GetBufferSize(),
-                null, vertexShaderOutput.Address()), "CreateVertexShader");
-
-            using var vertexShader = vertexShaderOutput.Take();
-
-            NativeError.ThrowIfFailed(device.Pointer->CreatePixelShader(
-                pixelCode.Pointer->GetBufferPointer(), pixelCode.Pointer->GetBufferSize(),
-                null, pixelShaderOutput.Address()), "CreatePixelShader");
-
-            using var pixelShader = pixelShaderOutput.Take();
-
-            mut var element = D3D11_INPUT_ELEMENT_DESC.Zero;
-            element.SemanticName = utf8z("POSITION");
-            element.Format = DXGI_FORMAT.R32G32B32_FLOAT;
-            element.InputSlotClass = D3D11_INPUT_CLASSIFICATION.PER_VERTEX_DATA;
-
-            using mut var layoutOutput = new ComSlot<ID3D11InputLayout>();
-            NativeError.ThrowIfFailed(device.Pointer->CreateInputLayout(
-                &element, 1, vertexCode.Pointer->GetBufferPointer(),
-                vertexCode.Pointer->GetBufferSize(), layoutOutput.Address()), "CreateInputLayout");
-
-            using var layout = layoutOutput.Take();
-
-            InlineArray<Vertex, 3> vertices =
-            [
-                new Vertex(0, 0.6, 0.5),
-                new Vertex(0.6, -0.5, 0.5),
-                new Vertex(-0.6, -0.5, 0.5)
-            ];
-
-            uint32 stride = uint32(sizeof(Vertex));
-            uint32 offset = 0;
-
-            mut var bufferDescription = D3D11_BUFFER_DESC.Zero;
-            bufferDescription.ByteWidth = stride * 3;
-            bufferDescription.Usage = D3D11_USAGE.IMMUTABLE;
-            bufferDescription.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-
-            mut var initialData = D3D11_SUBRESOURCE_DATA.Zero;
-            initialData.pSysMem = &vertices[0];
-
-            using mut var bufferOutput = new ComSlot<ID3D11Buffer>();
-            NativeError.ThrowIfFailed(device.Pointer->CreateBuffer(
-                &bufferDescription, &initialData, bufferOutput.Address()), "CreateBuffer");
-
-            using var buffer = bufferOutput.Take();
-            // CreateBuffer copied the vertices; it does not retain this stack address.
-
-            mut var viewport = D3D11_VIEWPORT.Zero;
-            viewport.Width = (float32)width;
-            viewport.Height = (float32)height;
-            viewport.MaxDepth = 1;
-
-            var targetPointer = target.Pointer;
-            var bufferPointer = buffer.Pointer;
-
-            // Declared after resource owners: ClearState runs before their Release calls.
-            using var bindings = new ContextBindingsGuard(context.Pointer);
-
-            context.Pointer->OMSetRenderTargets(1, &targetPointer, null);
-            context.Pointer->RSSetViewports(1, &viewport);
-            context.Pointer->IASetInputLayout(layout.Pointer);
-            context.Pointer->IASetVertexBuffers(0, 1, &bufferPointer, &stride, &offset);
-            context.Pointer->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY.TRIANGLELIST);
-            context.Pointer->VSSetShader(vertexShader.Pointer, null, 0);
-            context.Pointer->PSSetShader(pixelShader.Pointer, null, 0);
-
-            InlineArray<float32, 4> clearColor = [0.03, 0.06, 0.12, 1];
-            mut var message = MSG.Zero;
-            mut bool running = true;
-
-            while (running)
-            {
-                while (Win32.PeekMessageW(&message, null, 0, 0, PM_REMOVE) != 0)
-                {
-                    if (message.message == WM_QUIT)
-                    {
-                        running = false;
-                        break;
-                    }
-
-                    Win32.TranslateMessage(&message); // False also means "no character translation".
-                    Win32.DispatchMessageW(&message);
-                }
-
-                if (!running)
-                {
-                    break;
-                }
-
-                var status = RenderFrame(context.Pointer, target.Pointer, swap.Pointer, &clearColor[0]);
-
-                if (status == DXGI_STATUS_OCCLUDED)
-                {
-                    Win32.Sleep(16);
-                    continue;
-                }
-
-                if (status == DXGI_ERROR_DEVICE_REMOVED || status == DXGI_ERROR_DEVICE_RESET)
-                {
-                    NativeDiagnostics.WriteHResult(status, "Present");
-                    NativeDiagnostics.WriteHResult(device.Pointer->GetDeviceRemovedReason(), "Device reason");
-
-                    return 3;
-                }
-
-                NativeError.ThrowIfFailed(status, "Present");
+    [NoThrow]
+    public static nint WindowProcedure(Terrum.Interop.Windows.HWND window, uint32 message,
+        nuint wParam, nint lParam) {
+        if (message == 5) {
+            if (PostMessageW(window, 32768, wParam, 0) == 0) {
+                mut Terrum.Interop.Windows.MSG failureQuit = msgzero();
+                PeekMessageW(&failureQuit, Terrum.Interop.Windows.HWND.NoOwner, 18, 18, 1);
+                PostQuitMessage(1);
             }
-
             return 0;
         }
-    }
-
-    private static unsafe HRESULT RenderFrame(ptr<ID3D11DeviceContext> context,
-        ptr<ID3D11RenderTargetView> target, ptr<IDXGISwapChain> swap,
-        ptr<float32> clearColor)
-    {
-        context->ClearRenderTargetView(target, clearColor);
-        context->Draw(3, 0);
-        return swap->Present(1, 0);
-    }
-
-    private static unsafe ComOwner<ID3DBlob> CompileShader(ptr<char16> path, ptr<char8> entryPoint, ptr<char8> target)
-    {
-        using mut var code = new ComSlot<ID3DBlob>();
-        using mut var diagnostics = new ComSlot<ID3DBlob>();
-
-        var status = D3DCompileFromFile(
-            path, null, null, entryPoint, target, D3DCOMPILE_ENABLE_STRICTNESS, 0,
-            code.Address(), diagnostics.Address());
-
-        if (diagnostics.HasValue)
-        {
-            NativeDiagnostics.WriteCompilerOutput(diagnostics.Pointer);
-        }
-
-        NativeError.ThrowIfFailed(status, "D3DCompileFromFile");
-
-        return code.Take();
-    }
-
-    [NativeExport(CallingConvention = NativeCallingConvention.Winapi)]
-    private static nint WindowProcedure(HWND window, uint32 message, nuint wParam, nint lParam)
-    {
-        unsafe
-        {
-            try
-            {
-                if (message == WM_CLOSE)
-                {
-                    // Exit the loop; the owner, not this callback, destroys the window.
-                    Win32.PostQuitMessage(0);
-
-                    return 0;
-                }
-
-                if (message == WM_PAINT)
-                {
-                    mut var paint = PAINTSTRUCT.Zero;
-                    NativeError.RequireHandle(Win32.BeginPaint(window, &paint), "BeginPaint");
-                    NativeError.RequireTrue(Win32.EndPaint(window, &paint), "EndPaint");
-
-                    return 0;
-                }
-
-                return Win32.DefWindowProcW(window, message, wParam, lParam);
+        if (message == 16) {
+            mut Terrum.Interop.Windows.MSG quit = msgzero();
+            if (PeekMessageW(&quit, Terrum.Interop.Windows.HWND.NoOwner, 18, 18, 0) == 0) {
+                PostQuitMessage(0);
             }
-            catch
-            {
-                Runtime.FailFastCurrentException();
+            return 0;
+        }
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
+}
+
+public unique struct WindowOwner {
+    private Terrum.Interop.Windows.HWND Handle;
+    private char16 Atom;
+    private uint32 ThreadId;
+
+    public WindowOwner() {
+        Handle = Terrum.Interop.Windows.HWND.NoOwner;
+        Atom = 0;
+        ThreadId = GetCurrentThreadId();
+        require ThreadId != 0;
+        Terrum.Interop.Windows.WNDCLASSEXW descriptor = windowclassex(
+            &Host.WindowProcedure, GetModuleHandleW(null), utf16z("TerrumOwnerClass"));
+        Atom = RegisterClassExW(&descriptor);
+        try {
+            require Atom != 0;
+            Handle = CreateWindowExW(
+                0, utf16z("TerrumOwnerClass"), utf16z("Terrum DX11 Triangle"), 13238272,
+                100, 100, 800, 600,
+                Terrum.Interop.Windows.HWND.NoOwner, null, GetModuleHandleW(null), null);
+            require Handle != Terrum.Interop.Windows.HWND.NoOwner;
+        } finally {
+            if (Handle == Terrum.Interop.Windows.HWND.NoOwner && Atom != 0) {
+                ExitIfFalse(UnregisterClassW(
+                    utf16z("TerrumOwnerClass"), GetModuleHandleW(null)) != 0);
             }
         }
+    }
+
+    [NoThrow]
+    private static void ExitIfFalse(bool succeeded) {
+        if (!succeeded) {
+            ExitProcess(87);
+        }
+    }
+
+    [NoThrow] [Cleanup]
+    public void Close() {
+        ExitIfFalse(ThreadId == GetCurrentThreadId());
+        ExitIfFalse(DestroyWindow(Handle) != 0);
+        ExitIfFalse(UnregisterClassW(
+            utf16z("TerrumOwnerClass"), GetModuleHandleW(null)) != 0);
+    }
+
+    public int32 Run() {
+        ExitIfFalse(ThreadId == GetCurrentThreadId());
+        InlineArray<uint32, 1> featureLevels = [45056];
+        mut InlineArray<uint32, 1> selectedFeatureLevel = [0];
+        SwapChainDescription swapChainDescription = new SwapChainDescription(
+            new ModeDescription(1, 1, 0, 0, 28, 0, 0),
+            new SampleDescription(1, 0), 32, 1, Handle, 1, 0, 0);
+        int32 deviceStatus = D3D11CreateDeviceAndSwapChain(
+            null, 5, null, 0, &featureLevels[0], 1, 7, &swapChainDescription,
+            out var swapchain, out var device, &selectedFeatureLevel[0], out var context);
+        if (deviceStatus >= 0) {
+            mut InlineArray<char16, 260> shaderPath = [];
+            uint32 pathLength = GetModuleFileNameW(null, &shaderPath[0], 260);
+            if (pathLength == 0) {
+                uint32 pathError = GetLastError();
+                return 1;
+            }
+            if (pathLength >= 260) {
+                return 1;
+            }
+            mut uint32 scan = pathLength;
+            mut uint32 prefixLength = 0;
+            while (scan > 0 && prefixLength == 0) {
+                scan = scan - 1;
+                if (shaderPath[scan] == 92 || shaderPath[scan] == 47) {
+                    if (scan + 1 >= pathLength) {
+                        return 1;
+                    }
+                    prefixLength = scan + 1;
+                }
+            }
+            if (prefixLength == 0 || prefixLength + 14 > 260) {
+                return 1;
+            }
+            shaderPath[prefixLength + 0] = 116;
+            shaderPath[prefixLength + 1] = 114;
+            shaderPath[prefixLength + 2] = 105;
+            shaderPath[prefixLength + 3] = 97;
+            shaderPath[prefixLength + 4] = 110;
+            shaderPath[prefixLength + 5] = 103;
+            shaderPath[prefixLength + 6] = 108;
+            shaderPath[prefixLength + 7] = 101;
+            shaderPath[prefixLength + 8] = 46;
+            shaderPath[prefixLength + 9] = 104;
+            shaderPath[prefixLength + 10] = 108;
+            shaderPath[prefixLength + 11] = 115;
+            shaderPath[prefixLength + 12] = 108;
+            shaderPath[prefixLength + 13] = 0;
+            if (D3DCompileFromFile(&shaderPath[0], null, null,
+                utf8z("VertexMain"), utf8z("vs_5_0"), 0, 0,
+                out var vertexCode, null) >= 0) {
+                if (device.CreateVertexShader(vertexCode, out var vertexShader)) {
+                    if (D3DCompileFromFile(&shaderPath[0], null, null,
+                        utf8z("PixelMain"), utf8z("ps_5_0"), 0, 0,
+                        out var pixelCode, null) >= 0) {
+                        if (device.CreatePixelShader(pixelCode, out var pixelShader)) {
+                            try {
+                                ShowWindow(Handle, 5);
+                                mut Terrum.Interop.Windows.MSG message = msgzero();
+                                mut int32 result = 1;
+                                mut nuint exitCode = 0;
+                                mut bool resizePending = true;
+                                mut bool minimized = false;
+                                mut bool redrawPending = true;
+                                mut uint32 lastWidth = 0;
+                                mut uint32 lastHeight = 0;
+                                while (result > 0) {
+                                    while (PeekMessageW(
+                                        &message, Terrum.Interop.Windows.HWND.NoOwner, 0, 0, 1) != 0) {
+                                        uint32 queuedMessageId = msgid(&message);
+                                        bool queuedWindowMessage = msgwindowis(&message, Handle);
+                                        if (queuedMessageId == 18) {
+                                            exitCode = msgwparam(&message);
+                                            result = 0;
+                                            break;
+                                        }
+                                        if (queuedWindowMessage && queuedMessageId == 32768) {
+                                            resizePending = true;
+                                            minimized = msgwparam(&message) == 1;
+                                        } else {
+                                            if (queuedWindowMessage && queuedMessageId == 15) {
+                                                redrawPending = true;
+                                            }
+                                            TranslateMessage(&message);
+                                            DispatchMessageW(&message);
+                                        }
+                                    }
+                                    if (result == 0) {
+                                        return exitCode == 0 ? 0 : 1;
+                                    }
+                                    if (resizePending || redrawPending) {
+                                        resizePending = false;
+                                        if (!minimized) {
+                                            mut ClientRectangle clientRectangle =
+                                                new ClientRectangle(0, 0, 0, 0);
+                                            if (GetClientRect(Handle, &clientRectangle) == 0) {
+                                                return 1;
+                                            }
+                                            if (!clientRectangle.TryGetDimensions(
+                                                out var clientWidth, out var clientHeight)) {
+                                                return 1;
+                                            }
+                                            if (clientWidth > 0 && clientHeight > 0) {
+                                                if (uint32(clientWidth) != lastWidth
+                                                    || uint32(clientHeight) != lastHeight) {
+                                                    context.ClearState();
+                                                    if (!swapchain.ResizeBuffers(
+                                                        0, uint32(clientWidth), uint32(clientHeight), 0, 0)) {
+                                                        return 1;
+                                                    }
+                                                    lastWidth = uint32(clientWidth);
+                                                    lastHeight = uint32(clientHeight);
+                                                    redrawPending = true;
+                                                }
+                                                if (redrawPending) {
+                                                    if (swapchain.GetBuffer(out var backBuffer)) {
+                                                        if (device.CreateRenderTargetView(
+                                                            backBuffer, out var renderTarget)) {
+                                                            try {
+                                                                context.ClearState();
+                                                                context.ClearRenderTargetView(
+                                                                    renderTarget, 0.08, 0.12, 0.18, 1.0);
+                                                                context.OMSetRenderTargets(renderTarget);
+                                                                context.RSSetViewports(
+                                                                    0.0, 0.0,
+                                                                    float32(clientWidth),
+                                                                    float32(clientHeight),
+                                                                    0.0, 1.0);
+                                                                context.IASetPrimitiveTopology(4);
+                                                                context.VSSetShader(vertexShader);
+                                                                context.PSSetShader(pixelShader);
+                                                                context.Draw(3, 0);
+                                                                if (!swapchain.Present()) {
+                                                                    return 1;
+                                                                }
+                                                            } finally {
+                                                                context.ClearState();
+                                                            }
+                                                        } else {
+                                                            return 1;
+                                                        }
+                                                    } else {
+                                                        return 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        redrawPending = false;
+                                    }
+                                    result = GetMessageW(
+                                        &message, Terrum.Interop.Windows.HWND.NoOwner, 0, 0);
+                                    if (result < 0) {
+                                        return 1;
+                                    }
+                                    if (result == 0) {
+                                        return msgwparam(&message) == 0 ? 0 : 1;
+                                    }
+                                    uint32 messageId = msgid(&message);
+                                    bool isWindowMessage = msgwindowis(&message, Handle);
+                                    if (isWindowMessage && messageId == 32768) {
+                                        resizePending = true;
+                                        minimized = msgwparam(&message) == 1;
+                                    } else {
+                                        if (isWindowMessage && messageId == 15) {
+                                            redrawPending = true;
+                                        }
+                                        TranslateMessage(&message);
+                                        DispatchMessageW(&message);
+                                    }
+                                }
+                                return exitCode == 0 ? 0 : 1;
+                            } finally {
+                                context.ClearState();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return 1;
+    }
+}
+
+int32 Main() {
+    WindowOwner window = new WindowOwner();
+    return window.Run();
+}
+
+[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetModuleFileNameW")]
+[NoThrow]
+extern uint32 GetModuleFileNameW(
+    Terrum.Interop.Windows.NativeNullPointer moduleName,
+    Terrum.Interop.NativeStorageAddress fileName,
+    uint32 size);
+
+[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetLastError")]
+[NoThrow]
+extern uint32 GetLastError();
+
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.GetClientRect")]
+[NoThrow]
+extern int32 GetClientRect(
+    Terrum.Interop.Windows.HWND window, Terrum.Interop.NativeStorageAddress rectangle);
+
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.PostMessageW")]
+[NoThrow]
+extern int32 PostMessageW(
+    Terrum.Interop.Windows.HWND window, uint32 message, nuint wParam, nint lParam);
+
+[Terrum.Interop.NativeImport("windows-x64.system32.user32.PeekMessageW")]
+[NoThrow]
+extern int32 PeekMessageW(
+    Terrum.Interop.Windows.MSGAddress message, Terrum.Interop.Windows.HWND window,
+    uint32 minimum, uint32 maximum, uint32 remove);
+
+[Layout(Sequential)]
+struct ClientRectangle {
+    int32 Left;
+    int32 Top;
+    int32 Right;
+    int32 Bottom;
+
+    [NoThrow]
+    public ClientRectangle(int32 left, int32 top, int32 right, int32 bottom) {
+        Left = left;
+        Top = top;
+        Right = right;
+        Bottom = bottom;
+    }
+
+    [NoThrow]
+    public bool TryGetDimensions(out int32 width, out int32 height) {
+        width = 0;
+        height = 0;
+        if (Left != 0 || Top != 0 || Right < Left || Bottom < Top) {
+            return false;
+        }
+        width = Right;
+        height = Bottom;
+        return true;
     }
 }
