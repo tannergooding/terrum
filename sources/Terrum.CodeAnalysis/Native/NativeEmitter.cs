@@ -858,6 +858,48 @@ internal sealed partial class PeCompiler
             {
                 maximumArguments = Math.Max(maximumArguments, function.ParameterCount);
             }
+            if (function.Intrinsic == BoundIntrinsic.NativeComVTableCall
+                && function.NativeComMethod is NativeComMethodDefinition comMethod
+                && NativeComCatalog.TryParseSignature(comMethod.Signature, out _, out var comParameters))
+            {
+                maximumArguments = Math.Max(maximumArguments, comParameters.Length);
+                var requiredSpills = comMethod.OutputParameterIndex >= 0 ? 1 : 0;
+                if (!function.NativeComHiddenParameters.IsDefaultOrEmpty)
+                {
+                    foreach (var parameter in function.NativeComHiddenParameters)
+                    {
+                        if (parameter.Kind == NativeComHiddenParameterKind.InterfaceIdAddress)
+                        {
+                            requiredSpills++;
+                        }
+                    }
+                }
+                if (!comMethod.ParameterAdaptations.IsDefaultOrEmpty)
+                {
+                    requiredSpills += comMethod.ParameterAdaptations.Count(
+                        static adaptation => adaptation.Kind
+                            == NativeComParameterAdaptationKind.SingleElementOwnerPointerArray);
+                    foreach (var adaptation in comMethod.ParameterAdaptations)
+                    {
+                        if (adaptation.Kind != NativeComParameterAdaptationKind.ValueArrayAddress)
+                        {
+                            continue;
+                        }
+                        if (!NativeComCatalog.TryGetValueArrayElementCount(adaptation.TargetType,
+                                out var elementCount)
+                            || _program.NativeImportCatalog is not NativeImportCatalog comCatalog
+                            || !NativeComCallContract.TryResolveBoundType(adaptation.SourceType,
+                                comCatalog, _program, allowVoid: false, out var elementType))
+                        {
+                            throw new InvalidOperationException(
+                                "A COM value-array adaptation has an invalid storage layout.");
+                        }
+                        var byteCount = checked(elementCount * Size(elementType));
+                        requiredSpills += (byteCount + 15) / 16;
+                    }
+                }
+                spillSlots = Math.Max(spillSlots, requiredSpills);
+            }
             var outParameters = 0;
             foreach (var variable in function.Variables)
             {
@@ -1113,6 +1155,18 @@ internal sealed partial class PeCompiler
                 if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
                 {
                     EmitManagedClassFactory(function);
+                }
+                else if (function.Intrinsic == BoundIntrinsic.NativeComVTableCall)
+                {
+                    EmitNativeComMethodFunction(function);
+                }
+                else if (function.Intrinsic == BoundIntrinsic.NativeComOwnerClose)
+                {
+                    EmitNativeComOwnerClose(function);
+                }
+                else if (function.Intrinsic == BoundIntrinsic.NativeComOwnerTryClone)
+                {
+                    EmitNativeComOwnerTryClone(function);
                 }
                 else if (function.Intrinsic >= BoundIntrinsic.NodeTryCreate)
                 {

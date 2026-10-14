@@ -359,6 +359,15 @@ public static partial class SemanticVerifier
             }
             var isCataloguedFixedArrayElement = NativeFixedArrayContract.IsCataloguedElement(
                 (PrimitiveType)(100 + index), program.Structures, program.NativeImportCatalog);
+            var cataloguedAggregateStorage = NativeStorageParameterContract.SupportsAggregateType(
+                program.NativeImportCatalog, (PrimitiveType)(100 + index), program.Structures, isReadonly: false)
+                || NativeStorageParameterContract.SupportsAggregateType(
+                    program.NativeImportCatalog, (PrimitiveType)(100 + index), program.Structures, isReadonly: true);
+            if (structure.Size > ValueLayout.MaximumSize
+                && !isCataloguedFixedArrayElement && !cataloguedAggregateStorage)
+            {
+                throw Invalid();
+            }
             if (structure.IsSequential && (!structure.IsInternal || structure.IsUnique
                 || structure.IsTransparent || structure.Fields.Any(static field => !field.IsPrivate))
                 && structure.BlittableTargetRequirement == 0
@@ -416,8 +425,11 @@ public static partial class SemanticVerifier
                         || (variable.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                             && (!function.IsExternal || variableIndex >= function.ParameterCount))
                         || (variable.Type == PrimitiveType.NativeWindowHandle
-                            && (!function.IsExternal || variableIndex != 0
-                                || variableIndex >= function.ParameterCount))
+                            && !(function.IsExternal && variableIndex == 0
+                                && variableIndex < function.ParameterCount)
+                            && !(variableIndex < function.ParameterCount
+                                && program.NativeImportCatalog?.MatchesCallbackFunction(
+                                    PrimitiveType.NativeCallbackAddress, function) == true))
                         || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
@@ -466,6 +478,34 @@ public static partial class SemanticVerifier
                     && classIndexes.TryGetValue(factoryClassName, out var factoryClassIndex))
                 {
                     classFactoryCounts[factoryClassIndex]++;
+                }
+                continue;
+            }
+            if (function.Intrinsic == BoundIntrinsic.NativeComVTableCall)
+            {
+                if (!NativeComCallContract.IsValidVTableCallFunction(function, program))
+                {
+                    throw InvalidEffect(function.Span,
+                        $"The closed COM call does not retain its catalogued owner acquisition and interface provenance for '{function.Name}'.");
+                }
+                continue;
+            }
+            if (function.Intrinsic == BoundIntrinsic.NativeComOwnerClose)
+            {
+                if (function.DeclaringStruct is not string cleanupStructName
+                    || !NativeComCallContract.IsValidOwnerCloseFunction(function, program))
+                {
+                    throw InvalidEffect(function.Span, "NativeImport");
+                }
+                cleanupOwners ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                cleanupOwners.Add(function.Name, cleanupStructName);
+                continue;
+            }
+            if (function.Intrinsic == BoundIntrinsic.NativeComOwnerTryClone)
+            {
+                if (!NativeComCallContract.IsValidOwnerCloneFunction(function, program))
+                {
+                    throw InvalidEffect(function.Span, "NativeImport");
                 }
                 continue;
             }

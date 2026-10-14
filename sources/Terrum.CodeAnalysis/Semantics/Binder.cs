@@ -1010,27 +1010,33 @@ internal sealed partial class Binder
             Report("TRM3005", "Transparent Copy structs require exactly one scalar value field.", declaration.Span);
         }
         var fieldLayout = fields.ToImmutable();
+        size = (size + alignment - 1) & -alignment;
         var cataloguedFixedArrayElement = _nativeImportCatalog?.SupportsFixedArrayElement(
             qualified, size, alignment) == true;
-        if (isSequential && (isPublic || isUnique || fields.Any(static field => !field.IsPrivate))
-            && !cataloguedFixedArrayElement)
-        {
-            Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
-        }
-        size = (size + alignment - 1) & -alignment;
-        if (size is < 1 or > ValueLayout.MaximumStructureSize)
-        {
-            Report("TRM3005",
-                $"A struct must have a naturally aligned size from 1 through {ValueLayout.MaximumStructureSize} bytes.",
-                declaration.Span);
-        }
+        var structureType = (PrimitiveType)(100 + index);
         _structs[index] = new BoundStruct(qualified, fieldLayout, size) {
             IsInternal = _structs[index].IsInternal,
             IsUnique = isUnique,
             IsTransparent = isTransparent,
             IsSequential = isSequential,
         };
-        _structureAlignments[(PrimitiveType)(100 + index)] = alignment;
+        _structureAlignments[structureType] = alignment;
+        var cataloguedAggregateStorage = NativeStorageParameterContract.SupportsAggregateType(
+            _nativeImportCatalog, structureType, _structs, isReadonly: false)
+            || NativeStorageParameterContract.SupportsAggregateType(
+                _nativeImportCatalog, structureType, _structs, isReadonly: true);
+        if (isSequential && (isPublic || isUnique || fields.Any(static field => !field.IsPrivate))
+            && !cataloguedFixedArrayElement)
+        {
+            Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
+        }
+        if (size is < 1 or > ValueLayout.MaximumStructureSize
+            || (size > ValueLayout.MaximumSize && !cataloguedFixedArrayElement && !cataloguedAggregateStorage))
+        {
+            Report("TRM3005",
+                $"A struct must have a naturally aligned size from 1 through {ValueLayout.MaximumSize} bytes unless a native storage catalog admits its layout.",
+                declaration.Span);
+        }
         _ = _layingOut.Remove(index);
         _ = _laidOut.Add(index);
     }
@@ -3733,6 +3739,10 @@ internal sealed partial class Binder
                 {
                     expression = new BoundConstant(1, PrimitiveType.Bool, node.Span);
                 }
+                else if (TryFindInitReferenceProjection(initializedSourceNode, out var initializedDestination))
+                {
+                    expression = new BoundIsInitialized(initializedDestination, node.Span);
+                }
                 else
                 {
                     var initializedSource = BindExpression(initializedSourceNode, null);
@@ -3936,6 +3946,20 @@ internal sealed partial class Binder
             {
                 var op = ((SyntaxTokenElement)node.Children[0]).Token;
                 var operandNode = (SyntaxNode)node.Children[1];
+                if (op.Kind == TokenKind.Star)
+                {
+                    if (TryFindInitReferenceProjection(node, out var destination))
+                    {
+                        expression = new BoundRead(destination, _variables[destination].Type, node.Span);
+                    }
+                    else
+                    {
+                        Report("TRM3030", "Dereference requires an init ref destination in this source profile.",
+                            op.Span);
+                        expression = ErrorExpression(node.Span);
+                    }
+                    break;
+                }
                 if (op.Kind == TokenKind.Ampersand)
                 {
                     if (expected == PrimitiveType.NativeUtf16ZPointer
