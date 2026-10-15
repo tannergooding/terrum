@@ -343,7 +343,7 @@ public readonly ref struct TrRmNativeImportTableReader
         return parameter.Retention == (byte)NativeParameterRetention.NoEscape
             && (pointeeType == PrimitiveType.Void
                 ? access == (byte)NativeParameterAccess.Read && parameter.Extent == 0
-                : parameter.Extent == 1
+                : parameter.Extent is 0 or 1
                     && access is >= (byte)NativeParameterAccess.Read
                         and <= (byte)NativeParameterAccess.ReadWrite);
     }

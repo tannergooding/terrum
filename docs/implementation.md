@@ -164,21 +164,26 @@ NativeImport table and source-reference path; that standard path is limited to
 named Windows System32 imports. Its section, clause, and Feature assignments
 are not canonical TRRM assignments. The source prototype also accepts
 `NativeParameter` for raw pointer inputs with explicit `Read`, `Write`, or
-`ReadWrite` access, `NoEscape` retention, and a one-value extent for supported
-scalar, raw-pointer, and fixed-layout Blittable aggregate pointees. Aggregate
-addresses require an initialized local; writable access additionally requires
-mutable backing. Opaque `NativeWindowHandle` and `NativeModuleHandle` values
-are admitted as by-value parameters, relying on their explicit pointer-sized
-handle representation. `NativeOutput` remains limited to scalar and raw-pointer
-pointees, and `ptr<void>` is limited to readonly, zero-extent metadata.
-When a call forms an address with `&local`, the local must be initialized and
-match the pointee type; `Write` and `ReadWrite` require mutable backing. Raw
-pointer values remain caller-authored unsafe inputs. This input metadata
+`ReadWrite` access, `NoEscape` retention, and extent zero or one for supported
+scalar, raw-pointer, and fixed-layout Blittable aggregate pointees. Extent zero
+does not prove a buffer length, string termination, or any other property of
+the foreign access. Aggregate addresses require an initialized local; writable
+access additionally requires mutable backing. Opaque `NativeWindowHandle` and
+`NativeModuleHandle` values are admitted as by-value parameters, relying on
+their explicit pointer-sized handle representation. `NativeOutput` remains
+limited to scalar and raw-pointer pointees, and `ptr<void>` is limited to
+readonly, zero-extent metadata. Direct pointer arguments also accept `null`;
+matching `utf8z`/`utf16z` literals require read-only, no-escape, zero-extent
+metadata. When a call forms an address with
+`&local` or the first element of a fixed array, the backing must be initialized
+and match the pointee type; `Write` and `ReadWrite` require mutable backing.
+Raw pointer values remain caller-authored unsafe inputs. This input metadata
 round-trips through private semantic-module revision 80, native packages,
 consumer sets, and graph-JIT roots. The experimental TRRM direct-import path
 also round-trips scalar, opaque-pointer, and `ptr<void>` pointees using
-provisional clause kind 10; fixed-layout aggregate pointees remain unsupported
-in that executable profile. The clause assignment remains unapproved and this
+provisional clause kind 10, including extent-zero scalar and character-pointer
+inputs; fixed-layout aggregate pointees remain unsupported in that executable
+profile. The clause assignment remains unapproved and this
 implementation does not establish canonical TRRM conformance.
 
 Direct imports with writable scalar outputs and `NativeParameter` inputs also

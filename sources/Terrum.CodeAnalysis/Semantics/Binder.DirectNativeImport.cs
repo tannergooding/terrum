@@ -13,7 +13,52 @@ internal sealed partial class Binder
         IsAddressOfExpression(expression)
             ? BindNativeParameterAddress(expression, parameter.Access, parameter.Extent,
                 parameter.PointeeType, span)
-            : BindExpression(expression, PrimitiveType.NativeRawPointer);
+            : BindDirectNativePointerValue(expression, parameter);
+
+    private BoundExpression BindDirectNativePointerValue(SyntaxNode expression,
+        DirectNativeParameter parameter)
+    {
+        while (expression.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            expression = (SyntaxNode)expression.Children[1];
+        }
+        if (expression.Kind == SyntaxKind.LiteralExpression
+            && expression.Children is [SyntaxTokenElement { Token.Text: "null" }])
+        {
+            return new BoundConstant(0, PrimitiveType.NativeRawPointer, expression.Span);
+        }
+
+        var literalType = NativeStringZConstructorType(expression);
+        if (literalType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+            && (parameter.PointeeType == PrimitiveType.Void
+                || parameter.PointeeType == PrimitiveType.Char16
+                    && literalType == PrimitiveType.NativeUtf16ZPointer))
+        {
+            return literalType == PrimitiveType.NativeUtf16ZPointer
+                ? BindNativeUtf16ZLiteral(expression, literalType)
+                : BindNativeUtf8ZLiteral(expression, literalType);
+        }
+        return BindExpression(expression, PrimitiveType.NativeRawPointer);
+    }
+
+    private static PrimitiveType? NativeStringZConstructorType(SyntaxNode expression)
+    {
+        while (expression.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            expression = (SyntaxNode)expression.Children[1];
+        }
+        if (expression.Kind != SyntaxKind.InvocationExpression
+            || ((SyntaxNode)expression.Children[0]).Kind != SyntaxKind.NameExpression)
+        {
+            return null;
+        }
+        var name = NameText((SyntaxNode)expression.Children[0]);
+        return name switch {
+            "utf16z" => PrimitiveType.NativeUtf16ZPointer,
+            "utf8z" => PrimitiveType.NativeUtf8ZPointer,
+            _ => null,
+        };
+    }
 
     private static bool IsAddressOfExpression(SyntaxNode expression)
     {
@@ -32,12 +77,12 @@ internal sealed partial class Binder
         {
             expression = (SyntaxNode)expression.Children[1];
         }
-        if (extent != 1 || expression is not {
+        if (extent is not (0 or 1) || expression is not {
                 Kind: SyntaxKind.UnaryExpression,
             } || ((SyntaxTokenElement)expression.Children[0]).Token.Kind != TokenKind.Ampersand)
         {
             Report("TRM3030",
-                "A NativeParameter address requires the address of one stable local value.",
+                "A NativeParameter address requires the address of stable local storage.",
                 span);
             return ErrorExpression(span);
         }
@@ -47,23 +92,54 @@ internal sealed partial class Binder
         {
             target = (SyntaxNode)target.Children[1];
         }
+
+        if (target.Kind == SyntaxKind.IndexExpression
+            && TryFindNativeFixedArrayLocal((SyntaxNode)target.Children[0], out var arrayVariable)
+            && _variables[arrayVariable].NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
+            && NativeFixedArrayContract.MatchesLayout(layout, _structs, _nativeImportCatalog))
+        {
+            var index = BindNativeFixedArrayIndex((SyntaxNode)target.Children[2], layout);
+            if ((pointeeType != PrimitiveType.Void && pointeeType != layout.ElementType)
+                || index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
+                || _variables[arrayVariable].IsInitializationLocal
+                || _unresolvedVacantLocals.Contains(arrayVariable)
+                || access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
+                    && (!_variables[arrayVariable].IsMutable
+                        || !NativeFixedArrayContract.AllowsMutableLocal(
+                            layout, _structs, _nativeImportCatalog)))
+            {
+                Report("TRM3030",
+                    "A NativeParameter address requires a matching initialized fixed array and access mode.",
+                    span);
+                return ErrorExpression(span);
+            }
+
+            return new BoundNativeStorageAddress(arrayVariable, index, layout.CarrierType,
+                layout.ElementType, PrimitiveType.NativeStorageAddress, layout.ElementCount,
+                layout.ElementStride, layout.ByteExtent,
+                IsReadonly: access == NativeParameterAccess.Read, Span: span);
+        }
+
         if (target.Kind != SyntaxKind.NameExpression
             || !TryFindVariable(NameText(target), out var variable)
-            || _variables[variable].Type != pointeeType
+            || (pointeeType != PrimitiveType.Void && _variables[variable].Type != pointeeType)
+            || (pointeeType == PrimitiveType.Void
+                && !DirectNativeImportContract.IsInputPointee(_variables[variable].Type, _structs))
             || _variables[variable].IsInitializationLocal
             || _unresolvedVacantLocals.Contains(variable)
             || access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
                 && !_variables[variable].IsMutable)
         {
             Report("TRM3030",
-                "A NativeParameter address requires an initialized local with the exact pointee type and access.",
+                "A NativeParameter address requires initialized local storage with matching type and access.",
                 span);
             return ErrorExpression(span);
         }
 
-        var extentBytes = ValueLayout.Size(pointeeType, _structs);
+        var carrierType = _variables[variable].Type;
+        var extentBytes = ValueLayout.Size(carrierType, _structs);
         return new BoundNativeStorageAddress(variable,
-            new BoundConstant(0, PrimitiveType.Int32, span), pointeeType, pointeeType,
+            new BoundConstant(0, PrimitiveType.Int32, span), carrierType, carrierType,
             PrimitiveType.NativeStorageAddress, 1, extentBytes, extentBytes,
             IsReadonly: access == NativeParameterAccess.Read, Span: span);
     }

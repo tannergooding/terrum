@@ -4424,6 +4424,9 @@ public static partial class SemanticVerifier
                             && DirectNativeImportContract.IsNativeHandleValue(
                                 target.Variables[parameterSlot].Type)
                             && argument.Type == target.Variables[parameterSlot].Type;
+                        var isDirectNativeStringPointerArgument = directNativeParameter is not null
+                            && DirectNativeImportContract.IsStringPointerArgument(
+                                argument, directNativeParameter, program);
                         var isDirectNativeParameterAddress = argument is BoundNativeStorageAddress
                             directParameterAddress
                             && directNativeParameter is not null
@@ -4607,7 +4610,8 @@ public static partial class SemanticVerifier
                                         initialized, fieldMasks, declarations, function, program,
                                         ref remaining, depth + 1, failures);
                                 }
-                                else if (argument.Type != PrimitiveType.NativeRawPointer)
+                                else if (argument.Type != PrimitiveType.NativeRawPointer
+                                    && !isDirectNativeStringPointerArgument)
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
@@ -4846,7 +4850,11 @@ public static partial class SemanticVerifier
                             if (IsNativeUtfZPointer(argument.Type)
                                 && argument.Type != target.Variables[parameterSlot].Type)
                             {
-                                throw InvalidEffect(argument.Span, "NativeImport");
+                                if (directNativeParameter is null
+                                    || !isDirectNativeStringPointerArgument)
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
                             }
                             if (argument is BoundMutableReceiverLoan mutableLoan)
                             {
@@ -4933,7 +4941,8 @@ public static partial class SemanticVerifier
                                         throw InvalidEffect(argument.Span, "NativeImport");
                                     }
                                 }
-                                else if (IsNativeUtfZPointer(argument.Type))
+                                else if (IsNativeUtfZPointer(argument.Type)
+                                    && !isDirectNativeStringPointerArgument)
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
@@ -4972,7 +4981,8 @@ public static partial class SemanticVerifier
                             reservedReceiver = loanRoot;
                         }
                         if (argument.Type != target.Variables[parameterSlot].Type
-                            && !isDirectNativeParameterAddress)
+                            && !isDirectNativeParameterAddress
+                            && !isDirectNativeStringPointerArgument)
                         {
                             throw Invalid();
                         }

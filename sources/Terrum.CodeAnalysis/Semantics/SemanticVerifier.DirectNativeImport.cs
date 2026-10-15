@@ -33,9 +33,22 @@ public static partial class SemanticVerifier
         var firstLocal = function.ParameterCount + (function.IsConstructor ? 1 : 0);
         if (!DirectNativeImportContract.MatchesAddress(address, parameter, function, program)
             || address.Variable < firstLocal || !declarations.Contains(address.Variable)
-            || !initialized[address.Variable]
-            || HasFields(program, parameter.PointeeType)
-                && fieldMasks[address.Variable] != FullMask(program, parameter.PointeeType))
+            || !initialized[address.Variable])
+        {
+            throw InvalidEffect(address.Span, "NativeImport");
+        }
+
+        if (address.CarrierType == PrimitiveType.NativeFixedArray)
+        {
+            VerifyNativeFixedArrayPlace(address.Variable, address.Index, PrimitiveType.NativeFixedArray,
+                0, parameter.Access == NativeParameterAccess.Read,
+                initialized, fieldMasks, declarations, function, program,
+                ref remaining, depth + 1, failures);
+            return;
+        }
+
+        if (HasFields(program, address.ElementType)
+            && fieldMasks[address.Variable] != FullMask(program, address.ElementType))
         {
             throw InvalidEffect(address.Span, "NativeImport");
         }

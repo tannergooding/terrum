@@ -44,6 +44,25 @@ internal static class DirectNativeImportContract
     internal static bool IsValueParameter(PrimitiveType type) =>
         IsScalar(type) || IsNativeHandleValue(type);
 
+    internal static bool IsStringPointerArgument(BoundExpression argument,
+        DirectNativeParameter parameter, BoundProgram program) =>
+        parameter.Access == NativeParameterAccess.Read
+        && parameter.Retention == NativeParameterRetention.NoEscape
+        && parameter.Extent == 0
+        && (argument switch {
+            BoundConstant {
+                Type: PrimitiveType.NativeUtf16ZPointer,
+                Value: >= 0,
+            } literal => (parameter.PointeeType is PrimitiveType.Void or PrimitiveType.Char16)
+                && literal.Value < program.NativeUtf16ZLiterals.Length,
+            BoundConstant {
+                Type: PrimitiveType.NativeUtf8ZPointer,
+                Value: >= 0,
+            } literal => parameter.PointeeType == PrimitiveType.Void
+                && literal.Value < program.NativeUtf8ZLiterals.Length,
+            _ => false,
+        });
+
     internal static bool IsOutputPointee(PrimitiveType type) =>
         IsScalar(type) || type == PrimitiveType.NativeRawPointer;
 
@@ -108,7 +127,7 @@ internal static class DirectNativeImportContract
                 || parameter.Retention != NativeParameterRetention.NoEscape
                 || (parameter.PointeeType == PrimitiveType.Void
                     ? parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0
-                    : parameter.Extent != 1)
+                    : parameter.Extent is not (0 or 1))
                 || function.Variables[parameter.ParameterIndex] is not BoundVariable pointerParameter
                 || pointerParameter.Type != PrimitiveType.NativeRawPointer
                 || pointerParameter.IsOut || pointerParameter.IsInit)
@@ -189,21 +208,45 @@ internal static class DirectNativeImportContract
     internal static bool MatchesAddress(BoundNativeStorageAddress address, DirectNativeParameter parameter,
         BoundFunction caller, BoundProgram program)
     {
-        var extent = ValueLayout.Size(parameter.PointeeType, program.Structures);
-        return parameter.Extent == 1
-            && address.Type == PrimitiveType.NativeStorageAddress
-            && address.AddressType == PrimitiveType.NativeStorageAddress
-            && address.CarrierType == parameter.PointeeType
-            && address.ElementType == parameter.PointeeType
+        if (address.Type != PrimitiveType.NativeStorageAddress
+            || address.AddressType != PrimitiveType.NativeStorageAddress
+            || address.IsReadonly != (parameter.Access == NativeParameterAccess.Read)
+            || address.Index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
+            || (uint)address.Variable >= (uint)caller.Variables.Length
+            || caller.Variables[address.Variable].Type != address.CarrierType
+            || caller.Variables[address.Variable].IsInitializationLocal
+            || (parameter.Access != NativeParameterAccess.Read
+                && !caller.Variables[address.Variable].IsMutable))
+        {
+            return false;
+        }
+
+        if (address.CarrierType == PrimitiveType.NativeFixedArray)
+        {
+            return caller.Variables[address.Variable].NativeFixedArrayLayout
+                    is BoundNativeFixedArrayLayout layout
+                && NativeFixedArrayContract.MatchesLayout(layout, program.Structures,
+                    program.NativeImportCatalog)
+                && address.ElementType == layout.ElementType
+                && (parameter.PointeeType == PrimitiveType.Void
+                    || parameter.PointeeType == layout.ElementType)
+                && address.ElementCount == layout.ElementCount
+                && address.ElementStride == layout.ElementStride
+                && address.ByteExtent == layout.ByteExtent
+                && (parameter.PointeeType != PrimitiveType.Void
+                    || DirectNativeImportContract.IsInputPointee(layout.ElementType, program.Structures))
+                && (parameter.Access == NativeParameterAccess.Read
+                    || NativeFixedArrayContract.AllowsMutableLocal(layout, program.Structures,
+                        program.NativeImportCatalog));
+        }
+
+        var elementExtent = ValueLayout.Size(address.ElementType, program.Structures);
+        return address.CarrierType == address.ElementType
+            && (parameter.PointeeType == PrimitiveType.Void
+                ? DirectNativeImportContract.IsInputPointee(address.ElementType, program.Structures)
+                : address.ElementType == parameter.PointeeType)
             && address.ElementCount == 1
-            && address.ElementStride == extent
-            && address.ByteExtent == extent
-            && address.IsReadonly == (parameter.Access == NativeParameterAccess.Read)
-            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
-            && (uint)address.Variable < (uint)caller.Variables.Length
-            && caller.Variables[address.Variable].Type == parameter.PointeeType
-            && !caller.Variables[address.Variable].IsInitializationLocal
-            && (parameter.Access == NativeParameterAccess.Read
-                || caller.Variables[address.Variable].IsMutable);
+            && address.ElementStride == elementExtent
+            && address.ByteExtent == elementExtent;
     }
 }

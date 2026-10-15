@@ -428,6 +428,93 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeImportAcceptsUnboundedPointerInputsWithExplicitUnsafeBacking()
+    {
+        const string Source = """
+            [Terrum.Interop.NativeImport("example.dll", "CompileFromFile")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(9, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeOutput(7, NonNegative)]
+            extern int32 CompileFromFile(
+                ptr<char16> sourceFile,
+                ptr<void> defines,
+                ptr<void> include,
+                ptr<void> entryPoint,
+                ptr<void> target,
+                uint32 flags1,
+                uint32 flags2,
+                write ptr<ptr<void>> code,
+                ptr<void> diagnostics);
+
+            int32 Main() {
+                mut InlineArray<char16, 260> sourceFile = [];
+                mut ptr<void> code = null;
+                unsafe {
+                    return CompileFromFile(&sourceFile[0], null, null,
+                        utf8z("VSMain"), utf8z("vs_5_0"), 0, 0, &code, null);
+                }
+            }
+            """;
+        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(Source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var import = compilation.Program!.Functions.Single(static function =>
+            function.Name == "CompileFromFile").DirectNativeImport!;
+        Assert.That(import.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, PrimitiveType.Char16,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(1, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(2, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(3, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(4, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(8, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+        ]));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program, NativeRuntimePolicy.FailFast)), Does.Contain("CompileFromFile"));
+
+        var wrongElementType = Compilation.CreateWithNativeImports(SyntaxTree.Parse(Source.Replace(
+            "InlineArray<char16, 260>", "InlineArray<uint32, 260>", StringComparison.Ordinal)));
+        Assert.That(wrongElementType.Program, Is.Null);
+        Assert.That(wrongElementType.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+
+        var safeCaller = Compilation.CreateWithNativeImports(SyntaxTree.Parse(Source.Replace(
+            "unsafe {", "{", StringComparison.Ordinal)));
+        Assert.That(safeCaller.Program, Is.Null);
+        Assert.That(safeCaller.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
+    }
+
+    [Test]
+    public void TrRmNativeImportRoundTripsUnboundedCharacterPointerInput()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadPath")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            public extern int32 ReadPath(ptr<char16> path);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "character-pointer-input");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var import = loaded.Functions.Single(static function =>
+            function.Name == "ReadPath").DirectNativeImport!;
+        Assert.That(import.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, PrimitiveType.Char16,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+        ]));
+    }
+
+    [Test]
     public void DirectNativePointerInputSurvivesPrivateSemanticMetadataAndIsRevalidated()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
