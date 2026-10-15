@@ -38,11 +38,8 @@ internal static class DirectNativeImportContract
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
-    internal static bool IsNativeHandleValue(PrimitiveType type) =>
-        type is PrimitiveType.NativeWindowHandle or PrimitiveType.NativeModuleHandle;
-
     internal static bool IsValueParameter(PrimitiveType type) =>
-        IsScalar(type) || IsNativeHandleValue(type);
+        IsScalar(type);
 
     internal static bool IsStringPointerArgument(BoundExpression argument,
         DirectNativeParameter parameter, BoundProgram program) =>

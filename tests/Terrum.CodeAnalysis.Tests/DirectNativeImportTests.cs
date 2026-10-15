@@ -105,6 +105,42 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void BlittableRecordsCarryOpaquePointerFieldsThroughDirectImports()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct FixturePointerRecord {
+                public ptr<void> Context;
+                public uint64 Value;
+
+                public FixturePointerRecord(ptr<void> context, uint64 value) {
+                    Context = context;
+                    Value = value;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveRecord")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern int32 ObserveRecord(ptr<FixturePointerRecord> value);
+
+            int32 Main() {
+                FixturePointerRecord record = new FixturePointerRecord(null, 42);
+                unsafe { return ObserveRecord(&record); }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var recordType = compilation.Program!.Structures.Single(static structure =>
+            structure.Name == "FixturePointerRecord");
+        Assert.That(recordType.Size, Is.EqualTo(16));
+        Assert.That(recordType.Fields.Select(static field => field.Offset), Is.EqualTo([0, 8]));
+        Assert.That(recordType.Fields[0].Type, Is.EqualTo(PrimitiveType.NativeRawPointer));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program, NativeRuntimePolicy.FailFast)), Does.Contain("ObserveRecord"));
+    }
+
+    [Test]
     public void DirectNativeImportSupportsOpaquePointerAndFloatingResultsThroughTrRm()
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -138,6 +174,38 @@ public sealed class DirectNativeImportTests
         Assert.That(Encoding.ASCII.GetString(
             NativeEmitter.EmitWithNativeImports(consumer.Program!, NativeRuntimePolicy.FailFast)),
             Does.Contain("AcquireContext"));
+
+        var privateArtifact = ModuleCompiler.CreateProducer(provider.Program!,
+            ["AcquireContext", "ReadTemperature"]);
+        var privateReference = ModuleCompiler.CreateReference(privateArtifact);
+        Assert.That(privateReference.Functions.Select(static function => function.ReturnType),
+            Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.Float64]));
+    }
+
+    [Test]
+    public void DirectNativeImportRejectsTypedPointerResultsWithoutPointeeMetadata()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "AcquireValue")]
+            public extern ptr<int32> AcquireValue();
+            """));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public void DirectNativeImportDoesNotTreatWindowHandleTypesAsGenericAbiValues()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadHandle")]
+            public extern int32 ReadHandle(Terrum.Interop.Windows.HWND value);
+            """));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
     }
 
     [Test]
@@ -260,7 +328,7 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void DirectNativeImportAcceptsOpaqueHandleValuesAndWritableBlittableAggregates()
+    public void DirectNativeImportAcceptsOpaquePointersAndWritableBlittableAggregates()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
@@ -279,13 +347,14 @@ public sealed class DirectNativeImportTests
             }
 
             [Terrum.Interop.NativeImport("example.dll", "UpdateRectangle")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(3, Write, NoEscape, 1)]
             [NoThrow]
-            extern int32 UpdateRectangle(Terrum.Interop.Windows.HWND window,
-                Terrum.Interop.Windows.HINSTANCE module, ptr<NativeRectangle> rectangle);
+            extern int32 UpdateRectangle(ptr<void> window,
+                ptr<void> module, ptr<NativeRectangle> rectangle);
 
-            unsafe int32 Invoke(Terrum.Interop.Windows.HWND window,
-                Terrum.Interop.Windows.HINSTANCE module) {
+            unsafe int32 Invoke(ptr<void> window, ptr<void> module) {
                 mut NativeRectangle rectangle = new NativeRectangle(1, 2, 3, 4);
                 unsafe { return UpdateRectangle(window, module, &rectangle); }
             }
@@ -299,8 +368,12 @@ public sealed class DirectNativeImportTests
             candidate.Name == "UpdateRectangle");
         Assert.That(function.RequiresUnsafeCaller, Is.True);
         Assert.That(function.Variables.Take(2).Select(static variable => variable.Type),
-            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+            Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.NativeRawPointer]));
         Assert.That(function.DirectNativeImport!.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(1, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
             new DirectNativeParameter(2, (PrimitiveType)100,
                 NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
         ]));
@@ -354,11 +427,11 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void UnsafeSourceFunctionsCanRelayOpaqueWindowHandlesWithExplicitAuthorization()
+    public void UnsafeSourceFunctionsCanRelayOpaquePointersWithExplicitAuthorization()
     {
         var accepted = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            unsafe int32 Consume(Terrum.Interop.Windows.HWND window) { return 42; }
-            unsafe int32 Forward(Terrum.Interop.Windows.HWND window) {
+            unsafe int32 Consume(ptr<void> window) { return 42; }
+            unsafe int32 Forward(ptr<void> window) {
                 unsafe { return Consume(window); }
             }
             """));
@@ -366,8 +439,8 @@ public sealed class DirectNativeImportTests
             string.Join(Environment.NewLine, accepted.Diagnostics));
 
         var rejected = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            unsafe int32 Consume(Terrum.Interop.Windows.HWND window) { return 42; }
-            int32 Forward() { return Consume(Terrum.Interop.Windows.HWND.NoOwner); }
+            unsafe int32 Consume(ptr<void> window) { return 42; }
+            int32 Forward() { return Consume(null); }
             """));
         Assert.That(rejected.HasErrors, Is.True);
         Assert.That(rejected.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
@@ -410,7 +483,7 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void OpaqueHandleAndWritableAggregateImportSurvivePrivateModulesButRemainUnencodedInTrRm()
+    public void OpaquePointerAndWritableAggregateImportSurvivePrivateModulesButRemainUnencodedInTrRm()
     {
         const string Source = """
             [Blittable] [Layout(LayoutKind.Sequential)]
@@ -422,9 +495,11 @@ public sealed class DirectNativeImportTests
             }
 
             [Terrum.Interop.NativeImport("example.dll", "UpdateRectangle")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(3, Write, NoEscape, 1)]
-            public extern int32 UpdateRectangle(Terrum.Interop.Windows.HWND window,
-                Terrum.Interop.Windows.HINSTANCE module, ptr<NativeRectangle> rectangle);
+            public extern int32 UpdateRectangle(ptr<void> window,
+                ptr<void> module, ptr<NativeRectangle> rectangle);
             """;
 
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Source));
@@ -437,8 +512,12 @@ public sealed class DirectNativeImportTests
         var function = reference.Functions.Single(static candidate =>
             candidate.Name == "UpdateRectangle");
         Assert.That(function.Variables.Take(2).Select(static variable => variable.Type),
-            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+            Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.NativeRawPointer]));
         Assert.That(function.DirectNativeImport!.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(1, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
             new DirectNativeParameter(2, (PrimitiveType)100,
                 NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
         ]));
@@ -532,7 +611,7 @@ public sealed class DirectNativeImportTests
     public void DirectNativeImportAcceptsUnboundedPointerInputsWithExplicitUnsafeBacking()
     {
         const string Source = """
-            [Terrum.Interop.NativeImport("example.dll", "CompileFromFile")]
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadSourceFixture")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
@@ -540,7 +619,7 @@ public sealed class DirectNativeImportTests
             [Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
             [Terrum.Interop.NativeParameter(9, Read, NoEscape, 0)]
             [Terrum.Interop.NativeOutput(7, NonNegative)]
-            extern int32 CompileFromFile(
+            extern int32 ReadSourceFixture(
                 ptr<char16> sourceFile,
                 ptr<void> defines,
                 ptr<void> include,
@@ -552,20 +631,19 @@ public sealed class DirectNativeImportTests
                 ptr<void> diagnostics);
 
             int32 Main() {
-                mut InlineArray<char16, 260> sourceFile = [];
                 mut ptr<void> code = null;
                 unsafe {
-                    return CompileFromFile(&sourceFile[0], null, null,
+                    return ReadSourceFixture(utf16z("fixture.terrum"), null, null,
                         utf8z("VSMain"), utf8z("vs_5_0"), 0, 0, &code, null);
                 }
             }
             """;
-        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(Source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var import = compilation.Program!.Functions.Single(static function =>
-            function.Name == "CompileFromFile").DirectNativeImport!;
+            function.Name == "ReadSourceFixture").DirectNativeImport!;
         Assert.That(import.Parameters, Is.EqualTo([
             new DirectNativeParameter(0, PrimitiveType.Char16,
                 NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
@@ -581,14 +659,14 @@ public sealed class DirectNativeImportTests
                 NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
         ]));
         Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
-            compilation.Program, NativeRuntimePolicy.FailFast)), Does.Contain("CompileFromFile"));
+            compilation.Program, NativeRuntimePolicy.FailFast)), Does.Contain("ReadSourceFixture"));
 
-        var wrongElementType = Compilation.CreateWithNativeImports(SyntaxTree.Parse(Source.Replace(
-            "InlineArray<char16, 260>", "InlineArray<uint32, 260>", StringComparison.Ordinal)));
+        var wrongElementType = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+            "ptr<char16> sourceFile", "ptr<uint32> sourceFile", StringComparison.Ordinal)));
         Assert.That(wrongElementType.Program, Is.Null);
-        Assert.That(wrongElementType.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(wrongElementType.HasErrors, Is.True);
 
-        var safeCaller = Compilation.CreateWithNativeImports(SyntaxTree.Parse(Source.Replace(
+        var safeCaller = Compilation.Create(SyntaxTree.Parse(Source.Replace(
             "unsafe {", "{", StringComparison.Ordinal)));
         Assert.That(safeCaller.Program, Is.Null);
         Assert.That(safeCaller.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
@@ -598,9 +676,9 @@ public sealed class DirectNativeImportTests
     public void TrRmNativeImportRoundTripsUnboundedCharacterPointerInput()
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [Terrum.Interop.NativeImport("example.dll", "ReadPath")]
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadUtf16Path")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
-            public extern int32 ReadPath(ptr<char16> path);
+            public extern int32 ReadUtf16Path(ptr<char16> path);
             """));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
@@ -608,7 +686,7 @@ public sealed class DirectNativeImportTests
         var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "character-pointer-input");
         var loaded = TrRmExecutableCompiler.Load(artifact);
         var import = loaded.Functions.Single(static function =>
-            function.Name == "ReadPath").DirectNativeImport!;
+            function.Name == "ReadUtf16Path").DirectNativeImport!;
         Assert.That(import.Parameters, Is.EqualTo([
             new DirectNativeParameter(0, PrimitiveType.Char16,
                 NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
@@ -616,16 +694,15 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void UnsafeWrapperCanCallDirectImportWithLocalBacking()
+    public void UnsafeWrapperCanCallDirectImportWithStringLiteralPointer()
     {
-        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse("""
-            [Terrum.Interop.NativeImport("example.dll", "ReadPath")]
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadUtf16Path")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
-            extern int32 ReadPath(ptr<char16> path);
+            extern int32 ReadUtf16Path(ptr<char16> path);
 
             unsafe int32 ReadThroughWrapper() {
-                mut InlineArray<char16, 260> path = [];
-                unsafe { return ReadPath(&path[0]); }
+                unsafe { return ReadUtf16Path(utf16z("fixture.terrum")); }
             }
 
             int32 Main() {
@@ -636,7 +713,7 @@ public sealed class DirectNativeImportTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
-            compilation.Program!, NativeRuntimePolicy.FailFast)), Does.Contain("ReadPath"));
+            compilation.Program!, NativeRuntimePolicy.FailFast)), Does.Contain("ReadUtf16Path"));
     }
 
     [Test]

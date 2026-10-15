@@ -10,11 +10,11 @@ contracts. A private target-requirement number is not a standard Feature ID.
 ## Implemented public fixed-layout source profile
 
 Source-authored `[Blittable]` commitments support natural Windows x64
-`Sequential` layouts and one-field scalar `Transparent` layouts. Sequential
-fields may use the fixed scalar/pointer set, explicitly represented native
-window/module handles, or transitively committed structures; handle fields
-retain their nominal handle type and do not describe or extend the referent's
-lifetime. Unique fields remain restricted to unique owners. The compiler
+`Sequential` layouts and one-field scalar-or-raw-pointer `Transparent`
+layouts. Sequential fields may use the fixed scalar/pointer set or transitively
+committed structures. Raw pointer fields preserve only address bits; they do
+not describe or extend the referent's lifetime. Unique fields remain restricted
+to unique owners. The compiler
 recomputes the layout under mandatory verification and uses the existing
 Windows x64 target requirement `1`, not a separate layout-profile identity.
 Externally visible public fields require this commitment; a public field on

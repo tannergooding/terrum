@@ -1501,7 +1501,7 @@ internal sealed partial class Binder
         if (type is PrimitiveType.Bool or PrimitiveType.Char16
             or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64
-            or PrimitiveType.Float32 or PrimitiveType.Float64)
+            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.NativeRawPointer)
         {
             return true;
         }
@@ -2242,7 +2242,24 @@ internal sealed partial class Binder
             Report("TRM3001", "A static operator implementation requires a supported arity and a struct body.", declaration.Span);
         }
         var classConstructor = constructor && TryResolveClass(Qualify(containingType!), out _);
-        var returnType = constructor ? ResolveDeclaredType(containingType!) : BindType(returnNode!, allowVoid: true);
+        PrimitiveType? directNativeReturnPointeeType = null;
+        var directNativeReturnIsWritable = false;
+        PrimitiveType returnType;
+        if (constructor)
+        {
+            returnType = ResolveDeclaredType(containingType!);
+        }
+        else if (nativeLibraryName is not null
+            && TryBindDirectNativePointerType(returnNode!, out var returnPointeeType,
+                out directNativeReturnIsWritable))
+        {
+            directNativeReturnPointeeType = returnPointeeType;
+            returnType = PrimitiveType.NativeRawPointer;
+        }
+        else
+        {
+            returnType = BindType(returnNode!, allowVoid: true);
+        }
         if (property && (returnType == PrimitiveType.Void
             || (isStatic ? !IsSupportedStaticGetterType(returnType) : !IsCopyGenericType(returnType))
             || IsUnique(returnType)))
@@ -2459,7 +2476,7 @@ internal sealed partial class Binder
                     && !DirectNativeImportContract.IsValueParameter(parameter.Type))
                 {
                     Report("TRM3030",
-                        "A direct native import value parameter requires a supported scalar or explicit native handle type.",
+                        "A direct native import value parameter requires a supported scalar or explicit NativeParameter pointer contract.",
                         parameter.Span);
                 }
             }
@@ -2481,6 +2498,13 @@ internal sealed partial class Binder
                 Report("TRM3030",
                     "A direct native import result must have a directly supported scalar or raw-pointer representation.",
                     declaration.Span);
+            }
+            if (returnType == PrimitiveType.NativeRawPointer
+                && (directNativeReturnPointeeType != PrimitiveType.Void || directNativeReturnIsWritable))
+            {
+                Report("TRM3030",
+                    "A raw pointer result must be exactly ptr<void>; typed pointer results require a preserved pointee contract.",
+                    returnNode?.Span ?? declaration.Span);
             }
             requiresUnsafeCaller = true;
             directNativeImport = new DirectNativeImport(nativeLibraryName, nativeExportName,

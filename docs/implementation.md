@@ -62,10 +62,12 @@ not approval of the remaining language contracts. The exact source, layout,
 metadata, ABI, and runtime contracts are in the
 [specification index](specs/README.md).
 Public fixed-layout source support is implemented for natural Windows x64
-`Sequential` and scalar-carrier `Transparent` layouts committed with
-`[Blittable]`. Mandatory verification recomputes the fixed-storage facts, and
-private semantic modules persist them. Packing, alignment controls, unions,
-opaque handle fields, and standard TRRM layout persistence remain unsupported.
+`Sequential` and scalar-or-raw-pointer-carrier `Transparent` layouts committed
+with `[Blittable]`. Mandatory verification recomputes the fixed-storage facts,
+and private semantic modules persist them. Packing, alignment controls,
+and standard TRRM layout persistence remain unsupported. Raw pointer fields
+carry only their declared address bits, not pointee validity, backing,
+ownership, or lifetime.
 Direct `NativeParameter` inputs can point at committed aggregates in source,
 private semantic modules, and native execution. The canonical standard TRRM
 `NativeParameter` encoding remains unapproved; the provisional executable
@@ -154,9 +156,12 @@ A separate prototype under the unapproved
 [TRRM native interop proposal](proposals/trrm-native-interop-metadata.md)
 supports two-string `Terrum.Interop.NativeImport` declarations with
 `Terrum.Interop.NativeOutput` for result-correlated writable scalar pointers
-and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. The default
-output condition is nonzero; `NativeOutput(ordinal, NonNegative)` provisionally
-expresses signed nonnegative status results such as HRESULT success. The latter
+and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. Direct imports
+also admit supported scalar results and opaque `ptr<void>` results; typed
+pointer results remain rejected until their pointee identity is preserved.
+The default output condition is nonzero; `NativeOutput(ordinal, NonNegative)`
+provisionally expresses signed nonnegative status results such as HRESULT
+success. The latter
 pointer output represents only unmanaged pointer bits; it adds no backing,
 provenance, ownership, pinning, or cleanup guarantee. The prototype carries the raw
 import's caller-unsafety and direct representation through a provisional TRRM
@@ -168,23 +173,24 @@ are not canonical TRRM assignments. The source prototype also accepts
 scalar, raw-pointer, and fixed-layout Blittable aggregate pointees. Extent zero
 does not prove a buffer length, string termination, or any other property of
 the foreign access. Aggregate addresses require an initialized local; writable
-access additionally requires mutable backing. Opaque `NativeWindowHandle` and
-`NativeModuleHandle` values are admitted as by-value parameters, relying on
-their explicit pointer-sized handle representation. `NativeOutput` remains
-limited to scalar and raw-pointer pointees, and `ptr<void>` is limited to
+access additionally requires mutable backing. Windows `HWND`/`HINSTANCE`
+aliases do not receive generic direct-import parameter admission; spell those
+ABI values as explicitly contracted pointers. `NativeOutput` remains limited
+to scalar and raw-pointer pointees, and `ptr<void>` input values are limited to
 readonly, zero-extent metadata. Direct pointer arguments also accept `null`;
 matching `utf8z`/`utf16z` literals require read-only, no-escape, zero-extent
-metadata. When a call forms an address with
-`&local` or the first element of a fixed array, the backing must be initialized
+metadata and do not require a selected API catalog. When a call forms an
+address with `&local` or the first element of a fixed array, the backing must be initialized
 and match the pointee type; `Write` and `ReadWrite` require mutable backing.
 Raw pointer values remain caller-authored unsafe inputs. This input metadata
 round-trips through private semantic-module revision 80, native packages,
 consumer sets, and graph-JIT roots. The experimental TRRM direct-import path
-also round-trips scalar, opaque-pointer, and `ptr<void>` pointees using
-provisional clause kind 10, including extent-zero scalar and character-pointer
-inputs; fixed-layout aggregate pointees remain unsupported in that executable
-profile. The clause assignment remains unapproved and this
-implementation does not establish canonical TRRM conformance.
+also round-trips scalar, opaque-pointer, and `ptr<void>` pointees, plus
+supported scalar and `ptr<void>` results, using provisional clause kind 10.
+It includes extent-zero scalar and character-pointer inputs; fixed-layout
+aggregate pointees remain unsupported in that executable profile. The clause
+assignment remains unapproved and this implementation does not establish
+canonical TRRM conformance.
 
 Direct imports with writable scalar outputs and `NativeParameter` inputs also
 round-trip through private semantic producer/consumer and native package
