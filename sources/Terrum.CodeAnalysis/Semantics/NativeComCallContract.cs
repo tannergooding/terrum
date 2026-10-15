@@ -1000,8 +1000,7 @@ internal static class NativeComCallContract
         && parameter is not null && parameter.Retention == NativeParameterRetention.NoEscape
         && parameter.Extent == 1
         && TryGetNativeParameterPointeeType(method, nativeIndex, catalog, structures, out var pointeeType)
-        && (DirectNativeImportContract.IsScalar(pointeeType)
-            || pointeeType == PrimitiveType.NativeRawPointer);
+        && DirectNativeImportContract.IsInputPointee(pointeeType, structures);
 
     internal static NativeComParameterAdaptation? ComObjectBufferContentsAdaptation(
         NativeComMethodDefinition method, int nativeIndex) =>
@@ -1340,6 +1339,14 @@ internal static class NativeComCallContract
         };
         if ((byte)kind == byte.MaxValue)
         {
+            for (var index = 0; index < structures.Count; index++)
+            {
+                if (structures[index].Name == identity)
+                {
+                    type = (PrimitiveType)(100 + index);
+                    return true;
+                }
+            }
             foreach (var signatureType in catalog.ComSignatureTypes)
             {
                 if (signatureType.Identity == identity)

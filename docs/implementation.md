@@ -209,7 +209,11 @@ and failure-disposition rejection. A source-authored owner is also inferred as
 a borrowed COM method parameter only for an exact single-interface pointer
 with read-only, no-escape, extent-one metadata; writable or escaping parameters
 do not gain owner-loan treatment. This source-level path does not establish
-foreign COM runtime behavior. Provisional TRRM producer/consumer support now
+foreign COM runtime behavior. Source-authored `NativeParameter` storage-address
+arguments also admit no-escape, extent-one Windows x64 Blittable aggregate
+pointees; read and read-write accesses require full initialization. This does
+not approve or newly qualify a serialized metadata profile. Provisional TRRM
+producer/consumer support now
 round-trips source-authored interface IIDs/base edges, vtable slots/effects,
 and `NativeParameter` facts through TypeDef/MethodDef rows and Contract clauses
 7, 8, and 10 under Feature ID 3/revision 1. The consumer reconstructs those

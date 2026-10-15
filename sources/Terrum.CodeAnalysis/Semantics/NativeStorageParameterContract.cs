@@ -297,8 +297,7 @@ internal static class NativeStorageParameterContract
             || parameter.Extent != 1
             || !NativeComCallContract.TryGetNativeParameterPointeeType(method,
                 nativeParameterIndex, catalog, program.Structures, out var pointeeType)
-            || !(DirectNativeImportContract.IsScalar(pointeeType)
-                || pointeeType == PrimitiveType.NativeRawPointer))
+            || !DirectNativeImportContract.IsInputPointee(pointeeType, program.Structures))
         {
             return false;
         }

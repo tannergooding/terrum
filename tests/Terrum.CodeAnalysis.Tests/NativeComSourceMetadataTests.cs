@@ -156,6 +156,65 @@ public sealed class NativeComSourceMetadataTests
         }
         """;
 
+    private const string SourceComAggregateParameter = """
+        namespace Example.Interop;
+
+        [Blittable] [Layout(Sequential)]
+        struct RecordIdentity {
+            uint32 High;
+            uint32 Low;
+
+            public RecordIdentity(uint32 high, uint32 low) {
+                High = high;
+                Low = low;
+            }
+        }
+
+        [Terrum.Interop.NativeComInterface("a07cd987-6ee5-48e6-80cb-44dd59cb3d65")]
+        interface IRecordReader {
+            [Terrum.Interop.NativeComMethod(0, ReleasesReference)]
+            [NoThrow]
+            unsafe uint32 Release();
+
+            [Terrum.Interop.NativeComMethod(1)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            unsafe int32 IsCurrent(ptr<RecordIdentity> identity);
+        }
+
+        [Terrum.Interop.NativeComOwner("IRecordReader")]
+        public unique struct RecordReaderOwner {
+            private ptr<void> Pointer;
+
+            public unsafe RecordReaderOwner(ptr<void> pointer) {
+                unsafe { Pointer = pointer; }
+            }
+        }
+
+        [Terrum.Interop.NativeImport("example.dll", "CreateRecordReader")]
+        [Terrum.Interop.NativeOutput(0)]
+        extern unsafe int32 CreateRecordReader(write ptr<ptr<void>> output);
+
+        [Terrum.Interop.NativeComAcquisition(
+            0, "RecordReaderOwner", "CreateRecordReader", 0, OutputMayBeWrittenOnFailure)]
+        bool TryCreateRecordReader(out RecordReaderOwner owner) {
+            mut ptr<void> raw = null;
+            mut int32 result = 0;
+            unsafe { result = CreateRecordReader(&raw); }
+            owner = unsafe(new RecordReaderOwner(raw));
+            return result >= 0;
+        }
+
+        int32 Main() {
+            RecordIdentity identity = new RecordIdentity(1, 2);
+            if (TryCreateRecordReader(out var reader)) {
+                mut int32 result = 0;
+                unsafe { result = reader.IsCurrent(&identity); }
+                return result;
+            }
+            return 0;
+        }
+        """;
+
     private const string SourceComOwnerAcquisition = """
         namespace Example.Interop;
 
@@ -658,6 +717,38 @@ public sealed class NativeComSourceMetadataTests
         var acquire = catalog.ComMethods.Single(static method => method.BoundMethodName == "Acquire");
         Assert.That(acquire.OutputParameterIndex, Is.EqualTo(1));
         Assert.That(acquire.OutputInterfaceIdentity, Is.EqualTo("Example.Interop.IClock"));
+    }
+
+    [Test]
+    public void SourceAuthoredComMethodAcceptsBlittableAggregatePointer()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(SourceComAggregateParameter));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var method = compilation.Program!.Functions.Single(static function =>
+            function.Name == "Example.Interop.RecordReaderOwner.IsCurrent");
+        Assert.That(method.Variables[1].Type, Is.EqualTo(PrimitiveType.NativeStorageAddress));
+    }
+
+    [Test]
+    public void SourceAuthoredComMethodRejectsNonBlittableAggregatePointer()
+    {
+        var source = SourceComAggregateParameter.Replace("[Blittable] ", "", StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void SourceAuthoredComMethodRejectsUninitializedAggregatePointer()
+    {
+        var source = SourceComAggregateParameter.Replace(
+            "RecordIdentity identity = new RecordIdentity(1, 2);",
+            "mut RecordIdentity identity;", StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.True);
     }
 
     [Test]

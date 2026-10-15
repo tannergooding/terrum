@@ -186,6 +186,15 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(address.Span, "NativeImport");
         }
+        if (NativeComCallContract.TryGetNativeParameter(method, nativeParameterIndex,
+                out var parameter)
+            && parameter is not null
+            && (parameter.Access is NativeParameterAccess.Read or NativeParameterAccess.ReadWrite)
+            && HasFields(program, address.CarrierType)
+            && fieldMasks[address.Variable] != FullMask(program, address.CarrierType))
+        {
+            throw InvalidEffect(address.Span, "NativeImport");
+        }
         Expression(address.Index, initialized, fieldMasks, declarations, function, program,
             ref remaining, depth + 1, failures);
     }
