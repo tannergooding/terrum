@@ -176,7 +176,7 @@ public sealed partial class GenericControlFlowModuleTests
     public async Task GenericProofUsesImportedConcreteCopyDeclarationsAsync(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile("""
-            public struct Box {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Box {
                 public int32 Number;
                 public Box(int32 number) { Number = number; }
             }
@@ -198,7 +198,7 @@ public sealed partial class GenericControlFlowModuleTests
     public async Task GenericProofInfersImportedFactoryReturnWithoutTypeSyntaxAsync(NativeRuntimePolicy policy)
     {
         var producer = ModuleCompiler.CreateProducer(Compile("""
-            public struct Box {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Box {
                 public int32 Number;
                 public Box(int32 number) { Number = number; }
                 public static Box Create() { return new Box(1); }

@@ -20,17 +20,17 @@ public sealed class FixedLayoutProfileCandidateTests
     private const int MaximumDepth = 128;
 
     private const string Declarations = """
-        public struct Inner { public int32 Signed; public char16 Unit; }
-        public struct Outer { public char16 Prefix; public Inner Value; public uint32 Tail; }
-        public struct Padded { public char16 Prefix; public uint32 Value; public char16 Suffix; }
-        public struct Over16 { public int64 Value; }
-        public struct BooleanField { public bool Value; }
-        public struct Float32Field { public float32 Value; }
-        public struct FloatingField { public float64 Value; }
-        public struct FloatingInner { public float32 Value; public bool Enabled; }
-        public struct FloatingOuter { public char16 Prefix; public FloatingInner Value; }
-        unique struct UniqueValue { public int32 Value; }
-        public struct MissingNested { public Inner Value; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Inner { public int32 Signed; public char16 Unit; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Outer { public char16 Prefix; public Inner Value; public uint32 Tail; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Padded { public char16 Prefix; public uint32 Value; public char16 Suffix; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Over16 { public int64 Value; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct BooleanField { public bool Value; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Float32Field { public float32 Value; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct FloatingField { public float64 Value; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct FloatingInner { public float32 Value; public bool Enabled; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct FloatingOuter { public char16 Prefix; public FloatingInner Value; }
+        [Blittable] [Layout(LayoutKind.Sequential)] unique struct UniqueValue { public int32 Value; }
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct MissingNested { public Inner Value; }
         """;
 
     [Test]
@@ -73,14 +73,14 @@ public sealed class FixedLayoutProfileCandidateTests
     public void IndependentCandidateDescriptorsUseNominalNamesAndRejectChangedContracts()
     {
         var producer = Compile("""
-            public struct Leaf { public int32 Value; }
-            public struct Pair { public Leaf First; public char16 Last; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 1; }
             """);
         var replacement = Compile("""
-            public struct ReorderedIndex { public uint64 Value; }
-            public struct Leaf { public int32 Value; }
-            public struct Pair { public Leaf First; public char16 Last; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct ReorderedIndex { public uint64 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
         Assert.That((int)Find(replacement, "Pair").Fields[0].Type, Is.Not.EqualTo((int)Find(producer, "Pair").Fields[0].Type));
@@ -90,48 +90,48 @@ public sealed class FixedLayoutProfileCandidateTests
         Assert.That(AreCompatible(producerDescriptor, replacementDescriptor), Is.True);
 
         var changedType = Compile("""
-            public struct Leaf { public uint32 Value; }
-            public struct Pair { public Leaf First; public char16 Last; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public uint32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
         Assert.That(AreCompatible(producerDescriptor,
             Describe(changedType, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedNominal = Compile("""
-            public struct Leaf { public int32 Value; }
-            public struct PairReplacement { public Leaf First; public char16 Last; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct PairReplacement { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
         Assert.That(AreCompatible(producerDescriptor,
             Describe(changedNominal, "PairReplacement", Claims("Leaf", "PairReplacement"))), Is.False);
 
         var changedFieldName = Compile("""
-            public struct Leaf { public int32 Data; }
-            public struct Pair { public Leaf First; public char16 Last; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public int32 Data; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
         Assert.That(AreCompatible(producerDescriptor,
             Describe(changedFieldName, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedOrder = Compile("""
-            public struct Leaf { public int32 Value; }
-            public struct Pair { public char16 Last; public Leaf First; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public char16 Last; public Leaf First; }
             int32 Change() { return 2; }
             """);
         Assert.That(AreCompatible(producerDescriptor,
             Describe(changedOrder, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedAccess = Compile("""
-            public struct Leaf { int32 Value; }
-            public struct Pair { public Leaf First; public char16 Last; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
         Assert.That(AreCompatible(producerDescriptor,
             Describe(changedAccess, "Pair", Claims("Leaf", "Pair"))), Is.False);
 
         var changedMutation = Compile("""
-            public struct Leaf { public mut int32 Value; }
-            public struct Pair { public Leaf First; public char16 Last; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public mut int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public char16 Last; }
             int32 Change() { return 2; }
             """);
         Assert.That(AreCompatible(producerDescriptor,
@@ -422,7 +422,8 @@ public sealed class FixedLayoutProfileCandidateTests
     private static BoundProgram CreateTooDeepProgram()
     {
         var source = string.Concat(Enumerable.Range(0, MaximumDepth + 2)
-            .Select(static index => $"public struct D{index} {{ public int32 Value; }} "));
+            .Select(static index =>
+                $"[Blittable] [Layout(LayoutKind.Sequential)] public struct D{index} {{ public int32 Value; }} "));
         var program = Compile(source);
         var structures = program.Structures;
         for (var index = 0; index < structures.Length - 1; index++)

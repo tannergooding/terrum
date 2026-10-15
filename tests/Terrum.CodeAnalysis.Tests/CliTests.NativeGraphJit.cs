@@ -119,12 +119,12 @@ public sealed partial class CliTests
         try
         {
             await File.WriteAllTextAsync(leafSource, """
-                public unique struct Child {
+                [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Child {
                     public int32 Value;
                     [NoThrow] public Child(int32 value) { Value = value; }
                     [NoThrow] [Cleanup] public void Close() {}
                 }
-                public unique struct Parent {
+                [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Parent {
                     public Child Owned;
                     [NoThrow] public Parent(int32 value) { Owned = new Child(value); }
                 }

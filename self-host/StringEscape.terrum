@@ -1,5 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
+[Blittable]
+[Layout(LayoutKind.Sequential)]
 public struct StringEscapeDecodeResult
 {
     public int32 ErrorCode;

@@ -541,6 +541,17 @@ public static partial class ModuleCompiler
             {
                 Add(variable.Type);
             }
+            if (function.DirectNativeImport is DirectNativeImport import)
+            {
+                foreach (var output in import.Outputs)
+                {
+                    Add(output.PointeeType);
+                }
+                foreach (var parameter in import.Parameters)
+                {
+                    Add(parameter.PointeeType);
+                }
+            }
             if (function.DeclaringStruct is string declaring
                 && declaring != NativeBufferIntrinsics.TypeName
                 && declaring != NativeManagedNodeIntrinsics.TypeName
@@ -948,7 +959,8 @@ public static partial class ModuleCompiler
             }
             if (function.IsExternal && function.DirectNativeImport is not null)
             {
-                if (!DirectNativeImportContract.IsValid(function) || exports.ContainsKey(function.Name))
+                if (!DirectNativeImportContract.IsValid(function, program.Structures)
+                    || exports.ContainsKey(function.Name))
                 {
                     throw new ModuleContractException(
                         $"Direct native import '{function.Name}' is invalid or ambiguous.");
@@ -2926,6 +2938,18 @@ public static partial class ModuleCompiler
     {
         return function with {
             ReturnType = RemapType(function.ReturnType, source, destination, classOffset, destinationTypes),
+            DirectNativeImport = function.DirectNativeImport is DirectNativeImport import
+                ? import with {
+                    Outputs = [.. import.Outputs.Select(output => output with {
+                        PointeeType = RemapType(output.PointeeType, source, destination, classOffset,
+                            destinationTypes),
+                    })],
+                    Parameters = [.. import.Parameters.Select(parameter => parameter with {
+                        PointeeType = RemapType(parameter.PointeeType, source, destination, classOffset,
+                            destinationTypes),
+                    })],
+                }
+                : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = RemapType(variable.Type, source, destination, classOffset, destinationTypes),
             })],
@@ -3238,7 +3262,7 @@ public static partial class ModuleCompiler
         {
             PutString(writer, structure.Name);
             if (module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
-                or DirectNativeParameterVersion)
+                or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion)
             {
                 writer.Write((byte)structure.TokenSpanRole);
             }
@@ -3308,7 +3332,7 @@ public static partial class ModuleCompiler
             {
                 PutFunction(writer, function, names, ref remaining,
                     module.FormatVersion >= DirectNativeImportVersion,
-                    module.FormatVersion >= DirectNativeParameterVersion);
+                    module.FormatVersion >= DirectNativeParameterVersion, module.Structures);
             }
         }
         if (stream.Length > MaximumBytes)
@@ -3359,7 +3383,7 @@ public static partial class ModuleCompiler
                 InvocationBuffers = invocationBuffers,
                 RuntimePolicy = policy,
             };
-            if (module.FormatVersion >= DirectNativeImportVersion
+            if (module.FormatVersion is DirectNativeImportVersion or DirectNativeParameterVersion
                 && !module.Functions.Any(static item =>
                     item.Function?.DirectNativeImport is not null))
             {
@@ -3390,7 +3414,7 @@ public static partial class ModuleCompiler
             }
             if (hasPrivateManagedState || !expectedConsumer
                 && module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
-                    or DirectNativeParameterVersion)
+                    or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion)
             {
                 ValidateProducer(module);
             }
@@ -3413,7 +3437,7 @@ public static partial class ModuleCompiler
         }
         var version = reader.ReadInt32();
         if (version is not (Version or PrivateSpanVersion or FixedLayoutVersion
-            or DirectNativeImportVersion or DirectNativeParameterVersion)
+            or DirectNativeImportVersion or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion)
             || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
@@ -3429,12 +3453,12 @@ public static partial class ModuleCompiler
         var profileIdText = GetString(reader);
         var invocationProfileId = profileIdText.Length == 0 ? null : profileIdText;
         var bufferCount = Count(reader, version is PrivateSpanVersion or DirectNativeImportVersion
-            or DirectNativeParameterVersion ? 12 : 10);
+            or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
                     || invocationProfileId != ScannerHost.InvocationProfileIdentity
                         && (version is not (PrivateSpanVersion or DirectNativeImportVersion
-                                or DirectNativeParameterVersion)
+                                or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion)
                             || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId))))
             || (invocationProfileId is null && bufferCount != 0))
         {
@@ -3480,7 +3504,7 @@ public static partial class ModuleCompiler
             }
             var role = reader is ModuleReader {
                 FormatVersion: PrivateSpanVersion or DirectNativeImportVersion
-                    or DirectNativeParameterVersion,
+                    or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion,
             }
                 ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
             if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
@@ -3645,7 +3669,8 @@ public static partial class ModuleCompiler
     }
 
     private static void PutFunction(BinaryWriter writer, BoundFunction function, string[] names,
-        ref int remaining, bool supportsDirectNativeImports, bool supportsDirectNativeParameters)
+        ref int remaining, bool supportsDirectNativeImports, bool supportsDirectNativeParameters,
+        ImmutableArray<BoundStruct> structures)
     {
         PutString(writer, function.Name);
         writer.Write((int)function.ReturnType);
@@ -3677,7 +3702,7 @@ public static partial class ModuleCompiler
             writer.Write(function.DirectNativeImport is not null);
             if (function.DirectNativeImport is DirectNativeImport import)
             {
-                if (!function.IsExternal || !DirectNativeImportContract.IsValid(function))
+                if (!function.IsExternal || !DirectNativeImportContract.IsValid(function, structures))
                 {
                     throw new ModuleContractException("Direct native import metadata is invalid.");
                 }

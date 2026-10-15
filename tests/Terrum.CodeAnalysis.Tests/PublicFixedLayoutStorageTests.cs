@@ -20,10 +20,12 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class PublicFixedLayoutStorageTests
 {
     private const string Library = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Leaf {
             public mut int32 Value;
             public Leaf(int32 value) { Value = value; }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Packet {
             public char16 Prefix;
             public mut Leaf Item;
@@ -42,10 +44,11 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("uint64",8)]
     [TestCase("float32",4)]
     [TestCase("float64",8)]
-    public void EveryStorableCorePrimitiveRetainsAnExplicitProductionCommitment(string type, int width)
+    public void EveryStorableCorePrimitiveRetainsASourceDeclaredCommitment(string type, int width)
     {
-        var program = Commit(CompileLibrary($"public struct Box {{ public {type} Value; }}"
-            + " public int32 Check(Box value) { return 42; }"));
+        var program = CompileLibrary($"[Blittable] [Layout(LayoutKind.Sequential)] "
+            + $"public struct Box {{ public {type} Value; }}"
+            + " public int32 Check(Box value) { return 42; }");
         Assert.That(global::System.Linq.Enumerable.Single(FixedLayoutStorage.Validate(program.Structures)), Is.EqualTo(width));
         SemanticVerifier.VerifyLibrary(program);
         var producer = ModuleCompiler.CreateProducer(program, ["Check"]);
@@ -90,7 +93,6 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("wrong-target")]
     [TestCase("missing-sequential")]
     [TestCase("transparent")]
-    [TestCase("unique")]
     [TestCase("cleanup")]
     [TestCase("offset")]
     [TestCase("width")]
@@ -115,7 +117,6 @@ public sealed class PublicFixedLayoutStorageTests
             "wrong-target" => packet with { BlittableTargetRequirement = 2 },
             "missing-sequential" => packet with { IsSequential = false },
             "transparent" => packet with { IsTransparent = true },
-            "unique" => packet with { IsUnique = true },
             "cleanup" => packet with { CleanupMethod = "Drop" },
             "offset" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Offset = 3 }) },
             "width" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Size = 8 }) },
@@ -156,6 +157,22 @@ public sealed class PublicFixedLayoutStorageTests
         {
             _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
         }
+    }
+    [Test]
+    public void UniqueBlittableLayoutRetainsItsIndependentCleanupContract()
+    {
+        var program = CompileLibrary("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public unique struct Owner {
+                private int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [NoThrow] [Cleanup]
+                public void Close() { }
+            }
+            """);
+        Assert.That(FixedLayoutStorage.Validate(program.Structures),
+            Is.EqualTo([sizeof(int)]));
+        SemanticVerifier.VerifyLibrary(program);
     }
     [TestCase(false)]
     [TestCase(true)]
@@ -208,9 +225,10 @@ public sealed class PublicFixedLayoutStorageTests
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(78));
         var snapshot = SHA256.HashData(consumer);
-        var replacementProgram = Commit(CompileLibrary(
-            "public struct Other { public uint64 Value; } " + Library.Replace(
-                "new Packet(value)", "new Packet(value + 1)", StringComparison.Ordinal), policy));
+        var replacementProgram = CompileLibrary(
+            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Other { public uint64 Value; } "
+                + Library.Replace(
+                "new Packet(value)", "new Packet(value + 1)", StringComparison.Ordinal), policy);
         Assert.That(replacementProgram.Structures[2].Fields[1].Type, Is.Not.EqualTo(program.Structures[1].Fields[1].Type));
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Make"]);
         var nativePolicy = (NativeRuntimePolicy)policy;
@@ -228,11 +246,23 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("nominal")]
     public void ReplacementRejectsChangedStorageOrFieldContracts(string change)
     {
-        var original = ModuleCompiler.CreateProducer(Commit(CompileLibrary(Library)), ["Make"]);
+        var baseProgram = CompileLibrary(Library);
+        var original = ModuleCompiler.CreateProducer(baseProgram, ["Make"]);
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Make(42).Item.Value; }"), ModuleCompiler.CreateReference(original));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(), original);
+        if (change == "commitment")
+        {
+            var uncommitted = baseProgram with {
+                Structures = [.. baseProgram.Structures.Select(static structure => structure with {
+                    BlittableTargetRequirement = 0,
+                })],
+            };
+            _ = Assert.Throws<ArgumentException>(() =>
+                ModuleCompiler.CreateProducer(uncommitted, ["Make"]))!;
+            return;
+        }
         var source = change switch {
             "field-type" => Library.Replace("int32 Value", "uint32 Value", StringComparison.Ordinal)
                 .Replace("Value = value", "Value = uint32(value)", StringComparison.Ordinal),
@@ -243,17 +273,10 @@ public sealed class PublicFixedLayoutStorageTests
             "mutation" => Library.Replace("public mut int32 Value", "public int32 Value", StringComparison.Ordinal),
             "unsafe" => UnsafeLibrary(),
             "nominal" => Library.Replace("Leaf", "DifferentLeaf", StringComparison.Ordinal),
-            _ => Library,
+            _ => throw new InvalidOperationException(),
         };
+        Assert.That(source, Is.Not.EqualTo(Library));
         var replacementProgram = CompileLibrary(source);
-        if (change is not "commitment")
-        {
-            Assert.That(source, Is.Not.EqualTo(Library));
-        }
-        if (change != "commitment")
-        {
-            replacementProgram = Commit(replacementProgram);
-        }
         if (change == "access")
         {
             _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(replacementProgram, ["Make"]))!;
@@ -421,7 +444,8 @@ public sealed class PublicFixedLayoutStorageTests
     public async Task NativeGraphMetadataRetainsTheSameFixedStorageReplacementContractAsync(BoundRuntimePolicy policy)
     {
         var nativePolicy = (NativeRuntimePolicy)policy;
-        var producer = NativeModuleCompiler.CreateProducer(Commit(CompileLibrary(Library, policy)),
+        var sourceProgram = CompileLibrary(Library, policy);
+        var producer = NativeModuleCompiler.CreateProducer(sourceProgram,
             ["Make"], "FixedLeaf", nativePolicy);
         var reference = NativeModuleCompiler.CreateGraphReference([producer]);
         {var __nunitItems1 = reference.Structures;        Assert.Multiple(() => { foreach (var __nunitItem9 in __nunitItems1) { Assert.That(__nunitItem9.BlittableTargetRequirement, Is.EqualTo(1)); } });}
@@ -430,23 +454,53 @@ public sealed class PublicFixedLayoutStorageTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(),
             [producer], nativePolicy);
-        var replacement = NativeModuleCompiler.CreateProducer(Commit(CompileLibrary(
-            Library.Replace("new Packet(value)", "new Packet(value + 1)", StringComparison.Ordinal), policy)),
+        var replacement = NativeModuleCompiler.CreateProducer(CompileLibrary(
+            Library.Replace("new Packet(value)", "new Packet(value + 1)", StringComparison.Ordinal), policy),
             ["Make"], "FixedLeaf", nativePolicy);
         NativeModuleCompiler.ValidateGraph(consumer, [replacement]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [replacement],
             TimeSpan.FromSeconds(10), nativePolicy).ConfigureAwait(true), Is.EqualTo(43));
-        var uncommitted = NativeModuleCompiler.CreateProducer(CompileLibrary(Library, policy),
-            ["Make"], "FixedLeaf", nativePolicy);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(consumer, [uncommitted]))!;
+        var uncommittedProgram = sourceProgram with {
+            Structures = [.. sourceProgram.Structures.Select(static structure => structure with {
+                BlittableTargetRequirement = 0,
+            })],
+        };
+        _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(
+            uncommittedProgram, ["Make"], "FixedLeaf", nativePolicy))!;
     }
-    [TestCase("[Blittable] public struct Box { public int32 Value; }")]
-    [TestCase("[Blittable] [Layout(Sequential)] public struct Box { public int32 Value; }")]
-    public void ProvisionalBoundOptInDoesNotRegisterSourceAttributes(string source)
+    [TestCase("[Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; }")]
+    [TestCase("[Layout(Kind: LayoutKind.Sequential)] [Blittable] public struct Box { public int32 Value; }")]
+    public void RegisteredSourceLayoutAttributesSelectTheFixedLayoutCommitment(string source)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source + " public int32 Check() { return 42; }"));
-        Assert.That(compilation.HasErrors, Is.True);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3001"),Is.True);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            source + " public int32 Check(Box value) { return value.Value; }"));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var structure = global::System.Linq.Enumerable.Single(compilation.Program!.Structures);
+        Assert.That(structure.IsSequential, Is.True);
+        Assert.That(structure.BlittableTargetRequirement,
+            Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
+        Assert.That(global::System.Linq.Enumerable.Single(
+            ModuleCompiler.CreateReference(ModuleCompiler.CreateProducer(compilation.Program!, ["Check"]))
+                .Structures).BlittableTargetRequirement,
+            Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
+    }
+
+    [Test]
+    public void InternalStructFieldsDoNotCreateAnExternalLayoutBoundary()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct LocalValue {
+                   public int32 Value;
+                   public LocalValue(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                   LocalValue value = new LocalValue(42);
+                   return value.Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     private static BoundProgram CompileLibrary(string source, BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)

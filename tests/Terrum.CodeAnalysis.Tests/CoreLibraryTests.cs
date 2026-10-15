@@ -332,7 +332,7 @@ public sealed class CoreLibraryTests
     public void PrimitiveOwnerVerificationDoesNotReinterpretHistoricalNominalLayouts()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "public struct Cell { public int32 Value; public int32 Read() { return Value; } }"));
+            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public int32 Value; public int32 Read() { return Value; } }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))();
         var function = global::System.Linq.Enumerable.Single(program.Functions);

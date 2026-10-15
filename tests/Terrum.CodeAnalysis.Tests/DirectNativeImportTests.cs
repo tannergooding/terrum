@@ -106,6 +106,59 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void NativeJitExecutesABlittableAggregatePointerInput()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct SystemTime {
+                char16 Year;
+                char16 Month;
+                char16 DayOfWeek;
+                char16 Day;
+                char16 Hour;
+                char16 Minute;
+                char16 Second;
+                char16 Millisecond;
+
+                public SystemTime(char16 year, char16 month, char16 dayOfWeek, char16 day,
+                    char16 hour, char16 minute, char16 second, char16 millisecond) {
+                    Year = year;
+                    Month = month;
+                    DayOfWeek = dayOfWeek;
+                    Day = day;
+                    Hour = hour;
+                    Minute = minute;
+                    Second = second;
+                    Millisecond = millisecond;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "SystemTimeToFileTime")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeOutput(1)]
+            extern int32 SystemTimeToFileTime(ptr<SystemTime> value, write ptr<int64> fileTime);
+
+            int32 Main() {
+                SystemTime value = new SystemTime(char16(2024), char16(1), char16(0), char16(2),
+                    char16(3), char16(4), char16(5), char16(6));
+                mut int64 fileTime = 0;
+                unsafe {
+                    if (SystemTimeToFileTime(&value, &fileTime) == 0) { return -1; }
+                }
+                if (fileTime <= 0) { return -2; }
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(0));
+    }
+
+    [Test]
     public void SourceAuthoredImportRequiresUnsafeCallers()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ImportDeclaration + """
@@ -221,6 +274,59 @@ public sealed class DirectNativeImportTests
         var parameterOrdinalOffset = parameterCountOffset + sizeof(int);
         BinaryPrimitives.WriteInt32LittleEndian(
             malformed.AsSpan(parameterOrdinalOffset, sizeof(int)), 1);
+
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void BlittableAggregateNativeParameterSurvivesTypeRemappingAndIsRevalidated()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct UnusedPrefix { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct ClockFields {
+                public char16 Year;
+                public char16 Month;
+                public char16 DayOfWeek;
+                public char16 Day;
+                public char16 Hour;
+                public char16 Minute;
+                public char16 Second;
+                public char16 Millisecond;
+            }
+
+            [Terrum.Interop.NativeImport("example.dll", "ReadClock")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 ReadClock(ptr<ClockFields> value);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = ModuleCompiler.CreateProducer(compilation.Program!, ["ReadClock"]);
+        var reference = ModuleCompiler.CreateReference(artifact);
+        Assert.That(reference.Structures.Select(static structure => structure.Name),
+            Is.EqualTo(["ClockFields"]));
+        var import = reference.Functions.Single(static function =>
+            function.Name == "ReadClock").DirectNativeImport!;
+        Assert.That(import.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, (PrimitiveType)100,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 1),
+        ]));
+
+        var malformed = artifact.ToArray();
+        var library = Encoding.UTF8.GetBytes("example.dll");
+        var libraryOffset = IndexOf(malformed, library);
+        var exportLengthOffset = libraryOffset + library.Length;
+        var exportLength = BinaryPrimitives.ReadInt32LittleEndian(
+            malformed.AsSpan(exportLengthOffset, sizeof(int)));
+        var outputCountOffset = exportLengthOffset + sizeof(int) + exportLength;
+        var parameterCountOffset = outputCountOffset + sizeof(int);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            malformed.AsSpan(parameterCountOffset, sizeof(int))), Is.EqualTo(1));
+        var parameterTypeOffset = parameterCountOffset + (2 * sizeof(int));
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(parameterTypeOffset, sizeof(int)), int.MaxValue);
 
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
     }

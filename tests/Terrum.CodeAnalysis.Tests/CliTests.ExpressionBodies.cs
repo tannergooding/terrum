@@ -26,7 +26,7 @@ public sealed partial class CliTests
         var hostedImage = Path.Combine(directory, "host.exe");
         var scannedImage = Path.Combine(directory, "scanner.exe");
         const string Library = """
-            public struct Value {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Value {
                 public int32 Field;
                 public Value(int32 value) => Field = value;
                 public int32 Result => Field;

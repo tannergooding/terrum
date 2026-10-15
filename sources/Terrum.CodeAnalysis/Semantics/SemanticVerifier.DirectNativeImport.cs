@@ -33,7 +33,9 @@ public static partial class SemanticVerifier
         var firstLocal = function.ParameterCount + (function.IsConstructor ? 1 : 0);
         if (!DirectNativeImportContract.MatchesAddress(address, parameter, function, program)
             || address.Variable < firstLocal || !declarations.Contains(address.Variable)
-            || !initialized[address.Variable])
+            || !initialized[address.Variable]
+            || HasFields(program, parameter.PointeeType)
+                && fieldMasks[address.Variable] != FullMask(program, parameter.PointeeType))
         {
             throw InvalidEffect(address.Span, "NativeImport");
         }

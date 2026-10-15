@@ -89,17 +89,20 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
-Persisted development semantic modules write and accept only revision 76;
-older revisions reject rather than being upgraded. The current format retains
-class/`ManagedNode` access contracts, non-exported compact-struct `MutReceiver`
-contracts and nested mutable-field loans, including fully initialized unique
-roots and children. Writable owning-buffer fields support `Set`, `TryAppend`,
+Persisted development semantic modules use base revision 76 and the private
+feature revisions documented in the
+[module inventory](modules.md); these revisions are not standard TRRM
+extensions. The current formats retain class/`ManagedNode` access contracts,
+non-exported compact-struct `MutReceiver` contracts and nested mutable-field
+loans, including fully initialized unique roots and children. Writable
+owning-buffer fields support `Set`, `TryAppend`,
 `Clear` and lexical `SliceMutable` acquisition without transferring ownership.
 Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Current artifacts
-record the validated access and receiver contracts directly; all use semantic
-module revision 76 regardless of which supported constructs they contain.
+record the validated access and receiver contracts directly; revision 76
+remains the base when no private span, fixed-layout or direct-import facts
+require a later revision.
 The provisional `Host.Source` semantic-module JIT adapter is a separate,
 unapproved extension; accepted module execution remains source-independent.
 It does not establish source-dependent native packages or persisted AOT.
@@ -335,7 +338,7 @@ existing initialization authority; ordinary immutable locals cannot. Failed
 initialization leaves vacancy and does not reactivate a root or cleanup bit.
 Retained end nodes are audited through
 producer/reference/consumer linking and private native graphs. Both PE and
-JIT policies use the same lowering under current semantic-module revision 76,
+JIT policies use the same lowering under the selected private semantic-module revision,
 with no native ABI/profile or scanner change. Parameter/receiver aliases, fields, indexers, const aliases and
 unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
 guards/ARC, view rebinding and source-free TRRM are not adopted by this operation.
@@ -1049,7 +1052,7 @@ before the first test, and `continue` reaches that test after exited-scope
 cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
 The bounded implementation rejects duplicate enclosing labels and permits
 reuse in disjoint scopes; the general source collision policy remains
-unspecified. Current semantic-module revision 76 serializes post-tested loops
+unspecified. Private semantic-module revisions serialize post-tested loops
 and non-nearest transfer depths
 when present. Native calling conventions, cleanup funclets and public ABI do
 not change.

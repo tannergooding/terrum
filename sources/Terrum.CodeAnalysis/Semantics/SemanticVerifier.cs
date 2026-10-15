@@ -2065,7 +2065,7 @@ public static partial class SemanticVerifier
         foreach (var function in program.Functions)
         {
             if (function.DirectNativeImport is not null
-                && !DirectNativeImportContract.IsValid(function))
+                && !DirectNativeImportContract.IsValid(function, program.Structures))
             {
                 throw InvalidEffect(function.Span, "NativeImport");
             }

@@ -56,14 +56,20 @@ predicate-refinement catalog for runtime values, so it does not fulfill the
 accepted v1 proof-floor scope.
 
 Current profile markers are syntax language version 46, semantic-module base
-revision 76 with private feature revisions through 80, and native profiles
+revision 76 with private feature revisions through 81, and native profiles
 native-10 through native-20. These markers describe supported implementations,
 not approval of the remaining language contracts. The exact source, layout,
 metadata, ABI, and runtime contracts are in the
 [specification index](specs/README.md).
-Public fixed-layout support is not implemented; its accepted bounded Windows
-x64 direction does not add source attributes, metadata encoding, or runtime
-support.
+Public fixed-layout source support is implemented for natural Windows x64
+`Sequential` and scalar-carrier `Transparent` layouts committed with
+`[Blittable]`. Mandatory verification recomputes the fixed-storage facts, and
+private semantic modules persist them. Packing, alignment controls, unions,
+opaque handle fields, and standard TRRM layout persistence remain unsupported.
+Direct `NativeParameter` inputs can point at committed aggregates in source,
+private semantic modules, and native execution; the standard TRRM
+`NativeParameter` encoding remains unapproved and is rejected. Direct native
+outputs remain limited to scalar and raw-pointer pointees.
 The detailed [hosted output profiles](implementation/output-profiles.md)
 are informative development inventories. Their historical `out` modes do not
 add parameter forms to the canonical reference model.

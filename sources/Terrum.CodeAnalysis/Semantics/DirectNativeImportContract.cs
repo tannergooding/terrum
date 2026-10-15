@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -40,7 +41,19 @@ internal static class DirectNativeImportContract
     internal static bool IsOutputPointee(PrimitiveType type) =>
         IsScalar(type) || type == PrimitiveType.NativeRawPointer;
 
-    internal static bool IsValid(BoundFunction function)
+    internal static bool IsInputPointee(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
+    {
+        if (type is PrimitiveType.Void or PrimitiveType.NativeRawPointer || IsScalar(type))
+        {
+            return true;
+        }
+        var index = (int)type - 100;
+        return index >= 0 && index < structures.Count
+            && structures[index].BlittableTargetRequirement == FixedLayoutStorage.WindowsX64TargetRequirement
+            && (structures[index].IsSequential || structures[index].IsTransparent);
+    }
+
+    internal static bool IsValid(BoundFunction function, IReadOnlyList<BoundStruct> structures)
     {
         if (function.DirectNativeImport is not DirectNativeImport import
             || !function.IsExternal || function.NativeImportKey is not null
@@ -78,10 +91,7 @@ internal static class DirectNativeImportContract
             if (parameter is null || parameter.ParameterIndex < 0
                 || parameter.ParameterIndex >= function.ParameterCount
                 || nativeParameters[parameter.ParameterIndex] || outputs[parameter.ParameterIndex]
-                || parameter.PointeeType is not (PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
-                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                    or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
-                    or PrimitiveType.NativeRawPointer)
+                || !IsInputPointee(parameter.PointeeType, structures)
                 || parameter.Access is not (NativeParameterAccess.Read
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention != NativeParameterRetention.NoEscape

@@ -380,6 +380,15 @@ internal sealed class Parser
                         attribute.Add(Take());
                     }
                 }
+                else if (attributeName == "Layout")
+                {
+                    while (Current.Kind is not (TokenKind.CloseParen or TokenKind.EndOfFile))
+                    {
+                        attribute.Add(Current.Kind is TokenKind.Identifier or TokenKind.NumericLiteral
+                            or TokenKind.Dot or TokenKind.Colon or TokenKind.Comma
+                            ? Take() : Expect(TokenKind.Identifier));
+                    }
+                }
                 else if (Current.Kind == TokenKind.StringLiteral)
                 {
                     attribute.Add(Take());

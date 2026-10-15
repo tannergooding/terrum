@@ -15,13 +15,13 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeLibraryTests
 {
     private const string Source = """
-        public struct Twelve {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Twelve {
             public int32 First; public int32 Second; public int32 Third;
             public Twelve(int32 first, int32 second, int32 third) {
                 First = first; Second = second; Third = third;
             }
         }
-        public struct Wide {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Wide {
             public int64 Signed; public uint64 Unsigned;
             public Wide(int64 signed, uint64 unsigned) { Signed = signed; Unsigned = unsigned; }
         }
@@ -144,7 +144,7 @@ public sealed class NativeLibraryTests
     {
         var privateType = Compile("struct Private { public int32 Value; } public int32 Read(Private value) { return value.Value; }");
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateType, ["Read"], NativeRuntimePolicy.FailFast))!;
-        var privateField = Compile("public struct Hidden { int32 Value; public Hidden(int32 n) { Value = n; } }"
+        var privateField = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Hidden { int32 Value; public Hidden(int32 n) { Value = n; } }"
             + " public Hidden Make() { return new Hidden(42); }");
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateField, ["Make"], NativeRuntimePolicy.FailFast))!;
     }
@@ -153,16 +153,17 @@ public sealed class NativeLibraryTests
     public void ValidatesRepeatedNestedValueTypesInLibrarySignatures()
     {
         var publicValues = Compile("""
-            public struct Leaf { public int32 Value; }
-            public struct Pair { public Leaf First; public Leaf Second; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public Leaf Second; }
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Envelope { public Pair Left; public Pair Right; }
             public Envelope Echo(Envelope value) { return value; }
             """);
         Assert.That(NativeEmitter.EmitLibrary(publicValues, ["Echo"], NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var privateValues = Compile("""
-            public struct Leaf { int32 Value; }
-            public struct Pair { public Leaf First; public Leaf Second; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Leaf { int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public Leaf First; public Leaf Second; }
             public Pair Echo(Pair value) { return value; }
             """);
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(privateValues, ["Echo"],
@@ -173,7 +174,7 @@ public sealed class NativeLibraryTests
     public void AllowsAbsentPrimitiveDeclaringStructOwner()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "public struct Cell { public int32 Value; public int32 Read() { return 42; } }"));
+            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public int32 Value; public int32 Read() { return 42; } }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var function = global::System.Linq.Enumerable.Single(program.Functions);

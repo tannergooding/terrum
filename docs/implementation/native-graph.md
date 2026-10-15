@@ -36,16 +36,18 @@ Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
 DLL or root EXE.
 For managed roots and intermediate producers in persisted acyclic native DLL
-graphs, each participant uses current semantic-module revision 76, the sole
-accepted revision. This serialization revision is distinct from the graph
-container and native package formats. Participants
+graphs, each participant uses the private semantic-module revision selected by
+its retained contracts: revision 76 is the base, while fixed layouts and
+direct-import metadata require their corresponding later revisions. This
+serialization revision is distinct from the graph container and native
+package formats. Participants
 communicate only through the established scalar and handle-free public `Copy`
 value contracts. Each persisted image has its own heap and root chain; an
 imported call preserves the caller's roots, and `ManagedHeap.Collect()` remains
 local to the image where it runs. The invocation-scoped `Host.Source`
 requirement is a semantic-module JIT capability, not a native graph capability.
-The same current semantic-module revision
-supports private managed consumers through ordinary single-provider semantic
+The same selected private semantic-module revision supports private managed
+consumers through ordinary single-provider semantic
 linking and native single-provider or module-set entry points. Semantic linking places producer
 and consumer code in one image/heap domain and remaps private class identities;
 the persisted native graph continues to keep each image's heap separate.
@@ -216,7 +218,7 @@ leaf's managed roots.
 The [Copy-field variant](../../samples/native/graph/managed-copy-class-leaf.terrum)
 can replace that same leaf with nested inline Copy values alongside its optional
 edges. Use it in place of `managed-class-leaf.terrum` in the producer command
-below. It writes current semantic-module revision 76 while retaining the
+below. It writes current semantic-module revision 78 while retaining the
 `native-20` profile, returns the same result and collects its private cycle.
 The unchanged root and intermediate do not import its nested struct layouts;
 retired semantic-module revisions are rejected and must be rebuilt from source.

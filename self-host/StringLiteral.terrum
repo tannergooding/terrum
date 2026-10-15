@@ -1,5 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
+[Blittable]
+[Layout(LayoutKind.Sequential)]
 public struct StringLiteral
 {
     public SourceRange Spelling;
@@ -331,6 +333,8 @@ public struct StringLiteral
     }
 }
 
+[Blittable]
+[Layout(LayoutKind.Sequential)]
 public struct StringLiteralCursor
 {
     private StringLiteral Literal;

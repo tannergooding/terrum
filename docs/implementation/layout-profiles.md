@@ -7,18 +7,29 @@ directions and support observations. It does not narrow the selected
 [binding and replacement](../specs/representation/binding-and-replacement.md)
 contracts. A private target-requirement number is not a standard Feature ID.
 
-## Initial public fixed-layout direction
+## Implemented public fixed-layout source profile
 
-For the first public Windows x64 fixed-layout slice, field eligibility uses
-the existing target-specific `Blittable` requirements and ordinary `Copy` and
-value-validity rules, not a slice-specific type whitelist. A nested struct
-field must also satisfy that slice's `Sequential` requirement. This accepts
-the eligibility and bounded implementation directions. The
-[registered source schemas](../specs/targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
-are specified; physical metadata encoding and exact migration version/tooling
-remain open, and no implementation support is implied.
-The implementation direction reuses Windows x64 target requirement `1` and
-introduces no separate layout-profile identity.
+Source-authored `[Blittable]` commitments support natural Windows x64
+`Sequential` layouts and one-field scalar `Transparent` layouts. Sequential
+fields may use the fixed scalar/pointer set or transitively committed
+structures; unique fields remain restricted to unique owners. The compiler
+recomputes the layout under mandatory verification and uses the existing
+Windows x64 target requirement `1`, not a separate layout-profile identity.
+Externally visible public fields require this commitment; a public field on
+an internal struct does not independently expose its layout for replacement.
+Private semantic modules persist and revalidate these facts. Packing and
+alignment controls, unions, opaque handle fields, and standard TRRM layout
+persistence are not implemented.
+
+Direct native `NativeParameter` inputs may use a committed aggregate pointee.
+The pointer contract remains one element, `NoEscape`, and backed by an
+initialized local; verification checks that all aggregate fields are
+initialized. Private semantic metadata revision 80 preserves and remaps the
+pointee type. Standard TRRM `NativeParameter` persistence remains rejected
+pending an approved encoding, and direct native outputs remain limited to
+scalar and raw-pointer pointees.
+When fixed-layout commitments coexist with private span roles, semantic-module
+revision 81 carries both fact sets without claiming standard TRRM support.
 
 
 ## Compact and resilient layout support
@@ -53,7 +64,8 @@ The implementation's provisional `[Layout(Sequential)]` spelling admits nonpubli
 Copy structs with private fields and eligible nested Copy fields, using the
 existing natural declaration-order layout (1-16 bytes). It does not publish
 fields, freeze representation, or permit independently replaceable layout
-boundaries; no semantic wire field or ABI migration is implied.
+boundaries; no semantic wire field or ABI migration is implied. This bounded
+compact form is distinct from the public `[Blittable]` fixed-storage contract.
 `ValueLayout` remains limited to naturally aligned 1-16-byte aggregates.
 
 These are private compiler/development contracts, not restrictions on the

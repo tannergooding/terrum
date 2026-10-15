@@ -111,7 +111,7 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
-            if (function.IsExternal && !DirectNativeImportContract.IsValid(function))
+            if (function.IsExternal && !DirectNativeImportContract.IsValid(function, program.Structures))
             {
                 throw Unsupported($"Function '{function.Name}' has an invalid direct native import contract.");
             }

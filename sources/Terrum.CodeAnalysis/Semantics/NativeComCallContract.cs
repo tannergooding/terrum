@@ -1525,7 +1525,7 @@ internal static class NativeComCallContract
                 && program.Functions.Any(candidate =>
                     candidate.Name == source.SourceMethodIdentity
                     && candidate.IsExternal && candidate.DirectNativeImport is not null
-                    && DirectNativeImportContract.IsValid(candidate)
+                    && DirectNativeImportContract.IsValid(candidate, program.Structures)
                     && DirectNativeImportContract.OutputForParameter(candidate,
                         source.SourceOutputParameterIndex) is DirectNativeOutput {
                             PointeeType: PrimitiveType.NativeRawPointer,

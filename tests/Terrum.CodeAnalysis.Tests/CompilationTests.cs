@@ -138,6 +138,7 @@ public sealed class CompilationTests
     public void AliasesPreserveNominalTypeIdentity()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Number {
                 public int32 Value;
                 public Number(int32 value) { Value = value; }

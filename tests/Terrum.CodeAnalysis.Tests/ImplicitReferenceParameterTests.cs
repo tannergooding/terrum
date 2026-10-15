@@ -103,7 +103,7 @@ public sealed class ImplicitReferenceParameterTests
     public void NestedFieldCanBeReborrowedFromAnImplicitReference(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int32 Value;
                 public Pair(int32 value) { Value = value; }
             }

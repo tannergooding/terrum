@@ -82,7 +82,7 @@ public sealed partial class NativeManagedClassModuleTests
 
     private const string ManagedGraphLeaf = """
         namespace Values;
-        public struct Payload {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Payload {
             public int64 First;
             public int64 Second;
             public Payload(int64 first, int64 second) { First = first; Second = second; }
@@ -220,7 +220,7 @@ public sealed partial class NativeManagedClassModuleTests
         var originalProgram = Compile(ManagedGraphLeaf, policy);
         string[] leafExports = ["Values.Make", "Values.Forward", "Values.Fail", "Values.CollectLeaf"];
         var original = NativeModuleCompiler.CreateProducer(originalProgram, leafExports, "NodeB", policy);
-        Assert.That(GraphSemanticVersion(original), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(original), Is.EqualTo(78));
         var bias = NativeModuleCompiler.CreateProducer(Compile(ManagedGraphBias, policy),
             ["Source.Bias"], "NodeC", policy);
         var middleProgram = Compile(ManagedMiddle(policy), policy,
@@ -228,14 +228,14 @@ public sealed partial class NativeManagedClassModuleTests
         string[] middleExports = ["Middle", "TryMiddle", "CollectMiddle"];
         var middle = NativeModuleCompiler.CreateGraphProducer(middleProgram, middleExports, "NodeA",
             [original, bias], policy);
-        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(78));
         var middleHash = SHA256.HashData(middle);
         var reference = NativeModuleCompiler.CreateGraphReference([middle, original, bias]);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).Name, Is.EqualTo("Values.Payload"));
         var rootProgram = Compile(ManagedGraphRoot, policy,
             reference, library: false);
         var root = NativeModuleCompiler.CreateGraphConsumer(rootProgram, [middle, original, bias], policy);
-        Assert.That(GraphSemanticVersion(root), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(root), Is.EqualTo(78));
         var rootHash = SHA256.HashData(root);
         Assert.That(NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion, Is.EqualTo("native-19"));
         Assert.That(NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion, Is.EqualTo("native-19"));
@@ -286,18 +286,18 @@ public sealed partial class NativeManagedClassModuleTests
         var middle = NativeModuleCompiler.CreateGraphProducer(Compile(middleSource, policy,
             NativeModuleCompiler.CreateGraphReference([original])), ["ForwardSnapshot", "MiddleValue"],
             "NodeA", [original], policy);
-        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(middle), Is.EqualTo(78));
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile(rootSource, policy,
             NativeModuleCompiler.CreateGraphReference([middle, original]), library: false),
             [middle, original], policy);
-        Assert.That(GraphSemanticVersion(root), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(root), Is.EqualTo(78));
         var rootHash = SHA256.HashData(root);
         var middleHash = SHA256.HashData(middle);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, original],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(42));
         var replacement = NativeModuleCompiler.CreateProducer(Compile(managedSource, policy),
             leafExports, "NodeB", policy);
-        Assert.That(GraphSemanticVersion(replacement), Is.EqualTo(76));
+        Assert.That(GraphSemanticVersion(replacement), Is.EqualTo(78));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true), Is.EqualTo(44));
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
@@ -373,6 +373,7 @@ public sealed partial class NativeManagedClassModuleTests
     public void ManagedGraphParticipantsRejectOwningImportsAndExports(NativeRuntimePolicy policy)
     {
         const string OwningProvider = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }
@@ -398,6 +399,7 @@ public sealed partial class NativeManagedClassModuleTests
         var bias = NativeModuleCompiler.CreateProducer(Compile(ManagedGraphBias, policy),
             ["Source.Bias"], "NodeC", policy);
         var export = Compile(Managed + """
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Owned {
                 public int32 Value;
                 public Owned(int32 value) { Value = value; }

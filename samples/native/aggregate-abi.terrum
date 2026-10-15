@@ -1,3 +1,4 @@
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct Pair
 {
     public int32 Start;
@@ -68,6 +69,7 @@ int32 Main()
     return ReadPair(MakePair(17, 25));
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct Nested
 {
     public mut Pair Value;
@@ -98,6 +100,7 @@ public bool TryNested(bool success, out Nested value)
     return true;
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct AlignedInner
 {
     public char16 Unit;
@@ -109,6 +112,7 @@ public struct AlignedInner
     }
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct AlignedOuter
 {
     public char16 Prefix;
@@ -189,6 +193,7 @@ bool TrySequential(bool success, out SequentialOuter value)
     return true;
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct Three
 {
     public bool First;
@@ -226,6 +231,7 @@ public bool TryThree(bool success, out Three value)
     return true;
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct Six
 {
     public char16 First;
@@ -259,6 +265,7 @@ public bool TrySix(bool success, out Six value)
     return true;
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct Twelve
 {
     public int32 First;
@@ -296,6 +303,7 @@ public int32 ReadMixed(Twelve first, Three second, Pair third, Six fourth, Twelv
     return first.First + first.Second + third.Length + int32(fourth.Third) + fifth.Third + sixth;
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct Wide
 {
     public mut Twelve Value;
@@ -363,6 +371,7 @@ public uint64 EchoUInt64(uint64 value)
     return value;
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public struct WideIntegerPair
 {
     public int64 Signed;
@@ -400,6 +409,7 @@ public bool TryWideIntegerPair(bool success, out WideIntegerPair value)
     return true;
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public unique struct SmallOwner
 {
     public int32 Value;
@@ -411,6 +421,7 @@ public unique struct SmallOwner
     }
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public unique struct WordOwner
 {
     public uint64 Value;
@@ -418,6 +429,7 @@ public unique struct WordOwner
     [NoThrow] public uint64 Read() { return Value; }
 }
 
+[Blittable] [Layout(LayoutKind.Sequential)]
 public unique struct LargeOwner
 {
     public int64 Signed;
@@ -430,42 +442,42 @@ public unique struct LargeOwner
     [NoThrow] public uint64 Read() { return Unsigned; }
 }
 // Transparent wrappers retain the carrier's direct argument and result ABI.
-[Layout(Transparent)] public struct BoolCarrier
+[Blittable] [Layout(LayoutKind.Transparent)] public struct BoolCarrier
 {
     public bool Value;
     public BoolCarrier(bool value) { Value = value; }
 }
 public BoolCarrier EchoBoolCarrier(BoolCarrier value) { return value; }
 
-[Layout(Transparent)] public struct CharCarrier
+[Blittable] [Layout(LayoutKind.Transparent)] public struct CharCarrier
 {
     public char16 Value;
     public CharCarrier(char16 value) { Value = value; }
 }
 public CharCarrier EchoCharCarrier(CharCarrier value) { return value; }
 
-[Layout(Transparent)] public struct IntCarrier
+[Blittable] [Layout(LayoutKind.Transparent)] public struct IntCarrier
 {
     public int32 Value;
     public IntCarrier(int32 value) { Value = value; }
 }
 public IntCarrier EchoIntCarrier(IntCarrier value) { return value; }
 
-[Layout(Transparent)] public struct UIntCarrier
+[Blittable] [Layout(LayoutKind.Transparent)] public struct UIntCarrier
 {
     public uint32 Value;
     public UIntCarrier(uint32 value) { Value = value; }
 }
 public UIntCarrier EchoUIntCarrier(UIntCarrier value) { return value; }
 
-[Layout(Transparent)] public struct LongCarrier
+[Blittable] [Layout(LayoutKind.Transparent)] public struct LongCarrier
 {
     public int64 Value;
     public LongCarrier(int64 value) { Value = value; }
 }
 public LongCarrier EchoLongCarrier(LongCarrier value) { return value; }
 
-[Layout(Transparent)] public struct ULongCarrier
+[Blittable] [Layout(LayoutKind.Transparent)] public struct ULongCarrier
 {
     public uint64 Value;
     public ULongCarrier(uint64 value) { Value = value; }

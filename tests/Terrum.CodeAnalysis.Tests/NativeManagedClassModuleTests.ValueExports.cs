@@ -19,7 +19,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class NativeManagedClassModuleTests
 {
     private const string ValueExportSource = """
-        public struct PublicPair {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct PublicPair {
             public int64 First;
             public int64 Second;
             public PublicPair(int64 first, int64 second) { First = first; Second = second; }
@@ -39,7 +39,7 @@ public sealed partial class NativeManagedClassModuleTests
         """;
 
     private const string ConditionalValueSource = """
-        public struct Pair {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
             public int64 First;
             public int64 Second;
             public Pair(int64 first, int64 second) { First = first; Second = second; }
@@ -77,7 +77,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var program = Compile(ValueExportSource, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Echo"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-19"));
         Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions).Name, Is.EqualTo("Echo"));
         var native = NativeModuleCompiler.CreateProducer(program, ["Echo"], "NodeB",
@@ -113,7 +113,7 @@ public sealed partial class NativeManagedClassModuleTests
         bool unique, NativeRuntimePolicy policy)
     {
         const string Source = """
-            public struct Vault {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Vault {
                 private int32 Hidden;
                 public Vault(int32 hidden) { Hidden = hidden; }
                 public static int32 Read() {
@@ -128,14 +128,15 @@ public sealed partial class NativeManagedClassModuleTests
             """;
         const string Consumer = "int32 Main() { return Vault.Read(); }";
         var originalSource = unique
-            ? Source.Replace("public struct Vault", "public unique struct Vault", StringComparison.Ordinal)
+            ? Source.Replace("[Blittable] [Layout(LayoutKind.Sequential)] public struct Vault", "public unique struct Vault", StringComparison.Ordinal)
             : Source;
         var replacementSource = originalSource.Replace("Leaf.TryCreate(40", "Leaf.TryCreate(42",
             StringComparison.Ordinal);
         var originalProgram = Compile(originalSource, policy);
         var replacementProgram = Compile(replacementSource, policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, ["Vault.Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)),
+            Is.EqualTo(unique ? 76 : 78));
         var reference = ModuleCompiler.CreateReference(original);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).Name, Is.EqualTo("Vault"));
         var consumer = ModuleCompiler.CreateConsumer(Compile(Consumer, policy, reference,
@@ -175,7 +176,7 @@ public sealed partial class NativeManagedClassModuleTests
     public async Task DeepCompactCopyValuesCrossManagedModuleAndNativeGraphAsync(NativeRuntimePolicy policy)
     {
         var source = new StringBuilder("""
-            public struct Wrap0 {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Wrap0 {
                 public int32 Number;
                 public Wrap0(int32 number) { Number = number; }
             }
@@ -184,7 +185,7 @@ public sealed partial class NativeManagedClassModuleTests
         var constructor = "new Wrap0(value)";
         for (var depth = 1; depth <= 20; depth++)
         {
-            _ = source.Append("public struct Wrap").Append(depth).Append(" { public Wrap")
+            _ = source.Append("[Blittable] [Layout(LayoutKind.Sequential)] public struct Wrap").Append(depth).Append(" { public Wrap")
                 .Append(depth - 1).Append(" Inner; public Wrap").Append(depth)
                 .Append("(Wrap").Append(depth - 1).Append(" inner) { Inner = inner; } }")
                 .AppendLine();
@@ -213,7 +214,7 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source.ToString(), policy);
         string[] exports = ["Make", "Echo", "CollectGarbage"];
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.Structures.Length, Is.EqualTo(21));
         {var __nunitItems0 = reference.Structures;        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0.Size, Is.EqualTo(4)); } });}
@@ -280,7 +281,7 @@ public sealed partial class NativeManagedClassModuleTests
         var consumerHash = SHA256.HashData(consumer);
         var replacementProgram = Compile(replacementSource, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(78));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).Name, Is.EqualTo("PublicPair"));
         var downgraded = (byte[])replacement.Clone();
@@ -320,7 +321,7 @@ public sealed partial class NativeManagedClassModuleTests
         NativeRuntimePolicy policy)
     {
         const string originalSource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int64 First;
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
@@ -376,7 +377,7 @@ public sealed partial class NativeManagedClassModuleTests
         var originalProducer = ModuleCompiler.CreateProducer(originalProgram, exports);
         var program = Compile(ConditionalValueSource, policy);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(originalProducer), library: false), originalProducer);
         var consumerHash = SHA256.HashData(consumer);
@@ -406,7 +407,7 @@ public sealed partial class NativeManagedClassModuleTests
     public async Task NonBooleanCopyOutputsRemainUnpublishedOnCheckedExceptionAsync()
     {
         const string providerSource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int64 First;
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
@@ -558,11 +559,11 @@ public sealed partial class NativeManagedClassModuleTests
     {
         const string Source = """
             namespace Values;
-            public struct Word {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Word {
                 public int32 Number;
                 public Word(int32 number) { Number = number; }
             }
-            public struct Nested {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Nested {
                 public Word First;
                 public int64 Last;
                 public Nested(Word first, int64 last) { First = first; Last = last; }
@@ -632,7 +633,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(managedProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(78));
         var publicStructure = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Structures);
         Assert.That(publicStructure.Name, Is.EqualTo("Snapshot"));
         Assert.That(publicStructure.Size, Is.EqualTo(12));
@@ -662,6 +663,7 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeHash));
     }
     [TestCase("""
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public unique struct Owned {
             public int32 Number;
             public Owned(int32 number) { Number = number; }
@@ -670,13 +672,13 @@ public sealed partial class NativeManagedClassModuleTests
         """)]
     [TestCase("""
         public unique struct Owned {
-            public OwnedInt32Buffer Words;
+            private OwnedInt32Buffer Words;
             public Owned(OwnedInt32Buffer words) { Words = move words; }
         }
         public Owned Leak(Owned value) { return move value; }
         """)]
     [TestCase("""
-        public struct Hidden {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Hidden {
             private int32 Number;
             public Hidden(int32 number) { Number = number; }
         }

@@ -18,7 +18,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class NativeManagedClassModuleTests
 {
     private const string ConsumerProducerSource = """
-        public struct Snapshot {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Snapshot {
             public int64 First;
             public int64 Second;
             public Snapshot(int64 first, int64 second) { First = first; Second = second; }
@@ -84,11 +84,11 @@ public sealed partial class NativeManagedClassModuleTests
             "box.Data.First + 1", StringComparison.Ordinal), policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, exports);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(78));
         var source = ManagedConsumerSource(policy, linked: true, bias: false);
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(78));
         var consumerHash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(linked.Classes.Select(static @class => @class.Name), Is.EqualTo(["Cell", "$producer.Cell"]));
@@ -126,7 +126,7 @@ public sealed partial class NativeManagedClassModuleTests
         var replacement = ModuleCompiler.CreateProducer(Compile(replacementSource, policy), exports);
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(78));
         var hash = SHA256.HashData(consumer);
         var linkedOriginal = ModuleCompiler.Link(consumer, original);
         var linkedReplacement = ModuleCompiler.Link(consumer, replacement);
@@ -208,6 +208,8 @@ public sealed partial class NativeManagedClassModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer))!;
         using (var reader = new BinaryReader(new MemoryStream(consumer)))
         {
+            reader.BaseStream.Position = sizeof(int);
+            var formatVersion = reader.ReadInt32();
             reader.BaseStream.Position = 8;
             SkipString(reader);
             _ = reader.ReadByte();
@@ -223,6 +225,11 @@ public sealed partial class NativeManagedClassModuleTests
             _ = reader.ReadBoolean();
             _ = reader.ReadBoolean();
             _ = reader.ReadBoolean();
+            if (formatVersion >= 78)
+            {
+                _ = reader.ReadInt32();
+                _ = reader.ReadBoolean();
+            }
             if (reader.ReadBoolean())
             {
                 SkipString(reader);
@@ -260,6 +267,7 @@ public sealed partial class NativeManagedClassModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, scalarProducer))!;
 
         const string OwningProducer = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }

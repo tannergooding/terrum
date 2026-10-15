@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeGraphOriginTests
 {
     private const string LeafSource = """
-        public unique struct Ticket {
+        [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
             public int32 Value;
             [NoThrow] public Ticket(int32 value) { Value = value; }
             [NoThrow] [Cleanup] public void Close() {}
@@ -46,7 +46,7 @@ public sealed class NativeGraphOriginTests
         NativeRuntimePolicy policy)
     {
         var source = $$"""
-            public struct {{type}} {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct {{type}} {
                 public int32 Value;
                 public {{type}}(int32 value) { Value = value; }
             }
@@ -112,7 +112,7 @@ public sealed class NativeGraphOriginTests
     public async Task CopyTypeSharedOriginMergesInDiamondAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
-            public struct Shared {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Shared {
                 public int32 Value;
                 public Shared(int32 value) { Value = value; }
             }
@@ -140,7 +140,7 @@ public sealed class NativeGraphOriginTests
     public async Task SparseSharedTypeOriginsMergeAcrossProvidersAsync(NativeRuntimePolicy policy)
     {
         const string SharedSource = """
-            public struct Shared {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Shared {
                 public int32 Value;
                 public Shared(int32 value) { Value = value; }
             }
@@ -175,7 +175,7 @@ public sealed class NativeGraphOriginTests
     public async Task UniqueWithoutDeclaredCleanupRetainsItsOriginAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
-            public unique struct Plain {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Plain {
                 public int32 Value;
                 [NoThrow] public Plain(int32 value) { Value = value; }
             }
@@ -217,7 +217,7 @@ public sealed class NativeGraphOriginTests
             """, Policy, NativeModuleCompiler.CreateGraphReference([seed])),
             ["Middle"], "Middle", [seed], Policy);
         var leaf = NativeModuleCompiler.CreateProducer(Compile("""
-            public struct Shared {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Shared {
                 public int32 Value;
                 public Shared(int32 value) { Value = value; }
             }
@@ -261,14 +261,14 @@ public sealed class NativeGraphOriginTests
     public void EqualLayoutsFromDistinctOriginsDoNotMerge()
     {
         const string First = """
-            public struct Shared {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Shared {
                 public int32 Value;
                 public Shared(int32 value) { Value = value; }
             }
             public Shared First() { return new Shared(1); }
             """;
         const string Second = """
-            public struct Shared {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Shared {
                 public int32 Value;
                 public Shared(int32 value) { Value = value; }
             }

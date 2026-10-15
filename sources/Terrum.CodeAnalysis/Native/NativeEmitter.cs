@@ -72,7 +72,7 @@ public static class NativeEmitter
             }
             if (function.DirectNativeImport is DirectNativeImport directImport)
             {
-                if (!DirectNativeImportContract.IsValid(function))
+                if (!DirectNativeImportContract.IsValid(function, program.Structures))
                 {
                     throw new ArgumentException("A direct native import does not retain its verified contract.",
                         nameof(program));
@@ -185,7 +185,7 @@ public static class NativeEmitter
                 continue;
             }
             if (function.DirectNativeImport is not DirectNativeImport import
-                || !DirectNativeImportContract.IsValid(function))
+                || !DirectNativeImportContract.IsValid(function, program.Structures))
             {
                 throw new NotSupportedException(
                     "Direct-native JIT requires every external declaration to retain its direct import contract.");
@@ -432,7 +432,7 @@ public static class NativeEmitter
                 continue;
             }
             if (function.DirectNativeImport is not DirectNativeImport import
-                || !DirectNativeImportContract.IsValid(function))
+                || !DirectNativeImportContract.IsValid(function, program.Structures))
             {
                 throw new NotSupportedException(
                     "Native library packages currently require direct imports for every external declaration.");
@@ -457,7 +457,7 @@ public static class NativeEmitter
         {
             if (!directFunctions.TryGetValue(binding.FunctionName, out var function)
                 || function.DirectNativeImport is not DirectNativeImport import
-                || !DirectNativeImportContract.IsValid(function)
+                || !DirectNativeImportContract.IsValid(function, program.Structures)
                 || !StringComparer.OrdinalIgnoreCase.Equals(import.LibraryName, binding.DllName)
                 || import.ExportName != binding.ExportName)
             {

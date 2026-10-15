@@ -12,7 +12,7 @@ public static class FixedLayoutStorage
     /// <summary>The existing Windows x64 target requirement; not a separate layout-profile identity.</summary>
     public const int WindowsX64TargetRequirement = 1;
 
-    /// <summary>Recomputes committed Sequential layouts, returning natural alignment by structure index, or zero for uncommitted structures.</summary>
+    /// <summary>Recomputes committed Sequential and Transparent layouts, returning natural alignment by structure index, or zero for uncommitted structures.</summary>
     /// <exception cref="ArgumentException">A commitment, transitive field, or recorded layout is invalid.</exception>
     /// <exception cref="NotSupportedException">The declaration graph exceeds verification limits.</exception>
     public static ImmutableArray<int> Validate(ImmutableArray<BoundStruct> structures)
@@ -64,8 +64,10 @@ public static class FixedLayoutStorage
             var structure = structures[index];
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name) || !names.Add(structure.Name)
                 || structure.BlittableTargetRequirement != WindowsX64TargetRequirement
-                || !structure.IsSequential || structure.IsTransparent || structure.IsUnique
-                || structure.CleanupMethod is not null || (structure.IsPrivate && structure.IsInternal)
+                || structure.IsSequential == structure.IsTransparent
+                || structure.IsTransparent && structure.Fields.Length != 1
+                || (structure.CleanupMethod is not null && !structure.IsUnique)
+                || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty)
             {
                 throw Invalid();
@@ -90,7 +92,8 @@ public static class FixedLayoutStorage
                 int fieldAlignment;
                 if (field.Type is PrimitiveType.Bool or PrimitiveType.Char16
                     or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.Float32 or PrimitiveType.Float64)
+                    or PrimitiveType.Float32 or PrimitiveType.Float64
+                    or PrimitiveType.NativeRawPointer)
                 {
                     // These are the currently storable Core primitives, not native test carriers.
                     width = ValueLayout.Size(field.Type, structures);
@@ -108,11 +111,15 @@ public static class FixedLayoutStorage
                         throw Invalid();
                     }
                     Visit(nested, depth + 1);
+                    if (structures[nested].IsUnique && !structure.IsUnique)
+                    {
+                        throw Invalid();
+                    }
                     width = structures[nested].Size;
                     fieldAlignment = alignments[nested];
                     height = Math.Max(height, heights[nested] + 1);
                 }
-                var offset = Align(size, fieldAlignment);
+                var offset = structure.IsTransparent ? 0 : Align(size, fieldAlignment);
                 if (offset > int.MaxValue - width || field.Offset != offset || field.Size != width)
                 {
                     throw Invalid();
@@ -120,7 +127,8 @@ public static class FixedLayoutStorage
                 size = offset + width;
                 alignment = Math.Max(alignment, fieldAlignment);
             }
-            if (Align(size, alignment) != structure.Size || structure.Size < 1)
+            if ((structure.IsTransparent ? size : Align(size, alignment)) != structure.Size
+                || structure.Size < 1)
             {
                 throw Invalid();
             }

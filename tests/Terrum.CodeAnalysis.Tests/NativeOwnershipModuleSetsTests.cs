@@ -13,7 +13,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeOwnershipModuleSetsTests
 {
     private const string First = """
-        public unique struct FirstTicket {
+        [Blittable] [Layout(LayoutKind.Sequential)] public unique struct FirstTicket {
             public int32 Value;
             [NoThrow] public FirstTicket(int32 value) { Value = value; }
             [NoThrow] [Cleanup] public void Close() {}
@@ -23,7 +23,7 @@ public sealed class NativeOwnershipModuleSetsTests
         """;
 
     private const string Second = """
-        public unique struct SecondTicket {
+        [Blittable] [Layout(LayoutKind.Sequential)] public unique struct SecondTicket {
             public int64 Value;
             public uint64 Marker;
             [NoThrow] public SecondTicket(int64 value) {

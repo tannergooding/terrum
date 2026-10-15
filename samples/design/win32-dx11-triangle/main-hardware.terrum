@@ -165,8 +165,8 @@ struct Host {
     int32 Value;
 
     [NoThrow]
-    public static nint WindowProcedure(Terrum.Interop.Windows.HWND window, uint32 message,
-        nuint wParam, nint lParam) {
+    public static unsafe nint WindowProcedure(Terrum.Interop.Windows.HWND window, uint32 message,
+        nuint wParam, nint lParam) { unsafe {
         if (message == 5) {
             if (PostMessageW(window, 32768, wParam, 0) == 0) {
                 mut Terrum.Interop.Windows.MSG failureQuit = msgzero();
@@ -183,7 +183,7 @@ struct Host {
             return 0;
         }
         return DefWindowProcW(window, message, wParam, lParam);
-    }
+    } }
 }
 
 public unique struct WindowOwner {
@@ -191,7 +191,7 @@ public unique struct WindowOwner {
     private char16 Atom;
     private uint32 ThreadId;
 
-    public WindowOwner() {
+    public WindowOwner() { unsafe {
         Handle = Terrum.Interop.Windows.HWND.NoOwner;
         Atom = 0;
         ThreadId = GetCurrentThreadId();
@@ -210,26 +210,26 @@ public unique struct WindowOwner {
             if (Handle == Terrum.Interop.Windows.HWND.NoOwner && Atom != 0) {
                 ExitIfFalse(UnregisterClassW(
                     utf16z("TerrumOwnerClass"), GetModuleHandleW(null)) != 0);
-            }
+            } }
         }
     }
 
     [NoThrow]
     private static void ExitIfFalse(bool succeeded) {
         if (!succeeded) {
-            ExitProcess(87);
+            unsafe { ExitProcess(87); }
         }
     }
 
     [NoThrow] [Cleanup]
-    public void Close() {
+    public void Close() { unsafe {
         ExitIfFalse(ThreadId == GetCurrentThreadId());
         ExitIfFalse(DestroyWindow(Handle) != 0);
         ExitIfFalse(UnregisterClassW(
             utf16z("TerrumOwnerClass"), GetModuleHandleW(null)) != 0);
-    }
+    } }
 
-    public int32 Run() {
+    public int32 Run() { unsafe {
         ExitIfFalse(ThreadId == GetCurrentThreadId());
         InlineArray<uint32, 1> featureLevels = [45056];
         mut InlineArray<uint32, 1> selectedFeatureLevel = [0];
@@ -258,8 +258,7 @@ public unique struct WindowOwner {
                         return 1;
                     }
                     prefixLength = scan + 1;
-                }
-            }
+                } }
             if (prefixLength == 0 || prefixLength + 14 > 260) {
                 return 1;
             }
@@ -409,7 +408,7 @@ public unique struct WindowOwner {
             }
         }
         return 1;
-    }
+    } }
 }
 
 int32 Main() {

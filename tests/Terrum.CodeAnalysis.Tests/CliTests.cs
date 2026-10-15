@@ -1185,7 +1185,7 @@ public sealed partial class CliTests
     public async Task SourceSetsResolveNamespacesAndValueMembersAcrossFilesAsync(string command)
     {
         const string Entry = "using Parts; int32 Main() { Box value = new Box(10); return value.Total(32); }";
-        const string Library = "namespace Parts; public struct Box { public int32 Value; public Box(int32 value) { Value = value; } public int32 Total(int32 extra) { return Value + extra; } }";
+        const string Library = "namespace Parts; [Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; public Box(int32 value) { Value = value; } public int32 Total(int32 extra) { return Value + extra; } }";
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-set-{Guid.NewGuid():N}");
         var library = prefix + ".terrum";
         var image = prefix + ".exe";

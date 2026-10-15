@@ -520,7 +520,7 @@ public static partial class NativeModuleCompiler
             {
                 continue;
             }
-            if (!function.IsExternal || !DirectNativeImportContract.IsValid(function))
+            if (!function.IsExternal || !DirectNativeImportContract.IsValid(function, program.Structures))
             {
                 throw new ModuleContractException(
                     "Graph producer contains an invalid direct native import declaration.");

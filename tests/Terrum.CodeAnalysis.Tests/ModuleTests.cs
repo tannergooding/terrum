@@ -155,7 +155,7 @@ public sealed class ModuleTests
         BoundRuntimePolicy policy)
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int32 First;
                 public int32 Second;
                 public Pair(int32 first, int32 second) {
@@ -212,7 +212,7 @@ public sealed class ModuleTests
         BoundRuntimePolicy policy)
     {
         const string LibrarySource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int32 First;
                 public int32 Second;
                 public Pair(int32 first, int32 second) {
@@ -274,7 +274,7 @@ public sealed class ModuleTests
         BoundRuntimePolicy policy)
     {
         const string LibrarySource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int32 First;
                 public int32 Second;
                 public Pair(int32 first, int32 second) {
@@ -415,7 +415,7 @@ public sealed class ModuleTests
         BoundRuntimePolicy policy)
     {
         const string LibrarySource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int32 First;
                 public int32 Second;
                 public Pair(int32 first, int32 second) {
@@ -487,7 +487,7 @@ public sealed class ModuleTests
     public async Task NativeGraphDoesNotPublishCopyInitializationOutputAfterImportedFailureAsync()
     {
         const string librarySource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int32 First;
                 public int32 Second;
                 public Pair(int32 first, int32 second) {
@@ -1344,7 +1344,7 @@ public sealed class ModuleTests
     {
         const string Library = """
             namespace Values;
-            public struct Value {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Value {
                 public int32 Number;
                 public Value(int32 number) { this.Number = number; }
                 public int32 Add(int32 amount) { return this.Number + amount; }
@@ -1800,17 +1800,17 @@ public sealed class ModuleTests
     [Test]
     public async Task ConstructorContractsUseExplicitArgumentsRatherThanReceiverSlotsAsync()
     {
-        const string Consumer = "public struct Box { public int32 Value; "
+        const string Consumer = "[Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; "
             + "public Box(int32 value) { this.Value = value; } } "
             + "int32 Main() { Box box = new Box(11); return box.Value; }";
         var first = Compile(Consumer);
         var consumer = ModuleCompiler.CreateConsumer(first, ModuleCompiler.CreateProducer(first, ["Box.#ctor"]));
-        var compatible = Compile("public struct Box { public int32 Value; "
+        var compatible = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; "
             + "public Box(int32 value) { this.Value = 22; } } int32 Main() { return 0; }");
         var linked = ModuleCompiler.Link(consumer, ModuleCompiler.CreateProducer(compatible, ["Box.#ctor"]));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(22));
 
-        var changed = Compile("public struct Box { public int32 Value; "
+        var changed = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; "
             + "public Box(uint32 value) { this.Value = int32(value); } } int32 Main() { return 0; }");
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.Link(consumer, ModuleCompiler.CreateProducer(changed, ["Box.#ctor"])))!;
@@ -1819,7 +1819,7 @@ public sealed class ModuleTests
     [TestCase(2)]
     public void RejectsMalformedConstructorParameterCountBeforeContractParsing(int parameterCount)
     {
-        var initial = Compile("public struct Box { public int32 Value; "
+        var initial = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; "
             + "public Box(int32 value) { this.Value = value; } } "
             + "int32 Main() { Box box = new Box(11); return box.Value; }");
         var producer = ModuleCompiler.CreateProducer(initial, ["Box.#ctor"]);
@@ -1852,7 +1852,7 @@ public sealed class ModuleTests
     [Test]
     public async Task PersistedConsumerRejectsChangedOutputLayoutAndFieldAccessInWorkerAsync()
     {
-        const string PairSource = "public struct Pair { public int32 A; public int32 B; "
+        const string PairSource = "[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public int32 A; public int32 B; "
             + "public Pair() { this.A = 11; this.B = 1; } "
             + "public static int32 Value() { Pair p = new Pair(); return p.A; } } "
             + "int32 Main() { return Pair.Value(); }";
@@ -1862,9 +1862,9 @@ public sealed class ModuleTests
             ("int32 Main() { if (Try(out var value)) { return value; } return 0; } "
                 + "public bool Try(out int32 value) { value = 11; return true; }",
                 "Try", "int32 Main() { return 0; } public bool Try(int32 value) { return true; }"),
-            (PairSource, "Pair.Value", "public struct Pair { public int32 B; public int32 A; " + PairReplacement),
-            (PairSource, "Pair.Value", "public struct Pair { public int32 A; private int32 B; " + PairReplacement),
-            (PairSource, "Pair.Value", "public struct Pair { public int32 A; internal int32 B; " + PairReplacement),
+            (PairSource, "Pair.Value", "[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public int32 B; public int32 A; " + PairReplacement),
+            (PairSource, "Pair.Value", "[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public int32 A; private int32 B; " + PairReplacement),
+            (PairSource, "Pair.Value", "[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public int32 A; internal int32 B; " + PairReplacement),
         };
 
         foreach (var (initialSource, export, changedSource) in cases)
@@ -1897,7 +1897,7 @@ public sealed class ModuleTests
     [Test]
     public void PrivateFunctionCannotBecomeAnImportedGrant()
     {
-        var program = Compile("public struct Secret { private int32 Value; private Secret() { this.Value = 7; } } "
+        var program = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Secret { private int32 Value; private Secret() { this.Value = 7; } } "
             + "int32 Main() { return 0; }");
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Secret.#ctor"]))!;
     }
@@ -1925,7 +1925,7 @@ public sealed class ModuleTests
             + "public static int32 Get() { return 11; } } int32 Main() { return 0; }");
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(implicitInternalType, ["Hidden.Get"]))!;
 
-        var privateField = Compile("public struct Pair { public int32 A; private int32 B; "
+        var privateField = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public int32 A; private int32 B; "
             + "public Pair() { this.A = 11; this.B = 1; } } "
             + "int32 Main() { return 0; } public Pair Make() { return new Pair(); }");
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(privateField, ["Make"]))!;
@@ -1948,7 +1948,7 @@ public sealed class ModuleTests
         const string Main = "int32 Main() { return Secret.Get(); }";
         static string Producer(int value)
         {
-            return "public struct Secret { private int32 Value; "
+            return "[Blittable] [Layout(LayoutKind.Sequential)] public struct Secret { private int32 Value; "
             + "private Secret() { this.Value = " + value.ToString(System.Globalization.CultureInfo.InvariantCulture)
             + "; } public static int32 Get() { Secret secret = new Secret(); return secret.Value; } }";
         }
@@ -2029,7 +2029,7 @@ public sealed class ModuleTests
     [Test]
     public void TamperedProducerCannotExportPrivateDependency()
     {
-        const string Source = "public struct Secret { private int32 Value; "
+        const string Source = "[Blittable] [Layout(LayoutKind.Sequential)] public struct Secret { private int32 Value; "
             + "private Secret() { this.Value = 7; } "
             + "public static int32 Get() { Secret secret = new Secret(); return secret.Value; } } "
             + "int32 Main() { return Secret.Get(); }";
@@ -2052,7 +2052,7 @@ public sealed class ModuleTests
     [Test]
     public void SameDeclaringTypeDoesNotGrantConsumerAccessToProducerPrivateBody()
     {
-        const string Source = "public struct Secret { private int32 Value; "
+        const string Source = "[Blittable] [Layout(LayoutKind.Sequential)] public struct Secret { private int32 Value; "
             + "private Secret() { this.Value = 7; } "
             + "public static int32 Get() { Secret s = new Secret(); return s.Value; } "
             + "public static int32 Consumer() { Secret s = new Secret(); return s.Value; } } "
@@ -2077,7 +2077,7 @@ public sealed class ModuleTests
     [Test]
     public void ForgedConsumerCallCannotReachProducerPrivateSymbol()
     {
-        const string Source = "public struct S { public int32 Field; "
+        const string Source = "[Blittable] [Layout(LayoutKind.Sequential)] public struct S { public int32 Field; "
             + "private static int32 Hide() { return 7; } "
             + "public static int32 Show() { return Hide(); } } "
             + "int32 Main() { return S.Show(); }";
@@ -2097,12 +2097,12 @@ public sealed class ModuleTests
     [TestCase("public int32 A; internal int32 B;")]
     public void RejectsChangedFieldOrderOrAccessBeforeExecutingConsumer(string fields)
     {
-        var initial = Compile("public struct Pair { public int32 A; public int32 B; "
+        var initial = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public int32 A; public int32 B; "
             + "public Pair() { this.A = 11; this.B = 1; } } "
             + "int32 Main() { return Value(); } public int32 Value() { Pair p = new Pair(); return p.A; }");
         var original = ModuleCompiler.CreateProducer(initial, ["Value", "Pair.#ctor"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, original);
-        var changed = Compile("public struct Pair { " + fields + " "
+        var changed = Compile("[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { " + fields + " "
             + "public Pair() { this.A = 11; this.B = 1; } } "
             + "int32 Main() { return 0; } public int32 Value() { Pair p = new Pair(); return p.A; }");
         _ = Assert.Throws<ModuleContractException>(() =>
@@ -2112,7 +2112,7 @@ public sealed class ModuleTests
     [Test]
     public async Task RemapsReorderedTypeIdentifiersWithoutRebindingConsumerAsync()
     {
-        const string A = "public struct A { public int32 Value; public A() { this.Value = 5; } }";
+        const string A = "[Blittable] [Layout(LayoutKind.Sequential)] public struct A { public int32 Value; public A() { this.Value = 5; } }";
         const string B = "struct B { public int32 Number; public B() { this.Number = 2; } }";
         const string Functions = "int32 Main() { return Helper(); } "
             + "public int32 Helper() { A value = new A(); return value.Value; }";
@@ -2147,10 +2147,12 @@ public sealed class ModuleTests
     public void RejectsCompositeContractsInRetiredSemanticRevision()
     {
         var program = Compile("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Child {
                 public int32 Value;
                 public Child() { Value = 42; }
             }
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Owner {
                 public Child Item;
                 public Owner() { Item = new Child(); }

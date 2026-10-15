@@ -384,7 +384,7 @@ public sealed class Integer64Tests
     public async Task WideLiteralPayloadsAndFieldContractsSurviveModuleLinkingAsync()
     {
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public struct Wide {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Wide {
                 public int64 Signed;
                 public uint64 Unsigned;
                 public Wide() { Signed = int64.MinValue; Unsigned = uint64.MaxValue; }

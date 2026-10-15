@@ -33,7 +33,7 @@ public sealed partial class CliTests
         try
         {
             await File.WriteAllTextAsync(source, """
-                public unique struct Token {
+                [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                     public int32 Id;
                     public Token() { Id = 42; }
                     [NoThrow] [Cleanup] public void Close() {}

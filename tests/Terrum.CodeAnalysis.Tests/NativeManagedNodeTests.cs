@@ -49,11 +49,11 @@ public sealed class NativeManagedNodeTests
         """;
 
     private const string MixedLibrary = """
-        public struct CopyValue {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct CopyValue {
             public int32 Value;
             public CopyValue(int32 value) { Value = value; }
         }
-        public unique struct UniqueValue {
+        [Blittable] [Layout(LayoutKind.Sequential)] public unique struct UniqueValue {
             public int32 Value;
             public UniqueValue(int32 value) { Value = value; }
             [NoThrow] [Cleanup] public void Close() {}

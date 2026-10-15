@@ -537,7 +537,9 @@ internal static class NativeDx11ComCatalog
             ]),
         Method(ClearStateIdentity, DeviceContext, DeviceContext, "ClearState",
             "void(ID3D11DeviceContext*)",
-            "windows-x64-rcx-void", NativeComEffects.None),
+            "windows-x64-rcx-void", NativeComEffects.None) with {
+                IsNoThrow = true,
+            },
     ];
 
     internal static ImmutableArray<(string Source, string Target)> PermittedBaseEdges { get; } = [

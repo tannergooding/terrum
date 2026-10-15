@@ -24,7 +24,7 @@ public sealed partial class CliTests
         try
         {
             await File.WriteAllTextAsync(leafSource, """
-                public unique struct Ticket {
+                [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                     public int32 Value;
                     [NoThrow] public Ticket(int32 value) { Value = value; }
                     [NoThrow] [Cleanup] public void Close() {}

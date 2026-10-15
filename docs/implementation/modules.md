@@ -54,9 +54,11 @@ approved-TRRM loop envelope described above is a different wire format.
 Revision 76 is the semantic-module base. Private revisions 77 through 80 add
 private span metadata, fixed-layout commitments, direct imports and outputs,
 and direct `NativeParameter` input metadata, respectively; revisions 79 and 80
-retain the applicable earlier private fields. Writers select the required
-revision for the retained contracts, and readers accept revisions 76 through
-80 while rejecting unsupported combinations. Older artifacts must be
+retain the applicable earlier private fields. Revision 81 combines private
+span roles with fixed-layout facts for source-granted modules that do not
+retain direct native imports. Writers select the required revision for the
+retained contracts, and readers accept revisions 76 through 81 while
+rejecting unsupported combinations. Older artifacts must be
 recreated from source. These private formats preserve verified, typed,
 source-mapped structured IR and the supported declaration, layout,
 initialization, cleanup, and runtime contracts described in this reference and

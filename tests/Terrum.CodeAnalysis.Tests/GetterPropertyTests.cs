@@ -61,7 +61,7 @@ public sealed class GetterPropertyTests
     public void StaticComputedGetterHasNoReceiverAndUsesTypeQualifiedAndUnqualifiedLookup()
     {
         const string source = """
-            public struct Counter {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
                 public int32 Placeholder;
                 public static int32 Base { [NoThrow] get { return 40; } }
                 public static int32 LocalValue {
@@ -113,7 +113,7 @@ public sealed class GetterPropertyTests
     public void GetterLookupDoesNotFallBackToAnotherOwner(string parameters, string access)
     {
         var compilation = Compilation.CreateLibrary([
-            SyntaxTree.Parse("namespace A; public struct Counter { public int32 Placeholder; }"),
+            SyntaxTree.Parse("namespace A; [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter { public int32 Placeholder; }"),
             SyntaxTree.Parse("""
                 namespace N.A;
                 public struct Counter {
@@ -144,12 +144,12 @@ public sealed class GetterPropertyTests
     public async Task StaticAndReadonlyInstanceGettersReturnCopyValuesAsync(BoundRuntimePolicy policy)
     {
         const string source = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public mut int32 First;
                 public mut int32 Second;
                 public Pair(int32 first, int32 second) { First = first; Second = second; }
             }
-            public struct Odd {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Odd {
                 public char16 First;
                 public char16 Second;
                 public bool Third;
@@ -159,16 +159,16 @@ public sealed class GetterPropertyTests
                     Third = third;
                 }
             }
-            public struct Envelope {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Envelope {
                 public Pair Payload;
                 public Odd Tail;
                 public Envelope(Pair payload, Odd tail) { Payload = payload; Tail = tail; }
             }
-            public unique struct UniqueValue {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct UniqueValue {
                 public int32 Number;
                 public UniqueValue(int32 number) { Number = number; }
             }
-            public struct Counter {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
                 public mut int32 Number;
                 public Counter(int32 number) { Number = number; }
                 public static Pair StaticPair {
@@ -241,11 +241,11 @@ public sealed class GetterPropertyTests
         await RunNativeImageAsync(NativeEmitter.Emit(program, runtimePolicy), 91).ConfigureAwait(true);
     }
     [TestCase("""
-        public unique struct UniqueValue {
+        [Blittable] [Layout(LayoutKind.Sequential)] public unique struct UniqueValue {
             public int32 Number;
             public UniqueValue(int32 number) { Number = number; }
         }
-        public struct Counter {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
             public int32 Placeholder;
             public static UniqueValue Value { get { return new UniqueValue(42); } }
         }
@@ -255,7 +255,7 @@ public sealed class GetterPropertyTests
             public int32 Number;
             public Box(int32 number) { Number = number; }
         }
-        public struct Counter {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
             public int32 Placeholder;
             public static Box Value { get { return new Box(42); } }
         }
@@ -370,7 +370,7 @@ public sealed class GetterPropertyTests
     public async Task ExportedGetterServicesSemanticAndNativeConsumersAsync(NativeRuntimePolicy policy)
     {
         const string Library = """
-            public struct Counter {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
                 public int32 _value;
                 public Counter(int32 value) { _value = value; }
                 public static Counter Create() { return new Counter(42); }
@@ -385,7 +385,7 @@ public sealed class GetterPropertyTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), boundPolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -468,7 +468,7 @@ public sealed class GetterPropertyTests
     public void PrivateGetterOnSharedPublicStructSurvivesSemanticLinking()
     {
         var program = CompileLibrary("""
-            public struct Counter {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
                 public int32 ValueField;
                 public Counter(int32 value) { ValueField = value; }
                 int32 Value { [NoThrow] get { return ValueField; } }

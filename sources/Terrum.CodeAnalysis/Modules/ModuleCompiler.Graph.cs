@@ -189,7 +189,7 @@ public static partial class ModuleCompiler
             {
                 if (function.DirectNativeImport is not null)
                 {
-                    if (!DirectNativeImportContract.IsValid(function))
+                    if (!DirectNativeImportContract.IsValid(function, program.Structures))
                     {
                         throw new ModuleContractException(
                             $"Graph library direct import '{function.Name}' is invalid.");

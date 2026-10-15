@@ -17,18 +17,22 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class AggregateAbiTests
 {
     private const string Declarations = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         struct Three {
             public bool A; public bool B; public bool C;
             public Three(bool a, bool b, bool c) { A = a; B = b; C = c; }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         struct Six {
             public char16 A; public char16 B; public char16 C;
             public Six(char16 a, char16 b, char16 c) { A = a; B = b; C = c; }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         struct Twelve {
             public int32 A; public int32 B; public int32 C;
             public Twelve(int32 a, int32 b, int32 c) { A = a; B = b; C = c; }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         struct Wide {
             public mut Twelve Value; public mut int32 Tail;
             public Wide(int32 tail) { Value = new Twelve(10, 11, 12); Tail = tail; }
@@ -87,7 +91,7 @@ public sealed class AggregateAbiTests
     [TestCase(16)]
     public async Task EveryNaturalAggregateSizeCopiesReturnsAndPublishesExactlyAsync(int size)
     {
-        var source = new StringBuilder("struct Bytes {");
+        var source = new StringBuilder("[Blittable] [Layout(LayoutKind.Sequential)] struct Bytes {");
         for (var index = 0; index < size; index++)
         {
             _ = source.Append(index == 0 ? "public mut bool F" : "public bool F").Append(index).Append(';');

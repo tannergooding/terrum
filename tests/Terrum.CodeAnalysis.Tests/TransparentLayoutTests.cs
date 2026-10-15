@@ -16,7 +16,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class TransparentLayoutTests
 {
     private const string Library = """
-        [Layout(Transparent)] public struct Number {
+        [Blittable] [Layout(LayoutKind.Transparent)] public struct Number {
             public int32 Value;
             public Number(int32 value) { Value = value; }
         }
@@ -33,7 +33,7 @@ public sealed class TransparentLayoutTests
         Assert.That(structure.IsTransparent, Is.True);
         Assert.That(structure.Size, Is.EqualTo(4));
         var producer = ModuleCompiler.CreateProducer(program, ["Wrap", "Unwrap"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).IsTransparent, Is.True);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(Consumer, reference, policy), producer);
@@ -65,12 +65,12 @@ public sealed class TransparentLayoutTests
             apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(43));
         Assert.That(SHA256.HashData(nativeConsumer), Is.EqualTo(nativeSnapshot));
 
-        var autoProgram = CompileLibrary(Library.Replace("[Layout(Transparent)] ", "", StringComparison.Ordinal), policy);
-        var autoProducer = ModuleCompiler.CreateProducer(autoProgram, ["Wrap", "Unwrap"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(autoProducer.AsSpan(4, 4)), Is.EqualTo(76));
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer, autoProducer))!;
-        var nativeAuto = NativeModuleCompiler.CreateProducer(autoProgram, ["Wrap", "Unwrap"], "NodeB", policy);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeAuto]))!;
+        var uncommitted = Compilation.CreateLibrary(SyntaxTree.Parse(
+            Library.Replace("[Blittable] [Layout(LayoutKind.Transparent)] ", "", StringComparison.Ordinal)),
+            (BoundRuntimePolicy)policy);
+        Assert.That(uncommitted.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(uncommitted.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3005"), Is.True);
     }
     [TestCase("[Layout(Transparent)] struct Empty { }")]
     [TestCase("[Layout(Transparent)] struct Pair { int32 A; int32 B; }")]
@@ -101,13 +101,14 @@ public sealed class TransparentLayoutTests
             Structures = [structure with { Fields = [] }],
         }))!;
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(
-            "public struct Pair { public int32 Left; public int32 Right; }"
+            "[Blittable] [Layout(LayoutKind.Sequential)] "
+            + "public struct Pair { public int32 Left; public int32 Right; }"
             + " public int32 Read(Pair value) { return value.Left; }", NativeRuntimePolicy.FailFast), ["Read"]);
         var flag = new byte[] { 4, 0, 0, 0, (byte)'P', (byte)'a', (byte)'i', (byte)'r',
-            8, 0, 0, 0, 0, 0, 0, 0 };
+            8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1 };
         var location = producer.AsSpan().IndexOf(flag);
         Assert.That(location >= 0, Is.True);
-        producer[location + flag.Length - 1] = 1;
+        producer[location + 15] = 1;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(producer))!;
     }
 

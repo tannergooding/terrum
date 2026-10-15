@@ -603,7 +603,7 @@ public sealed partial class GenericControlFlowModuleTests
         NativeRuntimePolicy policy)
     {
         const string providerSource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int64 First;
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
@@ -617,7 +617,7 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """;
         const string originalProviderSource = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int64 First;
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }

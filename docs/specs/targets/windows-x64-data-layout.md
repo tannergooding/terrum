@@ -179,7 +179,9 @@ public struct Packet
 ```
 
 Omission of Layout selects Auto. Explicit Auto is permitted without controls,
-but cannot combine with Blittable or public instance fields.
+but cannot combine with Blittable or externally visible public instance
+fields. A public field on an internal struct remains internal and does not
+create an independently replaceable layout boundary.
 Sequential does not itself grant Blittable. Union requires Blittable.
 Transparent has exactly one instance field and accepts neither custom
 control, even an otherwise equivalent value. An enum uses its explicit

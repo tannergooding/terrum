@@ -20,11 +20,11 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeModuleTests
 {
     private const string Provider = """
-        public struct Twelve {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Twelve {
             public int32 First; public int32 Second; public int32 Third;
             public Twelve(int32 a, int32 b, int32 c) { First = a; Second = b; Third = c; }
         }
-        public struct Wide {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Wide {
             public int64 Signed; public uint64 Unsigned;
             public Wide(int64 signed, uint64 unsigned) { Signed = signed; Unsigned = unsigned; }
         }
@@ -218,7 +218,7 @@ public sealed class NativeModuleTests
     [Test]
     public async Task NativeConsumerAcceptsCompatibleProviderWithReorderedTypesAsync()
     {
-        const string typeA = "public struct A { public int32 Value; public A() { Value = 5; } }";
+        const string typeA = "[Blittable] [Layout(LayoutKind.Sequential)] public struct A { public int32 Value; public A() { Value = 5; } }";
         const string typeB = "struct B { public int32 Number; public B() { Number = 2; } }";
         const string functions = "public int32 Read() { A value = new A(); return value.Value; }";
         var original = NativeModuleCompiler.CreateProducer(CompileLibrary(typeA + typeB + functions),

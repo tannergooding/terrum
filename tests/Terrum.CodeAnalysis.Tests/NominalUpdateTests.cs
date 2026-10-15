@@ -456,7 +456,7 @@ public sealed class NominalUpdateTests
     public void BodylessIncrementImportContractRequiresOwnerResult()
     {
         const string source = """
-            public struct Value {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Value {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
                 public static Value operator ++(Value value) {
@@ -523,11 +523,13 @@ public sealed class NominalUpdateTests
         }
         if (exportOperator)
         {
-            library = library.Replace("struct Value {", "public struct Value {", StringComparison.Ordinal);
+            library = library.Replace("struct Value {",
+                "[Blittable] [Layout(LayoutKind.Sequential)] public struct Value {", StringComparison.Ordinal);
         }
         string[] exports = exportOperator ? ["Next", "Value.op_Increment"] : ["Next"];
         var original = ModuleCompiler.CreateProducer(CompileLibrary(library, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)),
+            Is.EqualTo(exportOperator ? 78 : 76));
         var stale = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 63);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));

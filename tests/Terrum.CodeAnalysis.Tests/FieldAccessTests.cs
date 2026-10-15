@@ -14,11 +14,11 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class FieldAccessTests
 {
     private const string MutableValues = """
-        public struct Inner {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Inner {
             public mut int32 Value;
             public Inner() { Value = 1; }
         }
-        public struct Outer {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Outer {
             public mut Inner Value;
             public Outer() { Value = new Inner(); }
         }
@@ -90,7 +90,7 @@ public sealed class FieldAccessTests
         {
             var modifier = writable ? "mut " : "";
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-                "public struct Cell { public " + modifier + "int32 Value; public Cell(int32 value) { Value = value; } } "
+                "[Blittable] [Layout(LayoutKind.Sequential)] public struct Cell { public " + modifier + "int32 Value; public Cell(int32 value) { Value = value; } } "
                 + "public Cell Make() { return new Cell(" + initial.ToString(System.Globalization.CultureInfo.InvariantCulture) + "); }"));
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
             return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), ["Make"]);

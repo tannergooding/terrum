@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NestedValueTests
 {
     private const string Values = """
-        public struct Pair {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
             public mut Unit First;
             public mut Unit Second;
             public Pair(int32 first, int32 second) {
@@ -25,7 +25,7 @@ public sealed class NestedValueTests
                 this.Second = new Unit(second);
             }
         }
-        public struct Unit {
+        [Blittable] [Layout(LayoutKind.Sequential)] public struct Unit {
             public mut int32 Value;
             public Unit(int32 value) { this.Value = value; }
         }
@@ -48,7 +48,7 @@ public sealed class NestedValueTests
     public async Task ConstructorsAndOutputsMutateOnlyInitializedNestedValuesAsync()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            public struct Box {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Box {
                 public mut Pair Value;
                 public int32 Tail;
                 public Box() {
@@ -276,7 +276,7 @@ public sealed class NestedValueTests
         var outer = SyntaxTree.Parse("using Model; struct Wrapper { public Unit Value; "
             + "public Wrapper() { Value = new Unit(42); } } "
             + "int32 Main() { Wrapper value = new Wrapper(); return value.Value.Value; }", "outer.terrum");
-        var inner = SyntaxTree.Parse("namespace Model; public struct Unit { public int32 Value; "
+        var inner = SyntaxTree.Parse("namespace Model; [Blittable] [Layout(LayoutKind.Sequential)] public struct Unit { public int32 Value; "
             + "public Unit(int32 value) { Value = value; } }", "inner.terrum");
         var compilation = Compilation.Create([outer, inner]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -299,7 +299,8 @@ public sealed class NestedValueTests
     public void ModuleExportsRequireTransitivePublicValueLayouts()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public struct Outer { public Hidden Value; public Outer() { Value = new Hidden(); } }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Outer { public Hidden Value; public Outer() { Value = new Hidden(); } }
+            [Blittable] [Layout(LayoutKind.Sequential)]
             struct Hidden { public int32 Value; public Hidden() { Value = 42; } }
             public Outer Make() { return new Outer(); }
             """));
@@ -340,8 +341,8 @@ public sealed class NestedValueTests
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = consumerCompilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), producer);
         var reordered = Compilation.CreateLibrary(SyntaxTree.Parse("""
             struct Hidden { public int32 X; public Hidden() { X = 0; } }
-            public struct Unit { public mut int32 Value; public Unit(int32 value) { Value = value; } }
-            public struct Pair { public mut Unit First; public mut Unit Second;
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Unit { public mut int32 Value; public Unit(int32 value) { Value = value; } }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public mut Unit First; public mut Unit Second;
                 public Pair(int32 a, int32 b) { First = new Unit(a); Second = new Unit(b); } }
             public Pair Make() { Hidden hidden = new Hidden(); return new Pair(20, 22); }
             """));

@@ -19,7 +19,7 @@ public sealed partial class NativeManagedClassModuleTests
         NativeRuntimePolicy policy)
     {
         var program = Compile("""
-            public struct Counter {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
                 public mut int32 Value;
                 public Counter(int32 value) { Value = value; }
                 public mut void Increment() { Value = Value + 1; }
@@ -33,7 +33,7 @@ public sealed partial class NativeManagedClassModuleTests
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(program, ["Counter.Increment"]))!;
         var producer = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("Leaf"));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Leaf(); }",

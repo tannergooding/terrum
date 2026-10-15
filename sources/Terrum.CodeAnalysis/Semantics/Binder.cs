@@ -721,7 +721,7 @@ internal sealed partial class Binder
                     StringComparison.Ordinal) => ("TRM3030", nativeComMessage),
                 _ => ("TRM3016", exceededWorkLimit
                     ? "Source exceeds the semantic verification work limit."
-                    : "Source violates definite assignment, initialization, or executable type rules."),
+                    : $"Source violates definite assignment, initialization, or executable type rules. {invalidEffect}"),
             };
             Report(code, message, span);
             return null;
@@ -984,7 +984,9 @@ internal sealed partial class Binder
 
         isWritable = firstToken.Token.Kind == TokenKind.WriteKeyword;
         var pointee = BindType(typeArguments[0], allowVoid: true);
-        if (pointee != PrimitiveType.Void && !DirectNativeImportContract.IsOutputPointee(pointee))
+        if (isWritable
+            ? !DirectNativeImportContract.IsOutputPointee(pointee)
+            : !DirectNativeImportContract.IsInputPointee(pointee, _structs))
         {
             return false;
         }
@@ -1181,23 +1183,65 @@ internal sealed partial class Binder
         var isUnique = false;
         var isTransparent = false;
         var isSequential = false;
+        var isBlittable = false;
+        var layoutAttributeSeen = false;
         var visibilityCount = 0;
         foreach (var element in declaration.Children)
         {
             if (element is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
             {
-                if (attribute.Children is [
-                    SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
-                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "Layout" },
-                    SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
-                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier } layout,
-                    SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
-                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }]
-                    && !isTransparent && !isSequential
-                    && (layout.Token.Text is "Transparent" or "Sequential"))
+                var attributeName = AttributeName(attribute);
+                if (attributeName == "Blittable")
                 {
-                    isTransparent = layout.Token.Text == "Transparent";
-                    isSequential = layout.Token.Text == "Sequential";
+                    if (isBlittable || !IsNoArgumentBlittableAttribute(attribute))
+                    {
+                        Report("TRM3005", "Blittable is a nonrepeatable, parameterless source layout contract.",
+                            attribute.Span);
+                    }
+                    else
+                    {
+                        isBlittable = true;
+                    }
+                }
+                else if (attributeName == "Layout")
+                {
+                    if (layoutAttributeSeen)
+                    {
+                        Report("TRM3005", "Layout is a nonrepeatable source layout contract.", attribute.Span);
+                    }
+                    else
+                    {
+                        layoutAttributeSeen = true;
+                        if (!TryDecodeLayoutAttribute(attribute, out var layoutKind, out var hasControls))
+                        {
+                            Report("TRM3005", hasControls
+                                ? "Packing and Alignment controls are not supported by the current fixed-layout source profile."
+                                : "Layout requires a supported LayoutKind value.", attribute.Span);
+                        }
+                        else
+                        {
+                            switch (layoutKind)
+                            {
+                                case "Auto":
+                                    break;
+                                case "Sequential":
+                                    isSequential = true;
+                                    break;
+                                case "Transparent":
+                                    isTransparent = true;
+                                    break;
+                                case "Union":
+                                    Report("TRM3005",
+                                        "Union layout is not supported by the current source layout profile.",
+                                        attribute.Span);
+                                    break;
+                                default:
+                                    Report("TRM3005", "LayoutKind does not name a supported layout form.",
+                                        attribute.Span);
+                                    break;
+                            }
+                        }
+                    }
                 }
                 else if (AttributeName(attribute) == "Terrum.Interop.NativeComOwner"
                     && NativeComCallContract.IsCataloguedOwnerName(qualified, _nativeImportCatalog))
@@ -1333,12 +1377,26 @@ internal sealed partial class Binder
             Report("TRM3005", "A struct requires at least one field.", declaration.Span);
         }
         if (isTransparent && (isUnique || fields.Count != 1
-            || fields[0].Type is not (PrimitiveType.Bool or PrimitiveType.Char16
-                or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)))
+            || (isBlittable
+                ? !IsBlittableLayoutFieldType(fields[0].Type)
+                : fields[0].Type is not (PrimitiveType.Bool or PrimitiveType.Char16
+                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))))
         {
             Report("TRM3005", "Transparent Copy structs require exactly one scalar value field.", declaration.Span);
         }
         var fieldLayout = fields.ToImmutable();
+        var hasPublicFields = fieldLayout.Any(static field => !field.IsPrivate && !field.IsInternal);
+        if (isPublic && hasPublicFields && !isBlittable)
+        {
+            Report("TRM3005", "Public instance fields require an explicit Blittable layout commitment.",
+                declaration.Span);
+        }
+        if (isBlittable && (!layoutAttributeSeen || !isSequential && !isTransparent))
+        {
+            Report("TRM3005",
+                "The current Blittable source profile requires an explicit Layout(LayoutKind.Sequential) commitment.",
+                declaration.Span);
+        }
         size = (size + alignment - 1) & -alignment;
         var cataloguedFixedArrayElement = _nativeImportCatalog?.SupportsFixedArrayElement(
             qualified, size, alignment) == true;
@@ -1347,6 +1405,8 @@ internal sealed partial class Binder
             IsInternal = _structs[index].IsInternal,
             IsUnique = isUnique,
             IsTransparent = isTransparent,
+            BlittableTargetRequirement = isBlittable
+                ? FixedLayoutStorage.WindowsX64TargetRequirement : 0,
             IsSequential = isSequential,
         };
         _structureAlignments[structureType] = alignment;
@@ -1357,6 +1417,7 @@ internal sealed partial class Binder
         var cataloguedAggregateLayout = _nativeImportCatalog?.SupportsAggregateStorageLayout(
             structureType, _structs) == true;
         if (isSequential && (isPublic || isUnique || fields.Any(static field => !field.IsPrivate))
+            && !isBlittable
             && !cataloguedFixedArrayElement)
         {
             Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
@@ -1371,6 +1432,84 @@ internal sealed partial class Binder
         }
         _ = _layingOut.Remove(index);
         _ = _laidOut.Add(index);
+    }
+
+    private static bool IsNoArgumentBlittableAttribute(SyntaxNode attribute) =>
+        attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "Blittable" },
+            SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket },
+        ];
+
+    private static bool TryDecodeLayoutAttribute(SyntaxNode attribute, out string layoutKind,
+        out bool hasUnsupportedControls)
+    {
+        layoutKind = "";
+        var tokens = attribute.Children.OfType<SyntaxTokenElement>().ToArray();
+        hasUnsupportedControls = tokens.Any(static token =>
+            token.Token.Text is "Packing" or "Alignment");
+
+        if (hasUnsupportedControls)
+        {
+            return false;
+        }
+        if (tokens is [
+            { Token.Kind: TokenKind.OpenBracket },
+            { Token.Kind: TokenKind.Identifier, Token.Text: "Layout" },
+            { Token.Kind: TokenKind.OpenParen },
+            { Token.Kind: TokenKind.Identifier } simpleKind,
+            { Token.Kind: TokenKind.CloseParen },
+            { Token.Kind: TokenKind.CloseBracket },
+        ])
+        {
+            layoutKind = simpleKind.Token.Text;
+            return true;
+        }
+        if (tokens is [
+            { Token.Kind: TokenKind.OpenBracket },
+            { Token.Kind: TokenKind.Identifier, Token.Text: "Layout" },
+            { Token.Kind: TokenKind.OpenParen },
+            { Token.Kind: TokenKind.Identifier, Token.Text: "LayoutKind" },
+            { Token.Kind: TokenKind.Dot },
+            { Token.Kind: TokenKind.Identifier } qualifiedKind,
+            { Token.Kind: TokenKind.CloseParen },
+            { Token.Kind: TokenKind.CloseBracket },
+        ])
+        {
+            layoutKind = qualifiedKind.Token.Text;
+            return true;
+        }
+        if (tokens is [
+            { Token.Kind: TokenKind.OpenBracket },
+            { Token.Kind: TokenKind.Identifier, Token.Text: "Layout" },
+            { Token.Kind: TokenKind.OpenParen },
+            { Token.Kind: TokenKind.Identifier, Token.Text: "Kind" },
+            { Token.Kind: TokenKind.Colon },
+            { Token.Kind: TokenKind.Identifier, Token.Text: "LayoutKind" },
+            { Token.Kind: TokenKind.Dot },
+            { Token.Kind: TokenKind.Identifier } namedKind,
+            { Token.Kind: TokenKind.CloseParen },
+            { Token.Kind: TokenKind.CloseBracket },
+        ])
+        {
+            layoutKind = namedKind.Token.Text;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsBlittableLayoutFieldType(PrimitiveType type)
+    {
+        if (type is PrimitiveType.Bool or PrimitiveType.Char16
+            or PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.Float32 or PrimitiveType.Float64)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private int ValueAlignment(PrimitiveType type)

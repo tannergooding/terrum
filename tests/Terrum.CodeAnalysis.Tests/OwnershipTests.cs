@@ -1180,7 +1180,7 @@ public sealed class OwnershipTests
     public async Task UniqueByValueContractSurvivesSeparateNativeModulesAsync()
     {
         var providerSource = """
-            public unique struct Token {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -1215,7 +1215,7 @@ public sealed class OwnershipTests
     public async Task ConditionalOwningOutputContractSurvivesSeparateModulesAsync()
     {
         const string ProviderSource = """
-            public unique struct Token {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -1311,7 +1311,7 @@ public sealed class OwnershipTests
     public void MalformedUnexportedParameterTypeProducesModuleFormatError()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public struct Box {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Box {
                 public int32 Id;
                 public Box(int32 id) { Id = id; }
             }
@@ -1337,7 +1337,7 @@ public sealed class OwnershipTests
     public void ConsumerImportCannotDowngradeOwningParameterProfile()
     {
         const string ProviderSource = """
-            public unique struct Token {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -1373,7 +1373,7 @@ public sealed class OwnershipTests
     private static async Task AssertExternalCleanupConsumerAsync(string consumerSource, BoundRuntimePolicy policy)
     {
         const string ProducerSource = """
-            public unique struct Token {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -1407,7 +1407,7 @@ public sealed class OwnershipTests
     public async Task UniqueCleanupContractSurvivesSeparateNativeModulesAsync()
     {
         const string ProviderSource = """
-            public unique struct Token {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -1808,13 +1808,13 @@ public sealed class OwnershipTests
     public async Task CompositeOwnershipContractsSurviveSeparateModulesAsync(NativeRuntimePolicy policy)
     {
         const string Provider = """
-            public unique struct Token {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Id;
                 public Token(int32 id) { Id = id; }
                 [NoThrow] [Cleanup] public void Close() {}
                 [NoThrow] public int32 Read() { return Id; }
             }
-            public unique struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Pair {
                 public Token Child;
                 public int32 Tail;
                 public Pair(int32 id) {
@@ -1834,7 +1834,7 @@ public sealed class OwnershipTests
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual44 = compilation.Program; Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual44!; }))();
         var exports = new[] { "Token.Close", "Token.Read", "Pair.Close", "Pair.Read", "Make", "Take" };
         var semanticProducer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)), Is.EqualTo(78));
         var staleVersion = (byte[])semanticProducer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(staleVersion.AsSpan(4, 4), 13);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion))!;
@@ -1867,7 +1867,7 @@ public sealed class OwnershipTests
     public async Task CompositeChildCleanupUsesItsLeafOriginAcrossNativeGraphAsync(NativeRuntimePolicy policy)
     {
         const string Leaf = """
-            public unique struct Ticket {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -1876,7 +1876,7 @@ public sealed class OwnershipTests
             public Ticket Make(int32 value) { return new Ticket(value); }
             """;
         const string Middle = """
-            public unique struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Pair {
                 public Ticket Child;
                 public int32 Tail;
                 public Pair(int32 value) { Child = Make(value); Tail = 2; }

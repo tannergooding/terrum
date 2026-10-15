@@ -53,7 +53,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.PublishAndSummarize"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(77));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(81));
         var alternateCompilation = Compilation.Create(trees,
             ScalarFrontendHost.CreateInvocationProfileBuffers(SourceText.From("different seed 123")), policy);
         Assert.That(alternateCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, alternateCompilation.Diagnostics));
@@ -216,7 +216,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(),
             ["Terrum.CodeAnalysis.PublishAndSummarize"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(77));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(81));
 
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.InvocationProfileId, Is.EqualTo(ScalarFrontendHost.ExpandedInvocationProfileIdentity));

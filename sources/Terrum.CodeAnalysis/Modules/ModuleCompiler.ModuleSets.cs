@@ -164,7 +164,7 @@ public static partial class ModuleCompiler
             {
                 if (function.DirectNativeImport is not null)
                 {
-                    if (!DirectNativeImportContract.IsValid(function)
+                    if (!DirectNativeImportContract.IsValid(function, program.Structures)
                         || reference.Functions.Any(export => export.Name == function.Name))
                     {
                         throw new ModuleContractException(

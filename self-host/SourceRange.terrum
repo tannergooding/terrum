@@ -1,6 +1,8 @@
 using Terrum;
 namespace Terrum.CodeAnalysis;
 
+[Blittable]
+[Layout(LayoutKind.Sequential)]
 public struct SourceRange
 {
     public int32 Start;

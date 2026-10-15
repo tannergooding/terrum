@@ -10,6 +10,7 @@ public static partial class ModuleCompiler
 {
     // Provisional bounded semantic IR only; canonical TRRM (1, 0) reserved bits stay reserved.
     private const int FixedLayoutVersion = 78;
+    private const int PrivateSpanFixedLayoutVersion = 81;
 
     private static Module SelectFixedLayoutRevision(Module module)
     {
@@ -19,7 +20,7 @@ public static partial class ModuleCompiler
         }
         if (module.FormatVersion == PrivateSpanVersion)
         {
-            throw new ModuleContractException("Fixed-storage commitments cannot yet be combined with private-span revision 77.");
+            return module with { FormatVersion = PrivateSpanFixedLayoutVersion };
         }
         if (module.FormatVersion >= DirectNativeImportVersion)
         {

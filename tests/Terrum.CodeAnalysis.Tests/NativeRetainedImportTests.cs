@@ -21,7 +21,7 @@ public sealed class NativeRetainedImportTests
     public void RetainedCleanupDeclarationDoesNotCreateAnUnusedMachineImport(NativeRuntimePolicy policy)
     {
         var leaf = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public unique struct Token {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }
                 [NoThrow] [Cleanup] public void Close() {}

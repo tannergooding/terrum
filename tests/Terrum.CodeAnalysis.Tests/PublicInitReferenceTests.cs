@@ -87,12 +87,12 @@ public sealed class PublicInitReferenceTests
     public async Task ExportedNonBooleanInitPublishesOnNormalReturnAsync(NativeRuntimePolicy policy)
     {
         const string Library = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int32 First;
                 public int32 Second;
                 public Pair(int32 first, int32 second) { First = first; Second = second; }
             }
-            public unique struct Ticket {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -200,7 +200,7 @@ public sealed class PublicInitReferenceTests
         const string Leaf = "namespace Source; public int32 Bias() { return 40; }";
         const string Middle = """
             using Source;
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int64 First;
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
@@ -255,7 +255,7 @@ public sealed class PublicInitReferenceTests
     public async Task PublicUniqueInitPublishesOnlyACompleteOwnerAsync(NativeRuntimePolicy policy)
     {
         const string Library = """
-            public unique struct Ticket {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
                 [NoThrow] [Cleanup] public void Close() {}
@@ -290,7 +290,7 @@ public sealed class PublicInitReferenceTests
     public void ManagedGraphCannotExportUniqueInitOutputs()
     {
         const string Library = """
-            public unique struct Ticket {
+            [Blittable] [Layout(LayoutKind.Sequential)] public unique struct Ticket {
                 public int32 Value;
                 public Ticket(int32 value) { Value = value; }
                 [NoThrow] [Cleanup] public void Close() {}

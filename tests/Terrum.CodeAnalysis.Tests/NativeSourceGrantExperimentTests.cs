@@ -662,7 +662,7 @@ public sealed class NativeSourceGrantExperimentTests
             "int32 Loop() { mut int32 n = 0; while (n < Host.Source.Length) { n = n + 1; break; } return n; }",
             "int32 Loop() { mut int32 n = 0; for (mut int32 i = 0; i < Host.Source.Length; i = i + 1) { n = n + 1; continue; } return n; }",
             "int32 Cleanup() { try { return int32(Host.Source[0]); } finally { int32 n = 0; } }",
-            "public struct Pair { public int32 A; public int32 B; } public Pair Aggregate(Pair value) { return value; }",
+            "[Blittable] [Layout(LayoutKind.Sequential)] public struct Pair { public int32 A; public int32 B; } public Pair Aggregate(Pair value) { return value; }",
         })
         {
             var unsupported = Compile(BoundRuntimePolicy.FailFast, [], extra);

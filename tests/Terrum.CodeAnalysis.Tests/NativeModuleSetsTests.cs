@@ -166,7 +166,7 @@ public sealed class NativeModuleSetsTests
     public void PersistedConsumerSetWithoutImportsValidatesAgainstPopulatedProviders()
     {
         var alpha = Producer("""
-            public struct Node { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Node { public int32 Value; }
             public Node Echo(Node value) { return value; }
             """, "Echo", "First");
         var beta = Producer(Beta, "Beta", "Second");
@@ -260,7 +260,7 @@ public sealed class NativeModuleSetsTests
         var beta = Producer(Beta, "Beta", "Second");
 
         const string Value = """
-            public struct Box {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Box {
                 public int32 Value;
                 public Box(int32 value) { Value = value; }
             }
@@ -284,6 +284,7 @@ public sealed class NativeModuleSetsTests
             Producer("public int32 Alpha() { return 20; }", "Alpha", "First"), beta]))!;
 
         const string Owner = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Lease {
                 public int32 Value;
                 public Lease(int32 value) { Value = value; }
@@ -509,22 +510,22 @@ public sealed class NativeModuleSetsTests
     public async Task BothIndependentNestedValueTablesBindAndExecuteAsync(string secondType, string secondValue)
     {
         const string First = """
-            public struct FirstInner {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct FirstInner {
                 public int32 Value;
                 public FirstInner(int32 value) { Value = value; }
             }
-            public struct FirstOuter {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct FirstOuter {
                 public FirstInner Child;
                 public FirstOuter(FirstInner child) { Child = child; }
             }
             public FirstOuter Alpha() { return new FirstOuter(new FirstInner(20)); }
             """;
         var second = $$"""
-            public struct SecondInner {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct SecondInner {
                 public {{secondType}} Value;
                 public SecondInner({{secondType}} value) { Value = value; }
             }
-            public struct SecondOuter {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct SecondOuter {
                 public SecondInner Child;
                 public SecondOuter(SecondInner child) { Child = child; }
             }
@@ -555,7 +556,7 @@ public sealed class NativeModuleSetsTests
     public void PublicIrCannotAddConsumerOwnedMemberToImportedType()
     {
         const string Provider = """
-            public struct Box { public int32 Value; public Box(int32 value) { Value = value; } }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; public Box(int32 value) { Value = value; } }
             public Box Alpha() { return new Box(20); }
             """;
         var first = Producer(Provider, "Alpha", "First");
@@ -580,6 +581,7 @@ public sealed class NativeModuleSetsTests
     public void RetainedImportOwnershipCannotBeLoweredByRehashingSet()
     {
         const string Owner = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }

@@ -61,7 +61,7 @@ public sealed partial class NativeManagedClassModuleTests
     public async Task WideClassRevisionRetainsTransparentStructuresAsync(NativeRuntimePolicy policy)
     {
         var source = """
-            [Layout(Transparent)] public struct Number {
+            [Blittable] [Layout(LayoutKind.Transparent)] public struct Number {
                 public int32 Value;
                 public Number(int32 value) { Value = value; }
             }
@@ -70,7 +70,7 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source, policy);
         Assert.That(global::System.Linq.Enumerable.Single(program.Structures).IsTransparent, Is.True);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);

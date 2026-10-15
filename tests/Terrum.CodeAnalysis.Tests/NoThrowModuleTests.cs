@@ -37,7 +37,7 @@ public sealed class NoThrowModuleTests
     public async Task NoThrowConstructorAndImportedFunctionRemainDeclaredThroughRemappingAsync()
     {
         const string Source = """
-            public struct Value {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Value {
                 public int32 Number;
                 [NoThrow] public Value(int32 number) { Number = number; }
                 [NoThrow] public int32 Read() { return Number; }

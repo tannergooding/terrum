@@ -150,7 +150,7 @@ public sealed class NativeGraphTests
         static byte[] CreateStructuredProvider(string structure, string identity)
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-                $"public struct {structure} {{ public int32 Value; }} "
+                $"[Blittable] [Layout(LayoutKind.Sequential)] public struct {structure} {{ public int32 Value; }} "
                 + $"public int32 Read{structure}({structure} value) {{ return value.Value; }}"));
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
             return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))(),
@@ -219,7 +219,7 @@ public sealed class NativeGraphTests
     public void GraphProviderValidationAcceptsNoImportsWithDependencies()
     {
         var dependencyCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            public struct Node { public int32 Value; }
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Node { public int32 Value; }
             public Node GetNode(Node value) { return value; }
             """));
         Assert.That(dependencyCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, dependencyCompilation.Diagnostics));
@@ -372,6 +372,7 @@ public sealed class NativeGraphTests
     public async Task OwnedTransferAcrossIntermediatePreservesReplacementContractsAsync()
     {
         const string LeafSource = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }
@@ -522,7 +523,7 @@ public sealed class NativeGraphTests
     {
         var outputMode = usesInit ? "init ref<Pair>" : "out Pair";
         const string ProviderTemplate = """
-            public struct Pair {
+            [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                 public int64 First;
                 public int64 Second;
                 public Pair(int64 first, int64 second) { First = first; Second = second; }
@@ -621,7 +622,7 @@ public sealed class NativeGraphTests
     {
         var providerSource = usesCopyStruct
             ? """
-                public struct Pair {
+                [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                     public int64 First;
                     public int64 Second;
                     public Pair(int64 first, int64 second) { First = first; Second = second; }
@@ -681,7 +682,7 @@ public sealed class NativeGraphTests
     {
         var providerSource = usesCopyStruct
             ? """
-                public struct Pair {
+                [Blittable] [Layout(LayoutKind.Sequential)] public struct Pair {
                     public int64 First;
                     public int64 Second;
                     public Pair(int64 first, int64 second) { First = first; Second = second; }

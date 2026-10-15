@@ -21,7 +21,10 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CallerUnsafeTests
 {
+    private const int FixedLayoutModuleVersion = 78;
+
     private const string PairDeclaration = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Pair {
             public mut int32 First;
             public mut int32 Second;
@@ -29,6 +32,7 @@ public sealed class CallerUnsafeTests
         }
         """;
     private const string TripleDeclaration = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Triple {
             public mut int32 First;
             public mut int32 Second;
@@ -41,18 +45,21 @@ public sealed class CallerUnsafeTests
         }
         """;
     private const string EnvelopeDeclaration = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Envelope {
             public mut Pair Payload;
             public Envelope(Pair payload) { Payload = payload; }
         }
         """;
     private const string FloatBoxDeclaration = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct FloatBox {
             public float64 Value;
             public FloatBox(float64 value) { Value = value; }
         }
         """;
     private const string ValueDeclaration = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Value {
             public mut int32 Marker;
             public Value(int32 marker) { Marker = marker; }
@@ -68,18 +75,22 @@ public sealed class CallerUnsafeTests
         }
         """;
     private const string UnsafeFieldModuleSource = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct SafeInner {
             public mut int32 Value;
             public SafeInner(int32 value) { Value = value; }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct UnsafeInner {
             public unsafe mut int32 Value;
             public UnsafeInner(int32 value) { unsafe { Value = value; } }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct UnsafeOuter {
             public unsafe mut SafeInner Value;
             public UnsafeOuter(SafeInner value) { unsafe { Value = value; } }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct UnsafeLeafOuter {
             public mut UnsafeInner Value;
             public UnsafeLeafOuter(UnsafeInner value) { Value = value; }
@@ -118,9 +129,11 @@ public sealed class CallerUnsafeTests
         }
         """;
     private const string UnsafeMutableFieldLoanModuleSource = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct DiscardedBeforeLoanCounter {
             public int32 Value;
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct LoanCounter {
             public mut int32 Number;
             public LoanCounter(int32 number) { Number = number; }
@@ -134,14 +147,17 @@ public sealed class CallerUnsafeTests
                 return Number;
             }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct UnsafeLeafOwner {
             public unsafe mut LoanCounter Value;
             public UnsafeLeafOwner(LoanCounter value) { unsafe { Value = value; } }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct SafeLoanInner {
             public mut LoanCounter Value;
             public SafeLoanInner(LoanCounter value) { Value = value; }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct UnsafeAncestorOwner {
             public unsafe mut SafeLoanInner Value;
             public UnsafeAncestorOwner(SafeLoanInner value) { unsafe { Value = value; } }
@@ -170,6 +186,7 @@ public sealed class CallerUnsafeTests
         }
         """;
     private const string ConsumerLocalUnsafeMutableFieldLoanSource = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct ConsumerLoanCounter {
             public mut int32 Number;
             public ConsumerLoanCounter(int32 number) { Number = number; }
@@ -178,6 +195,7 @@ public sealed class CallerUnsafeTests
                 return Number;
             }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct ConsumerUnsafeLeafOwner {
             public unsafe mut ConsumerLoanCounter Value;
             public ConsumerUnsafeLeafOwner(ConsumerLoanCounter value) {
@@ -226,6 +244,7 @@ public sealed class CallerUnsafeTests
         }
         """;
     private const string ExpressionOpsDeclaration = """
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct ExpressionOps {
             public int32 Marker;
             public ExpressionOps(int32 marker) { Marker = marker; }
@@ -264,6 +283,7 @@ public sealed class CallerUnsafeTests
     private const string CopyValueGetterSource =
         PairDeclaration + "\n\n" + TripleDeclaration + """
 
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Odd {
             public char16 First;
             public char16 Second;
@@ -274,11 +294,13 @@ public sealed class CallerUnsafeTests
                 Third = third;
             }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct Nested {
             public Pair Payload;
             public Odd Tail;
             public Nested(Pair payload, Odd tail) { Payload = payload; Tail = tail; }
         }
+        [Blittable] [Layout(LayoutKind.Sequential)]
         public struct GetterOwner {
             public int32 Marker;
             public GetterOwner(int32 marker) { Marker = marker; }
@@ -874,7 +896,7 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(
         CompileLibrary(UnsafeFieldExpressionModuleSource, policy),
         ["MakeOuter", "MakeLeafOuter", "ReadValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var (owner, fieldName, expected) in new[]
@@ -912,7 +934,7 @@ public sealed class CallerUnsafeTests
         var unsafeRead = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual9 = expressionReturn.Value; Assert.That(__nunitActual9, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual9!; }))();
         var expressionConsumer = ModuleCompiler.CreateConsumer(expressionProgram, producer);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])expressionConsumer.Clone();
@@ -1036,7 +1058,7 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
 
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
@@ -1296,6 +1318,8 @@ public sealed class CallerUnsafeTests
 
         var receiverConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             struct DiscardedBeforeLoanCounter { public int32 Value; }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct LoanCounter {
                 public mut int32 Number;
                 public LoanCounter(int32 number) { Number = number; }
@@ -1305,6 +1329,8 @@ public sealed class CallerUnsafeTests
                     return Number;
                 }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct UnsafeLeafOwner {
                 public unsafe mut LoanCounter Value;
                 public UnsafeLeafOwner(LoanCounter value) { unsafe { Value = value; } }
@@ -1434,12 +1460,16 @@ public sealed class CallerUnsafeTests
     public void UnsafeExpressionLoanCannotInvalidateAnAlreadyReservedSibling(BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct LoanCounter {
                 public mut int32 Number;
                 public LoanCounter(int32 number) { Number = number; }
                 public mut int32 Next() { Number = Number + 1; return Number; }
                 public mut int32 Add(int32 amount) { Number = Number + amount; return Number; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct UnsafeLoanOwner {
                 public mut LoanCounter SafeChild;
                 public unsafe mut LoanCounter UnsafeChild;
@@ -1600,6 +1630,7 @@ public sealed class CallerUnsafeTests
     public void UnsafeStaticOperatorsRequireAuthorizationForBinaryUnaryAndUpdateSyntax()
     {
         const string declaration = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Number {
                 public int32 Value;
                 public Number(int32 value) { Value = value; }
@@ -1654,10 +1685,14 @@ public sealed class CallerUnsafeTests
     public async Task StaticOperatorIdentityAndUnsafeEffectSurviveModuleImportAsync(BoundRuntimePolicy policy)
     {
         const string declaration = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Magnitude {
                 public int32 Value;
                 public Magnitude(int32 value) { Value = value; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Number {
                 public int32 Value;
                 public Number(int32 value) { Value = value; }
@@ -1785,6 +1820,8 @@ public sealed class CallerUnsafeTests
     public async Task CallerUnsafeBinaryOperatorsRoundTripInUnsafeExpressionsAsync(BoundRuntimePolicy policy)
     {
         const string declaration = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Number {
                 public int32 Value;
                 public Number(int32 value) { Value = value; }
@@ -1810,6 +1847,8 @@ public sealed class CallerUnsafeTests
             }
             """;
         const string clientSource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct LocalNumber {
                 public int32 Value;
                 public LocalNumber(int32 value) { Value = value; }
@@ -1923,10 +1962,14 @@ public sealed class CallerUnsafeTests
     public async Task CallerUnsafeOperatorsRoundTripInUnsafeExpressionsAsync(BoundRuntimePolicy policy)
     {
         const string declaration = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Magnitude {
                 public int32 Value;
                 public Magnitude(int32 value) { Value = value; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Number {
                 public int32 Value;
                 public Number(int32 value) { Value = value; }
@@ -1961,10 +2004,14 @@ public sealed class CallerUnsafeTests
                     return unsafe(--mutable);
                 }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct SafeHolder {
                 public mut Number Value;
                 public SafeHolder(Number value) { Value = value; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct UnsafeHolder {
                 public unsafe mut Number Value;
                 public UnsafeHolder(Number value) { unsafe { Value = value; } }
@@ -1979,6 +2026,8 @@ public sealed class CallerUnsafeTests
             }
             """;
         const string clientSource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct LocalNumber {
                 public int32 Value;
                 public LocalNumber(int32 value) { Value = value; }
@@ -2111,6 +2160,8 @@ public sealed class CallerUnsafeTests
     public async Task CallerUnsafeConstructorsRoundTripInUnsafeExpressionsAsync(BoundRuntimePolicy policy)
     {
         const string declaration = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Number {
                 public int32 Value;
                 public unsafe Number(int32 left, int32 right) { Value = left + right; }
@@ -2118,6 +2169,8 @@ public sealed class CallerUnsafeTests
             }
             """;
         const string clientSource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct LocalNumber {
                 public int32 Value;
                 public unsafe LocalNumber() { Value = 20; }
@@ -2304,6 +2357,8 @@ public sealed class CallerUnsafeTests
     public void SemanticModulesRoundTripCallerUnsafeReadonlyCopyMethods(BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -2376,11 +2431,15 @@ public sealed class CallerUnsafeTests
         BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Pair {
                 public int32 Left;
                 public int32 Right;
                 public Pair(int32 left, int32 right) { Left = left; Right = right; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -2419,7 +2478,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
         var computeContract = GetModuleStringStartingWith(producer, "Value.Compute|");
         var forgedProducer = ReplaceModuleString(producer, "Value.Compute", "Value.$producer.Compute");
         forgedProducer = ReplaceModuleString(forgedProducer, computeContract,
@@ -2535,6 +2594,8 @@ public sealed class CallerUnsafeTests
     public void SemanticModulesRoundTripCallerUnsafeReadonlyCopyGetters(BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -2563,7 +2624,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -2658,6 +2719,8 @@ public sealed class CallerUnsafeTests
     public void SemanticModulesRoundTripCallerUnsafeStaticCopyGetters(BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Placeholder;
                 public static int32 Read {
@@ -2679,7 +2742,7 @@ public sealed class CallerUnsafeTests
         string[] exports = ["Value.#get:Read", "Value.SafeRead"];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -2733,6 +2796,8 @@ public sealed class CallerUnsafeTests
     public void SemanticModulesRoundTripCallerUnsafeStaticMethodExpressions(BoundRuntimePolicy policy)
     {
         const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct ScalarOps {
                 public int32 Marker;
                 public ScalarOps(int32 marker) { Marker = marker; }
@@ -2757,7 +2822,7 @@ public sealed class CallerUnsafeTests
             "ScalarOps.ReadInstance", "Top", "Forward", "MakeScalarOps", "EchoForward",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(source, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var name in exports[..3])
@@ -2782,7 +2847,7 @@ public sealed class CallerUnsafeTests
         var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual92 = main.Body.Statements[1]; Assert.That(__nunitActual92, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual92!; }))();
         var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual93 = returned.Value; Assert.That(__nunitActual93, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual93!; }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
@@ -2857,7 +2922,7 @@ public sealed class CallerUnsafeTests
         ];
         var producer = ModuleCompiler.CreateProducer(
             CompileLibrary(CopyValueExpressionProviderSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(
             SyntaxTree.Parse(CopyValueExpressionConsumerSource), reference, policy);
@@ -2895,6 +2960,8 @@ public sealed class CallerUnsafeTests
         var runtimePolicy = policy == BoundRuntimePolicy.CheckedExceptions
             ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast;
         const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct ScalarOps {
                 public int32 Marker;
                 public ScalarOps(int32 marker) { Marker = marker; }
@@ -3010,7 +3077,7 @@ public sealed class CallerUnsafeTests
             "GetterOwner.#get:StaticNested",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(CopyValueGetterSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
         var reference = ModuleCompiler.CreateReference(producer);
 
         foreach (var (name, isStatic, parameterCount) in new[]
@@ -3076,10 +3143,14 @@ public sealed class CallerUnsafeTests
     public void CallerUnsafeGetterPersistenceRejectsNonExportableCopyResultLayouts()
     {
         const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Hidden {
                 int32 Secret;
                 public Hidden(int32 secret) { Secret = secret; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Placeholder;
                 public Hidden Read { unsafe get { return new Hidden(42); } }
@@ -3095,6 +3166,8 @@ public sealed class CallerUnsafeTests
     public void SemanticModulesRoundTripCallerUnsafeStaticCopyMethods(BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Placeholder;
                 public static unsafe int32 Read() { return 42; }
@@ -3218,6 +3291,8 @@ public sealed class CallerUnsafeTests
         BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -3278,6 +3353,8 @@ public sealed class CallerUnsafeTests
         BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -3347,6 +3424,8 @@ public sealed class CallerUnsafeTests
         BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Placeholder;
                 public static int32 Read { [NoThrow] unsafe get { return 42; } }
@@ -3540,6 +3619,8 @@ public sealed class CallerUnsafeTests
         BoundRuntimePolicy policy)
     {
         const string Source = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Placeholder;
                 public static unsafe int32 Read() { return 42; }
@@ -3641,6 +3722,8 @@ public sealed class CallerUnsafeTests
     public void PersistedWritersRejectUnsupportedUnsafeMemberKinds()
     {
         var privateLayoutStaticMethod = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 private int32 Number;
                 public static unsafe int32 Read() { return 42; }
@@ -3650,6 +3733,8 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateProducer(privateLayoutStaticMethod, ["Value.Read"]));
 
         var uniqueOwnerStaticMethod = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public unique struct Value {
                 public int32 Placeholder;
                 public static unsafe int32 Read() { return 42; }
@@ -3659,6 +3744,8 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.CreateProducer(uniqueOwnerStaticMethod, ["Value.Read"]));
 
         var mutableMethod = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public mut int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -3689,32 +3776,44 @@ public sealed class CallerUnsafeTests
         var unsupportedValueTypes = new[]
         {
             """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Hidden {
                 private mut int32 Number;
                 public Hidden(int32 number) { Number = number; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Marker;
                 public static unsafe int32 Read(Hidden value) { return 42; }
             }
             """,
             """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public unique struct Owned {
                 public mut int32 Number;
                 public Owned(int32 number) { Number = number; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Marker;
                 public static unsafe int32 Read(Owned value) { return value.Number; }
             }
             """,
             """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Marker;
                 public static unsafe int32 Read(OwnedInt32Buffer buffer) { return 42; }
             }
             """,
             """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Marker;
                 public static unsafe int32 Read(ManagedNode node) { return 42; }
@@ -3821,6 +3920,8 @@ public sealed class CallerUnsafeTests
         var dependency = NativeModuleCompiler.CreateProducer(
             CompileLibrary("public int32 Helper() { return 0; }"), ["Helper"], "SafeDependency", policy);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Box {
                 public int32 Placeholder;
                 public static bool Danger(out int32 value) { value = 42; return true; }
@@ -3835,10 +3936,14 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(forged));
 
         var uniqueCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public unique struct Owned {
                 public mut int32 Number;
                 public Owned(int32 number) { Number = number; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Box {
                 public int32 Placeholder;
                 public static int32 Danger(int32 value) {
@@ -3879,15 +3984,17 @@ public sealed class CallerUnsafeTests
         var layerNames = Enumerable.Range(0, MaximumLayer + 1)
             .Select(static index => "CopyLayer" + index).ToArray();
         var structures = layerNames.Select((name, index) => index == MaximumLayer
-            ? $"public struct {name} {{ public mut int32 Left; public mut int32 Right; "
+            ? $"[Blittable] [Layout(LayoutKind.Sequential)] public struct {name} {{ public mut int32 Left; public mut int32 Right; "
                 + $"public {name}(int32 left, int32 right) {{ Left = left; Right = right; }} }}"
-            : $"public struct {name} {{ public int32 Left; public int32 Right; }}");
+            : $"[Blittable] [Layout(LayoutKind.Sequential)] public struct {name} {{ public int32 Left; public int32 Right; }}");
         var touchFunctions = layerNames.Select((name, index) =>
             $"public int32 Touch{index}({name} value) {{ return 0; }}").ToArray();
         var source = string.Join(Environment.NewLine, structures.Concat(touchFunctions)) + """
 
             public CopyLayer24 MakeLayer() { return new CopyLayer24(1, 2); }
 
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Box {
                 public int32 Marker;
                 public static unsafe int32 Danger(CopyLayer24 value) { return 42; }
@@ -3911,7 +4018,7 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer));
         var repeatedSupportedCopyLayout = ForgeRepeatedNestedCopyModule(
             consumer, layerNames, makeLeafPrivate: false);
-        Assert.Throws<ModuleContractException>(() =>
+        Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.Link(repeatedSupportedCopyLayout, producer));
     }
 
@@ -3919,6 +4026,7 @@ public sealed class CallerUnsafeTests
         bool makeLeafPrivate = true)
     {
         var forged = (byte[])module.Clone();
+        var version = BinaryPrimitives.ReadInt32LittleEndian(forged.AsSpan(sizeof(int), sizeof(int)));
         var offset = sizeof(int) * 2;
         SkipModuleString(forged, ref offset);
         offset += sizeof(byte) * 3;
@@ -3940,7 +4048,15 @@ public sealed class CallerUnsafeTests
         {
             var name = ReadModuleString(forged, ref offset);
             structureIndexes.Add(name, index);
+            if (version is 77 or 79 or 80)
+            {
+                offset += sizeof(byte);
+            }
             offset += sizeof(int) + (sizeof(byte) * 4);
+            if (version >= FixedLayoutModuleVersion)
+            {
+                offset += sizeof(int) + sizeof(byte);
+            }
             var hasCleanup = forged[offset++] != 0;
             if (hasCleanup)
             {
@@ -4374,6 +4490,8 @@ public sealed class CallerUnsafeTests
     public void TrRmAndSemanticModulesRejectUnsupportedUnsafeFieldContracts()
     {
         var program = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Cell {
                 public unsafe int32 Value;
                 public Cell() { unsafe { Value = 42; } }
@@ -4397,11 +4515,15 @@ public sealed class CallerUnsafeTests
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(classProgram, "unsafe-class-field"));
 
         var fieldLoanProgram = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Counter {
                 public mut int32 Number;
                 public Counter(int32 number) { Number = number; }
                 public mut int32 Next() { Number = Number + 1; return Number; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Owner {
                 public unsafe mut Counter Value;
                 public Owner(Counter value) { unsafe { Value = value; } }
@@ -4414,11 +4536,15 @@ public sealed class CallerUnsafeTests
         Assert.That(ModuleCompiler.CreateProducer(fieldLoanProgram, ["Invoke"]), Is.Not.Empty);
 
         var safeFieldLoanProgram = CompileLibrary("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Counter {
                 public mut int32 Number;
                 public Counter(int32 number) { Number = number; }
                 public mut int32 Next() { Number = Number + 1; return Number; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Owner {
                 public mut Counter Value;
                 public Owner(Counter value) { Value = value; }
@@ -4434,15 +4560,21 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedFieldLoanModule));
 
         const string uniqueOwnerFieldLoanSource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Counter {
                 public mut int32 Number;
                 public Counter(int32 number) { Number = number; }
                 public mut int32 Next() { Number = Number + 1; return Number; }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public struct Inner {
                 public mut Counter Value;
                 public Inner(Counter value) { unsafe { Value = value; } }
             }
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
             public unique struct Owner {
                 public mut Inner Nested;
                 public Owner(Inner nested) { Nested = nested; }
@@ -4477,6 +4609,7 @@ public sealed class CallerUnsafeTests
 
     private static int FindModuleFieldUnsafeFlagOffset(byte[] module, string structureName, string fieldName)
     {
+        var version = BinaryPrimitives.ReadInt32LittleEndian(module.AsSpan(sizeof(int), sizeof(int)));
         var offset = sizeof(int) * 2;
         SkipModuleString(module, ref offset);
         offset += sizeof(byte) * 3;
@@ -4494,7 +4627,15 @@ public sealed class CallerUnsafeTests
         for (var structure = 0; structure < structureCount; structure++)
         {
             var name = ReadModuleString(module, ref offset);
+            if (version is 77 or 79 or 80)
+            {
+                offset += sizeof(byte);
+            }
             offset += sizeof(int) + (sizeof(byte) * 4);
+            if (version >= FixedLayoutModuleVersion)
+            {
+                offset += sizeof(int) + sizeof(byte);
+            }
             if (module[offset++] != 0)
             {
                 SkipModuleString(module, ref offset);

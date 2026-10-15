@@ -1,4 +1,4 @@
-public struct Snapshot {
+[Blittable] [Layout(LayoutKind.Sequential)] public struct Snapshot {
     public int32 Count;
     public int32 Total;
     public int32 Version;
