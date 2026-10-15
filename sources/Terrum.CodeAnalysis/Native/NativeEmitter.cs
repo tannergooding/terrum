@@ -116,7 +116,7 @@ public static class NativeEmitter
         });
     }
 
-    private static string System32ImportPath(string dllName)
+    internal static string System32ImportPath(string dllName)
     {
         var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
         if (!OperatingSystem.IsWindows() || !Path.IsPathFullyQualified(systemDirectory)
@@ -147,6 +147,49 @@ public static class NativeEmitter
     internal static NativeCode EmitCodeWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         CompileWithImports(program, bindings, runtimePolicy, cancellationToken).Code;
+
+    internal static (NativeCode Code, ImmutableArray<NativeImportBinding> Imports)
+        EmitCodeWithDirectNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+                CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+
+        var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
+        var libraryNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var function in program.Functions)
+        {
+            if (!function.IsExternal)
+            {
+                if (function.DirectNativeImport is not null)
+                {
+                    throw new ArgumentException(
+                        "Only external declarations can carry direct native imports.", nameof(program));
+                }
+                continue;
+            }
+            if (function.DirectNativeImport is not DirectNativeImport import
+                || !DirectNativeImportContract.IsValid(function))
+            {
+                throw new NotSupportedException(
+                    "Direct-native JIT requires every external declaration to retain its direct import contract.");
+            }
+            if (!libraryNames.TryGetValue(import.LibraryName, out var libraryName))
+            {
+                libraryName = import.LibraryName;
+                libraryNames.Add(libraryName, libraryName);
+            }
+            bindings.Add(new NativeImportBinding(function.Name, libraryName, import.ExportName));
+        }
+        if (bindings.Count == 0)
+        {
+            throw new ArgumentException("The program contains no direct native imports.", nameof(program));
+        }
+        var directBindings = bindings.ToImmutable();
+        ValidateDirectNativeBindings(program, directBindings);
+        var (code, selected) = CompileWithImports(program, directBindings, runtimePolicy,
+            cancellationToken, allowNativeImports: true);
+        return (code, UsedImports(code, selected));
+    }
 
     private static (NativeCode Code, Dictionary<int, NativeImportBinding> Selected)
         CompileWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
@@ -400,7 +443,8 @@ public static class NativeEmitter
             if (!directFunctions.TryGetValue(binding.FunctionName, out var function)
                 || function.DirectNativeImport is not DirectNativeImport import
                 || !DirectNativeImportContract.IsValid(function)
-                || import.LibraryName != binding.DllName || import.ExportName != binding.ExportName)
+                || !StringComparer.OrdinalIgnoreCase.Equals(import.LibraryName, binding.DllName)
+                || import.ExportName != binding.ExportName)
             {
                 continue;
             }

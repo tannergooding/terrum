@@ -28,6 +28,11 @@ ABI, binding and code-lifetime obligations.
 The JIT consumes the same verified bound program and `NativeEmitter.EmitCode`
 result as the PE writer. It is a second artifact consumer, not a second
 instruction encoder, source interpreter or CIL/LLVM backend.
+Standalone `NativeJit.Execute` accepts direct source imports when every
+external declaration has a retained direct-import contract; it resolves those
+DLL names by absolute System32 path. Catalogued imports are not JIT bindings.
+The separate graph-JIT path continues to bind only selected provider DLLs and
+does not stage arbitrary raw-import DLLs.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll jit samples\native\factorial.terrum --runtime fail-fast

@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
@@ -53,6 +54,30 @@ public sealed class DirectNativeImportTests
             Does.Contain("QueryPerformanceCounter"));
         Assert.That(Encoding.ASCII.GetString(image),
             Does.Contain("KERNEL32.dll"));
+    }
+
+    [Test]
+    public void NativeJitExecutesAValidatedSystem32DirectImport()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+            [NoThrow]
+            extern unsafe uint32 GetCurrentThreadId();
+
+            int32 Main() {
+                unsafe {
+                    if (GetCurrentThreadId() != 0) { return 0; }
+                }
+                return -1;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(0));
     }
 
     [Test]

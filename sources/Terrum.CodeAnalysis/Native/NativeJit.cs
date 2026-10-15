@@ -37,7 +37,8 @@ public static unsafe class NativeJit
     private const int MaximumInvocationSourceCodeUnits = 16_384;
     private static readonly List<INativeJitContinuationRegistration> s_retainedRegistrations = [];
 
-    /// <summary>Emits and executes a host-neutral callable entry point, returning its int32 result.</summary>
+    /// <summary>Emits and executes a verified callable entry point, returning its int32 result.</summary>
+    /// <remarks>Direct native imports resolve by absolute System32 path; catalog imports are not JIT bindings.</remarks>
     /// <exception cref="ArgumentException">The program requires an invocation-scoped source grant.</exception>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
     public static int Execute(BoundProgram program, NativeRuntimePolicy runtimePolicy,
@@ -48,8 +49,8 @@ public static unsafe class NativeJit
         {
             throw new ArgumentException("A source-dependent program requires ExecuteWithSourceGrant.", nameof(program));
         }
-        var code = EmitCode(program, runtimePolicy);
-        return ExecuteCode(code, [], [], registrarAssembly, null, null, false, out _);
+        var (code, modules, imports) = EmitForExecution(program, runtimePolicy);
+        return ExecuteCode(code, modules, imports, registrarAssembly, null, null, false, out _);
     }
 
     /// <summary>Executes a source-dependent program with one fresh, immutable UTF-16 source grant.</summary>
@@ -156,9 +157,50 @@ public static unsafe class NativeJit
     public static NativeExecutionResult ExecuteWithData(BoundProgram program, NativeRuntimePolicy runtimePolicy,
         string? registrarAssembly = null)
     {
-        var code = EmitCode(program, runtimePolicy);
-        var exitCode = ExecuteCode(code, [], [], registrarAssembly, null, null, true, out var data);
+        var (code, modules, imports) = EmitForExecution(program, runtimePolicy);
+        var exitCode = ExecuteCode(code, modules, imports, registrarAssembly, null, null, true, out var data);
         return new NativeExecutionResult(exitCode, data) { BufferOffsets = code.BufferOffsets };
+    }
+
+    private static (NativeCode Code, NativeJitModule[] Modules, ImmutableArray<NativeImportBinding> Imports)
+        EmitForExecution(BoundProgram program, NativeRuntimePolicy runtimePolicy)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        if (!program.Functions.Any(static function => function.DirectNativeImport is not null))
+        {
+            return (EmitCode(program, runtimePolicy), [], []);
+        }
+        if (program.RequiresSourceGrant)
+        {
+            throw new NotSupportedException("Direct native imports do not support invocation-scoped source grants.");
+        }
+        if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
+        {
+            throw new PlatformNotSupportedException("Native JIT requires a Windows x64 process.");
+        }
+
+        var (code, imports) = NativeEmitter.EmitCodeWithDirectNativeImports(program, runtimePolicy);
+        ValidateBufferMetadata(program, code);
+        var exportsByDll = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var import in imports)
+        {
+            if (!exportsByDll.TryGetValue(import.DllName, out var exports))
+            {
+                exports = [];
+                exportsByDll.Add(import.DllName, exports);
+            }
+            exports.Add(import.ExportName);
+        }
+
+        var modules = new NativeJitModule[exportsByDll.Count];
+        var moduleIndex = 0;
+        foreach (var (dllName, exports) in exportsByDll)
+        {
+            exports.Sort(StringComparer.Ordinal);
+            modules[moduleIndex++] = new NativeJitModule(dllName,
+                NativeEmitter.System32ImportPath(dllName), exports);
+        }
+        return (code, modules, imports);
     }
 
     private static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy)

@@ -160,8 +160,10 @@ dependencies. Active synthetic coverage validates single-provider and
 consumer-set pairs plus a graph consumer/provider pair. This establishes
 compilation, metadata validation, and PE emission—not execution of the foreign
 function. Graph and consumer-set execution do not stage arbitrary raw-import
-DLLs, and direct imports remain unsupported in NativeJit. Runtime qualification
-of foreign calls is also absent.
+DLLs. Standalone NativeJit resolves direct imports only by absolute System32
+path; graph JIT still accepts provider-module imports only. Runtime evidence
+covers the System32 `GetCurrentThreadId` smoke test, not arbitrary foreign DLLs
+or COM behavior.
 
 Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,
 `NativeParameter`, and `NativeComAcquisition` metadata is also provisionally
