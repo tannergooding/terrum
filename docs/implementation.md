@@ -160,8 +160,8 @@ dependencies. Active synthetic coverage validates single-provider and
 consumer-set pairs plus a graph consumer/provider pair. This establishes
 compilation, metadata validation, and PE emission—not execution of the foreign
 function. Graph and consumer-set execution do not stage arbitrary raw-import
-DLLs. JIT, semantic TRRM COM ownership/dependency binding, and runtime
-qualification remain unsupported by this slice.
+DLLs, and direct imports remain unsupported in NativeJit. Runtime qualification
+of foreign calls is also absent.
 
 Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,
 `NativeParameter`, and `NativeComAcquisition` metadata is also provisionally
@@ -184,7 +184,11 @@ artifact does not yet persist/reconstruct `NativeComOwner` or
 `NativeComAcquisition` clauses 9 and 11, so those ownership wrappers cannot yet
 be supplied by a separate TRRM dependency. These wire assignments remain
 implementation experiments, not canonical TRRM assignments, and no foreign
-COM runtime behavior is established.
+COM runtime behavior is established. The executable Body profile remains
+root-free scalar and excludes owning calls and cleanup; clause 11's current
+structural rule requires an acquisition Body. That boundary is preserved, so
+dependency-provided acquisition wrappers remain unsupported rather than
+silently treating inspectable Body forms as executable.
 
 ## Syntax and CLI
 
