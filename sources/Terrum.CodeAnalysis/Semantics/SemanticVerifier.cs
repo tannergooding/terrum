@@ -334,6 +334,7 @@ public static partial class SemanticVerifier
                         or PrimitiveType.NativeNullPointer
                         or PrimitiveType.NativeCallbackAddress
                     || (field.Type == PrimitiveType.NativeWindowHandle
+                        && structure.BlittableTargetRequirement == 0
                         && !NativeStorageParameterContract.SupportsAggregateType(
                             program.NativeImportCatalog, (PrimitiveType)(100 + index),
                             program.Structures, isReadonly: false)
@@ -404,6 +405,7 @@ public static partial class SemanticVerifier
             var cataloguedAggregateLayout = program.NativeImportCatalog?.SupportsAggregateStorageLayout(
                 (PrimitiveType)(100 + index), program.Structures) == true;
             if (structure.Size > ValueLayout.MaximumSize
+                && structure.BlittableTargetRequirement == 0
                 && !isCataloguedFixedArrayElement && !cataloguedAggregateStorage && !cataloguedAggregateLayout)
             {
                 throw Invalid();
@@ -3521,19 +3523,23 @@ public static partial class SemanticVerifier
         return expression;
     }
 
-    private static bool IsPlainAggregateWindowHandleParameter(BoundExpression expression, BoundFunction function,
-        BoundProgram program) =>
+    private static bool IsWindowHandleAggregateParameter(BoundExpression expression, BoundFunction function,
+        BoundProgram program, bool allowUnsafeNativeHandleValue) =>
         function.IsConstructor
-        && NativeAggregateContract.IsPlainValueAggregate(function.ReturnType, program.Structures)
+        && (NativeAggregateContract.IsPlainValueAggregate(function.ReturnType, program.Structures)
+           || allowUnsafeNativeHandleValue && function.RequiresUnsafeCaller
+               && IsBlittableWindowHandleAggregate(function.ReturnType, program))
         && expression is BoundRead {
             Type: PrimitiveType.NativeWindowHandle,
         } read
         && read.Variable > 0 && read.Variable <= function.ParameterCount;
 
-    private static bool IsPlainAggregateWindowHandleArgument(BoundExpression argument, BoundFunction target,
-        int parameterSlot, BoundFunction caller, BoundProgram program) =>
+    private static bool IsWindowHandleAggregateArgument(BoundExpression argument, BoundFunction target,
+        int parameterSlot, BoundFunction caller, BoundProgram program, bool allowUnsafeNativeHandleValue) =>
         target.IsConstructor
-        && NativeAggregateContract.IsPlainValueAggregate(target.ReturnType, program.Structures)
+        && (NativeAggregateContract.IsPlainValueAggregate(target.ReturnType, program.Structures)
+           || allowUnsafeNativeHandleValue && caller.RequiresUnsafeCaller
+               && IsBlittableWindowHandleAggregate(target.ReturnType, program))
         && target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowHandle
         && (argument is BoundNativeNoOwner
             || argument is BoundCall {
@@ -3546,7 +3552,22 @@ public static partial class SemanticVerifier
                 Type: PrimitiveType.NativeWindowHandle,
             } window
                 && NativeWindowCreationContract.IsCreatedWindowLocal(caller, window.Variable, program)
+            || allowUnsafeNativeHandleValue && caller.RequiresUnsafeCaller
+                && argument is BoundRead {
+                    Variable: >= 0,
+                    Type: PrimitiveType.NativeWindowHandle,
+                } unsafeWindow
+                && unsafeWindow.Variable < caller.ParameterCount
             || NativeHandleOwnerContract.IsOwnedHandleExpression(argument, caller, program));
+
+    private static bool IsBlittableWindowHandleAggregate(PrimitiveType type, BoundProgram program)
+    {
+        var index = (int)type - 100;
+        return (uint)index < (uint)program.Structures.Length
+            && program.Structures[index].BlittableTargetRequirement != 0
+            && program.Structures[index].Fields.Any(static field =>
+                field.Type == PrimitiveType.NativeWindowHandle);
+    }
 
     private static void Expression(BoundExpression expression, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
@@ -3566,7 +3587,8 @@ public static partial class SemanticVerifier
         if (expression.Type == PrimitiveType.NativeWindowHandle && !allowUnsafeNativeHandleValue
             && !allowPlainAggregateWindowHandle
             && !(allowCreatedWindowResult && expression is (BoundCall or BoundRead))
-            && !IsPlainAggregateWindowHandleParameter(expression, function, program)
+            && !IsWindowHandleAggregateParameter(
+                expression, function, program, allowUnsafeNativeHandleValue)
             && !NativeHandleOwnerContract.IsOwnerHandleFieldRead(expression, function, program)
             && !NativeHandleOwnerContract.IsOwnedHandleExpression(expression, function, program)
             && !(allowCallbackWindowHandle
@@ -3693,7 +3715,10 @@ public static partial class SemanticVerifier
                 break;
             case BoundUnsafeExpression unsafeExpression:
                 Expression(unsafeExpression.Expression, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                    ref remaining, depth + 1, failures, statementCompound, allowCreatedWindowResult,
+                    allowNullPointerArgument, allowCallbackWindowHandle, allowCurrentModuleHandleValue,
+                    cleanupCounterStep, allowPlainAggregateWindowHandle,
+                    allowUnsafeNativeHandleValue: true);
                 break;
             case BoundOptionalLift lift:
                 if (!ManagedClassTypes.IsOptional(lift.Type)
@@ -4705,6 +4730,14 @@ public static partial class SemanticVerifier
                             else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowHandle
                                 && !isDirectNativeHandleArgument)
                             {
+                                if (!target.IsExternal && target.RequiresUnsafeCaller
+                                    && call.IsUnsafeAuthorized)
+                                {
+                                    Expression(argument, initialized, fieldMasks, declarations, function, program,
+                                        ref remaining, depth + 1, failures,
+                                        allowUnsafeNativeHandleValue: true);
+                                    continue;
+                                }
                                 if (!target.IsExternal
                                     && NativeAggregateContract.IsOwnedWindowHandleFieldArgument(
                                         argument, target, parameterSlot, function, program))
@@ -4714,8 +4747,9 @@ public static partial class SemanticVerifier
                                         allowPlainAggregateWindowHandle: true);
                                     continue;
                                 }
-                                if (IsPlainAggregateWindowHandleArgument(
-                                    argument, target, parameterSlot, function, program))
+                                if (IsWindowHandleAggregateArgument(
+                                    argument, target, parameterSlot, function, program,
+                                    allowUnsafeNativeHandleValue))
                                 {
                                     Expression(argument, initialized, fieldMasks, declarations, function, program,
                                         ref remaining, depth + 1, failures, allowPlainAggregateWindowHandle: true);

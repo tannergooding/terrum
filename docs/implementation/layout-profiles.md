@@ -11,23 +11,26 @@ contracts. A private target-requirement number is not a standard Feature ID.
 
 Source-authored `[Blittable]` commitments support natural Windows x64
 `Sequential` layouts and one-field scalar `Transparent` layouts. Sequential
-fields may use the fixed scalar/pointer set or transitively committed
-structures; unique fields remain restricted to unique owners. The compiler
+fields may use the fixed scalar/pointer set, explicitly represented native
+window/module handles, or transitively committed structures; handle fields
+retain their nominal handle type and do not describe or extend the referent's
+lifetime. Unique fields remain restricted to unique owners. The compiler
 recomputes the layout under mandatory verification and uses the existing
 Windows x64 target requirement `1`, not a separate layout-profile identity.
 Externally visible public fields require this commitment; a public field on
 an internal struct does not independently expose its layout for replacement.
 Private semantic modules persist and revalidate these facts. Packing and
-alignment controls, unions, opaque handle fields, and standard TRRM layout
-persistence are not implemented.
+alignment controls, unions, and standard TRRM layout persistence are not
+implemented.
 
 Direct native `NativeParameter` inputs may use a committed aggregate pointee.
-The pointer contract remains one element, `NoEscape`, and backed by an
-initialized local; verification checks that all aggregate fields are
-initialized. Private semantic metadata revision 80 preserves and remaps the
-pointee type. Standard TRRM `NativeParameter` persistence remains rejected
-pending an approved encoding, and direct native outputs remain limited to
-scalar and raw-pointer pointees.
+The address-based storage limit is 128 bytes, independent of the 16-byte
+executable value profile. The pointer contract remains one element,
+`NoEscape`, and backed by an initialized local; verification checks that all
+aggregate fields are initialized. Private semantic metadata revision 80
+preserves and remaps the pointee type. Standard TRRM `NativeParameter`
+persistence remains rejected pending an approved encoding, and direct native
+outputs remain limited to scalar and raw-pointer pointees.
 When fixed-layout commitments coexist with private span roles, semantic-module
 revision 81 carries both fact sets without claiming standard TRRM support.
 

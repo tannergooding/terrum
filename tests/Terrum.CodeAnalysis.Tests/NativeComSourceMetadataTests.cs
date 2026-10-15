@@ -14,6 +14,83 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeComSourceMetadataTests
 {
+    [Test]
+    public void SourceOwnerResolvesAnUnqualifiedCatalogInterfaceIdentity()
+    {
+        var interfaceDefinition = new NativeComInterfaceDefinition(
+            "IFixture", Guid.Parse("A3BFA1D9-0169-4B6C-9334-33D17A7CE9E7"), null,
+            ["IFixture::Release"], ["IFixture::Release"]);
+        var methodDefinition = new NativeComMethodDefinition(
+            "fixture.iface.release", "IFixture", "IFixture", 0,
+            "uint32(IFixture*)", "windows-x64-rcx-eax", NativeComEffects.ReleasesReference,
+            IsCallable: true) {
+            VTableMethodIdentity = "IFixture::Release",
+            IsNoThrow = true,
+        };
+        var catalogImport = new NativeImportDefinition(
+            "test.fixture.create", "fixture.dll", "CreateFixture",
+            [PrimitiveType.NativeComInterfaceOutputAddress], PrimitiveType.Int32,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
+            NativeImportDeploymentPolicy.ApplicationDirectory) {
+            ParameterContracts = [NativeImportParameterContract.OwnedNativeComInterfaceOutput],
+            ComOutputs = [new(0, "IFixture", NativeComEffects.SignedHResult
+                | NativeComEffects.AcquiresReference | NativeComEffects.OutputMayBeWrittenOnFailure)],
+        };
+        var catalogOwner = new NativeComOwnerDefinition(
+            "Example.Interop.ProvisionalFixtureOwner", "IFixture",
+            NativeComOwnerAcquisitionKind.NativeImportOutput, "test.fixture.create", 0,
+            IsUnique: true, CellSize: sizeof(long), CellAlignment: sizeof(long)) {
+            ReleaseMethodIdentity = methodDefinition.Identity,
+            OutputMayBeWrittenOnFailure = true,
+        };
+        var catalog = NativeImportCatalog.CreateForTesting(
+            "test.generic-com.source-owner.v1", [catalogImport], [interfaceDefinition],
+            [catalogOwner], [methodDefinition], []);
+        const string source = """
+            namespace Example.Interop;
+
+            [Terrum.Interop.NativeComOwner("IFixture")]
+            public unique struct FixtureOwner {
+                private ptr<void> Pointer;
+                public unsafe FixtureOwner(ptr<void> pointer) {
+                    unsafe { Pointer = pointer; }
+                }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "AcquireFixture")]
+            [Terrum.Interop.NativeOutput(0)]
+            extern unsafe int32 AcquireFixture(write ptr<ptr<void>> output);
+
+            [Terrum.Interop.NativeComAcquisition(
+                0, "FixtureOwner", "AcquireFixture", 0, OutputMayBeWrittenOnFailure)]
+            bool TryAcquireFixture(out FixtureOwner owner) {
+                mut ptr<void> raw = null;
+                mut int32 result = 0;
+                unsafe { result = AcquireFixture(&raw); }
+                owner = unsafe(new FixtureOwner(raw));
+                return result >= 0;
+            }
+
+            int32 Main() { return 0; }
+            """;
+
+        var compilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var owners = compilation.Program!.NativeImportCatalog!.ComOwners;
+        Assert.That(owners, Has.Length.EqualTo(1));
+        Assert.That(owners[0].BoundOwnerName, Is.EqualTo("Example.Interop.FixtureOwner"));
+        Assert.That(owners[0].InterfaceIdentity, Is.EqualTo("IFixture"));
+
+        var unknownInterface = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(source.Replace(
+                "[Terrum.Interop.NativeComOwner(\"IFixture\")]",
+                "[Terrum.Interop.NativeComOwner(\"IMissing\")]", StringComparison.Ordinal))],
+            catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(unknownInterface.Program, Is.Null);
+    }
+
     private const string SourceOwnerAcquisition = """
         namespace Example.Interop;
 

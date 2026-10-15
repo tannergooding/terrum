@@ -59,34 +59,53 @@ public sealed class PublicFixedLayoutStorageTests
         Assert.That(retained.Size, Is.EqualTo(width));
         Assert.That((global::System.Linq.Enumerable.Single(retained.Fields).Offset, retained.Fields[0].Size), Is.EqualTo((0, width)));
     }
+
+    [Test]
+    public void NativeHandleFieldsRetainTheirRepresentationAcrossPrivateModules()
+    {
+        var program = CompileLibrary("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct HandlePair {
+                public Terrum.Interop.Windows.HWND Window;
+                public Terrum.Interop.Windows.HINSTANCE Module;
+            }
+            public int32 RoundTrip(HandlePair value) { return 42; }
+            """);
+        Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo([8]));
+        Assert.That(program.Structures[0].Fields.Select(static field => field.Type),
+            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+        Assert.That(program.Structures[0].Fields.Select(static field => field.Offset), Is.EqualTo([0, 8]));
+        SemanticVerifier.VerifyLibrary(program);
+
+        var artifact = ModuleCompiler.CreateProducer(program, ["RoundTrip"]);
+        var retained = ModuleCompiler.CreateReference(artifact);
+        Assert.That(retained.Structures.Single().Fields.Select(static field => field.Type),
+            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+        Assert.That(retained.Structures.Single().Size, Is.EqualTo(16));
+    }
+
     [TestCase("char16 Prefix; int64 Value; char16 Tail;",24,8,new[] { 0, 8, 16 })]
     [TestCase("uint64 A; uint64 B; uint64 C; uint64 D; uint64 E;",40,8,new[] { 0, 8, 16, 24, 32 })]
-    public void LargerStorageIsEligibleWithoutWideningExecutableAggregates(
+    public void LargerBlittableLayoutsRemainEligibleForExecutableUses(
         string fields, int size, int alignment, int[] offsets)
     {
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(offsets);
-        var types = fields.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var boundFields = ImmutableArray.CreateBuilder<BoundStructField>(types.Length);
-        for (var index = 0; index < types.Length; index++)
-        {
-            var words = types[index].Split(' ');
-            var type = words[0] switch {
-                "char16" => PrimitiveType.Char16,
-                "int64" => PrimitiveType.Int64,
-                "uint64" => PrimitiveType.UInt64,
-                _ => throw new InvalidOperationException(),
-            };
-            boundFields.Add(new BoundStructField(words[1], type, offsets[index], type == PrimitiveType.Char16 ? 2 : 8));
-        }
-        var large = new BoundStruct("Large", boundFields.MoveToImmutable(), size) {
-            IsSequential = true,
-            BlittableTargetRequirement = 1,
-        };
-        Assert.That(global::System.Linq.Enumerable.Single(FixedLayoutStorage.Validate([large])), Is.EqualTo(alignment));
-        var program = CompileLibrary("public int32 Check() { return 42; }") with { Structures = [large] };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program))!;
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Check"]))!;
+        var sourceFields = string.Join(Environment.NewLine,
+            fields.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(static field => $"public {field};"));
+        var source = $"[Blittable] [Layout(LayoutKind.Sequential)] public struct Large {{ {sourceFields} }}"
+            + " public int32 Check() { return 42; }";
+        var program = CompileLibrary(source);
+        Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo([alignment]));
+        Assert.That(program.Structures[0].Size, Is.EqualTo(size));
+        Assert.That(program.Structures[0].Fields.Select(static field => field.Offset), Is.EqualTo(offsets));
+        SemanticVerifier.VerifyLibrary(program);
+        _ = ModuleCompiler.CreateProducer(program, ["Check"]);
+
+        var aggregateProgram = CompileLibrary(source.Replace("Check()", "Check(Large value)", StringComparison.Ordinal));
+        SemanticVerifier.VerifyLibrary(aggregateProgram);
+        _ = ModuleCompiler.CreateProducer(aggregateProgram, ["Check"]);
     }
     [TestCase("missing-root")]
     [TestCase("missing-nested")]
@@ -101,7 +120,7 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("managed")]
     [TestCase("owner")]
     [TestCase("view")]
-    [TestCase("native-handle")]
+    [TestCase("native-function-pointer")]
     [TestCase("native-carrier")]
     [TestCase("unknown-type")]
     [TestCase("negative-type")]
@@ -125,7 +144,7 @@ public sealed class PublicFixedLayoutStorageTests
             "managed" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.ManagedNode }) },
             "owner" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.OwnedInt32Buffer }) },
             "view" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.ReadonlyInt32BufferView }) },
-            "native-handle" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeWindowHandle }) },
+            "native-function-pointer" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeCallbackAddress }) },
             "native-carrier" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeFixedArray }) },
             "unknown-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)999 }) },
             "negative-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)int.MinValue }) },
@@ -149,7 +168,7 @@ public sealed class PublicFixedLayoutStorageTests
             _ = Assert.Throws<ArgumentException>(() => FixedLayoutStorage.Validate(program.Structures))!;
         }
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program))!;
-        if (change is "native-handle" or "native-carrier")
+        if (change is "native-function-pointer" or "native-carrier")
         {
             _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
         }

@@ -209,6 +209,70 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeImportAcceptsLargeBlittableAggregateInput()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct NativePacket {
+                public uint64 First;
+                public uint64 Second;
+                public uint64 Third;
+                public uint64 Fourth;
+                public uint64 Fifth;
+
+                public NativePacket(uint64 first, uint64 second, uint64 third,
+                    uint64 fourth, uint64 fifth) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                    Fourth = fourth;
+                    Fifth = fifth;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("example.dll", "ConsumePacket")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern int32 ConsumePacket(ptr<NativePacket> packet);
+
+            int32 Main() {
+                NativePacket packet = new NativePacket(1, 2, 3, 4, 5);
+                unsafe { return ConsumePacket(&packet); }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var structure = compilation.Program!.Structures.Single(static candidate =>
+            candidate.Name == "NativePacket");
+        Assert.That(structure.Size, Is.EqualTo(40));
+        Assert.That(structure.Fields[^1].Type, Is.EqualTo(PrimitiveType.UInt64));
+        Assert.That(structure.Fields[^1].Offset, Is.EqualTo(32));
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(compilation.Program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ConsumePacket"));
+    }
+
+    [Test]
+    public void UnsafeSourceFunctionsCanRelayOpaqueWindowHandlesWithExplicitAuthorization()
+    {
+        var accepted = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            unsafe int32 Consume(Terrum.Interop.Windows.HWND window) { return 42; }
+            unsafe int32 Forward(Terrum.Interop.Windows.HWND window) {
+                unsafe { return Consume(window); }
+            }
+            """));
+        Assert.That(accepted.HasErrors, Is.False,
+            string.Join(Environment.NewLine, accepted.Diagnostics));
+
+        var rejected = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            unsafe int32 Consume(Terrum.Interop.Windows.HWND window) { return 42; }
+            int32 Forward() { return Consume(Terrum.Interop.Windows.HWND.NoOwner); }
+            """));
+        Assert.That(rejected.HasErrors, Is.True);
+        Assert.That(rejected.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
+    }
+
+    [Test]
     public void DirectNativeWritableAggregateRequiresBlittabilityAndMutableInitializedBacking()
     {
         const string Import = """

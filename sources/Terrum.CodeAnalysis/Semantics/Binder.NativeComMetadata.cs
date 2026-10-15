@@ -450,7 +450,10 @@ internal sealed partial class Binder
 
         var ownerDefinitions = ImmutableArray.CreateBuilder<NativeComOwnerDefinition>(
             (_nativeImportCatalog?.ComOwners.Length ?? 0) + sourceOwners.Count);
-        ownerDefinitions.AddRange(_nativeImportCatalog?.ComOwners ?? []);
+        var sourceOwnerInterfaces = sourceOwners.Values
+            .Select(static owner => owner.InterfaceIdentity).ToHashSet(StringComparer.Ordinal);
+        ownerDefinitions.AddRange(_nativeImportCatalog?.ComOwners
+            .Where(owner => !sourceOwnerInterfaces.Contains(owner.InterfaceIdentity)) ?? []);
         var combinedMethods = methods.ToImmutable();
         foreach (var (ownerName, sourceOwner) in sourceOwners)
         {
@@ -567,6 +570,10 @@ internal sealed partial class Binder
             || _nativeImportCatalog?.TryGetComInterface(qualified, out _) == true)
         {
             return qualified;
+        }
+        if (_nativeImportCatalog?.TryGetComInterface(identity, out _) == true)
+        {
+            return identity;
         }
         foreach (var importedNamespace in _usings)
         {

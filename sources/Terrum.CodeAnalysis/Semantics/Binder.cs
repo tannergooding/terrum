@@ -1421,10 +1421,10 @@ internal sealed partial class Binder
         }
         if (size is < 1 or > ValueLayout.MaximumStructureSize
             || (size > ValueLayout.MaximumSize && !cataloguedFixedArrayElement
-                && !cataloguedAggregateStorage && !cataloguedAggregateLayout))
+                && !cataloguedAggregateStorage && !cataloguedAggregateLayout && !isBlittable))
         {
             Report("TRM3005",
-                $"A struct must have a naturally aligned size from 1 through {ValueLayout.MaximumSize} bytes unless a native storage catalog admits its layout.",
+                $"A struct must fit the fixed-storage limit, and aggregates larger than {ValueLayout.MaximumSize} bytes require a Blittable commitment or a supported native storage layout.",
                 declaration.Span);
         }
         _ = _layingOut.Remove(index);
@@ -2408,6 +2408,13 @@ internal sealed partial class Binder
                     continue;
                 }
                 var resultCondition = nativeOutputResultConditions[outputIndex];
+                if (resultCondition != 0
+                    && !DirectNativeImportContract.IsValidResultCondition(returnType, resultCondition))
+                {
+                    Report("TRM3030",
+                        "NativeOutput result conditions must be compatible with the callable result type.",
+                        nativeImportAttribute?.Span ?? declaration.Span);
+                }
                 nativeOutputs.Add(new DirectNativeOutput(outputIndex, outputType,
                     resultCondition != 0 ? resultCondition
                         : DirectNativeImportContract.DefaultResultCondition(returnType),
