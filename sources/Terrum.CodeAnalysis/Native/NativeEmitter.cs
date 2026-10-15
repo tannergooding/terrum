@@ -32,7 +32,8 @@ public static class NativeEmitter
     /// <remarks>Bindings specify ABI identities, not verified provider contracts; callers must validate provider compatibility.</remarks>
     public static byte[] EmitWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
-        EmitWithImportUsage(program, bindings, runtimePolicy, cancellationToken).Image;
+        EmitWithImportUsage(program, bindings, runtimePolicy,
+            cancellationToken: cancellationToken).Image;
 
     /// <summary>Emits a native executable using verified direct or catalogued native import declarations.</summary>
     public static byte[] EmitWithNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
@@ -128,8 +129,8 @@ public static class NativeEmitter
 
     internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
-            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default,
-            bool allowNativeImports = false, bool allowDirectNativeImports = false)
+            NativeRuntimePolicy runtimePolicy, bool allowNativeImports = false,
+            bool allowDirectNativeImports = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(bindings);
@@ -337,12 +338,13 @@ public static class NativeEmitter
     public static byte[] EmitLibraryWithImports(BoundProgram program, IReadOnlyList<string> exports,
         IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default) =>
-        EmitLibraryWithImportUsage(program, exports, bindings, runtimePolicy, cancellationToken).Image;
+        EmitLibraryWithImportUsage(program, exports, bindings, runtimePolicy,
+            cancellationToken: cancellationToken).Image;
 
     internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitLibraryWithImportUsage(BoundProgram program, IReadOnlyList<string> exports,
             IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
-            CancellationToken cancellationToken = default, bool allowDirectNativeImports = false)
+            bool allowDirectNativeImports = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(bindings);

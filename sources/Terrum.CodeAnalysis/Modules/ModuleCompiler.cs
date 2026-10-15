@@ -227,7 +227,7 @@ public static partial class ModuleCompiler
         return GetDirectNativeImports(consumer);
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyList<string>> GetDirectNativeImports(Module producer)
+    private static Dictionary<string, IReadOnlyList<string>> GetDirectNativeImports(Module producer)
     {
         var indexes = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
         for (var index = 0; index < producer.Functions.Length; index++)
