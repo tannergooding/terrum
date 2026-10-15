@@ -263,8 +263,19 @@ public sealed class NativeGraphTests
         Assert.That(info.Dependencies, Is.EqualTo(["NodeB"]));
         Assert.That(info.Exports, Is.EqualTo(["ReadAndReturn"]));
 
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
-            "int32 Main() { return ReadAndReturn(); }"),
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Adjust")]
+            [Terrum.Interop.NativeOutput(0)]
+            extern int32 Adjust(write ptr<int32> value);
+
+            int32 Main() {
+                mut int32 value = 1;
+                unsafe {
+                    if (Adjust(&value) == 0) { return ReadAndReturn() + value; }
+                }
+                return -1;
+            }
+            """),
             NativeModuleCompiler.CreateGraphReference([provider]));
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));

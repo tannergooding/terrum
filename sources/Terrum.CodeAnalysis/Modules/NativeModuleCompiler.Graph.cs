@@ -107,12 +107,30 @@ public static partial class NativeModuleCompiler
         var imports = contractSnapshot.Imports;
         var bindings = GraphBindings(providers, imports);
         var declarations = NativeBindings(bindings);
-        var (image, used) = declarations.Length == 0
+        var directNativeBindings = DirectNativeBindings(program);
+        var imageBindings = new NativeImportBinding[declarations.Length + directNativeBindings.Length];
+        declarations.CopyTo(imageBindings, 0);
+        directNativeBindings.CopyTo(imageBindings, declarations.Length);
+        var (image, used) = imageBindings.Length == 0
             ? (NativeEmitter.Emit(program, runtimePolicy),
                 ImmutableArray<NativeImportBinding>.Empty)
-            : NativeEmitter.EmitWithImportUsage(program, declarations, runtimePolicy);
+            : NativeEmitter.EmitWithImportUsage(program, imageBindings, runtimePolicy,
+                allowDirectNativeImports: directNativeBindings.Length != 0);
+        var graphBindingNames = new HashSet<string>(declarations.Length, StringComparer.Ordinal);
+        foreach (var declaration in declarations)
+        {
+            _ = graphBindingNames.Add(declaration.FunctionName);
+        }
+        var graphUsedBuilder = ImmutableArray.CreateBuilder<NativeImportBinding>();
+        foreach (var import in used)
+        {
+            if (graphBindingNames.Contains(import.FunctionName))
+            {
+                graphUsedBuilder.Add(import);
+            }
+        }
         var package = new GraphPackage(true, null, runtimePolicy, [],
-            WithGraphUsage(bindings, used), contract, image) {
+            WithGraphUsage(bindings, graphUsedBuilder.ToImmutable()), contract, image) {
             ContractSnapshot = contractSnapshot,
             Origins = CreateGraphOrigins(contractSnapshot, true, null, providers),
         };

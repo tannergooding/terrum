@@ -480,20 +480,20 @@ public static partial class NativeModuleCompiler
                 }
             }
         }
-        if (!package.Consumer && !package.IsLeaf)
+        var directImports = package.Consumer
+            ? ModuleCompiler.GetConsumerNativeImports(package.Contract)
+            : package.IsLeaf ? ImmutableDictionary<string, IReadOnlyList<string>>.Empty
+                : ModuleCompiler.GetGraphProducerNativeImports(package.Contract);
+        foreach (var (dllName, symbols) in directImports)
         {
-            foreach (var (dllName, directImports) in
-                ModuleCompiler.GetGraphProducerNativeImports(package.Contract))
+            if (!imports.TryGetValue(dllName, out var expectedSymbols))
             {
-                if (!imports.TryGetValue(dllName, out var symbols))
-                {
-                    symbols = new HashSet<string>(StringComparer.Ordinal);
-                    imports.Add(dllName, symbols);
-                }
-                foreach (var symbol in directImports)
-                {
-                    _ = symbols.Add(symbol);
-                }
+                expectedSymbols = new HashSet<string>(StringComparer.Ordinal);
+                imports.Add(dllName, expectedSymbols);
+            }
+            foreach (var symbol in symbols)
+            {
+                _ = expectedSymbols.Add(symbol);
             }
         }
         if (imports.Count == 0)
