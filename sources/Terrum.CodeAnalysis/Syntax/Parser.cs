@@ -341,6 +341,39 @@ internal sealed class Parser
                 else if (attributeName == "Terrum.Interop.NativeComAcquisition")
                 {
                     attribute.Add(Expect(TokenKind.NumericLiteral));
+                    while (Current.Kind == TokenKind.Comma)
+                    {
+                        attribute.Add(Take());
+                        attribute.Add(Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral
+                            or TokenKind.Identifier ? Take() : Expect(TokenKind.Identifier));
+                    }
+                }
+                else if (attributeName == "Terrum.Interop.NativeComInterface")
+                {
+                    attribute.Add(Expect(TokenKind.StringLiteral));
+                }
+                else if (attributeName == "Terrum.Interop.NativeComMethod")
+                {
+                    attribute.Add(Expect(TokenKind.NumericLiteral));
+                    while (Current.Kind == TokenKind.Comma)
+                    {
+                        attribute.Add(Take());
+                        attribute.Add(Expect(TokenKind.Identifier));
+                    }
+                }
+                else if (attributeName == "Terrum.Interop.NativeParameter")
+                {
+                    while (Current.Kind != TokenKind.CloseParen
+                        && Current.Kind != TokenKind.EndOfFile)
+                    {
+                        attribute.Add(Current.Kind is TokenKind.Identifier or TokenKind.NumericLiteral
+                            or TokenKind.StringLiteral ? Take() : Expect(TokenKind.Identifier));
+                        if (Current.Kind != TokenKind.Comma)
+                        {
+                            break;
+                        }
+                        attribute.Add(Take());
+                    }
                 }
                 else if (Current.Kind == TokenKind.StringLiteral)
                 {

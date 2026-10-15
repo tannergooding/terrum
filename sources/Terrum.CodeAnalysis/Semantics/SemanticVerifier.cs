@@ -43,6 +43,28 @@ public static partial class SemanticVerifier
     /// <exception cref="NotSupportedException">The library exceeds verification limits.</exception>
     public static void VerifyLibrary(BoundProgram program) => VerifyCore(program, requireEntryPoint: false);
 
+    internal static void VerifyLibraryWithDirectNativeImports(BoundProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        VerifyDirectNativeImports(program, requireEntryPoint: false);
+    }
+
+    internal static void VerifyWithDirectNativeImports(BoundProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        VerifyDirectNativeImports(program, requireEntryPoint: true);
+    }
+
+    private static void VerifyDirectNativeImports(BoundProgram program, bool requireEntryPoint)
+    {
+        if (program.Functions.Any(static function =>
+            function.IsExternal && function.DirectNativeImport is null))
+        {
+            throw Invalid();
+        }
+        VerifyCore(program, requireEntryPoint, allowExternal: true);
+    }
+
     internal static void VerifyReferences(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
@@ -435,7 +457,7 @@ public static partial class SemanticVerifier
                 || (function.IsPrivate && function.IsInternal)
                 || (function.DoesNotReturn && function.ReturnType != PrimitiveType.Void)
                 || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeNullPointer
+                    or PrimitiveType.NativeNullPointer or PrimitiveType.NativeRawPointer
                     or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress
                 || (function.ReturnType == PrimitiveType.NativeWindowHandle
                     && !NativeWindowCreationContract.IsCreateWindowFunction(function, program.NativeImportCatalog))
@@ -506,7 +528,8 @@ public static partial class SemanticVerifier
                                     function, variableIndex, program)))
                         || (variable.Type == PrimitiveType.NativeStorageAddress
                             && !NativeStorageParameterContract.IsStorageAddressParameter(function,
-                                variableIndex, program.NativeImportCatalog))
+                                variableIndex, program.NativeImportCatalog)
+                            && DirectNativeImportContract.OutputForParameter(function, variableIndex) is null)
                         || (NativeFixedArrayContract.IsCarrier(variable.Type)
                             && (function.IsExternal || function.IndexedBody is not null
                                 || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -586,7 +609,8 @@ public static partial class SemanticVerifier
                                     or PrimitiveType.Int64 or PrimitiveType.UInt64
                                     or PrimitiveType.Float32 or PrimitiveType.Float64)
                                 && !IsCopyStruct(program, variable.Type)
-                                && !IsNativeComImportOutputParameter(function, variableIndex, program)))))
+                                && !IsNativeComImportOutputParameter(function, variableIndex, program)
+                                && DirectNativeImportContract.OutputForParameter(function, variableIndex) is null))))
                     {
                         throw Invalid();
                     }
@@ -662,6 +686,7 @@ public static partial class SemanticVerifier
                 || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
                 || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 || (!allowGenericProofDependencies && ((function.NativeImportKey is null
+                    && function.DirectNativeImport is null
                     && (function.IsPrivate || function.IsInternal))
                     || ManagedClassTypes.IsManaged(function.ReturnType)
                     || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))))
@@ -2052,24 +2077,33 @@ public static partial class SemanticVerifier
     private static void VerifyNativeImportCatalog(BoundProgram program)
     {
         var catalog = program.NativeImportCatalog;
+        foreach (var function in program.Functions)
+        {
+            if (function.DirectNativeImport is not null
+                && !DirectNativeImportContract.IsValid(function))
+            {
+                throw InvalidEffect(function.Span, "NativeImport");
+            }
+        }
         if (catalog is null)
         {
             if (program.NativeImportCatalogId is not null
                 || program.Functions.Any(static function => function.NativeImportKey is not null)
-                || program.Functions.Any(static function => function.ReturnType is
-                    PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeWindowHandle
-                    || function.ReturnType == PrimitiveType.NativeCallbackAddress
-                    || NativeFixedArrayContract.IsCarrier(function.ReturnType)
-                    || IsRestrictedNativeDescriptor(function.ReturnType)
-                    || function.Variables.Any(static variable => variable.Type is
+                || program.Functions.Any(static function => function.DirectNativeImport is null
+                    && (function.ReturnType is
                         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeCallbackAddress
-                        || IsRestrictedNativeDescriptor(variable.Type)
-                        || variable.NativeStorageRecordLayout is not null
-                        || variable.NativeStorageRecordFacts is not null
-                        || NativeFixedArrayContract.IsCarrier(variable.Type)
-                        || variable.NativeFixedArrayLayout is not null))
+                        or PrimitiveType.NativeWindowHandle
+                        || function.ReturnType == PrimitiveType.NativeCallbackAddress
+                        || NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                        || IsRestrictedNativeDescriptor(function.ReturnType)
+                        || function.Variables.Any(static variable => variable.Type is
+                            PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                            or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeCallbackAddress
+                            || IsRestrictedNativeDescriptor(variable.Type)
+                            || variable.NativeStorageRecordLayout is not null
+                            || variable.NativeStorageRecordFacts is not null
+                            || NativeFixedArrayContract.IsCarrier(variable.Type)
+                            || variable.NativeFixedArrayLayout is not null)))
                 || !program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
             {
                 throw InvalidEffect(default, "NativeImport");
@@ -2099,6 +2133,10 @@ public static partial class SemanticVerifier
             }
 
             externalCount++;
+            if (function.DirectNativeImport is not null)
+            {
+                continue;
+            }
             if (function.NativeImportKey is not string key
                 || !catalog.TryGetImport(key, out var definition)
                 || definition is null || !catalog.MatchesFunction(function, definition, program.Structures))
@@ -2107,7 +2145,8 @@ public static partial class SemanticVerifier
             }
         }
 
-        if (externalCount == 0 && !catalog.SupportsCataloguedFixedArrayStorage)
+        if (externalCount == 0 && !catalog.SupportsCataloguedFixedArrayStorage
+            && !catalog.SupportsNativeComContracts)
         {
             throw InvalidEffect(default, "NativeImport");
         }
@@ -2127,12 +2166,15 @@ public static partial class SemanticVerifier
         }
     }
 
-    internal static void RejectSourceNativeImports(BoundProgram program, string target)
+    internal static void RejectSourceNativeImports(BoundProgram program, string target,
+        bool allowDirectNativeImports = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
         if (program.NativeImportCatalog is not null || program.NativeImportCatalogId is not null
             || program.Functions.Any(static function => function.NativeImportKey is not null)
+            || !allowDirectNativeImports
+                && program.Functions.Any(static function => function.DirectNativeImport is not null)
             || program.Functions.Any(static function => function.ReturnType is
                 PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 or PrimitiveType.NativeWindowHandle
@@ -3599,6 +3641,13 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(constant.Span, "NativeImport");
                     }
                 }
+                else if (constant.Type == PrimitiveType.NativeRawPointer)
+                {
+                    if (constant.Value != 0)
+                    {
+                        throw Invalid();
+                    }
+                }
                 else if (constant.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
                     or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
                     or PrimitiveType.Char16 or PrimitiveType.Bool)
@@ -4328,6 +4377,7 @@ public static partial class SemanticVerifier
                     }
                 }
                 var outTargets = new HashSet<int>();
+                var directNativeOutputTargets = new HashSet<int>();
                 var implicitReferenceTemporaries = new HashSet<int>();
                 var argumentParameters = call.ArgumentParameterIndices.IsDefault
                     ? null : new bool[call.Arguments.Length];
@@ -4373,6 +4423,8 @@ public static partial class SemanticVerifier
                         {
                             throw Invalid();
                         }
+                        var directNativeOutput = DirectNativeImportContract.OutputForParameter(
+                            target, parameterIndex);
                         NativeStorageRecordParameterDefinition? storageRecordParameter = null;
                         if (storageRecordImport is not null)
                         {
@@ -4457,6 +4509,10 @@ public static partial class SemanticVerifier
                             var isAllowedStorageAddress = argument is BoundNativeStorageAddress storageAddress
                                 && storageParameter is not null
                                 && NativeStorageParameterContract.MatchesAddress(storageAddress, storageParameter);
+                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress directOutputAddress
+                                && directNativeOutput is not null
+                                && DirectNativeImportContract.MatchesAddress(
+                                    directOutputAddress, directNativeOutput, function, program);
                             isAllowedStorageAddress |= argument is BoundNativeStorageAddress recordAddress
                                 && storageRecordParameter is not null
                                 && NativeStorageRecordContract.MatchesAddress(recordAddress,
@@ -4504,7 +4560,20 @@ public static partial class SemanticVerifier
                                 && comValueOutputAddressAdaptation is not null
                                 && NativeStorageParameterContract.MatchesValueOutputAddress(
                                     comValueOutputAddress, comValueOutputAddressAdaptation, program);
-                            if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowClassExAddress)
+                            if (directNativeOutput is not null)
+                            {
+                                if (argument is not BoundNativeStorageAddress outputAddress
+                                    || !DirectNativeImportContract.MatchesAddress(
+                                        outputAddress, directNativeOutput, function, program)
+                                    || !directNativeOutputTargets.Add(outputAddress.Variable))
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                VerifyDirectNativeOutputAddress(outputAddress, directNativeOutput,
+                                    initialized, fieldMasks, declarations, function, program,
+                                    ref remaining, depth + 1, failures);
+                            }
+                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowClassExAddress)
                             {
                                 VerifyNativeWindowClassExAddress(argument, target, parameterIndex,
                                     initialized, declarations, function, program, ref remaining, depth + 1);
@@ -4854,7 +4923,8 @@ public static partial class SemanticVerifier
                             throw Invalid();
                         }
                         if ((argument is BoundOutArgument)
-                            != target.Variables[parameterSlot].IsOut)
+                            != target.Variables[parameterSlot].IsOut
+                            && directNativeOutput is null)
                         {
                             throw Invalid();
                         }
@@ -5053,6 +5123,7 @@ public static partial class SemanticVerifier
             or PrimitiveType.NativeWindowHandle
             or PrimitiveType.NativeCallbackAddress
             or PrimitiveType.NativeStorageAddress
+            or PrimitiveType.NativeRawPointer
             or PrimitiveType.NativeModuleHandle or PrimitiveType.NativeWindowClassEx
             or PrimitiveType.NativeWindowClassExAddress
             || NativeFixedArrayContract.IsCarrier(type)

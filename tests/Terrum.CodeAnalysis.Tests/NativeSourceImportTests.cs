@@ -49,7 +49,7 @@ public sealed partial class NativeSourceImportTests
             extern void Sleep(uint32 milliseconds);
 
             int32 Main() {
-                Sleep(16);
+                unsafe { Sleep(16); }
                 return 0;
             }
             """;
@@ -62,8 +62,14 @@ public sealed partial class NativeSourceImportTests
         Assert.That(sleep.ReturnType, Is.EqualTo(PrimitiveType.Void));
         Assert.That(global::System.Linq.Enumerable.Single(sleep.Variables).Type, Is.EqualTo(PrimitiveType.UInt32));
         Assert.That(sleep.IsNoThrow, Is.True);
-        Assert.That(sleep.RequiresUnsafeCaller, Is.False);
+        Assert.That(sleep.RequiresUnsafeCaller, Is.True);
         Assert.That(sleep.DoesNotReturn, Is.False);
+
+        var safeCall = source.Replace("unsafe { Sleep(16); }", "Sleep(16);", StringComparison.Ordinal);
+        var safeCompilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(safeCall));
+        Assert.That(safeCompilation.Program, Is.Null);
+        Assert.That(global::System.Linq.Enumerable.Any(safeCompilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
 
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
         Assert.That(image.AsSpan().IndexOf("KERNEL32.dll\0"u8) >= 0, Is.True);
@@ -161,7 +167,7 @@ public sealed partial class NativeSourceImportTests
 
         var withoutNoEscape = new NativeImportDefinition(Utf16ZFixtureKey, "native-import-abi-probe.dll",
             "NativeFfiUtf16Z", [PrimitiveType.NativeUtf16ZPointer], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
+            true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory);
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
             "test-native-utf16z-without-contract-v1", [withoutNoEscape]))!;
     }
@@ -192,27 +198,35 @@ public sealed partial class NativeSourceImportTests
         var invalidBodies = new[] {
             $$"""
                 int32 Main() {
-                    return NativeFfiMessageBox(owner: 0, text: utf16z("text"),
-                        caption: utf16z("caption"), flags: 0);
+                    unsafe {
+                        return NativeFfiMessageBox(owner: 0, text: utf16z("text"),
+                            caption: utf16z("caption"), flags: 0);
+                    }
                 }
                 """,
             $$"""
                 int32 Main() {
-                    return NativeFfiMessageBox(owner: null, text: utf16z("text"),
-                        caption: utf16z("caption"), flags: 0);
+                    unsafe {
+                        return NativeFfiMessageBox(owner: null, text: utf16z("text"),
+                            caption: utf16z("caption"), flags: 0);
+                    }
                 }
                 """,
             $$"""
                 int32 Main() {
                     Terrum.Interop.Windows.HWND owner = Terrum.Interop.Windows.HWND.NoOwner;
-                    return NativeFfiMessageBox(owner: owner, text: utf16z("text"),
-                        caption: utf16z("caption"), flags: 0);
+                    unsafe {
+                        return NativeFfiMessageBox(owner: owner, text: utf16z("text"),
+                            caption: utf16z("caption"), flags: 0);
+                    }
                 }
                 """,
             $$"""
                 int32 Forward(Terrum.Interop.Windows.HWND owner) {
-                    return NativeFfiMessageBox(owner: owner, text: utf16z("text"),
-                        caption: utf16z("caption"), flags: 0);
+                    unsafe {
+                        return NativeFfiMessageBox(owner: owner, text: utf16z("text"),
+                            caption: utf16z("caption"), flags: 0);
+                    }
                 }
                 int32 Main() {
                     return Forward(Terrum.Interop.Windows.HWND.NoOwner);
@@ -220,10 +234,12 @@ public sealed partial class NativeSourceImportTests
                 """,
             $$"""
                 int32 Main() {
-                    return NativeFfiMessageBox(
-                        owner: true ? Terrum.Interop.Windows.HWND.NoOwner
-                            : Terrum.Interop.Windows.HWND.NoOwner,
-                        text: utf16z("text"), caption: utf16z("caption"), flags: 0);
+                    unsafe {
+                        return NativeFfiMessageBox(
+                            owner: true ? Terrum.Interop.Windows.HWND.NoOwner
+                                : Terrum.Interop.Windows.HWND.NoOwner,
+                            text: utf16z("text"), caption: utf16z("caption"), flags: 0);
+                    }
                 }
                 """,
         };
@@ -245,8 +261,10 @@ public sealed partial class NativeSourceImportTests
             extern int32 NativeFfiMessageBox(HWND owner, ptr<char16> text,
                 ptr<char16> caption, uint32 flags);
             int32 Main() {
-                return NativeFfiMessageBox(owner: HWND.NoOwner, text: utf16z("text"),
-                    caption: utf16z("caption"), flags: 0);
+                unsafe {
+                    return NativeFfiMessageBox(owner: HWND.NoOwner, text: utf16z("text"),
+                        caption: utf16z("caption"), flags: 0);
+                }
             }
             """;
         var spoofedCompilation = Compilation.CreateWithNativeImports(
@@ -260,8 +278,8 @@ public sealed partial class NativeSourceImportTests
             extern int32 NativeFfiMessageBox(Terrum.Interop.Windows.HWND owner, ptr<char16> text,
                 ptr<char16> caption, uint32 flags);
             int32 Main() {
-                return NativeFfiMessageBox(flags: 0, caption: utf16z("caption"),
-                    text: utf16z("text"), owner: Terrum.Interop.Windows.HWND.NoOwner);
+                return unsafe(NativeFfiMessageBox(flags: 0, caption: utf16z("caption"),
+                    text: utf16z("text"), owner: Terrum.Interop.Windows.HWND.NoOwner));
             }
             """;
         var validCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(validSource)], catalog,
@@ -273,7 +291,8 @@ public sealed partial class NativeSourceImportTests
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImports(
             program, NativeRuntimePolicy.FailFast))!;
         var boundReturn = ((global::System.Func<BoundReturn>)(() => { var __nunitActual2 = main.Body.Statements[0]; Assert.That(__nunitActual2, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual2!; }))();
-        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual3 = boundReturn.Value; Assert.That(__nunitActual3, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual3!; }))();
+        var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual3 = boundReturn.Value; Assert.That(__nunitActual3, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual3!; }))();
+        var call = ((global::System.Func<BoundCall>)(() => { var __nunitActual4 = unsafeExpression.Expression; Assert.That(__nunitActual4, Is.TypeOf<BoundCall>()); return (BoundCall)__nunitActual4!; }))();
         var ownerArgumentIndex = Enumerable.Range(0, call.Arguments.Length)
             .Single(index => call.ParameterIndex(index) == 0);
         Assert.That(call.Arguments[ownerArgumentIndex], Is.TypeOf<BoundNativeNoOwner>());
@@ -311,7 +330,7 @@ public sealed partial class NativeSourceImportTests
         var withoutNoOwner = new NativeImportDefinition(MessageBoxFixtureKey,
             "native-import-abi-probe.dll", "NativeFfiMessageBox",
             [PrimitiveType.NativeWindowHandle], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
+            true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory);
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
             "test-native-hwnd-without-contract-v1", [withoutNoOwner]))!;
     }
@@ -327,8 +346,10 @@ public sealed partial class NativeSourceImportTests
             extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
                 ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
             int32 Main() {
-                return NativeFfiUtf16Z(utf16z("first"), 1, 2,
-                    utf16z("second"), 3, utf16z("third"));
+                unsafe {
+                    return NativeFfiUtf16Z(utf16z("first"), 1, 2,
+                        utf16z("second"), 3, utf16z("third"));
+                }
             }
             """;
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
@@ -362,10 +383,12 @@ public sealed partial class NativeSourceImportTests
             extern void Sleep(uint32 milliseconds);
 
             int32 Main() {
-                if (CurrentThreadId() == 0) {
-                    return 1;
+                unsafe {
+                    if (CurrentThreadId() == 0) {
+                        return 1;
+                    }
+                    Sleep(1);
                 }
-                Sleep(1);
                 return 0;
             }
 
@@ -473,11 +496,11 @@ public sealed partial class NativeSourceImportTests
                 new NativeImportDefinition(SignedFixtureKey, "native-import-abi-probe.dll", "NativeFfiSigned",
                     [PrimitiveType.Int32, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
                         PrimitiveType.Int32, PrimitiveType.UInt32],
-                    PrimitiveType.Int64, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory),
+                    PrimitiveType.Int64, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory),
                 new NativeImportDefinition(UnsignedFixtureKey, "native-import-abi-probe.dll", "NativeFfiUnsigned",
                     [PrimitiveType.UInt64, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
                         PrimitiveType.UInt32],
-                    PrimitiveType.UInt64, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory),
+                    PrimitiveType.UInt64, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory),
                 CreateUtf16ZImportDefinition(),
                 CreateMessageBoxImportDefinition(),
             ]);
@@ -503,20 +526,22 @@ public sealed partial class NativeSourceImportTests
                     ptr<char16> caption, uint32 flags);
 
                 int32 Main() {
-                    if (NativeFfiSigned(-7, 11, -13, 17, -19, 23) != -1234567890123) {
-                        return 1;
-                    }
-                    if (NativeFfiUnsigned(2, 3, -5, 7, 11) != 18364758544493064720) {
-                        return 2;
-                    }
-                    if (NativeFfiUtf16Z(sixth: utf16z(""), fifth: 610800471,
-                        fourth: utf16z("caption"), third: 81985529216486895,
-                        second: 324478056, first: utf16z("A\n\U0001F642")) != 0) {
-                        return 3;
-                    }
-                    if (NativeFfiMessageBox(flags: 0, caption: utf16z("caption"),
-                        text: utf16z("A\n\U0001F642"), owner: Terrum.Interop.Windows.HWND.NoOwner) != 1) {
-                        return 4;
+                    unsafe {
+                        if (NativeFfiSigned(-7, 11, -13, 17, -19, 23) != -1234567890123) {
+                            return 1;
+                        }
+                        if (NativeFfiUnsigned(2, 3, -5, 7, 11) != 18364758544493064720) {
+                            return 2;
+                        }
+                        if (NativeFfiUtf16Z(sixth: utf16z(""), fifth: 610800471,
+                            fourth: utf16z("caption"), third: 81985529216486895,
+                            second: 324478056, first: utf16z("A\n\U0001F642")) != 0) {
+                            return 3;
+                        }
+                        if (NativeFfiMessageBox(flags: 0, caption: utf16z("caption"),
+                            text: utf16z("A\n\U0001F642"), owner: Terrum.Interop.Windows.HWND.NoOwner) != 1) {
+                            return 4;
+                        }
                     }
                     return 0;
                 }
@@ -624,7 +649,7 @@ public sealed partial class NativeSourceImportTests
         new(Utf16ZFixtureKey, "native-import-abi-probe.dll", "NativeFfiUtf16Z",
             [PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32, PrimitiveType.UInt64,
                 PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32, PrimitiveType.NativeUtf16ZPointer],
-            PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
+            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [
                 NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
                 NativeImportParameterContract.Value,
@@ -639,7 +664,7 @@ public sealed partial class NativeSourceImportTests
         new(MessageBoxFixtureKey, "native-import-abi-probe.dll", "NativeFfiMessageBox",
             [PrimitiveType.NativeWindowHandle, PrimitiveType.NativeUtf16ZPointer,
                 PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32],
-            PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
+            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [
                 NativeImportParameterContract.NoOwnerWindowHandle,
                 NativeImportParameterContract.ReadonlyUtf16ZNoEscape,

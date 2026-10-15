@@ -17,9 +17,9 @@ public static partial class ModuleCompiler
 
     private static void RequirePrivateSpanRevision(BinaryReader reader)
     {
-        if (reader is not ModuleReader { FormatVersion: PrivateSpanVersion })
+        if (reader is not ModuleReader { FormatVersion: PrivateSpanVersion or DirectNativeImportVersion })
         {
-            throw new ModuleFormatException("Private span IR requires semantic-module revision 77.");
+            throw new ModuleFormatException("Private span IR requires semantic-module revision 77 or 79.");
         }
     }
 
@@ -62,11 +62,17 @@ public static partial class ModuleCompiler
             }
             return;
         }
-        if (module.FormatVersion != PrivateSpanVersion || !module.RequiresSourceGrant
+        if (module.FormatVersion is not (PrivateSpanVersion or DirectNativeImportVersion)
+            || module.FormatVersion == PrivateSpanVersion && !module.RequiresSourceGrant
+            || hasSpans && !module.RequiresSourceGrant
             || module.Functions.Any(static item => item.Import
                 && ContractContainsType(item.Contract, PrimitiveType.TokenSpan)))
         {
             throw new ModuleFormatException("Unsupported private-span module boundary.");
+        }
+        if (!hasSpans)
+        {
+            return;
         }
         try
         {

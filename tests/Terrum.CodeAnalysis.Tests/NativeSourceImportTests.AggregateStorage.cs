@@ -35,7 +35,7 @@ public sealed partial class NativeSourceImportTests
     private static NativeImportDefinition CreateAggregateStorageImport(bool isReadonly = false) =>
         new(AggregateStorageImportKey, "native-aggregate-probe.dll", "FillRect",
             [PrimitiveType.NativeStorageAddress], PrimitiveType.Int32,
-            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [
                 isReadonly
@@ -64,7 +64,7 @@ public sealed partial class NativeSourceImportTests
     {
         var writable = CompileAggregateStorage("""
             mut FixtureRect rectangle = new FixtureRect(1, 2, 3, 4);
-            return FillRect(&rectangle);
+            unsafe { return FillRect(&rectangle); }
             """);
         Assert.That(writable.HasErrors, Is.False, string.Join(Environment.NewLine, writable.Diagnostics));
         var writableProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = writable.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
@@ -72,7 +72,7 @@ public sealed partial class NativeSourceImportTests
 
         var readonlyCompilation = CompileAggregateStorage("""
             FixtureRect rectangle = new FixtureRect(1, 2, 3, 4);
-            return FillRect(&rectangle);
+            unsafe { return FillRect(&rectangle); }
             """, isReadonly: true);
         Assert.That(readonlyCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, readonlyCompilation.Diagnostics));
         var readonlyProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = readonlyCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
@@ -84,7 +84,7 @@ public sealed partial class NativeSourceImportTests
     {
         var compilation = CompileAggregateStorage("""
             mut FixtureRect rectangle = new FixtureRect(1, 2, 3, 4);
-            return FillRect(&rectangle);
+            unsafe { return FillRect(&rectangle); }
             """, runtimePolicy: BoundRuntimePolicy.CheckedExceptions);
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));

@@ -24,11 +24,13 @@ public sealed partial class NativeSourceImportTests
             extern uint32 GetLastError();
             int32 Main() {
                 mut InlineArray<char16, 260> path = [];
-                uint32 length = GetModuleFileNameW(null, &path[0], 260);
-                if (length == 0) {
-                    return int32(GetLastError());
+                unsafe {
+                    uint32 length = GetModuleFileNameW(null, &path[0], 260);
+                    if (length == 0) {
+                        return int32(GetLastError());
+                    }
+                    return int32(length);
                 }
-                return int32(length);
             }
             """;
 

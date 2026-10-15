@@ -23,7 +23,7 @@ internal static class NativeWindowClientRectContract
     internal static NativeImportDefinition Import { get; } = new(ImportKey,
         "user32.dll", "GetClientRect", [
             PrimitiveType.NativeWindowHandle, PrimitiveType.NativeStorageAddress,
-        ], PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.System32) {
+        ], PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.System32) {
         ParameterContracts = [
             NativeImportParameterContract.CreatedWindowHandleNoEscape,
             NativeImportParameterContract.WritableNativeStorageNoEscape,

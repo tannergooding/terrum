@@ -21,13 +21,18 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Fixed-storage commitments cannot yet be combined with private-span revision 77.");
         }
+        if (module.FormatVersion == DirectNativeImportVersion)
+        {
+            return module;
+        }
         return module with { FormatVersion = FixedLayoutVersion };
     }
 
     private static void ValidateFixedLayoutModule(Module module)
     {
         var hasCommitments = module.Structures.Any(static structure => structure.BlittableTargetRequirement != 0);
-        if (hasCommitments != (module.FormatVersion == FixedLayoutVersion))
+        if (hasCommitments && module.FormatVersion < FixedLayoutVersion
+            || !hasCommitments && module.FormatVersion == FixedLayoutVersion)
         {
             throw new ModuleFormatException("Explicit fixed-storage commitments require semantic-module revision 78.");
         }

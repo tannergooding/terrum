@@ -50,6 +50,11 @@ internal static class NativeComCallContract
                 continue;
             }
 
+            if (!HasOwnerCellLayout(structures[structureIndex], owner)
+                || structures[structureIndex].CleanupMethod != owner.BoundOwnerName + ".Close")
+            {
+                continue;
+            }
             var receiverType = (PrimitiveType)(100 + structureIndex);
             if (Owner(receiverType, program) is null)
             {
@@ -272,7 +277,8 @@ internal static class NativeComCallContract
                     variables.ToImmutable(), variables.Count, new BoundBlock([], default), default) {
                     DeclaringStruct = owner.BoundOwnerName,
                     IsInternal = true,
-                    IsNoThrow = true,
+                    IsNoThrow = method.IsNoThrow,
+                    RequiresUnsafeCaller = true,
                     Intrinsic = BoundIntrinsic.NativeComVTableCall,
                     NativeComMethod = method,
                     NativeComParameterMappings = mappings.ToImmutable(),
@@ -308,6 +314,12 @@ internal static class NativeComCallContract
                 | NativeComEffects.AcquiresReference
                 | NativeComEffects.OutputMayBeWrittenOnFailure)) == 0;
     }
+
+    internal static bool HasOwnerCellLayout(BoundStruct structure, NativeComOwnerDefinition owner) =>
+        structure.IsUnique && structure.Size == owner.CellSize
+        && (structure.Fields.IsEmpty
+            || structure.Fields is [{ Offset: 0, Size: sizeof(long), Type: PrimitiveType.NativeRawPointer,
+                IsMutable: false } field] && field.IsPrivate);
 
     private static bool TryResolveOwnerType(string interfaceIdentity, BoundProgram program,
         out PrimitiveType type)
@@ -405,6 +417,24 @@ internal static class NativeComCallContract
 
     internal static Dictionary<int, int>? Acquisitions(BoundFunction function, BoundProgram program)
     {
+        var declaredAcquisitions = function.NativeComAcquisitionOutputParameterIndexes;
+        if (declaredAcquisitions.IsDefault
+            || declaredAcquisitions.Distinct().Count() != declaredAcquisitions.Length)
+        {
+            throw Invalid("the declared acquisition output ordinals are malformed.");
+        }
+        foreach (var parameter in declaredAcquisitions)
+        {
+            if ((uint)parameter >= (uint)function.ParameterCount
+                || parameter >= function.Variables.Length
+                || !function.Variables[parameter].IsOut
+                || Owner(function.Variables[parameter].Type, program) is not NativeComOwnerDefinition owner
+                || !TryGetForwardedImportOutput(function, parameter, owner, program, out _, out _)
+                    && !IsSourceAuthoredAcquisition(function, parameter, owner, program))
+            {
+                throw Invalid("a NativeComAcquisition output is not backed by a fixed-interface import contract.");
+            }
+        }
         if (!function.Variables.Any(variable => Owner(variable.Type, program) is not null))
         {
             return null;
@@ -430,6 +460,7 @@ internal static class NativeComCallContract
                 var parameter = call.ParameterIndex(index);
                 var hasForwardedAcquisition = TryGetForwardedImportOutput(
                     target, parameter, owner, program, out _, out _);
+                var hasSourceAcquisition = IsSourceAuthoredAcquisition(target, parameter, owner, program);
                 var methodIdentity = target.NativeComMethod?.Identity
                     ?? target.NativeComAcquisitionMethodIdentity;
                 var importKey = target.NativeComAcquisitionImportKey
@@ -443,7 +474,7 @@ internal static class NativeComCallContract
                     == NativeComOwnerAcquisitionKind.NativeImportOutput
                     && importKey == owner.AcquisitionIdentity;
                 if (!isMethodOutputAcquisition && !isAdditionalAcquisition && !isImportAcquisition
-                    && !hasForwardedAcquisition)
+                    && !hasForwardedAcquisition && !hasSourceAcquisition)
                 {
                     continue;
                 }
@@ -502,7 +533,7 @@ internal static class NativeComCallContract
         var structure = program.Structures[index];
         if (owner is null
             || !owner.IsUnique || owner.CellSize != sizeof(long) || owner.CellAlignment != sizeof(long)
-            || !structure.IsUnique || !structure.Fields.IsEmpty || structure.Size != owner.CellSize
+            || !HasOwnerCellLayout(structure, owner)
             || structure.CleanupMethod != owner.BoundOwnerName + ".Close")
         {
             throw Invalid();
@@ -617,7 +648,8 @@ internal static class NativeComCallContract
         if (function.Intrinsic != BoundIntrinsic.NativeComVTableCall
             || function.NativeComMethod is not NativeComMethodDefinition method
             || function.IsExternal || function.IsCleanup || function.IsConstructor || function.IsStatic
-            || function.IsOperator || function.DoesNotReturn || function.DeclaringStruct is null
+            || function.IsOperator || !function.RequiresUnsafeCaller || function.DoesNotReturn
+            || function.DeclaringStruct is null
             || function.Body is null || function.Body.Statements.IsDefault
             || !function.Body.Statements.IsEmpty || function.Variables.IsDefault
             || function.ParameterCount != function.Variables.Length
@@ -1132,14 +1164,19 @@ internal static class NativeComCallContract
 
         var owner = Owner(receiver.Type, program);
         return owner is not null && owner.ReleaseMethodIdentity == method.Identity
-            && owner.InterfaceIdentity == method.OwnerInterfaceIdentity
+            && program.NativeImportCatalog is NativeImportCatalog ownerCatalog
+            && NativeComCatalog.IsAssignable(owner.InterfaceIdentity, method.OwnerInterfaceIdentity,
+                ownerCatalog.ComInterfaces.ToDictionary(
+                    static definition => definition.NominalIdentity, StringComparer.Ordinal))
             && function.Name == owner.BoundOwnerName + ".Close"
             && function.DeclaringStruct == owner.BoundOwnerName
             && function.Variables.Length == 1 && function.Variables[0].Type == receiver.Type
             && catalog.TryGetComInterface(owner.InterfaceIdentity, out var definition)
             && definition is not null
-            && (parameters[0] == definition.NominalIdentity + "*"
-                || definition.SignatureAliases.Any(alias => parameters[0] == alias + "*"));
+            && (parameters[0] == method.OwnerInterfaceIdentity + "*"
+                || ownerCatalog.ComInterfaces.Single(item => item.NominalIdentity
+                    == method.OwnerInterfaceIdentity).SignatureAliases.Any(alias =>
+                    parameters[0] == alias + "*"));
     }
 
     internal static bool IsValidOwnerCloneFunction(BoundFunction function, BoundProgram program)
@@ -1333,6 +1370,10 @@ internal static class NativeComCallContract
     private static bool IsAcquisition(BoundFunction target, NativeComOwnerDefinition owner,
         int parameter, BoundProgram program)
     {
+        if (IsSourceAuthoredAcquisition(target, parameter, owner, program))
+        {
+            return true;
+        }
         if (TryGetForwardedImportOutput(target, parameter, owner, program, out _, out _))
         {
             return true;
@@ -1381,6 +1422,58 @@ internal static class NativeComCallContract
         return key is not null && IsNativeImportOutputAcquisition(owner, key, parameter, program);
     }
 
+    private static bool IsSourceAuthoredAcquisition(BoundFunction function, int outputParameter,
+        NativeComOwnerDefinition owner, BoundProgram program)
+    {
+        if (!function.NativeComAcquisitionOutputParameterIndexes.Contains(outputParameter)
+            || function.NativeComAcquisitionSources.IsDefault)
+        {
+            return false;
+        }
+
+        foreach (var source in function.NativeComAcquisitionSources)
+        {
+            if (source.OutputParameterIndex != outputParameter
+                || source.OwnerTypeIdentity != owner.BoundOwnerName
+                || source.SourceMethodIdentity != owner.AcquisitionIdentity
+                || source.SourceOutputParameterIndex != owner.OutputParameterIndex
+                || source.OutputMayBeWrittenOnFailure != owner.OutputMayBeWrittenOnFailure)
+            {
+                continue;
+            }
+
+            if (owner.AcquisitionKind == NativeComOwnerAcquisitionKind.ComMethodOutput
+                && program.NativeImportCatalog is NativeImportCatalog comCatalog
+                && comCatalog.TryGetComMethod(source.SourceMethodIdentity, out var comMethod)
+                && comMethod is not null
+                && comMethod.OutputParameterIndex == source.SourceOutputParameterIndex
+                && comMethod.OutputInterfaceIdentity == owner.InterfaceIdentity
+                && comMethod.Effects.HasFlag(NativeComEffects.AcquiresReference)
+                && comMethod.Effects.HasFlag(NativeComEffects.OutputMayBeWrittenOnFailure)
+                    == source.OutputMayBeWrittenOnFailure)
+            {
+                return true;
+            }
+
+            if (owner.AcquisitionKind == NativeComOwnerAcquisitionKind.DirectNativeImportOutput
+                && source.OutputMayBeWrittenOnFailure
+                && program.Functions.Any(candidate =>
+                    candidate.Name == source.SourceMethodIdentity
+                    && candidate.IsExternal && candidate.DirectNativeImport is not null
+                    && DirectNativeImportContract.IsValid(candidate)
+                    && DirectNativeImportContract.OutputForParameter(candidate,
+                        source.SourceOutputParameterIndex) is DirectNativeOutput {
+                            PointeeType: PrimitiveType.NativeRawPointer,
+                            FailureDisposition: 1,
+                        }))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsNativeImportOutputAcquisition(NativeComOwnerDefinition owner, string importKey,
         int parameter, BoundProgram program) =>
         owner.AcquisitionKind == NativeComOwnerAcquisitionKind.NativeImportOutput
@@ -1407,22 +1500,30 @@ internal static class NativeComCallContract
             || function.NativeImportKey is not null || function.NativeComMethod is not null
             || function.Variables.IsDefault || function.ParameterCount != function.Variables.Length
             || parameter < 0 || parameter >= function.ParameterCount
+            || !function.NativeComAcquisitionOutputParameterIndexes.Contains(parameter)
             || !function.Variables[parameter].IsOut
             || Owner(function.Variables[parameter].Type, program) != owner
             || function.ReturnType != PrimitiveType.Bool
-            || function.Body is not BoundBlock body || body.Statements.Length != 1
-            || body.Statements[0] is not BoundTryFinally outputScope
-            || outputScope.Body.Statements is not [BoundReturn {
-                Value: BoundBinary {
-                    Type: PrimitiveType.Bool,
-                    Operator: Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals,
-                    Left: BoundCall { Type: PrimitiveType.Int32 } call,
-                    Right: BoundConstant { Type: PrimitiveType.Int32, Value: 0 },
-                },
-            }]
+            || function.Body is not BoundBlock { Statements: [BoundTryFinally outputScope] }
             || !BoundTreeTraversal.IsWithinLimits(function.Body)
-            || !call.ArgumentParameterIndices.IsDefault || call.IsUnsafeAuthorized
-            || call.Function < 0 || call.Function >= program.Functions.Length)
+            || outputScope.Finally.Statements.IsDefault)
+        {
+            return false;
+        }
+
+        var calls = new List<BoundCall>();
+        _ = BoundTreeTraversal.RewriteCalls(function, call => {
+            calls.Add(call);
+            return call;
+        });
+        if (calls.Count != 1)
+        {
+            return false;
+        }
+        var call = calls[0];
+        if (!call.ArgumentParameterIndices.IsDefault || !call.IsUnsafeAuthorized
+            || call.Function < 0 || call.Function >= program.Functions.Length
+            || !ProvesAcquisitionResult(outputScope.Body, call))
         {
             return false;
         }
@@ -1500,6 +1601,350 @@ internal static class NativeComCallContract
         importFunctionIndex = call.Function;
         return true;
     }
+
+    private enum AcquisitionResultState : byte
+    {
+        NotCalled,
+        Failure,
+        Success,
+    }
+
+    private readonly record struct AcquisitionPath(AcquisitionResultState State, bool? ReturnValue);
+
+    private readonly record struct AcquisitionBooleanOutcome(AcquisitionResultState State, bool Value);
+
+    private static bool ProvesAcquisitionResult(BoundBlock body, BoundCall call)
+    {
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        var paths = new HashSet<AcquisitionPath> {
+            new(AcquisitionResultState.NotCalled, null),
+        };
+        if (!TryAnalyzeAcquisitionStatement(body, paths, call.Function, call.Span,
+            ref remaining, 0, out paths))
+        {
+            return false;
+        }
+
+        var hasSuccessfulReturn = false;
+        foreach (var path in paths)
+        {
+            if (path.ReturnValue is not bool returned || path.State == AcquisitionResultState.NotCalled
+                || (returned && path.State != AcquisitionResultState.Success))
+            {
+                return false;
+            }
+            hasSuccessfulReturn |= returned && path.State == AcquisitionResultState.Success;
+        }
+        return hasSuccessfulReturn;
+    }
+
+    private static bool TryAnalyzeAcquisitionStatement(BoundStatement statement,
+        HashSet<AcquisitionPath> paths, int importFunction, Terrum.CodeAnalysis.Text.TextSpan importSpan,
+        ref int remaining, int depth, out HashSet<AcquisitionPath> result)
+    {
+        result = [];
+        if (depth > SemanticVerifier.MaximumDepth || --remaining < 0)
+        {
+            return false;
+        }
+
+        switch (statement)
+        {
+            case BoundBlock block when !block.Statements.IsDefault:
+                var current = paths;
+                foreach (var child in block.Statements)
+                {
+                    if (!TryAnalyzeAcquisitionStatement(child, current, importFunction, importSpan,
+                        ref remaining, depth + 1, out current))
+                    {
+                        return false;
+                    }
+                }
+                result = current;
+                return true;
+
+            case BoundIf branch:
+                foreach (var path in paths)
+                {
+                    if (path.ReturnValue is not null)
+                    {
+                        result.Add(path);
+                        continue;
+                    }
+                    if (!TryEvaluateAcquisitionBoolean(branch.Condition, path.State,
+                        importFunction, importSpan, ref remaining, depth + 1, out var outcomes))
+                    {
+                        return false;
+                    }
+                    foreach (var outcome in outcomes)
+                    {
+                        var branchPath = new HashSet<AcquisitionPath> {
+                            new(outcome.State, null),
+                        };
+                        if (outcome.Value || branch.Else is not null)
+                        {
+                            if (!TryAnalyzeAcquisitionStatement(outcome.Value ? branch.Then : branch.Else!,
+                                branchPath, importFunction, importSpan, ref remaining, depth + 1,
+                                out var branchResult))
+                            {
+                                return false;
+                            }
+                            result.UnionWith(branchResult);
+                        }
+                        else
+                        {
+                            result.UnionWith(branchPath);
+                        }
+                    }
+                }
+                return true;
+
+            case BoundUnsafe unsafeBlock:
+                return TryAnalyzeAcquisitionStatement(unsafeBlock.Body, paths, importFunction, importSpan,
+                    ref remaining, depth + 1, out result);
+
+            case BoundReturn { Value: { Type: PrimitiveType.Bool } value }:
+                foreach (var path in paths)
+                {
+                    if (path.ReturnValue is not null)
+                    {
+                        result.Add(path);
+                        continue;
+                    }
+                    if (!TryEvaluateAcquisitionBoolean(value, path.State, importFunction, importSpan,
+                        ref remaining, depth + 1, out var outcomes))
+                    {
+                        return false;
+                    }
+                    foreach (var outcome in outcomes)
+                    {
+                        result.Add(new(outcome.State, outcome.Value));
+                    }
+                }
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryEvaluateAcquisitionBoolean(BoundExpression expression, AcquisitionResultState state,
+        int importFunction, Terrum.CodeAnalysis.Text.TextSpan importSpan, ref int remaining, int depth,
+        out HashSet<AcquisitionBooleanOutcome> outcomes)
+    {
+        outcomes = [];
+        if (expression.Type != PrimitiveType.Bool || depth > SemanticVerifier.MaximumDepth || --remaining < 0)
+        {
+            return false;
+        }
+
+        switch (expression)
+        {
+            case BoundUnsafeExpression unsafeExpression:
+                return TryEvaluateAcquisitionBoolean(unsafeExpression.Expression, state, importFunction, importSpan,
+                    ref remaining, depth + 1, out outcomes);
+
+            case BoundConstant { Type: PrimitiveType.Bool } constant:
+                outcomes.Add(new(state, constant.Value != 0));
+                return true;
+
+            case BoundUnary { Operator: Terrum.CodeAnalysis.Lexing.TokenKind.Bang } unary:
+                if (!TryEvaluateAcquisitionBoolean(unary.Operand, state, importFunction, importSpan,
+                    ref remaining, depth + 1, out var operandOutcomes))
+                {
+                    return false;
+                }
+                foreach (var outcome in operandOutcomes)
+                {
+                    outcomes.Add(new(outcome.State, !outcome.Value));
+                }
+                return true;
+
+            case BoundBinary { Operator: Terrum.CodeAnalysis.Lexing.TokenKind.AmpersandAmpersand } and:
+                if (!TryEvaluateAcquisitionBoolean(and.Left, state, importFunction, importSpan,
+                    ref remaining, depth + 1, out var leftAnd))
+                {
+                    return false;
+                }
+                foreach (var left in leftAnd)
+                {
+                    if (!left.Value)
+                    {
+                        outcomes.Add(new(left.State, false));
+                    }
+                    else if (!TryEvaluateAcquisitionBoolean(and.Right, left.State, importFunction, importSpan,
+                        ref remaining, depth + 1, out var rightAnd))
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        outcomes.UnionWith(rightAnd);
+                    }
+                }
+                return true;
+
+            case BoundBinary { Operator: Terrum.CodeAnalysis.Lexing.TokenKind.PipePipe } or:
+                if (!TryEvaluateAcquisitionBoolean(or.Left, state, importFunction, importSpan,
+                    ref remaining, depth + 1, out var leftOr))
+                {
+                    return false;
+                }
+                foreach (var left in leftOr)
+                {
+                    if (left.Value)
+                    {
+                        outcomes.Add(new(left.State, true));
+                    }
+                    else if (!TryEvaluateAcquisitionBoolean(or.Right, left.State, importFunction, importSpan,
+                        ref remaining, depth + 1, out var rightOr))
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        outcomes.UnionWith(rightOr);
+                    }
+                }
+                return true;
+
+            case BoundConditional conditional:
+                if (!TryEvaluateAcquisitionBoolean(conditional.Condition, state, importFunction, importSpan,
+                    ref remaining, depth + 1, out var conditions))
+                {
+                    return false;
+                }
+                foreach (var condition in conditions)
+                {
+                    if (!TryEvaluateAcquisitionBoolean(condition.Value ? conditional.WhenTrue : conditional.WhenFalse,
+                        condition.State, importFunction, importSpan, ref remaining, depth + 1, out var values))
+                    {
+                        return false;
+                    }
+                    outcomes.UnionWith(values);
+                }
+                return true;
+
+            case BoundBinary comparison when TryGetAcquisitionComparison(
+                comparison, importFunction, importSpan, out var comparisonOperator, out var constant):
+                if (state != AcquisitionResultState.NotCalled)
+                {
+                    return false;
+                }
+                AddAcquisitionComparisonOutcomes(outcomes, comparisonOperator, constant);
+                return outcomes.Count != 0;
+
+            default:
+                outcomes.Add(new(state, false));
+                outcomes.Add(new(state, true));
+                return true;
+        }
+    }
+
+    private static bool TryGetAcquisitionComparison(BoundBinary comparison, int importFunction,
+        Terrum.CodeAnalysis.Text.TextSpan importSpan, out Terrum.CodeAnalysis.Lexing.TokenKind operation,
+        out long constant)
+    {
+        operation = default;
+        constant = 0;
+        var left = UnwrapUnsafe(comparison.Left);
+        var right = UnwrapUnsafe(comparison.Right);
+        if (left is BoundCall { Type: PrimitiveType.Int32 } call
+            && call.Function == importFunction && call.Span == importSpan
+            && right is BoundConstant { Type: PrimitiveType.Int32 } rightConstant)
+        {
+            operation = comparison.Operator;
+            constant = rightConstant.Value;
+            return IsComparison(operation);
+        }
+        if (right is BoundCall { Type: PrimitiveType.Int32 } reverseCall
+            && reverseCall.Function == importFunction && reverseCall.Span == importSpan
+            && left is BoundConstant { Type: PrimitiveType.Int32 } leftConstant
+            && TryReverseComparison(comparison.Operator, out operation))
+        {
+            constant = leftConstant.Value;
+            return true;
+        }
+        return false;
+    }
+
+    private static BoundExpression UnwrapUnsafe(BoundExpression expression) =>
+        expression is BoundUnsafeExpression unsafeExpression ? UnwrapUnsafe(unsafeExpression.Expression) : expression;
+
+    private static bool IsComparison(Terrum.CodeAnalysis.Lexing.TokenKind operation) =>
+        operation is Terrum.CodeAnalysis.Lexing.TokenKind.EqualsEquals
+            or Terrum.CodeAnalysis.Lexing.TokenKind.BangEquals
+            or Terrum.CodeAnalysis.Lexing.TokenKind.Less
+            or Terrum.CodeAnalysis.Lexing.TokenKind.LessEquals
+            or Terrum.CodeAnalysis.Lexing.TokenKind.Greater
+            or Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals;
+
+    private static bool TryReverseComparison(Terrum.CodeAnalysis.Lexing.TokenKind operation,
+        out Terrum.CodeAnalysis.Lexing.TokenKind reversed)
+    {
+        reversed = operation switch {
+            Terrum.CodeAnalysis.Lexing.TokenKind.Less => Terrum.CodeAnalysis.Lexing.TokenKind.Greater,
+            Terrum.CodeAnalysis.Lexing.TokenKind.LessEquals => Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals,
+            Terrum.CodeAnalysis.Lexing.TokenKind.Greater => Terrum.CodeAnalysis.Lexing.TokenKind.Less,
+            Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals => Terrum.CodeAnalysis.Lexing.TokenKind.LessEquals,
+            Terrum.CodeAnalysis.Lexing.TokenKind.EqualsEquals => Terrum.CodeAnalysis.Lexing.TokenKind.EqualsEquals,
+            Terrum.CodeAnalysis.Lexing.TokenKind.BangEquals => Terrum.CodeAnalysis.Lexing.TokenKind.BangEquals,
+            _ => default,
+        };
+        return IsComparison(reversed);
+    }
+
+    private static void AddAcquisitionComparisonOutcomes(
+        HashSet<AcquisitionBooleanOutcome> outcomes,
+        Terrum.CodeAnalysis.Lexing.TokenKind operation, long constant)
+    {
+        var successCanBeTrue = ComparisonCanBe(operation, 0, int.MaxValue, constant);
+        var successCanBeFalse = ComparisonCanBe(ReverseTruth(operation), 0, int.MaxValue, constant);
+        var failureCanBeTrue = ComparisonCanBe(operation, int.MinValue, -1, constant);
+        var failureCanBeFalse = ComparisonCanBe(ReverseTruth(operation), int.MinValue, -1, constant);
+        if (successCanBeTrue)
+        {
+            outcomes.Add(new(AcquisitionResultState.Success, true));
+        }
+        if (successCanBeFalse)
+        {
+            outcomes.Add(new(AcquisitionResultState.Success, false));
+        }
+        if (failureCanBeTrue)
+        {
+            outcomes.Add(new(AcquisitionResultState.Failure, true));
+        }
+        if (failureCanBeFalse)
+        {
+            outcomes.Add(new(AcquisitionResultState.Failure, false));
+        }
+    }
+
+    private static bool ComparisonCanBe(Terrum.CodeAnalysis.Lexing.TokenKind operation,
+        long minimum, long maximum, long constant) =>
+        operation switch {
+            Terrum.CodeAnalysis.Lexing.TokenKind.EqualsEquals =>
+                constant >= minimum && constant <= maximum,
+            Terrum.CodeAnalysis.Lexing.TokenKind.BangEquals =>
+                minimum != maximum || constant < minimum || constant > maximum,
+            Terrum.CodeAnalysis.Lexing.TokenKind.Less => minimum < constant,
+            Terrum.CodeAnalysis.Lexing.TokenKind.LessEquals => minimum <= constant,
+            Terrum.CodeAnalysis.Lexing.TokenKind.Greater => maximum > constant,
+            Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals => maximum >= constant,
+            _ => false,
+        };
+
+    private static Terrum.CodeAnalysis.Lexing.TokenKind ReverseTruth(
+        Terrum.CodeAnalysis.Lexing.TokenKind operation) =>
+        operation switch {
+            Terrum.CodeAnalysis.Lexing.TokenKind.EqualsEquals => Terrum.CodeAnalysis.Lexing.TokenKind.BangEquals,
+            Terrum.CodeAnalysis.Lexing.TokenKind.BangEquals => Terrum.CodeAnalysis.Lexing.TokenKind.EqualsEquals,
+            Terrum.CodeAnalysis.Lexing.TokenKind.Less => Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals,
+            Terrum.CodeAnalysis.Lexing.TokenKind.LessEquals => Terrum.CodeAnalysis.Lexing.TokenKind.Greater,
+            Terrum.CodeAnalysis.Lexing.TokenKind.Greater => Terrum.CodeAnalysis.Lexing.TokenKind.LessEquals,
+            Terrum.CodeAnalysis.Lexing.TokenKind.GreaterEquals => Terrum.CodeAnalysis.Lexing.TokenKind.Less,
+            _ => default,
+        };
 
     private static ArgumentException Invalid(string? reason = null) =>
         new(reason is null

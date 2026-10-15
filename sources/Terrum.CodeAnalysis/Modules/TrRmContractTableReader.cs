@@ -25,6 +25,8 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmNativeComInterfaceContract?[] _comInterfaces;
     private readonly TrRmNativeComMethodContract?[] _comMethods;
     private readonly int[] _comOwnerInterfaces;
+    private readonly bool[] _typeHasNativeComContracts;
+    private readonly bool[] _methodHasNativeComContracts;
     private readonly ImmutableArray<TrRmNativeParameterContract>[] _nativeParameters;
     private readonly ImmutableArray<TrRmNativeComAcquisitionContract>[] _comAcquisitions;
 
@@ -48,6 +50,8 @@ public readonly ref struct TrRmContractTableReader
         _comInterfaces = new TrRmNativeComInterfaceContract?[types.Count + 1];
         _comMethods = new TrRmNativeComMethodContract?[methods.Count + 1];
         _comOwnerInterfaces = new int[types.Count + 1];
+        _typeHasNativeComContracts = new bool[types.Count + 1];
+        _methodHasNativeComContracts = new bool[methods.Count + 1];
         _nativeParameters = new ImmutableArray<TrRmNativeParameterContract>[methods.Count + 1];
         _comAcquisitions = new ImmutableArray<TrRmNativeComAcquisitionContract>[methods.Count + 1];
         var owners = new uint[recordCount + 1];
@@ -202,6 +206,7 @@ public readonly ref struct TrRmContractTableReader
                     }
                     _comInterfaces[interfaceType] = new TrRmNativeComInterfaceContract(
                         interfaceIid, (int)baseInterface);
+                    _typeHasNativeComContracts[interfaceType] = true;
                     break;
                 case 8:
                     if (data.Length != 16 || owner >> 24 != 0x16)
@@ -221,6 +226,7 @@ public readonly ref struct TrRmContractTableReader
                         throw InvalidContract();
                     }
                     _comMethods[comMethod] = new TrRmNativeComMethodContract(vtableSlot, comEffects);
+                    _methodHasNativeComContracts[comMethod] = true;
                     if (!interfaceMethods.TryGetValue(comMethodOwner, out var declaredMethods))
                     {
                         declaredMethods = [];
@@ -244,6 +250,7 @@ public readonly ref struct TrRmContractTableReader
                         throw InvalidContract();
                     }
                     _comOwnerInterfaces[ownerType] = (int)ownerInterface;
+                    _typeHasNativeComContracts[ownerType] = true;
                     break;
                 case 10:
                     if (data.Length != 20 || owner >> 24 != 0x16)
@@ -269,6 +276,7 @@ public readonly ref struct TrRmContractTableReader
                     var nativeParameter = new TrRmNativeParameterContract(
                         (int)parameterOrdinal, data[12], data[13], Read(data, 16));
                     AddNativeParameter(parameterMethod, nativeParameter);
+                    _methodHasNativeComContracts[parameterMethod] = true;
                     break;
                 case 11:
                     if (data.Length != 28 || owner >> 24 != 0x16)
@@ -302,6 +310,7 @@ public readonly ref struct TrRmContractTableReader
                     acquisitions.Add(new TrRmNativeComAcquisitionContract(
                         acquisitionMethod, (int)acquisitionOutput, (int)acquisitionOwner,
                         (int)sourceMethod, (int)sourceOutput, (byte)acquisitionFailureDisposition));
+                    _methodHasNativeComContracts[acquisitionMethod] = true;
                     break;
                 default:
                     throw InvalidContract();
@@ -480,6 +489,14 @@ public readonly ref struct TrRmContractTableReader
     internal int GetNativeComOwnerInterface(int typeDefRow)
         => typeDefRow > 0 && typeDefRow < _comOwnerInterfaces.Length
             ? _comOwnerInterfaces[typeDefRow] : 0;
+
+    internal bool HasNativeComContractsForTypeDef(int typeDefRow)
+        => typeDefRow > 0 && typeDefRow < _typeHasNativeComContracts.Length
+            && _typeHasNativeComContracts[typeDefRow];
+
+    internal bool HasNativeComContractsForMethodDef(int methodDefRow)
+        => methodDefRow > 0 && methodDefRow < _methodHasNativeComContracts.Length
+            && _methodHasNativeComContracts[methodDefRow];
 
     internal ImmutableArray<TrRmNativeParameterContract> GetNativeParameters(int methodDefRow)
         => methodDefRow > 0 && methodDefRow < _nativeParameters.Length

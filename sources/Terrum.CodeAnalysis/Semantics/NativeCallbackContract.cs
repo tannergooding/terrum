@@ -52,7 +52,7 @@ internal static class NativeCallbackContract
         NativeCallbackSignatureDefinition signature)
     {
         if (!IsValid(signature) || function.IsExternal || function.ReturnType != signature.ReturnType
-            || !function.IsNoThrow || function.RequiresUnsafeCaller || function.DoesNotReturn
+            || !function.IsNoThrow || !function.RequiresUnsafeCaller || function.DoesNotReturn
             || function.IsConstructor || function.IsClassConstructor || function.IsOperator || function.IsCleanup
             || function.PropertyName is not null || function.Intrinsic != BoundIntrinsic.None
             || (function.DeclaringStruct is not null && !function.IsStatic)

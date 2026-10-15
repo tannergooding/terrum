@@ -15,6 +15,16 @@ public readonly record struct TrRmFeatureRow(uint FeatureId, uint MinimumRuleRev
     public static TrRmFeatureRow ScalarInitOutput
         => new(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
             TrRmFeatureTableReader.ScalarInitOutputRuleRevision);
+
+    /// <summary>The provisional Windows named native import assignment.</summary>
+    public static TrRmFeatureRow WindowsNamedNativeImports
+        => new(TrRmFeatureTableReader.WindowsNamedNativeImportsFeatureId,
+            TrRmFeatureTableReader.WindowsNamedNativeImportsRuleRevision);
+
+    /// <summary>The provisional native COM contract assignment.</summary>
+    public static TrRmFeatureRow NativeComContracts
+        => new(TrRmFeatureTableReader.NativeComContractsFeatureId,
+            TrRmFeatureTableReader.NativeComContractsRuleRevision);
 }
 
 /// <summary>Validates the required feature assignments supported by provisional TRRM (1, 0).</summary>
@@ -24,11 +34,23 @@ public readonly ref struct TrRmFeatureTableReader
     /// <summary>The provisional feature identifier assigned to ScalarInitOutput.</summary>
     public const uint ScalarInitOutputFeatureId = 1;
 
+    /// <summary>The provisional feature identifier assigned to Windows named native imports.</summary>
+    public const uint WindowsNamedNativeImportsFeatureId = 2;
+
+    /// <summary>The provisional feature identifier assigned to native COM contracts.</summary>
+    public const uint NativeComContractsFeatureId = 3;
+
     /// <summary>The initial ScalarInitOutput rule revision supported by this implementation.</summary>
     public const uint ScalarInitOutputInitialRuleRevision = 1;
 
     /// <summary>The current ScalarInitOutput rule revision supported by this implementation.</summary>
     public const uint ScalarInitOutputRuleRevision = 6;
+
+    /// <summary>The initial Windows named native imports rule revision supported by this implementation.</summary>
+    public const uint WindowsNamedNativeImportsRuleRevision = 1;
+
+    /// <summary>The provisional native COM contract rule revision supported by this implementation.</summary>
+    public const uint NativeComContractsRuleRevision = 1;
 
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
@@ -56,9 +78,15 @@ public readonly ref struct TrRmFeatureTableReader
             var offset = row * RowSize;
             var featureId = Read(offset);
             var minimumRuleRevision = Read(offset + 4);
+            var maximumRevision = featureId switch
+            {
+                ScalarInitOutputFeatureId => ScalarInitOutputRuleRevision,
+                WindowsNamedNativeImportsFeatureId => WindowsNamedNativeImportsRuleRevision,
+                NativeComContractsFeatureId => NativeComContractsRuleRevision,
+                _ => 0u,
+            };
             if (featureId <= previousFeatureId || minimumRuleRevision == 0
-                || featureId != ScalarInitOutputFeatureId
-                || minimumRuleRevision > ScalarInitOutputRuleRevision)
+                || minimumRuleRevision > maximumRevision)
             {
                 throw InvalidFeature();
             }

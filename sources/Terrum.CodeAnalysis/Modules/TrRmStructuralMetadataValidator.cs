@@ -15,7 +15,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmModuleTableReader modules, TrRmTypeSpecTableReader typeSpecs,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
             TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
-            TrRmContractTableReader contracts)
+            TrRmContractTableReader contracts, TrRmNativeImportTableReader nativeImports)
         {
             Strings = strings;
             Modules = modules;
@@ -25,6 +25,7 @@ public static class TrRmStructuralMetadataValidator
             Methods = methods;
             Bodies = bodies;
             Contracts = contracts;
+            NativeImports = nativeImports;
         }
 
         internal TrRmStringTableReader Strings { get; }
@@ -35,6 +36,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmMethodDefTableReader Methods { get; }
         internal TrRmBodyTableReader Bodies { get; }
         internal TrRmContractTableReader Contracts { get; }
+        internal TrRmNativeImportTableReader NativeImports { get; }
     }
 
     private enum BodyInspection
@@ -77,6 +79,7 @@ public static class TrRmStructuralMetadataValidator
             throw InvalidMetadata();
         }
 
+        index.TryGetSection(0x0004, out var featureBytes, out var featureCount);
         index.TryGetSection(0x0010, out var moduleRefBytes, out var moduleRefCount);
         index.TryGetSection(0x0011, out var typeSpecBytes, out var typeSpecCount);
         index.TryGetSection(0x0012, out var typeArgBytes, out var typeArgCount);
@@ -95,6 +98,7 @@ public static class TrRmStructuralMetadataValidator
         index.TryGetSection(0x001F, out var sourceFileBytes, out var sourceFileCount);
         index.TryGetSection(0x0003, out var blobBytes, out var blobCount);
         index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount);
+        index.TryGetSection(0x0021, out var nativeImportBytes, out var nativeImportCount);
         index.TryGetSection(0x7F00, out var sourceMapBytes, out var sourceMapCount);
 
         if (blobCount != 0)
@@ -107,8 +111,9 @@ public static class TrRmStructuralMetadataValidator
 
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
         strings.ValidateShapes(stringCount);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
-            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount);
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, moduleRefCount,
             strings, modules);
         var typeSpecs = typeSpecCount == 0 ? default
@@ -140,6 +145,9 @@ public static class TrRmStructuralMetadataValidator
                 generics, typeSpecs);
         var contracts = new TrRmContractTableReader(contractBytes, contractCount,
             types, methods, signatures, parameters, typeSpecs);
+        ValidateNativeComFeatureAssignments(features, modules, methods, contracts);
+        var nativeImports = new TrRmNativeImportTableReader(nativeImportBytes,
+            nativeImportCount, strings, methods, signatures, parameters, typeSpecs, contracts);
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
@@ -226,7 +234,51 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceFiles;
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, typeSpecs,
-            signatures, parameters, methods, bodies, contracts);
+            signatures, parameters, methods, bodies, contracts, nativeImports);
+    }
+
+    private static void ValidateNativeComFeatureAssignments(
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmMethodDefTableReader methods,
+        TrRmContractTableReader contracts)
+    {
+        for (var module = 1; module <= modules.Count; module++)
+        {
+            var hasNativeComContracts = false;
+            var (typeStart, typeEnd) = modules.GetTypeDefRange(module);
+            for (var type = typeStart; type < typeEnd; type++)
+            {
+                hasNativeComContracts |= contracts.HasNativeComContractsForTypeDef(type);
+            }
+
+            var (methodStart, methodEnd) = modules.GetMethodDefRange(module);
+            for (var method = methodStart; method < methodEnd; method++)
+            {
+                hasNativeComContracts |= contracts.HasNativeComContractsForMethodDef(method);
+            }
+
+            if (!hasNativeComContracts)
+            {
+                continue;
+            }
+
+            var (featureStart, moduleFeatureCount) = modules.GetFeatureRange(module);
+            var declaresNativeComFeature = false;
+            for (var offset = 0; offset < moduleFeatureCount; offset++)
+            {
+                if (features.GetFeature(featureStart + offset).FeatureId
+                    == TrRmFeatureTableReader.NativeComContractsFeatureId)
+                {
+                    declaresNativeComFeature = true;
+                    break;
+                }
+            }
+
+            if (!declaresNativeComFeature)
+            {
+                throw InvalidMetadata();
+            }
+        }
     }
 
     private static InvalidDataException InvalidMetadata()

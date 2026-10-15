@@ -17,7 +17,7 @@ internal static class NativeWindowLifetimeContract
     internal static bool MatchesImport(NativeImportDefinition import) =>
         import.Key == ImportKey && import.DllName == DllName && import.ExportName == ExportName
         && import.DeploymentPolicy == NativeImportDeploymentPolicy.ApplicationDirectory
-        && import.IsNoThrow && !import.RequiresUnsafeCaller && !import.DoesNotReturn
+        && import.IsNoThrow && import.RequiresUnsafeCaller && !import.DoesNotReturn
         && import.ReturnType == PrimitiveType.Int32
         && !import.ParameterTypes.IsDefault && import.ParameterTypes is [PrimitiveType.NativeCallbackAddress]
         && !import.ParameterContracts.IsDefault

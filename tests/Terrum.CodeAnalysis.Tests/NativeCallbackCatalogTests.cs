@@ -15,7 +15,7 @@ public sealed class NativeCallbackCatalogTests
 
     private static NativeImportDefinition CreateImport() =>
         new(ImportKey, "callback-fixture.dll", "Invoke", [PrimitiveType.NativeCallbackAddress],
-            PrimitiveType.UInt32, IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            PrimitiveType.UInt32, IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.NativeCallback],
             CallbackParameters = [
@@ -34,7 +34,7 @@ public sealed class NativeCallbackCatalogTests
         string sourceTypeName = NativeWindowProcedureContract.TypeName) =>
         new(WindowImportKey, "callback-fixture.dll", "InvokeWindow",
             [PrimitiveType.NativeCallbackAddress], PrimitiveType.Int64, IsNoThrow: true,
-            RequiresUnsafeCaller: false, DoesNotReturn: false,
+            RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.NativeCallback],
             CallbackParameters = [
@@ -52,10 +52,10 @@ public sealed class NativeCallbackCatalogTests
             extern uint32 InvokeCallback(Terrum.Interop.NativeCallback callback);
 
             [NoThrow]
-            uint32 Callback(uint32 value) { return value; }
+            unsafe uint32 Callback(uint32 value) { return value; }
 
             int32 Main() {
-                InvokeCallback(&Callback);
+                unsafe { InvokeCallback(&Callback); }
                 return 0;
             }
             """;
@@ -79,10 +79,10 @@ public sealed class NativeCallbackCatalogTests
             extern uint32 InvokeCallback(Terrum.Interop.NativeCallback callback);
 
             [NoThrow]
-            uint32 Callback(int32 value) { return 1; }
+            unsafe uint32 Callback(int32 value) { return 1; }
 
             int32 Main() {
-                InvokeCallback(&Callback);
+                unsafe { InvokeCallback(&Callback); }
                 return 0;
             }
             """;
@@ -154,15 +154,17 @@ public sealed class NativeCallbackCatalogTests
             extern int64 InvokeWindow(Terrum.Interop.NativeCallback callback);
 
             [NoThrow]
-            uint32 Callback(uint32 value) { return value; }
+            unsafe uint32 Callback(uint32 value) { return value; }
 
             [NoThrow]
-            int64 WindowCallback(Terrum.Interop.Windows.HWND window, uint32 message,
+            unsafe int64 WindowCallback(Terrum.Interop.Windows.HWND window, uint32 message,
                 nuint wParam, nint lParam) { return lParam; }
 
             int32 Main() {
-                InvokeCallback(&Callback);
-                InvokeWindow(&WindowCallback);
+                unsafe {
+                    InvokeCallback(&Callback);
+                    InvokeWindow(&WindowCallback);
+                }
                 return 0;
             }
             """;

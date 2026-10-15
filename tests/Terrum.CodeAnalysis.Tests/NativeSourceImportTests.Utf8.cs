@@ -74,7 +74,7 @@ public sealed partial class NativeSourceImportTests
 
         var missingContract = new NativeImportDefinition(Utf8ZFixtureKey, "native-import-abi-probe.dll",
             "NativeFfiUtf8Z", [PrimitiveType.NativeUtf8ZPointer], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory);
+            true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory);
         _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
             "test-native-utf8z-without-contract-v1", [missingContract]))!;
         var productionCatalog = new NativeImportCatalog("production-native-utf8z-v1",
@@ -88,7 +88,7 @@ public sealed partial class NativeSourceImportTests
         const string importKey = "test.application.native-import-abi.NativeFfiWideAlias";
         var wideImport = new NativeImportDefinition(importKey, "native-import-abi-probe.dll",
             "NativeFfiUtf16Z", [PrimitiveType.NativeUtf16ZPointer], PrimitiveType.Void,
-            true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
+            true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.ReadonlyUtf16ZNoEscape],
         };
         var wideCatalog = NativeImportCatalog.CreateForTesting("test-native-char8-alias-v1", [wideImport]);
@@ -97,7 +97,7 @@ public sealed partial class NativeSourceImportTests
             [Terrum.Interop.NativeImport("{{importKey}}")]
             [NoThrow]
             extern void NativeFfiWideAlias(ptr<char8> text);
-            void Main() { NativeFfiWideAlias(utf16z("wide")); }
+            void Main() { unsafe { NativeFfiWideAlias(utf16z("wide")); } }
             """;
         var aliasCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(aliasSource)], wideCatalog,
             BoundRuntimePolicy.FailFast);
@@ -140,7 +140,7 @@ public sealed partial class NativeSourceImportTests
         const string importKey = "test.application.native-import-abi.NativeFfiMixedZ";
         var definition = new NativeImportDefinition(importKey, "native-import-abi-probe.dll",
             "NativeFfiUtf8Z", [PrimitiveType.NativeUtf16ZPointer, PrimitiveType.NativeUtf8ZPointer],
-            PrimitiveType.Void, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
+            PrimitiveType.Void, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [
                 NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
                 NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
@@ -153,15 +153,15 @@ public sealed partial class NativeSourceImportTests
             extern void NativeFfiMixedZ(ptr<char16> wide, ptr<char8> narrow);
             """;
         var exactLimitLiteral = new string('u', NativeStringZPoolContract.MaximumStorageBytes / sizeof(char) - 2);
-        var exactSource = string.Concat(declaration, "\nvoid Main() { NativeFfiMixedZ(utf16z(\"",
-            exactLimitLiteral, "\"), utf8z(\"x\")); }");
+        var exactSource = string.Concat(declaration, "\nvoid Main() { unsafe { NativeFfiMixedZ(utf16z(\"",
+            exactLimitLiteral, "\"), utf8z(\"x\")); } }");
         var exactCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(exactSource)], catalog,
             BoundRuntimePolicy.FailFast);
         Assert.That(exactCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, exactCompilation.Diagnostics));
 
         var overLimitLiteral = new string('u', NativeStringZPoolContract.MaximumStorageBytes / sizeof(char) - 1);
-        var overLimitSource = string.Concat(declaration, "\nvoid Main() { NativeFfiMixedZ(utf16z(\"",
-            overLimitLiteral, "\"), utf8z(\"x\")); }");
+        var overLimitSource = string.Concat(declaration, "\nvoid Main() { unsafe { NativeFfiMixedZ(utf16z(\"",
+            overLimitLiteral, "\"), utf8z(\"x\")); } }");
         var overLimitCompilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(overLimitSource)], catalog,
             BoundRuntimePolicy.FailFast);
         Assert.That(overLimitCompilation.Program, Is.Null);
@@ -179,8 +179,10 @@ public sealed partial class NativeSourceImportTests
             extern int32 NativeFfiUtf8Z(ptr<char8> first, uint32 second, uint64 third,
                 ptr<char8> fourth, uint32 fifth, ptr<char8> sixth);
             int32 Main() {
-                return NativeFfiUtf8Z(utf8z("first"), 1, 2,
-                    utf8z("second"), 3, utf8z("third"));
+                unsafe {
+                    return NativeFfiUtf8Z(utf8z("first"), 1, 2,
+                        utf8z("second"), 3, utf8z("third"));
+                }
             }
             """;
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
@@ -196,7 +198,7 @@ public sealed partial class NativeSourceImportTests
         new(Utf8ZFixtureKey, "native-import-abi-probe.dll", "NativeFfiUtf8Z",
             [PrimitiveType.NativeUtf8ZPointer, PrimitiveType.UInt32, PrimitiveType.UInt64,
                 PrimitiveType.NativeUtf8ZPointer, PrimitiveType.UInt32, PrimitiveType.NativeUtf8ZPointer],
-            PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
+            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [
                 NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
                 NativeImportParameterContract.Value,

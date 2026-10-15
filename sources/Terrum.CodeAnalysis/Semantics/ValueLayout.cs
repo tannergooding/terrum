@@ -26,7 +26,7 @@ internal static class ValueLayout
             or PrimitiveType.NativeNullPointer or PrimitiveType.NativeModuleHandle
             or PrimitiveType.NativeComInterfaceOutputAddress
             or PrimitiveType.NativeWindowClassExAddress or PrimitiveType.NativeWindowMessageAddress
-            or PrimitiveType.NativeStorageAddress
+            or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
                 => NativeTargetProfile.PointerSize,
         PrimitiveType.NativeWindowClassEx => NativeWindowClassContract.WindowClassExSize,
         PrimitiveType.NativeWindowMessage => NativeWindowMessageContract.MessageSize,
@@ -55,7 +55,7 @@ internal static class ValueLayout
                 or PrimitiveType.NativeNullPointer or PrimitiveType.NativeModuleHandle
                 or PrimitiveType.NativeComInterfaceOutputAddress
                 or PrimitiveType.NativeWindowClassExAddress or PrimitiveType.NativeWindowMessageAddress
-                or PrimitiveType.NativeStorageAddress)
+                or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer)
             {
                 return NativeTargetProfile.PointerSize;
             }

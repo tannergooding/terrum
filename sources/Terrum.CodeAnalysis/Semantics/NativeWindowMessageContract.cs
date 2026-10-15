@@ -29,7 +29,7 @@ internal static class NativeWindowMessageContract
     internal static ImmutableArray<NativeImportDefinition> Imports { get; } = [
         new(ShowWindowKey, "user32.dll", "ShowWindow",
             [PrimitiveType.NativeWindowHandle, PrimitiveType.Int32], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.System32) {
+            true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.CreatedWindowHandleNoEscape,
                 NativeImportParameterContract.Value,
@@ -38,7 +38,7 @@ internal static class NativeWindowMessageContract
         new(GetMessageKey, "user32.dll", "GetMessageW",
             [PrimitiveType.NativeWindowMessageAddress, PrimitiveType.NativeWindowHandle,
                 PrimitiveType.UInt32, PrimitiveType.UInt32], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.System32) {
+            true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.WritableWindowMessageNoEscape,
                 NativeImportParameterContract.NoOwnerWindowHandle,
@@ -48,18 +48,18 @@ internal static class NativeWindowMessageContract
         },
         new(TranslateMessageKey, "user32.dll", "TranslateMessage",
             [PrimitiveType.NativeWindowMessageAddress], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.System32) {
+            true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [NativeImportParameterContract.ReadonlyWindowMessageNoEscape],
         },
         new(DispatchMessageKey, "user32.dll", "DispatchMessageW",
             [PrimitiveType.NativeWindowMessageAddress], PrimitiveType.Int64,
-            true, false, false, NativeImportDeploymentPolicy.System32) {
+            true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [NativeImportParameterContract.ReadonlyWindowMessageNoEscape],
         },
         new(DefWindowProcKey, "user32.dll", "DefWindowProcW",
             [PrimitiveType.NativeWindowHandle, PrimitiveType.UInt32, PrimitiveType.UInt64,
                 PrimitiveType.Int64], PrimitiveType.Int64,
-            true, false, false, NativeImportDeploymentPolicy.System32) {
+            true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.WindowProcedureBorrowedHandle,
                 NativeImportParameterContract.Value,
@@ -69,11 +69,11 @@ internal static class NativeWindowMessageContract
         },
         new(PostQuitMessageKey, "user32.dll", "PostQuitMessage",
             [PrimitiveType.Int32], PrimitiveType.Void,
-            true, false, false, NativeImportDeploymentPolicy.System32),
+            true, true, false, NativeImportDeploymentPolicy.System32),
         new(PostMessageKey, "user32.dll", "PostMessageW",
             [PrimitiveType.NativeWindowHandle, PrimitiveType.UInt32, PrimitiveType.UInt64,
                 PrimitiveType.Int64], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.System32) {
+            true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.WindowProcedureBorrowedHandle,
                 NativeImportParameterContract.Value,
@@ -84,7 +84,7 @@ internal static class NativeWindowMessageContract
         new(PeekMessageKey, "user32.dll", "PeekMessageW",
             [PrimitiveType.NativeWindowMessageAddress, PrimitiveType.NativeWindowHandle,
                 PrimitiveType.UInt32, PrimitiveType.UInt32, PrimitiveType.UInt32], PrimitiveType.Int32,
-            true, false, false, NativeImportDeploymentPolicy.System32) {
+            true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.WritableWindowMessageNoEscape,
                 NativeImportParameterContract.NoOwnerOrCreatedWindowHandleNoEscape,

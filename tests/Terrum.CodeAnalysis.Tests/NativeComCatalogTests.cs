@@ -90,7 +90,7 @@ public sealed class NativeComCatalogTests
         const string importKey = "test.fixture.read-descriptor";
         var import = new NativeImportDefinition(importKey, "fixture.dll", "ReadDescriptor",
             [PrimitiveType.NativeStorageAddress], PrimitiveType.Int32,
-            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.ReadonlyNativeStorageNoEscape],
             AggregateStorageParameters = [
@@ -153,7 +153,7 @@ public sealed class NativeComCatalogTests
             int32 Main() {
                 FixtureDescriptor descriptor = new FixtureDescriptor(
                     new FixtureHeader(1, 2, 3), 4, 5, 6);
-                return ReadDescriptor(&descriptor);
+                return unsafe(ReadDescriptor(&descriptor));
             }
             """;
 
@@ -163,8 +163,11 @@ public sealed class NativeComCatalogTests
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
         var main = program.Functions[program.EntryPoint];
         var returnStatement = main.Body.Statements.OfType<BoundReturn>().Single();
-        var call = returnStatement.Value as BoundCall
-            ?? throw new AssertionException("Expected the aggregate import call.");
+        var call = returnStatement.Value switch {
+            BoundUnsafeExpression { Expression: BoundCall nativeCall } => nativeCall,
+            BoundCall nativeCall => nativeCall,
+            _ => throw new AssertionException("Expected the aggregate import call."),
+        };
         var address = call.Arguments[0] as BoundNativeStorageAddress
             ?? throw new AssertionException("Expected a catalogued aggregate storage address.");
         Assert.That(address.ByteExtent, Is.EqualTo(40));
@@ -184,7 +187,7 @@ public sealed class NativeComCatalogTests
         };
         var import = new NativeImportDefinition(
             "test.fixture.call", "fixture.dll", "Call", [PrimitiveType.UInt32], PrimitiveType.UInt32,
-            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory);
 
         var catalog = NativeImportCatalog.CreateForTesting(
@@ -473,7 +476,7 @@ public sealed class NativeComCatalogTests
         var import = new NativeImportDefinition(
             "test.fixture.acquire", "fixture.dll", "Acquire",
             [PrimitiveType.NativeComInterfaceOutputAddress], PrimitiveType.Int32,
-            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.OwnedNativeComInterfaceOutput],
             ComOutputs = [new(0, "IFixture", NativeComEffects.SignedHResult
@@ -525,22 +528,29 @@ public sealed class NativeComCatalogTests
     {
         var interfaceDefinition = new NativeComInterfaceDefinition(
             "IFixture", Guid.Parse("62D20A28-2466-4B88-882D-E7F27A61E4BE"), null,
-            ["IFixture::Release"], ["IFixture::Release"]);
+            ["IFixture::Release", "IFixture::Run"], ["IFixture::Release", "IFixture::Run"]);
         var release = new NativeComMethodDefinition(
             "fixture.iface.release", "IFixture", "IFixture", 0,
             "ULONG(IFixture*)", "windows-x64-rcx-eax",
             NativeComEffects.ReleasesReference, IsCallable: true) {
             VTableMethodIdentity = "IFixture::Release",
         };
+        var run = new NativeComMethodDefinition(
+            "fixture.iface.run", "IFixture", "IFixture", 1,
+            "uint32(IFixture*)", "windows-x64-rcx-eax",
+            NativeComEffects.None, IsCallable: true) {
+            VTableMethodIdentity = "IFixture::Run",
+        };
         var import = new NativeImportDefinition(
             "test.fixture.acquire-owner", "fixture.dll", "Acquire",
             [PrimitiveType.NativeNullPointer, PrimitiveType.NativeComInterfaceOutputAddress], PrimitiveType.Int32,
-            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.NullPointerOnly,
                 NativeImportParameterContract.OwnedNativeComInterfaceOutput],
             ComOutputs = [new(1, "IFixture", NativeComEffects.SignedHResult
-                | NativeComEffects.AcquiresReference | NativeComEffects.OutputMayBeWrittenOnFailure)],
+                | NativeComEffects.AcquiresReference
+                | NativeComEffects.OutputMayBeWrittenOnFailure)],
         };
         var owner = new NativeComOwnerDefinition(
             "FixtureOwner", "IFixture", NativeComOwnerAcquisitionKind.NativeImportOutput,
@@ -548,27 +558,37 @@ public sealed class NativeComCatalogTests
             ReleaseMethodIdentity = release.Identity,
         };
         var catalog = NativeImportCatalog.CreateForTesting(
-            "test.generic-com-source-acquisition.v1", [import], [interfaceDefinition], [owner], [release], []);
+            "test.generic-com-source-acquisition.v1", [import], [interfaceDefinition], [owner], [release, run], []);
         var source = """
             [Terrum.Interop.NativeImport("test.fixture.acquire-owner")]
             [NoThrow]
             extern int32 Acquire(Terrum.Interop.Windows.NativeNullPointer optional, out FixtureOwner owner);
 
+            [Terrum.Interop.NativeComAcquisition(0)]
             bool ForwardAcquire(out FixtureOwner owner) {
-                return Acquire(null, out owner) >= 0;
+                return unsafe(Acquire(null, out owner) >= 0);
             }
 
             int32 Main() {
                 if (!ForwardAcquire(out var owner)) {
                     return 1;
                 }
-                return 0;
+                unsafe {
+                    return int32(owner.Run());
+                }
             }
             """;
 
         var compilation = Compilation.CreateWithNativeImports(
             [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var unguardedCall = source.Replace("unsafe {", "{", StringComparison.Ordinal);
+        var unguardedCompilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(unguardedCall)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(unguardedCompilation.Program, Is.Null);
+        Assert.That(unguardedCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
 
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         var ownerStructure = global::System.Linq.Enumerable.Single(program.Structures, structure => structure.Name == owner.BoundOwnerName);
@@ -577,10 +597,43 @@ public sealed class NativeComCatalogTests
         Assert.That(ownerStructure.CleanupMethod, Is.EqualTo(owner.BoundOwnerName + ".Close"));
         var close = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == owner.BoundOwnerName + ".Close");
         Assert.That(NativeComCallContract.IsValidOwnerCloseFunction(close, program), Is.True);
+        var forward = global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.Name == "ForwardAcquire");
+        Assert.That(forward.NativeComAcquisitionOutputParameterIndexes, Is.EqualTo(new[] { 0 }));
         var main = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Main");
         Assert.That(NativeComCallContract.Acquisitions(main, program)!, Has.Exactly(1).Items);
 
         _ = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
+
+        var branchedSource = source.Replace(
+            "return unsafe(Acquire(null, out owner) >= 0);",
+            "if (unsafe(0 <= Acquire(null, out owner))) {\n    return true;\n}\nreturn false;",
+            StringComparison.Ordinal);
+        var branchedCompilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(branchedSource)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(branchedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, branchedCompilation.Diagnostics));
+
+        var failureAsSuccess = source.Replace(
+            "return unsafe(Acquire(null, out owner) >= 0);",
+            "return unsafe(Acquire(null, out owner) < 0);", StringComparison.Ordinal);
+        var failureAsSuccessCompilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(failureAsSuccess)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(failureAsSuccessCompilation.Program, Is.Null);
+
+        var missingAcquisition = source.Replace(
+            "[Terrum.Interop.NativeComAcquisition(0)]\n", "", StringComparison.Ordinal);
+        var missingAcquisitionCompilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(missingAcquisition)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(missingAcquisitionCompilation.Program, Is.Null);
+
+        var wrongOrdinal = source.Replace(
+            "[Terrum.Interop.NativeComAcquisition(0)]",
+            "[Terrum.Interop.NativeComAcquisition(1)]", StringComparison.Ordinal);
+        var wrongOrdinalCompilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(wrongOrdinal)], catalog, BoundRuntimePolicy.FailFast);
+        Assert.That(wrongOrdinalCompilation.Program, Is.Null);
+        Assert.That(wrongOrdinalCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
     }
 
     [Test]
@@ -835,6 +888,7 @@ public sealed class NativeComCatalogTests
             DeclaringStruct = "fixture.owner",
             IsInternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
             NativeComMethod = registerMethod,
         };
@@ -848,6 +902,7 @@ public sealed class NativeComCatalogTests
             DeclaringStruct = "fixture.owner",
             IsInternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
             NativeComMethod = stackMethod,
         };
@@ -857,6 +912,7 @@ public sealed class NativeComCatalogTests
             DeclaringStruct = "fixture.owner",
             IsInternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
             NativeComMethod = float32Method,
         };
@@ -866,6 +922,7 @@ public sealed class NativeComCatalogTests
             DeclaringStruct = "fixture.owner",
             IsInternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
             NativeComMethod = float64Method,
         };
@@ -882,6 +939,7 @@ public sealed class NativeComCatalogTests
             DeclaringStruct = "fixture.owner",
             IsInternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
             NativeComMethod = adaptedMethod,
             NativeComParameterMappings = [
@@ -899,6 +957,7 @@ public sealed class NativeComCatalogTests
             DeclaringStruct = "fixture.owner",
             IsInternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
             NativeComMethod = aggregateMethod,
         };
@@ -914,6 +973,7 @@ public sealed class NativeComCatalogTests
         ], 1, new BoundBlock([], default), default) {
             IsExternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             NativeImportKey = verificationImport.Key,
         };
         var program = new BoundProgram([
@@ -1384,6 +1444,7 @@ public sealed class NativeComCatalogTests
         ], 1, new BoundBlock([], default), default) {
             IsExternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             NativeImportKey = verificationImport.Key,
         };
         var program = new BoundProgram([cloneFunction, closeFunction, verificationFunction], -1) {
@@ -1484,6 +1545,7 @@ public sealed class NativeComCatalogTests
             DeclaringStruct = owner.BoundOwnerName,
             IsInternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             Intrinsic = BoundIntrinsic.NativeComVTableCall,
             NativeComMethod = createMethod,
             NativeComParameterMappings = [new(1, 4), new(2, 5)],
@@ -1507,6 +1569,7 @@ public sealed class NativeComCatalogTests
         ], 1, new BoundBlock([], default), default) {
             IsExternal = true,
             IsNoThrow = true,
+            RequiresUnsafeCaller = true,
             NativeImportKey = verificationImport.Key,
         };
         var program = new BoundProgram([createFunction, closeFunction, verificationImportFunction], -1) {
@@ -1540,7 +1603,9 @@ public sealed class NativeComCatalogTests
             new BoundReceiverLoan(0, ownerType, default),
             new BoundConstant(1, PrimitiveType.UInt32, default),
             new BoundOutArgument(1, true, ownerType, default),
-        ], PrimitiveType.Bool, default);
+        ], PrimitiveType.Bool, default) {
+            IsUnsafeAuthorized = true,
+        };
         var outputCaller = new BoundFunction("fixture.Caller", PrimitiveType.Bool, [
             new("this", ownerType, false, default),
             new("created", ownerType, true, default),
@@ -1564,9 +1629,18 @@ public sealed class NativeComCatalogTests
         Assert.That(bytes.IndexOf(new byte[] { 0xFF, 0x50, 0x08 }) >= 0, Is.True);
     }
 
+    [Test]
+    public void NativeImportCatalogRejectsImportsWithoutCallerUnsafety()
+    {
+        var safeImport = CreateImport() with { RequiresUnsafeCaller = false };
+
+        _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
+            "test.native-import.safe-caller.v1", [safeImport]))!;
+    }
+
     private static NativeImportDefinition CreateImport() =>
         new("test.fixture.call", "fixture.dll", "Call", [PrimitiveType.UInt32], PrimitiveType.UInt32,
-            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory);
 
     private static void AssertFloatingReturn(NativeCode code, int functionIndex, int vtableSlot, bool wide)

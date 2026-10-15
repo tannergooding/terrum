@@ -43,7 +43,7 @@ internal static class NativeWindowCreationContract
                 PrimitiveType.NativeModuleHandle,
                 PrimitiveType.NativeNullPointer,
             ],
-            PrimitiveType.NativeWindowHandle, true, false, false, NativeImportDeploymentPolicy.System32) {
+            PrimitiveType.NativeWindowHandle, true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.Value,
                 NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
@@ -61,7 +61,7 @@ internal static class NativeWindowCreationContract
             ResultContract = NativeImportResultContract.CreatedWindowHandle,
         },
         new(DestroyWindowKey, "user32.dll", DestroyWindowExport,
-            [PrimitiveType.NativeWindowHandle], PrimitiveType.Int32, true, false, false,
+            [PrimitiveType.NativeWindowHandle], PrimitiveType.Int32, true, true, false,
             NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [NativeImportParameterContract.CreatedWindowHandleNoEscape],
         },
@@ -69,7 +69,7 @@ internal static class NativeWindowCreationContract
             [PrimitiveType.NativeWindowHandle, PrimitiveType.NativeWindowHandle,
                 PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32,
                 PrimitiveType.UInt32],
-            PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.System32) {
+            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.CreatedWindowHandleNoEscape,
                 NativeImportParameterContract.NoOwnerWindowHandle,

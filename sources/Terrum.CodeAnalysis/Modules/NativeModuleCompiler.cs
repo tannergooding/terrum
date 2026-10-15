@@ -46,7 +46,9 @@ public static partial class NativeModuleCompiler
         CheckPolicy(runtimePolicy);
         var names = exports.ToArray();
         var contract = ModuleCompiler.CreateProducer(program, names);
-        var image = NativeEmitter.EmitLibrary(program, names, runtimePolicy);
+        var image = program.Functions.Any(static function => function.DirectNativeImport is not null)
+            ? NativeEmitter.EmitLibraryWithNativeImports(program, names, runtimePolicy)
+            : NativeEmitter.EmitLibrary(program, names, runtimePolicy);
         var package = Write(isConsumer: false, identity, runtimePolicy, contract, image);
         ValidateProducer(Read(package));
         return package;
@@ -278,7 +280,8 @@ public static partial class NativeModuleCompiler
 
     private static void ValidateProducerImage(Package producer, IReadOnlyList<string> exports)
     {
-        NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports,
+        var nativeImports = ModuleCompiler.GetProducerNativeImports(producer.Contract);
+        NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, nativeImports, exports,
             producer.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(producer.Profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(producer.Profile));
     }

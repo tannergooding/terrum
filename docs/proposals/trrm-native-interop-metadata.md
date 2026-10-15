@@ -1,10 +1,12 @@
 # Native imports and COM metadata in TRRM
 
 **Status: UNAPPROVED proposal for review.** This proposal adds no records to
-the canonical TRRM design and changes no current implementation. It proposes
-the smallest generic metadata surface needed to describe native DLL imports
-and COM calls in a Terrum dependency, so the compiler can consume the
-dependency's declarations instead of owning an API catalog.
+the canonical TRRM design and does not approve current implementation
+experiments. A provisional direct native-import slice exists in the branch;
+its unapproved wire assignments and support limits are recorded below. This
+proposal describes the broader generic metadata surface needed to describe
+native DLL imports and COM calls in a Terrum dependency, so the compiler can
+consume the dependency's declarations instead of owning an API catalog.
 
 ## Goal
 
@@ -49,6 +51,22 @@ that obligation in an explicit `unsafe { ... }` block or `unsafe(expr)`;
 declaring the caller `unsafe` propagates its obligation but does not make its
 body an implicit unsafe scope. `NoThrow` and other effects are separate
 promises; they do not remove the unsafe obligation.
+
+`unsafe` is an authored trust contract: it marks operations whose safety the
+compiler cannot establish and places responsibility on the author and caller.
+An explicit unsafe block or expression can contain that obligation inside an
+authored wrapper; it does not prove the wrapper's assumptions or the foreign
+provider's behavior. Unsafe code may be used to work around initialization
+analysis, a compiler limitation, or an optimization decision, and may also
+contain an intentional bug; the language does not judge those choices.
+However, `unsafe` need not authorize every possible escape: the language can
+limit which otherwise-dangerous operations it admits while still supporting
+common boundaries such as FFI. For admitted unsafe operations, the compiler
+should preserve source intent and may report an obvious contradiction as a
+suppressible warning, but should not reject code merely because a fact beyond
+the language's verification boundary cannot be proven. Safe code remains
+subject to the compiler's ordinary verification rules and blocking
+diagnostics.
 
 Every by-value scalar/aggregate and every data region exposed through a
 pointer must have the selected target's fixed `Blittable` representation.
@@ -105,10 +123,11 @@ Thus `ptr<T>` is not `pin ref<T>`: a pointer may refer to stack or native
 storage without a GC pin, while a pointer into movable managed storage
 requires an explicit live pin or other independently stable backing. The QPC
 wrapper uses `init ref<int64>` only for its Terrum-facing output; the raw
-import accepts `ptr<int64>` and receives the address of an initialized stack
-local. Similarly, the raw DXGI acquisition takes `ptr<Guid>` and
-`ptr<ptr<IDXGIDebug>>`; a wrapper forms those addresses from local storage
-inside an unsafe scope, then adopts the returned interface pointer.
+import accepts `write ptr<int64>` and receives the address of an initialized
+stack local. Similarly, the raw DXGI acquisition takes `ptr<Guid>` and
+`write ptr<ptr<void>>`; a wrapper forms those addresses from local storage
+inside an unsafe scope, then adopts the returned interface pointer after
+checking the requested IID.
 
 `init ref<T>` is currently a parameter mode with call-site spelling
 `init value`; it is not a first-class `init T` type qualifier. This proposal
@@ -119,9 +138,10 @@ should add a form such as `ref<init T>` or `ptr<init T>` is a separate type
 model question, not an implied part of this TRRM extension.
 
 An `init var` call-site argument is only an initialization destination for
-the wrapper's parameter. A wrapper output of type `init ref<ptr<T>>` would
-initialize a pointer cell; it would not pin the pointee or confer ownership.
-The pointer's validity and ownership still need their own contract.
+the wrapper's parameter. If pointer-valued initialization destinations are
+admitted, `init ref<ptr<T>>` initializes the pointer cell only; it does not
+pin the pointee or confer ownership. Whether that destination form should be
+admitted, and its required validity/ownership contract, remains open.
 
 The proposed `NativeParameter` access field can distinguish simple readonly,
 writable, and read/write pointer use; it does not settle a complete C/C++
@@ -152,9 +172,12 @@ with one target-resolved library and export:
 | `exportName` | The exact named export. |
 | `resolutionPolicy` | A target-defined search/deployment policy; it does not grant arbitrary path loading. |
 
-The exact table kind, field widths, string encoding requirements, and policy
-values remain for review. A first implementation can limit the row to named
-exports and the selected Windows system-library policy.
+The current implementation experiment uses a provisional section kind
+`0x0021` with fixed 16-byte rows: `methodDef`, `libraryName`, `exportName`,
+and a 32-bit resolution policy (`1` for the selected Windows System32 policy).
+These values are not accepted TRRM assignments and remain subject to
+end-to-end review. The implementation is limited to named exports and this
+single policy.
 
 This row is distinct from `Import`: a Terrum `Import` resolves a dependency
 declaration; `NativeImport` binds the selected declaration to an OS symbol.
@@ -180,7 +203,7 @@ Add these contract clauses to the existing `Contract` table:
 | `NativeComOwner` | `TypeDef` | The COM interface represented by this unique owner type. Reuse its existing layout and `Cleanup` contract for storage and release behavior. |
 | `NativeParameter` | `MethodDef` | For an address-passed parameter, its read/write/inout access, retention rule, and any required extent not already determined by its type. |
 | `NativeOutput` | `MethodDef` | Output parameter ordinal, result condition for a valid initialized value, and the value's failure state. |
-| `NativeComAcquisition` | `MethodDef` | Output parameter ordinal, resulting owner `TypeDef`, and whether failure may still write an owned output. It composes with `NativeOutput`'s result condition. |
+| `NativeComAcquisition` | `MethodDef` | Output ordinal and resulting owner `TypeDef`, with references to the foreign acquisition source and interface-selection condition; records whether failure may still write an owned output. It composes with that method's output-state contract. |
 
 Payload widths and enum assignments are intentionally unassigned in this
 proposal. The reader must validate all references, unique slots, interface
@@ -188,13 +211,42 @@ inheritance, signature arity, unique parameter ordinals, output ordinals,
 owner/interface compatibility, and failure cleanup requirements before
 accepting the native contract. A `NativeOutput` must refer to a writable
 parameter and a result condition expressible for that method's result type.
-A `NativeComAcquisition` must refer to that output and to an owner for the
-declared interface. Every `MethodDef` carrying `NativeImport` or
+A `NativeComAcquisition` must refer to a declared output-state contract and
+an owner for the declared interface. Every `MethodDef` carrying `NativeImport` or
 `NativeComMethod` metadata must also carry `Effects.RequiresUnsafeCaller`;
 readers must reject a missing unsafe obligation rather than infer that a
-scalar-only signature is safe.
+scalar-only signature is safe. A typed acquisition records the wrapper author's output/interface
+correlation; it is an authored trust claim, not proof that foreign code
+returned an object of that interface. For a selector API, authored code can
+pass the intended IID explicitly (for example, `typeof(T).Guid` for `riid`),
+but the author remains responsible for the foreign provider's behavior. The
+compiler validates the metadata's structure and preserves unsafe
+obligations; it may warn about an obvious source-level mismatch, but does not
+silently reinterpret a failed proof as undefined behavior or require proof of
+the provider's behavior to contain unsafety in an authored wrapper. A generic
+`void**` output from a call with a caller-selected `REFIID` is not by itself
+a compiler-proven typed interface result.
 Unknown required clauses must reject; readers must not silently ignore
 unsupported interop semantics.
+
+For the current native-import/output experiment only, `NativeOutput` uses
+provisional Contract kind `6` with a 16-byte payload: 32-bit parameter
+ordinal, result-condition code, failure-disposition code, and a reserved
+zero word. This assignment is not standard approval. No wire encoding is
+approved for the COM clauses. A structural reader experiment provisionally
+uses Contract kinds `7` through `11`: kind `7` for `NativeComInterface`
+(16-byte big-endian IID and base TypeDef row), kind `8` for `NativeComMethod`
+(vtable slot and effect mask),
+kind `9` for `NativeComOwner` (interface TypeDef row), kind `10` for
+`NativeParameter` (ordinal, access, retention, and extent), and kind `11` for
+`NativeComAcquisition` (wrapper output ordinal, owner TypeDef, source method,
+source output ordinal, and failure disposition). These payload assignments
+are implementation experiments only. Source-authored COM metadata binding
+and in-compilation verification are implemented provisionally. The structural
+reader validates clause shapes and the owning module's feature assignment;
+semantic producer serialization, dependency reconstruction, and consumer-side
+lowering remain unsupported. The metadata is an authored trust contract and
+does not prove a foreign provider returned the declared interface.
 
 `NativeParameter` and `NativeOutput` are needed because a pointer type alone
 does not say whether the callee reads, writes, or retains the address, and a
@@ -230,8 +282,9 @@ recovered from that signature.
 ### `QueryPerformanceCounter`
 
 The Windows API is a `BOOL` function with one output pointer to a signed
-64-bit `LARGE_INTEGER`. Its raw FFI signature uses `ptr<int64>`: `init ref<T>`
-is a checked Terrum destination descriptor, not the native pointer type.
+64-bit `LARGE_INTEGER`. Its raw FFI signature uses `write ptr<int64>`:
+`init ref<T>` is a checked Terrum destination descriptor, not the native
+pointer type.
 
 **Interop library declaration**
 
@@ -239,7 +292,7 @@ is a checked Terrum destination descriptor, not the native pointer type.
 namespace Terrum.Interop.Windows;
 
 [NoThrow]
-public extern unsafe int32 QueryPerformanceCounter(ptr<int64> performanceCount);
+public extern unsafe int32 QueryPerformanceCounter(write ptr<int64> performanceCount);
 ```
 
 The bodyless `extern unsafe` declaration is Terrum source syntax. Its
@@ -292,7 +345,7 @@ The exported declaration produces or reuses these TRRM records:
 
 | Record | Example value |
 |---|---|
-| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(ptr<int64>)`; parameter 0 is a raw pointer to one `int64`. |
+| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(write ptr<int64>)`; parameter 0 is a writable raw pointer to one `int64`. |
 | `NativeImport` | Method `QueryPerformanceCounter` → `Kernel32.dll!QueryPerformanceCounter`, resolved by the selected Windows system-library policy. |
 | `Effects` | `RequiresUnsafeCaller` and `NoThrow`. |
 | `NativeParameter` | Parameter 0 is writable and non-retained; its pointee is one `Blittable` `int64`. |
@@ -326,7 +379,7 @@ namespace Terrum.Interop.Dxgi;
 public extern unsafe int32 DXGIGetDebugInterface1(
     uint32 flags,
     ptr<Guid> riid,
-    ptr<ptr<IDXGIDebug>> ppDebug);
+    write ptr<ptr<void>> ppDebug);
 
 public interface IDXGIDebug : IUnknown {
     [NoThrow]
@@ -370,10 +423,12 @@ declares `Guid` with the Windows layout (16 bytes, 4-byte alignment).
 `DXGI_DEBUG_ALL` is a GUID and `DXGI_DEBUG_RLO_ALL` is the flag value `0x7`;
 they are passed as ordinary Blittable values. A library can expose them as
 type-owned values rather than relying on namespace-level constants.
-An ordinary Terrum factory calls `DXGIGetDebugInterface1` in an explicit
-unsafe scope with the address of a local `Guid` and the address of a mutable,
-initialized local pointer cell. It checks the HRESULT, releases a possibly
-written failure output, and transfers a successful pointer into
+`DXGIGetDebugInterface1` accepts any `REFIID` and returns an untyped `void**`;
+its raw import cannot promise that every output is `IDXGIDebug*`. An ordinary
+Terrum factory calls it in an explicit unsafe scope with the address of a
+local `Guid` and a mutable, initialized local `void*` cell. The factory fixes
+the requested IID to `IID_IDXGIDebug`, checks the HRESULT, releases a
+possibly written failure output, and transfers a successful pointer into
 `DxgiDebugOwner`; the compiler does not synthesize that wrapper. These locals
 have stable stack storage for the synchronous call, so no GC pinning is
 needed. The owner type itself stays on the Terrum side of the boundary; only
@@ -382,11 +437,12 @@ its opaque interface pointer is passed to COM.
 | Record | Example value |
 |---|---|
 | `NativeImport` | `DXGIGetDebugInterface1` → `Dxgi.dll!DXGIGetDebugInterface1`, Windows system-library policy. |
-| `MethodSig` / `Param` | `int32(uint32, ptr<Guid>, ptr<ptr<IDXGIDebug>>)`; parameter 1 is `REFIID`, parameter 2 is `void**`. |
+| `MethodSig` / `Param` | `int32(uint32, ptr<Guid>, write ptr<ptr<void>>)`; parameter 1 is `REFIID`, parameter 2 is writable `void**`. |
 | `Effects` | `RequiresUnsafeCaller` and `NoThrow` on the raw import and COM method. |
 | `NativeParameter` | Parameter 1 is read-only and non-retained; parameter 2 is writable and non-retained. |
-| `NativeOutput` | Parameter 2 is valid when the HRESULT is nonnegative. Conservatively, treat it as possibly written on failure. |
-| `NativeComAcquisition` | Parameter 2 produces an owned `IDXGIDebug`, represented by `DxgiDebugOwner`; release any non-null failure output. |
+| Raw import `NativeOutput` | Parameter 2 is valid when the HRESULT is nonnegative. Conservatively, treat it as possibly written on failure. |
+| Wrapper `MethodSig` / `OutputState` | `bool TryGetDxgiDebug(init ref<DxgiDebugOwner>)`; its owner output is initialized on success and vacant on failure. |
+| Wrapper `NativeComAcquisition` | The wrapper's output is an owned `DxgiDebugOwner`, acquired through `DXGIGetDebugInterface1` with `riid = IID_IDXGIDebug`; it releases any non-null raw failure output. |
 | `NativeComInterface` | `IDXGIDebug` has IID `119E7452-DE9E-40FE-8806-88F90C12B441` and base `IUnknown`. |
 | `NativeComMethod` | `ReportLiveObjects` is slot 3 with signature `int32(Guid, int32)`; `IUnknown.Release` is slot 2 and releases a reference. The `Guid` layout and target requirement let the backend derive aggregate passing. |
 | `TypeDef` / `Layout` | `Guid` is 16 bytes, 4-byte aligned, and carries the target's `Blittable` commitment. |
@@ -449,9 +505,10 @@ TRRM record alone does not prove provider conformance.
   requirements.
 - It does not change accepted language, ABI, ownership, or lifetime
   semantics.
-- Source syntax for authoring the native binding and COM clauses remains
-  open; it must produce the same dependency metadata without a compiler-owned
-  symbol catalog.
+- Source syntax for authoring COM clauses remains open. The implementation
+  experiment supports a named DLL/export declaration and result-correlated
+  scalar or opaque `ptr<void>` output; it does not establish an accepted
+  source-authoring contract or COM acquisition/ownership semantics.
 - The current DX11 path also relies on fixed-array/storage-record constraints
   and mapped-buffer behavior. This proposal does not encode those as import
   metadata; review whether ordinary source wrappers and existing target
@@ -460,5 +517,33 @@ TRRM record alone does not prove provider conformance.
 - Review whether the first slice needs explicit metadata for reference-count
   cloning beyond owned outputs and ordinary `Cleanup`, or whether that
   behavior should remain a Terrum wrapper.
-- Exact table/clause assignments and the required-feature identifier must be
-  allocated only after this proposal is reviewed.
+- Exact table/clause assignments and the required-feature identifier remain
+  unapproved. The implementation experiment provisionally uses section
+  `0x0021` with 16-byte rows (`MethodDef`, library `String`, export `String`,
+  System32 resolution policy `1`), `Contract` clause kind `6` with a
+  16-byte payload (parameter ordinal, result condition, failure disposition,
+  reserved zero), and Feature ID `2`, rule revision `1`, for Windows named
+  native imports. The user-directed provisional Feature assignment preserves
+  ID `1` for `ScalarInitOutput`; neither assignment is a canonical registry
+  change.
+- The separate structural COM reader experiment provisionally uses Contract
+  kinds `7` through `11` and Feature ID `3`, rule revision `1`, as described
+  above. These remain implementation experiments, not standard assignments.
+  Source-authored COM binding and verification exist, but semantic producer
+  serialization, dependency binding, and ownership lowering remain
+  unsupported.
+- The prototype represents `write ptr<T>` with the existing inline
+  `TypeSpec` family encoding for `ptr<T>` (`familyCode=0x8C`, writable
+  qualifier `0x01`, and the atomic code for `T`). This reuses the existing
+  TypeSpec grammar and does not assign a new form.
+- The prototype admits bodyless source-authored imports for named DLL
+  exports under the Windows System32 policy, with directly Blittable scalar
+  parameters and writable scalar pointer outputs. Each output is valid only
+  for an `int32` or `uint32` nonzero result; its failure disposition is
+  unspecified. The mandatory verifier still requires `Effects.RequiresUnsafeCaller`.
+  Private semantic producer/native package paths now preserve and revalidate
+  these direct-import and writable-output facts, and bind a consumer against
+  the produced DLL. This does not establish JIT, module-set/graph,
+  semantic TRRM COM dependency, COM acquisition, or runtime execution
+  support. The proposal remains unapproved; these implementation paths do not
+  assign canonical TRRM semantics or deployment behavior.

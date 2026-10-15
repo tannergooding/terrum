@@ -26,7 +26,7 @@ public sealed class NativeImportCatalog
                 [PrimitiveType.UInt32],
                 PrimitiveType.Void,
                 IsNoThrow: true,
-                RequiresUnsafeCaller: false,
+                RequiresUnsafeCaller: true,
                 DoesNotReturn: true,
                 DeploymentPolicy: NativeImportDeploymentPolicy.System32),
             new NativeImportDefinition(
@@ -36,7 +36,7 @@ public sealed class NativeImportCatalog
                 [],
                 PrimitiveType.UInt32,
                 IsNoThrow: true,
-                RequiresUnsafeCaller: false,
+                RequiresUnsafeCaller: true,
                 DoesNotReturn: false,
                 DeploymentPolicy: NativeImportDeploymentPolicy.System32),
             new NativeImportDefinition(
@@ -46,7 +46,7 @@ public sealed class NativeImportCatalog
                 [PrimitiveType.UInt32],
                 PrimitiveType.Void,
                 IsNoThrow: true,
-                RequiresUnsafeCaller: false,
+                RequiresUnsafeCaller: true,
                 DoesNotReturn: false,
                 DeploymentPolicy: NativeImportDeploymentPolicy.System32),
             new NativeImportDefinition(
@@ -57,7 +57,7 @@ public sealed class NativeImportCatalog
                     PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32],
                 PrimitiveType.Int32,
                 IsNoThrow: true,
-                RequiresUnsafeCaller: false,
+                RequiresUnsafeCaller: true,
                 DoesNotReturn: false,
                 DeploymentPolicy: NativeImportDeploymentPolicy.System32) {
                 ParameterContracts = [
@@ -75,7 +75,7 @@ public sealed class NativeImportCatalog
                     PrimitiveType.UInt32, PrimitiveType.UInt64, PrimitiveType.Int64],
                 PrimitiveType.Int64,
                 IsNoThrow: true,
-                RequiresUnsafeCaller: false,
+                RequiresUnsafeCaller: true,
                 DoesNotReturn: false,
                 DeploymentPolicy: NativeImportDeploymentPolicy.System32) {
                 ParameterContracts = [
@@ -232,15 +232,16 @@ public sealed class NativeImportCatalog
         ImmutableArray<NativeStorageRecordLayoutDefinition> nativeStorageRecordLayouts = default,
         ImmutableArray<NativeAggregateStorageLayoutDefinition> aggregateStorageLayouts = default)
     {
+        var hasComMetadata = !comInterfaces.IsDefault || !comOwners.IsDefault
+            || !comMethods.IsDefault || !comBaseEdges.IsDefault || !comSignatureTypes.IsDefault;
         if (string.IsNullOrWhiteSpace(identity) || imports.IsDefault
-            || (imports.IsEmpty && !isForTesting))
+            || (imports.IsEmpty && !isForTesting && !hasComMetadata))
         {
-            throw new ArgumentException("A native import catalog requires an identity and at least one entry.",
+            throw new ArgumentException(
+                "A native contract catalog requires an identity and at least one import or COM interface.",
                 nameof(identity));
         }
 
-        var hasComMetadata = !comInterfaces.IsDefault || !comOwners.IsDefault
-            || !comMethods.IsDefault || !comBaseEdges.IsDefault || !comSignatureTypes.IsDefault;
         if (hasComMetadata && (comInterfaces.IsDefault || comOwners.IsDefault
                 || comMethods.IsDefault || comBaseEdges.IsDefault))
         {
@@ -387,6 +388,7 @@ public sealed class NativeImportCatalog
                     && !(!isForTesting && identity == NativeWindowCreationContract.CatalogIdentity
                         && (NativeWindowCreationContract.MatchesImport(import)
                             || NativeWindowClassContract.MatchesImport(import))))
+                || !import.RequiresUnsafeCaller
                 || ((import.Key == NativeWindowLifetimeContract.ImportKey
                         || NativeWindowLifetimeContract.MatchesIdentity(import)
                         || (!import.CallbackParameters.IsDefaultOrEmpty
@@ -470,6 +472,8 @@ public sealed class NativeImportCatalog
     internal ImmutableArray<NativeComOwnerDefinition> ComOwners { get; }
 
     internal ImmutableArray<NativeComMethodDefinition> ComMethods { get; }
+
+    internal bool SupportsNativeComContracts => !ComInterfaces.IsEmpty;
 
     internal ImmutableArray<(string Source, string Target)> ComBaseEdges { get; }
 

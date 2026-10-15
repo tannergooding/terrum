@@ -41,7 +41,7 @@ public sealed partial class NativeSourceImportTests
         var key = paired ? StorageRecordPairImportKey : StorageRecordImportKey;
         var exportName = paired ? "ObserveStorageRecordPair" : "ObserveStorageRecord";
         var import = new NativeImportDefinition(key, "native-storage-record-probe.dll", exportName,
-            parameterTypes, PrimitiveType.Int32, true, false, false,
+            parameterTypes, PrimitiveType.Int32, true, true, false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = parameterContracts,
             StorageRecordParameters = storageRecordParameters,
@@ -77,7 +77,7 @@ public sealed partial class NativeSourceImportTests
         var compilation = CompileStorageRecord("""
             InlineArray<uint32, 4> backing = [1, 2, 3, 4];
             StorageRecord record = storageRecord(&backing[0], 16);
-            return ObserveStorageRecord(&record);
+            unsafe { return ObserveStorageRecord(&record); }
             """);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
@@ -94,14 +94,14 @@ public sealed partial class NativeSourceImportTests
         var invalidExtent = CompileStorageRecord("""
             InlineArray<uint32, 4> backing = [1, 2, 3, 4];
             StorageRecord record = storageRecord(&backing[0], 17);
-            return ObserveStorageRecord(&record);
+            unsafe { return ObserveStorageRecord(&record); }
             """);
         Assert.That(invalidExtent.HasErrors, Is.True);
 
         var mutable = CompileStorageRecord("""
             InlineArray<uint32, 4> backing = [1, 2, 3, 4];
             mut StorageRecord record = storageRecord(&backing[0], 16);
-            return ObserveStorageRecord(&record);
+            unsafe { return ObserveStorageRecord(&record); }
             """);
         Assert.That(mutable.HasErrors, Is.True);
 
@@ -109,7 +109,7 @@ public sealed partial class NativeSourceImportTests
             InlineArray<uint32, 4> backing = [1, 2, 3, 4];
             StorageRecord record = storageRecord(&backing[0], 16);
             StorageRecord copy = record;
-            return ObserveStorageRecord(&copy);
+            unsafe { return ObserveStorageRecord(&copy); }
             """);
         Assert.That(byValue.HasErrors, Is.True);
     }
@@ -155,7 +155,7 @@ public sealed partial class NativeSourceImportTests
             InlineArray<uint32, 4> second = [5, 6, 7, 8];
             StorageRecord firstRecord = storageRecord(&first[0], 16);
             StorageRecord secondRecord = storageRecord(&SECOND[0], 16);
-            return ObserveStorageRecordPair(&firstRecord, &secondRecord);
+            unsafe { return ObserveStorageRecordPair(&firstRecord, &secondRecord); }
             """;
         var sharedBacking = CompileStorageRecord(prefix.Replace("SECOND", "first", StringComparison.Ordinal),
             paired: true);
@@ -173,7 +173,7 @@ public sealed partial class NativeSourceImportTests
         var compilation = CompileStorageRecord("""
             InlineArray<uint32, 4> backing = [1, 2, 3, 4];
             StorageRecord record = storageRecord(&backing[0], 16);
-            return ObserveStorageRecord(&record);
+            unsafe { return ObserveStorageRecord(&record); }
             """);
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
         var function = program.Functions[program.EntryPoint];

@@ -27,7 +27,7 @@ internal static class NativeWindowsModulePathContract
     internal static NativeImportDefinition GetModuleFileNameImport { get; } = new(
         GetModuleFileNameKey, "kernel32.dll", "GetModuleFileNameW", [
             PrimitiveType.NativeNullPointer, PrimitiveType.NativeStorageAddress, PrimitiveType.UInt32,
-        ], PrimitiveType.UInt32, true, false, false, NativeImportDeploymentPolicy.System32) {
+        ], PrimitiveType.UInt32, true, true, false, NativeImportDeploymentPolicy.System32) {
         ParameterContracts = [
             NativeImportParameterContract.NullPointerOnly,
             NativeImportParameterContract.WritableNativeStorageNoEscape,
@@ -42,7 +42,7 @@ internal static class NativeWindowsModulePathContract
 
     internal static NativeImportDefinition GetLastErrorImport { get; } = new(
         GetLastErrorKey, "kernel32.dll", "GetLastError", [], PrimitiveType.UInt32,
-        true, false, false, NativeImportDeploymentPolicy.System32);
+        true, true, false, NativeImportDeploymentPolicy.System32);
 
     internal static ImmutableArray<NativeImportDefinition> Imports { get; } = [
         GetModuleFileNameImport,
@@ -74,7 +74,7 @@ internal static class NativeWindowsModulePathContract
             || !function.IsExternal || function.NativeImportKey != definition.Key
             || function.ReturnType != definition.ReturnType || function.ParameterCount != definition.ParameterTypes.Length
             || function.Variables.IsDefault || function.Variables.Length != definition.ParameterTypes.Length
-            || !function.IsNoThrow || function.RequiresUnsafeCaller || function.DoesNotReturn
+            || !function.IsNoThrow || !function.RequiresUnsafeCaller || function.DoesNotReturn
             || function.IsConstructor || function.IsClassConstructor || function.IsOperator || function.IsCleanup
             || function.PropertyName is not null || function.DeclaringStruct is not null
             || function.Intrinsic != BoundIntrinsic.None || function.Body is null

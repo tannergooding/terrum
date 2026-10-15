@@ -19,6 +19,7 @@ public static partial class ModuleCompiler
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private const int Magic = 0x4D525254; // TRRM
     private const int Version = 76;
+    private const int DirectNativeImportVersion = 79;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -50,6 +51,7 @@ public static partial class ModuleCompiler
                             declarationCount++;
                         }
                     }
+
                     var declarations = ImmutableArray.CreateBuilder<string>(declarationCount);
                     foreach (var item in module.Functions)
                     {
@@ -190,6 +192,7 @@ public static partial class ModuleCompiler
                 });
             }
         }
+
         return imports is null ? [] : [.. imports.Order(StringComparer.Ordinal)];
 
         Dictionary<string, int> CreateFunctionIndexes()
@@ -201,6 +204,44 @@ public static partial class ModuleCompiler
             }
             return result;
         }
+    }
+
+    internal static IReadOnlyDictionary<string, IReadOnlyList<string>> GetProducerNativeImports(
+        byte[] producerBytes)
+    {
+        var producer = Read(producerBytes, expectedConsumer: false);
+        var indexes = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
+        for (var index = 0; index < producer.Functions.Length; index++)
+        {
+            indexes.Add(producer.Functions[index].Name, index);
+        }
+        var imports = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in producer.Functions)
+        {
+            if (item.Function is not BoundFunction body)
+            {
+                continue;
+            }
+            _ = Calls(body.Body, visitSymbolicFunction: name => {
+                if (!indexes.TryGetValue(name, out var targetIndex))
+                {
+                    throw new ModuleFormatException($"Unresolved function reference '{name}'.");
+                }
+                if (producer.Functions[targetIndex].Function?.DirectNativeImport is not DirectNativeImport import)
+                {
+                    return;
+                }
+                var symbols = imports.TryGetValue(import.LibraryName, out var existing)
+                    ? existing : imports[import.LibraryName] = new HashSet<string>(StringComparer.Ordinal);
+                _ = symbols.Add(import.ExportName);
+            });
+        }
+        var result = new Dictionary<string, IReadOnlyList<string>>(imports.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (libraryName, symbols) in imports)
+        {
+            result.Add(libraryName, [.. symbols.Order(StringComparer.Ordinal)]);
+        }
+        return result;
     }
 
     /// <summary>Reads the native semantic profile of a persisted module, including its retained value contracts.</summary>
@@ -569,7 +610,14 @@ public static partial class ModuleCompiler
         }
         try
         {
-            SemanticVerifier.VerifyLibrary(program);
+            if (program.Functions.Any(static function => function.DirectNativeImport is not null))
+            {
+                SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
+            }
+            else
+            {
+                SemanticVerifier.VerifyLibrary(program);
+            }
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
@@ -613,7 +661,8 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(exports);
         ArgumentNullException.ThrowIfNull(program);
-        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules");
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
+            allowDirectNativeImports: true);
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
@@ -625,7 +674,14 @@ public static partial class ModuleCompiler
         }
         if (program.EntryPoint == -1)
         {
-            SemanticVerifier.VerifyLibrary(program);
+            if (program.Functions.Any(static function => function.DirectNativeImport is not null))
+            {
+                SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
+            }
+            else
+            {
+                SemanticVerifier.VerifyLibrary(program);
+            }
         }
         else
         {
@@ -1143,7 +1199,14 @@ public static partial class ModuleCompiler
         };
         try
         {
-            SemanticVerifier.Verify(result);
+            if (result.Functions.Any(static function => function.DirectNativeImport is not null))
+            {
+                SemanticVerifier.VerifyWithDirectNativeImports(result);
+            }
+            else
+            {
+                SemanticVerifier.Verify(result);
+            }
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
@@ -2932,6 +2995,13 @@ public static partial class ModuleCompiler
                 Receiver = RemapExpression(field.Receiver, source, destination, classOffset, destinationTypes),
             },
             BoundOutArgument output => output with { Type = RemapType(output.Type, source, destination, classOffset, destinationTypes) },
+            BoundNativeStorageAddress address => address with {
+                Type = RemapType(address.Type, source, destination, classOffset, destinationTypes),
+                CarrierType = RemapType(address.CarrierType, source, destination, classOffset, destinationTypes),
+                ElementType = RemapType(address.ElementType, source, destination, classOffset, destinationTypes),
+                AddressType = RemapType(address.AddressType, source, destination, classOffset, destinationTypes),
+                Index = RemapExpression(address.Index, source, destination, classOffset, destinationTypes),
+            },
             BoundCall call => call with {
                 Type = RemapType(call.Type, source, destination, classOffset, destinationTypes),
                 Arguments = RemapExpressions(call.Arguments, source, destination, classOffset, destinationTypes),
@@ -3056,15 +3126,21 @@ public static partial class ModuleCompiler
                 "Semantic modules do not persist implicit reference parameter contracts.");
         }
         RejectCompilationLocalSpans(program);
+        var hasDirectNativeImports = module.Functions.Any(static function =>
+            function.Function?.DirectNativeImport is not null);
         if (TokenSpanContract.HasMetadata(program)
             || ScalarFrontendHost.IsInvocationProfileIdentity(module.InvocationProfileId))
         {
             module = module with {
-                FormatVersion = PrivateSpanVersion,
+                FormatVersion = hasDirectNativeImports ? DirectNativeImportVersion : PrivateSpanVersion,
                 Structures = [.. module.Structures.Select(static structure => structure with {
                     TokenSpanRole = TokenSpanContract.RoleOf(structure),
                 })],
             };
+        }
+        else if (hasDirectNativeImports)
+        {
+            module = module with { FormatVersion = DirectNativeImportVersion };
         }
         module = SelectFixedLayoutRevision(module);
         ValidateUnsafeExpressionScopes(program, module);
@@ -3115,7 +3191,7 @@ public static partial class ModuleCompiler
         foreach (var structure in module.Structures)
         {
             PutString(writer, structure.Name);
-            if (module.FormatVersion == PrivateSpanVersion)
+            if (module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion)
             {
                 writer.Write((byte)structure.TokenSpanRole);
             }
@@ -3124,7 +3200,7 @@ public static partial class ModuleCompiler
             writer.Write(structure.IsInternal);
             writer.Write(structure.IsUnique);
             writer.Write(structure.IsTransparent);
-            if (module.FormatVersion == FixedLayoutVersion)
+            if (module.FormatVersion >= FixedLayoutVersion)
             {
                 writer.Write(structure.BlittableTargetRequirement);
                 writer.Write(structure.IsSequential);
@@ -3183,7 +3259,8 @@ public static partial class ModuleCompiler
             writer.Write(item.HasOwnershipTransfer);
             if (item.Function is BoundFunction function)
             {
-                PutFunction(writer, function, names, ref remaining);
+                PutFunction(writer, function, names, ref remaining,
+                    module.FormatVersion >= DirectNativeImportVersion);
             }
         }
         if (stream.Length > MaximumBytes)
@@ -3234,6 +3311,12 @@ public static partial class ModuleCompiler
                 InvocationBuffers = invocationBuffers,
                 RuntimePolicy = policy,
             };
+            if (module.FormatVersion == DirectNativeImportVersion
+                && (expectedConsumer || !module.Functions.Any(static item =>
+                    item.Function?.DirectNativeImport is not null)))
+            {
+                throw new ModuleFormatException("Revision 79 requires a producer with direct native imports.");
+            }
             var retainedProfile = RetainedNativeProfile(module);
             if (profile != retainedProfile)
             {
@@ -3256,7 +3339,8 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
-            if (hasPrivateManagedState || !expectedConsumer && module.FormatVersion == PrivateSpanVersion)
+            if (hasPrivateManagedState || !expectedConsumer
+                && module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion)
             {
                 ValidateProducer(module);
             }
@@ -3278,7 +3362,8 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (Version or PrivateSpanVersion or FixedLayoutVersion) || reader is not ModuleReader moduleReader)
+        if (version is not (Version or PrivateSpanVersion or FixedLayoutVersion or DirectNativeImportVersion)
+            || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -3292,11 +3377,11 @@ public static partial class ModuleCompiler
         var requiresSourceGrant = GetBool(reader);
         var profileIdText = GetString(reader);
         var invocationProfileId = profileIdText.Length == 0 ? null : profileIdText;
-        var bufferCount = Count(reader, version == PrivateSpanVersion ? 12 : 10);
+        var bufferCount = Count(reader, version is PrivateSpanVersion or DirectNativeImportVersion ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
                     || invocationProfileId != ScannerHost.InvocationProfileIdentity
-                        && (version != PrivateSpanVersion
+                        && (version is not (PrivateSpanVersion or DirectNativeImportVersion)
                             || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId))))
             || (invocationProfileId is null && bufferCount != 0))
         {
@@ -3340,7 +3425,9 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Duplicate or empty type identity.");
             }
-            var role = reader is ModuleReader { FormatVersion: PrivateSpanVersion }
+            var role = reader is ModuleReader {
+                FormatVersion: PrivateSpanVersion or DirectNativeImportVersion,
+            }
                 ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
             if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
             {
@@ -3351,7 +3438,7 @@ public static partial class ModuleCompiler
             var isInternal = GetBool(reader);
             var isUnique = GetBool(reader);
             var isTransparent = GetBool(reader);
-            var fixedLayout = reader is ModuleReader { FormatVersion: FixedLayoutVersion };
+            var fixedLayout = reader is ModuleReader { FormatVersion: >= FixedLayoutVersion };
             var blittableTargetRequirement = fixedLayout ? reader.ReadInt32() : 0;
             var isSequential = fixedLayout && GetBool(reader);
             var cleanup = GetBool(reader) ? GetString(reader) : null;
@@ -3503,7 +3590,8 @@ public static partial class ModuleCompiler
         return items.ToImmutable();
     }
 
-    private static void PutFunction(BinaryWriter writer, BoundFunction function, string[] names, ref int remaining)
+    private static void PutFunction(BinaryWriter writer, BoundFunction function, string[] names,
+        ref int remaining, bool supportsDirectNativeImports)
     {
         PutString(writer, function.Name);
         writer.Write((int)function.ReturnType);
@@ -3528,6 +3616,28 @@ public static partial class ModuleCompiler
         if (function.DeclaringStruct is string declaringStruct)
         {
             PutString(writer, declaringStruct);
+        }
+        if (supportsDirectNativeImports)
+        {
+            writer.Write(function.IsExternal);
+            writer.Write(function.DirectNativeImport is not null);
+            if (function.DirectNativeImport is DirectNativeImport import)
+            {
+                if (!function.IsExternal || !DirectNativeImportContract.IsValid(function))
+                {
+                    throw new ModuleContractException("Direct native import metadata is invalid.");
+                }
+                PutString(writer, import.LibraryName);
+                PutString(writer, import.ExportName);
+                writer.Write(import.Outputs.Length);
+                foreach (var output in import.Outputs)
+                {
+                    writer.Write(output.ParameterIndex);
+                    writer.Write((int)output.PointeeType);
+                    writer.Write(output.ResultCondition);
+                    writer.Write(output.FailureDisposition);
+                }
+            }
         }
         writer.Write(function.ParameterCount);
         writer.Write(function.Variables.Length);
@@ -3566,6 +3676,29 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Managed nodes have no persisted module runtime.");
         }
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
+        var isExternal = false;
+        DirectNativeImport? directNativeImport = null;
+        if (reader is ModuleReader { FormatVersion: DirectNativeImportVersion })
+        {
+            isExternal = GetBool(reader);
+            if (GetBool(reader))
+            {
+                var libraryName = GetString(reader);
+                var exportName = GetString(reader);
+                var outputCount = Count(reader, MaximumSlots);
+                var outputs = ImmutableArray.CreateBuilder<DirectNativeOutput>(outputCount);
+                for (var outputIndex = 0; outputIndex < outputCount; outputIndex++)
+                {
+                    outputs.Add(new DirectNativeOutput(reader.ReadInt32(),
+                        (PrimitiveType)reader.ReadInt32(), reader.ReadUInt32(), reader.ReadUInt32()));
+                }
+                directNativeImport = new DirectNativeImport(libraryName, exportName, outputs.MoveToImmutable());
+            }
+            if (directNativeImport is not null && !isExternal)
+            {
+                throw new ModuleFormatException("Only external declarations can carry direct native imports.");
+            }
+        }
         var parameters = reader.ReadInt32();
         var count = Count(reader, MaximumSlots);
         if (parameters < 0 || parameters > count - (constructor ? 1 : 0))
@@ -3609,6 +3742,8 @@ public static partial class ModuleCompiler
             DeclaringStruct = declaringStruct,
             IsClassConstructor = classConstructor,
             ClassConstructor = classFactoryConstructor,
+            IsExternal = isExternal,
+            DirectNativeImport = directNativeImport,
         };
     }
 
@@ -4008,6 +4143,7 @@ public static partial class ModuleCompiler
             BoundSnapshotSpan => (byte)32,
             BoundSpanLength => (byte)33,
             BoundSpanRead => (byte)34,
+            BoundNativeStorageAddress => (byte)35,
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         writer.Write((int)expression.Type);
@@ -4045,6 +4181,16 @@ public static partial class ModuleCompiler
             case BoundSpanRead read:
                 PutExpression(writer, read.View, names, ref remaining, depth + 1, inUnsafe);
                 PutExpression(writer, read.Index, names, ref remaining, depth + 1, inUnsafe);
+                break;
+            case BoundNativeStorageAddress address:
+                writer.Write(address.Variable);
+                writer.Write((int)address.CarrierType);
+                writer.Write((int)address.ElementType);
+                writer.Write(address.ElementCount);
+                writer.Write(address.ElementStride);
+                writer.Write(address.ByteExtent);
+                writer.Write(address.IsReadonly);
+                PutExpression(writer, address.Index, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundViewRead viewRead:
                 writer.Write(viewRead.Variable);
@@ -4317,6 +4463,21 @@ public static partial class ModuleCompiler
                 RequirePrivateSpanRevision(reader);
                 var spanView = GetExpression(reader, ref remaining, depth + 1);
                 return new BoundSpanRead(spanView, GetExpression(reader, ref remaining, depth + 1), type, span);
+            case 35:
+                if (reader is not ModuleReader { FormatVersion: DirectNativeImportVersion })
+                {
+                    throw new ModuleFormatException("Native storage addresses require semantic-module revision 79.");
+                }
+                var storageVariable = reader.ReadInt32();
+                var carrierType = GetType(reader);
+                var elementType = GetType(reader);
+                var elementCount = reader.ReadInt32();
+                var elementStride = reader.ReadInt32();
+                var byteExtent = reader.ReadInt32();
+                var isReadonly = GetBool(reader);
+                var storageIndex = GetExpression(reader, ref remaining, depth + 1);
+                return new BoundNativeStorageAddress(storageVariable, storageIndex,
+                    carrierType, elementType, type, elementCount, elementStride, byteExtent, isReadonly, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }
@@ -4553,6 +4714,10 @@ public static partial class ModuleCompiler
             BoundSpanRead read => read with {
                 View = ResolveExpression(read.View, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
                 Index = ResolveExpression(read.Index, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
+            },
+            BoundNativeStorageAddress address => address with {
+                Index = ResolveExpression(address.Index, names, functions, structures,
+                    valueTypes, inUnsafe, inUnsafeExpression),
             },
             BoundBufferRead buffer => buffer with {
                 Index = ResolveExpression(buffer.Index, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),

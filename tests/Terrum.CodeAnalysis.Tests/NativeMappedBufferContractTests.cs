@@ -24,7 +24,7 @@ public sealed class NativeMappedBufferContractTests
         var acquisitionImport = new NativeImportDefinition(
             "fixture.byte-reader.acquire", "fixture.dll", "AcquireByteReader",
             [PrimitiveType.NativeComInterfaceOutputAddress], PrimitiveType.Int32,
-            IsNoThrow: true, RequiresUnsafeCaller: false, DoesNotReturn: false,
+            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.OwnedNativeComInterfaceOutput],
             ComOutputs = [new(0, interfaceIdentity, NativeComEffects.AcquiresReference)],

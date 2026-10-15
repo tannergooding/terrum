@@ -250,13 +250,13 @@ internal static class NativeWindowOwnerContract
         && exitProcess.ExportName == "ExitProcess"
         && exitProcess.ParameterTypes.AsSpan().SequenceEqual([PrimitiveType.UInt32])
         && exitProcess.ReturnType == PrimitiveType.Void && exitProcess.IsNoThrow
-        && !exitProcess.RequiresUnsafeCaller && exitProcess.DoesNotReturn
+        && exitProcess.RequiresUnsafeCaller && exitProcess.DoesNotReturn
         && exitProcess.DeploymentPolicy == NativeImportDeploymentPolicy.System32
         && catalog.TryGetImport(GetCurrentThreadIdKey, out var threadId)
         && threadId is not null && threadId.DllName.Equals("kernel32.dll", StringComparison.OrdinalIgnoreCase)
         && threadId.ExportName == "GetCurrentThreadId" && threadId.ParameterTypes.IsEmpty
         && threadId.ReturnType == PrimitiveType.UInt32 && threadId.IsNoThrow
-        && !threadId.RequiresUnsafeCaller && !threadId.DoesNotReturn
+        && threadId.RequiresUnsafeCaller && !threadId.DoesNotReturn
         && threadId.DeploymentPolicy == NativeImportDeploymentPolicy.System32;
 
     internal static bool MatchesOwnerStructure(BoundStruct structure) =>

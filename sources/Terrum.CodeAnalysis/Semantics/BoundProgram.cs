@@ -78,6 +78,8 @@ public enum PrimitiveType
     NativeStorageAddress,
     /// <summary>A catalogued immutable native storage record whose layout is local to its selected profile.</summary>
     NativeStorageRecord,
+    /// <summary>An unmanaged opaque <c>ptr&lt;void&gt;</c> value with no pinning or ownership guarantee.</summary>
+    NativeRawPointer,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -355,6 +357,8 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    internal DirectNativeImport? DirectNativeImport { get; init; }
+
     internal NativeComMethodDefinition? NativeComMethod { get; init; }
     internal string? NativeComAcquisitionMethodIdentity { get; init; }
     internal ImmutableArray<NativeComBoundParameterMapping> NativeComParameterMappings { get; init; }
@@ -385,6 +389,8 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>The import that produces COM owners for this compiler-generated acquisition function.</summary>
     internal string? NativeComAcquisitionImportKey { get; init; }
+    internal ImmutableArray<int> NativeComAcquisitionOutputParameterIndexes { get; init; } = [];
+    internal ImmutableArray<NativeComAcquisitionSourceDefinition> NativeComAcquisitionSources { get; init; } = [];
 
     /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
     public bool IsConstructor { get; init; }
@@ -422,6 +428,12 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Input parameter ordinals that conservatively constrain a forwarded Span result. Never persisted.</summary>
     internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
 }
+
+internal sealed record DirectNativeImport(string LibraryName, string ExportName,
+    ImmutableArray<DirectNativeOutput> Outputs);
+
+internal sealed record DirectNativeOutput(int ParameterIndex, PrimitiveType PointeeType,
+    uint ResultCondition, uint FailureDisposition);
 
 /// <summary>A parameter or local storage declaration.</summary>
 /// <param name="Name">The source name.</param>

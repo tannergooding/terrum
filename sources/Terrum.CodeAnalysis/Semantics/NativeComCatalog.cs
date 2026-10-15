@@ -18,10 +18,27 @@ internal enum NativeComEffects : byte
     ReleasesReference = 8,
 }
 
+internal enum NativeComParameterAccess : byte
+{
+    Read,
+    Write,
+    ReadWrite,
+}
+
+internal enum NativeComParameterRetention : byte
+{
+    NoEscape,
+    MayEscape,
+}
+
+internal sealed record NativeComParameterDefinition(int ParameterIndex,
+    NativeComParameterAccess Access, NativeComParameterRetention Retention, int Extent);
+
 internal enum NativeComOwnerAcquisitionKind : byte
 {
     NativeImportOutput,
     ComMethodOutput,
+    DirectNativeImportOutput,
 }
 
 internal enum NativeComParameterAdaptationKind : byte
@@ -72,7 +89,15 @@ internal sealed record NativeComOwnerDefinition(
     internal ImmutableArray<int> AdditionalOutputParameterIndexes { get; init; } = [];
     internal ImmutableArray<string> AdditionalAcquisitionMethodIdentities { get; init; } = [];
     internal string ReleaseMethodIdentity { get; init; } = "";
+    internal bool OutputMayBeWrittenOnFailure { get; init; }
 }
+
+internal sealed record NativeComAcquisitionSourceDefinition(
+    int OutputParameterIndex,
+    string OwnerTypeIdentity,
+    string SourceMethodIdentity,
+    int SourceOutputParameterIndex,
+    bool OutputMayBeWrittenOnFailure);
 
 internal sealed record NativeComParameterAdaptation(
     int ParameterIndex,
@@ -131,6 +156,9 @@ internal sealed record NativeComMethodDefinition(
 {
     internal string VTableMethodIdentity { get; init; } = "";
     internal string? BoundMethodName { get; init; }
+    internal bool IsNoThrow { get; init; }
+    internal bool RequiresNativeParameterMetadata { get; init; }
+    internal ImmutableArray<NativeComParameterDefinition> NativeParameters { get; init; } = [];
     internal ImmutableArray<int> BorrowedOwnerParameters { get; init; } = [];
     internal ImmutableArray<NativeComHiddenParameter> HiddenParameters { get; init; } = [];
     internal ImmutableArray<NativeStorageRecordParameterDefinition> StorageRecordParameters { get; init; } = [];
@@ -308,7 +336,8 @@ internal static class NativeComCatalog
                 || !ownerInterfaces.Add(owner.InterfaceIdentity)
                 || !interfacesByIdentity.ContainsKey(owner.InterfaceIdentity)
                 || owner.AcquisitionKind is not (NativeComOwnerAcquisitionKind.NativeImportOutput
-                    or NativeComOwnerAcquisitionKind.ComMethodOutput)
+                    or NativeComOwnerAcquisitionKind.ComMethodOutput
+                    or NativeComOwnerAcquisitionKind.DirectNativeImportOutput)
                 || string.IsNullOrWhiteSpace(owner.AcquisitionIdentity)
                 || owner.OutputParameterIndex < 0
                 || (owner.AcquisitionKind == NativeComOwnerAcquisitionKind.ComMethodOutput
@@ -356,6 +385,35 @@ internal static class NativeComCatalog
                     && !method.Effects.HasFlag(NativeComEffects.SignedHResult)))
             {
                 return Invalid(out failureReason, $"COM method '{method.Identity}' has unknown effect flags.");
+            }
+            if (method.NativeParameters.IsDefault
+                || method.NativeParameters.Any(static parameter => parameter is null
+                    || parameter.ParameterIndex < 1 || parameter.Extent < 0
+                    || parameter.Access is not (NativeComParameterAccess.Read
+                        or NativeComParameterAccess.Write or NativeComParameterAccess.ReadWrite)
+                    || parameter.Retention is not (NativeComParameterRetention.NoEscape
+                        or NativeComParameterRetention.MayEscape))
+                || method.NativeParameters.Select(static parameter => parameter.ParameterIndex)
+                    .Distinct().Count() != method.NativeParameters.Length)
+            {
+                return Invalid(out failureReason, $"COM method '{method.Identity}' has invalid native parameter metadata.");
+            }
+            foreach (var nativeParameter in method.NativeParameters)
+            {
+                if (nativeParameter.ParameterIndex >= parameters.Length
+                    || !parameters[nativeParameter.ParameterIndex].EndsWith("*", StringComparison.Ordinal))
+                {
+                    return Invalid(out failureReason,
+                        $"COM method '{method.Identity}' parameter metadata does not match a pointer parameter.");
+                }
+            }
+            if (method.RequiresNativeParameterMetadata
+                && Enumerable.Range(1, Math.Max(0, parameters.Length - 1))
+                    .Any(index => parameters[index].EndsWith("*", StringComparison.Ordinal)
+                        && !method.NativeParameters.Any(parameter => parameter.ParameterIndex == index)))
+            {
+                return Invalid(out failureReason,
+                    $"COM method '{method.Identity}' is missing pointer access or retention metadata.");
             }
             if (!interfacesByIdentity.TryGetValue(method.OwnerInterfaceIdentity, out var ownerInterface)
                 || !interfacesByIdentity.TryGetValue(method.DeclaringInterfaceIdentity, out var declaringInterface))
@@ -483,7 +541,14 @@ internal static class NativeComCatalog
                 if (!method.Effects.HasFlag(NativeComEffects.AcquiresReference)
                     || method.OutputInterfaceIdentity is not string outputInterface
                     || !interfacesByIdentity.ContainsKey(outputInterface)
-                    || (outputType != "void**" && !hasTypedOutput))
+                    || (outputType != "void**" && !hasTypedOutput)
+                    || method.RequiresNativeParameterMetadata
+                        && (!method.Effects.HasFlag(NativeComEffects.SignedHResult)
+                            || !method.NativeParameters.Any(parameter =>
+                                parameter.ParameterIndex == method.OutputParameterIndex
+                                && (parameter.Access is NativeComParameterAccess.Write
+                                    or NativeComParameterAccess.ReadWrite)
+                                && parameter.Retention == NativeComParameterRetention.NoEscape)))
                 {
                     return Invalid(out failureReason, $"COM method '{method.Identity}' has invalid output metadata.");
                 }
@@ -735,10 +800,11 @@ internal static class NativeComCatalog
                     return Invalid(out failureReason, $"COM owner '{owner.BoundOwnerName}' does not match a native import output.");
                 }
             }
-            else if (!methodsByIdentity.TryGetValue(owner.AcquisitionIdentity, out var method)
+            else if (owner.AcquisitionKind == NativeComOwnerAcquisitionKind.ComMethodOutput
+                && (!methodsByIdentity.TryGetValue(owner.AcquisitionIdentity, out var method)
                 || method.OutputParameterIndex != owner.OutputParameterIndex
                 || method.OutputInterfaceIdentity != owner.InterfaceIdentity
-                || !method.Effects.HasFlag(NativeComEffects.AcquiresReference))
+                || !method.Effects.HasFlag(NativeComEffects.AcquiresReference)))
             {
                 return Invalid(out failureReason, $"COM owner '{owner.BoundOwnerName}' does not match a COM method output.");
             }
@@ -775,7 +841,7 @@ internal static class NativeComCatalog
         NativeComMethodDefinition method,
         IReadOnlyDictionary<string, NativeComInterfaceDefinition> interfaces)
     {
-        if (method.OwnerInterfaceIdentity != owner.InterfaceIdentity || !method.IsCallable
+        if (!method.IsCallable || !IsAssignable(owner.InterfaceIdentity, method.OwnerInterfaceIdentity, interfaces)
             || method.OutputParameterIndex != -1 || method.OutputInterfaceIdentity is not null
             || method.Effects != NativeComEffects.ReleasesReference
             || !TryParseSignature(method.Signature, out var returnType, out var parameters)
@@ -785,9 +851,10 @@ internal static class NativeComCatalog
             return false;
         }
 
-        var pointerType = definition.NominalIdentity + "*";
+        var pointerType = method.OwnerInterfaceIdentity + "*";
         return parameters[0] == pointerType
-            || definition.SignatureAliases.Any(alias => parameters[0] == alias + "*");
+            || interfaces[method.OwnerInterfaceIdentity].SignatureAliases.Any(alias =>
+                parameters[0] == alias + "*");
     }
 
     internal static bool IsAssignable(string sourceIdentity, string targetIdentity,
@@ -845,6 +912,77 @@ internal static class NativeComCatalog
         parameters = parameterText.Split(',').Select(static parameter => parameter.Trim()).ToArray();
         return parameters.All(static parameter => parameter.Length != 0);
     }
+
+    internal static bool TryCreateAbi(string signature,
+        ImmutableArray<NativeComSignatureTypeDefinition> signatureTypes, out string abi)
+    {
+        abi = "";
+        if (signatureTypes.IsDefault
+            || !TryParseSignature(signature, out var returnType, out var parameters))
+        {
+            return false;
+        }
+
+        var signatureTypesByIdentity =
+            new Dictionary<string, NativeComSignatureTypeDefinition>(StringComparer.Ordinal);
+        foreach (var definition in signatureTypes)
+        {
+            if (definition is null || string.IsNullOrWhiteSpace(definition.Identity)
+                || !signatureTypesByIdentity.TryAdd(definition.Identity, definition))
+            {
+                return false;
+            }
+        }
+
+        if (!TryGetAbiValueKind(returnType, signatureTypesByIdentity, allowVoid: true,
+                isParameter: false, out var returnKind))
+        {
+            return false;
+        }
+
+        var locations = new string[parameters.Length];
+        for (var index = 0; index < parameters.Length; index++)
+        {
+            if (!TryGetAbiValueKind(parameters[index], signatureTypesByIdentity,
+                    allowVoid: false, isParameter: true, out var kind)
+                || kind is not NativeComAbiValueKind valueKind)
+            {
+                return false;
+            }
+
+            locations[index] = index switch {
+                0 => ArgumentLocation(valueKind, "rcx", "ecx", "xmm0"),
+                1 => ArgumentLocation(valueKind, "rdx", "edx", "xmm1"),
+                2 => ArgumentLocation(valueKind, "r8", "r8d", "xmm2"),
+                3 => ArgumentLocation(valueKind, "r9", "r9d", "xmm3"),
+                _ => $"stack{32 + (index - 4) * sizeof(long)}",
+            };
+        }
+
+        var resultLocation = returnKind switch {
+            null => "void",
+            NativeComAbiValueKind.Signed32 or NativeComAbiValueKind.Unsigned32 => "eax",
+            NativeComAbiValueKind.Signed64 or NativeComAbiValueKind.Unsigned64
+                or NativeComAbiValueKind.Pointer => "rax",
+            NativeComAbiValueKind.Float32 or NativeComAbiValueKind.Float64 => "xmm0",
+            _ => "",
+        };
+        if (resultLocation.Length == 0)
+        {
+            return false;
+        }
+
+        abi = "windows-x64-" + string.Join("-", locations.Append(resultLocation));
+        return true;
+    }
+
+    private static string ArgumentLocation(NativeComAbiValueKind kind,
+        string register, string narrowRegister, string floatingRegister) =>
+        kind switch {
+            NativeComAbiValueKind.Signed32 or NativeComAbiValueKind.Unsigned32 => narrowRegister,
+            NativeComAbiValueKind.Float32 or NativeComAbiValueKind.Float64 => floatingRegister,
+            _ => register,
+        };
 
     private static bool IsValidValueAddressAdaptation(NativeComParameterAdaptation adaptation,
         IReadOnlyDictionary<string, NativeComSignatureTypeDefinition> signatureTypes)
@@ -1155,7 +1293,8 @@ internal static class NativeComCatalog
         NativeComMethodDefinition second,
         IReadOnlyDictionary<string, NativeComSignatureTypeDefinition> signatureTypes)
     {
-        if (first.Effects != second.Effects
+        if (first.Effects != second.Effects || first.IsNoThrow != second.IsNoThrow
+            || !first.NativeParameters.SequenceEqual(second.NativeParameters)
             || first.OutputParameterIndex != second.OutputParameterIndex
             || first.OutputInterfaceIdentity != second.OutputInterfaceIdentity
             || first.BorrowedOwnerParameters.Length != second.BorrowedOwnerParameters.Length

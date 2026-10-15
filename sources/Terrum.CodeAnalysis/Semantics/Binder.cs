@@ -64,7 +64,7 @@ internal sealed partial class Binder
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
-    private readonly NativeImportCatalog? _nativeImportCatalog;
+    private NativeImportCatalog? _nativeImportCatalog;
     private NativeSourceProfile _sourceProfile;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
@@ -256,6 +256,7 @@ internal sealed partial class Binder
             }
             _contexts.Add(tree, (_namespace, [.. _usings]));
         }
+        BindSourceNativeComMetadata();
         DeclareProtocols();
         foreach (var tree in _trees)
         {
@@ -299,6 +300,7 @@ internal sealed partial class Binder
                         || NativeWindowMessageContract.IsTypeName(qualified)
                         || NativeWindowCreationContract.IsNullOnlyParameterTypeName(qualified)
                         || NativeComCallContract.IsCataloguedOwnerName(qualified, _nativeImportCatalog)
+                            && !HasSourceNativeComOwnerAttribute(structure)
                         || (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
                             && qualified is ("nint" or "nuint"))
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
@@ -660,6 +662,9 @@ internal sealed partial class Binder
                 CapturedParameters = signature.CapturedParameters,
                 ReturnsForwardedBacking = signature.ReturnsForwardedBacking,
                 ResultDependencyParameters = signature.ResultDependencyParameters,
+                NativeComAcquisitionOutputParameterIndexes =
+                    signature.NativeComAcquisitionOutputParameterIndexes,
+                NativeComAcquisitionSources = signature.NativeComAcquisitionSources,
             });
         }
 
@@ -801,6 +806,149 @@ internal sealed partial class Binder
         return StringLiteralDecoder.TryDecode(argument.Token.Text.AsSpan(), out key);
     }
 
+    private static bool TryDecodeDirectNativeImportAttribute(SyntaxNode attribute,
+        out string libraryName, out string exportName)
+    {
+        libraryName = "";
+        exportName = "";
+        var children = attribute.Children;
+        if (children.Length != 12
+            || children[0] is not SyntaxTokenElement open || open.Token.Kind != TokenKind.OpenBracket
+            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
+            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
+            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[5] is not SyntaxTokenElement { Token.Name: "NativeImport" }
+            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+            || children[7] is not SyntaxTokenElement library
+            || library.Token.Kind != TokenKind.StringLiteral
+            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[9] is not SyntaxTokenElement export
+            || export.Token.Kind != TokenKind.StringLiteral
+            || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+            || children[11] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }
+            || !StringLiteralDecoder.TryDecode(library.Token.Text.AsSpan(), out libraryName)
+            || !StringLiteralDecoder.TryDecode(export.Token.Text.AsSpan(), out exportName))
+        {
+            return false;
+        }
+
+        return DirectNativeImportContract.IsValidLibraryName(libraryName)
+            && DirectNativeImportContract.IsValidExportName(exportName);
+    }
+
+    private static bool TryDecodeNativeOutputAttribute(SyntaxNode attribute, out int parameterIndex)
+    {
+        parameterIndex = -1;
+        var children = attribute.Children;
+        if (children.Length != 10
+            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
+            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
+            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
+            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[5] is not SyntaxTokenElement { Token.Name: "NativeOutput" }
+            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+            || children[7] is not SyntaxTokenElement index
+            || index.Token.Kind != TokenKind.NumericLiteral
+            || !ScannerHost.TryParseIntegerMagnitude(index.Token.Text.AsSpan(), out var magnitude)
+            || magnitude > int.MaxValue
+            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+            || children[9] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+        {
+            return false;
+        }
+
+        parameterIndex = (int)magnitude;
+        return true;
+    }
+
+    private static bool TryDecodeNativeComAcquisitionAttribute(SyntaxNode attribute,
+        out int parameterIndex) =>
+        TryDecodeNativeComAcquisitionAttribute(attribute, out parameterIndex, out _);
+
+    private static bool TryDecodeNativeComAcquisitionAttribute(SyntaxNode attribute,
+        out int parameterIndex, out NativeComAcquisitionSourceDefinition? source)
+    {
+        parameterIndex = -1;
+        source = null;
+        var children = attribute.Children;
+        if (children.Length < 10
+            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
+            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
+            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
+            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[5] is not SyntaxTokenElement { Token.Name: "NativeComAcquisition" }
+            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+            || children[^2] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+            || children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }
+            || children[7] is not SyntaxTokenElement index
+            || index.Token.Kind != TokenKind.NumericLiteral
+            || !ScannerHost.TryParseIntegerMagnitude(index.Token.Text.AsSpan(), out var magnitude)
+            || magnitude > int.MaxValue)
+        {
+            return false;
+        }
+
+        parameterIndex = (int)magnitude;
+        if (children.Length == 10)
+        {
+            return true;
+        }
+        if (children.Length != 18
+            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[9] is not SyntaxTokenElement ownerToken
+            || ownerToken.Token.Kind != TokenKind.StringLiteral
+            || !StringLiteralDecoder.TryDecode(ownerToken.Token.Text.AsSpan(), out var ownerIdentity)
+            || string.IsNullOrWhiteSpace(ownerIdentity)
+            || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[11] is not SyntaxTokenElement methodToken
+            || methodToken.Token.Kind != TokenKind.StringLiteral
+            || !StringLiteralDecoder.TryDecode(methodToken.Token.Text.AsSpan(), out var sourceMethodIdentity)
+            || string.IsNullOrWhiteSpace(sourceMethodIdentity)
+            || children[12] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[13] is not SyntaxTokenElement sourceIndexToken
+            || sourceIndexToken.Token.Kind != TokenKind.NumericLiteral
+            || !ScannerHost.TryParseIntegerMagnitude(sourceIndexToken.Token.Text.AsSpan(),
+                out var sourceOutputMagnitude)
+            || sourceOutputMagnitude > int.MaxValue
+            || children[14] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[15] is not SyntaxTokenElement failureToken
+            || failureToken.Token.Kind != TokenKind.Identifier
+            || failureToken.Token.Name is not ("OutputMayBeWrittenOnFailure"
+                or "OutputNotWrittenOnFailure"))
+        {
+            return false;
+        }
+
+        source = new NativeComAcquisitionSourceDefinition(parameterIndex, ownerIdentity,
+            sourceMethodIdentity, (int)sourceOutputMagnitude,
+            failureToken.Token.Name == "OutputMayBeWrittenOnFailure");
+        return true;
+    }
+
+    private bool TryBindDirectNativePointerType(SyntaxNode node, out PrimitiveType pointeeType)
+    {
+        pointeeType = PrimitiveType.Int32;
+        var typeArguments = node.Children.OfType<SyntaxNode>().ToArray();
+        if (TypeNameIdentifier(node) != "ptr" || node.Children[0] is not SyntaxTokenElement {
+                Token.Kind: TokenKind.WriteKeyword
+            } || typeArguments.Length != 1
+            || node.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.Greater })
+        {
+            return false;
+        }
+
+        var pointee = BindType(typeArguments[0], allowVoid: false);
+        if (!DirectNativeImportContract.IsOutputPointee(pointee))
+        {
+            return false;
+        }
+        pointeeType = pointee;
+        return true;
+    }
+
     private static bool IsNativeImportInteger(PrimitiveType type) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
@@ -830,7 +978,7 @@ internal sealed partial class Binder
             || (owner.OutputParameterIndex != parameterIndex
                 && !owner.AdditionalOutputParameterIndexes.Contains(parameterIndex))
             || !_structs[structureIndex].IsUnique
-            || _structs[structureIndex].Fields.Length != 0
+            || !NativeComCallContract.HasOwnerCellLayout(_structs[structureIndex], owner)
             || _structs[structureIndex].Size != owner.CellSize
             || _structs[structureIndex].CleanupMethod != owner.BoundOwnerName + ".Close")
         {
@@ -847,6 +995,69 @@ internal sealed partial class Binder
         return structureIndex >= 0 && structureIndex < _structs.Count
             && NativeComCallContract.IsCataloguedOwnerName(
                 _structs[structureIndex].Name, _nativeImportCatalog);
+    }
+
+    private static bool HasSourceNativeComOwnerAttribute(SyntaxNode declaration) =>
+        declaration.Children.OfType<SyntaxNode>().Any(static child =>
+            child.Kind == SyntaxKind.Attribute
+            && AttributeName(child) == "Terrum.Interop.NativeComOwner");
+
+    private bool TryGetNativeComOwner(PrimitiveType type, out NativeComOwnerDefinition? owner)
+    {
+        var structureIndex = (int)type - 100;
+        owner = null;
+        return _nativeImportCatalog is NativeImportCatalog catalog
+            && structureIndex >= 0 && structureIndex < _structs.Count
+            && catalog.TryGetComOwner(_structs[structureIndex].Name, out owner);
+    }
+
+    private string ResolveNativeComOwnerIdentity(string identity)
+    {
+        if (identity.Contains('.', StringComparison.Ordinal))
+        {
+            return identity;
+        }
+        var qualified = Qualify(identity);
+        if (_structNames.ContainsKey(qualified))
+        {
+            return qualified;
+        }
+        foreach (var imported in _usings)
+        {
+            var candidate = imported + "." + identity;
+            if (_structNames.ContainsKey(candidate))
+            {
+                return candidate;
+            }
+        }
+        return qualified;
+    }
+
+    private string ResolveNativeComAcquisitionIdentity(string identity)
+    {
+        var separator = identity.IndexOf("::", StringComparison.Ordinal);
+        if (separator < 0)
+        {
+            return identity.Contains('.', StringComparison.Ordinal) ? identity : Qualify(identity);
+        }
+        var interfaceIdentity = identity[..separator];
+        if (!interfaceIdentity.Contains('.', StringComparison.Ordinal))
+        {
+            foreach (var imported in _usings)
+            {
+                var candidate = imported + "." + interfaceIdentity;
+                if (_nativeImportCatalog?.TryGetComInterface(candidate, out _) == true)
+                {
+                    interfaceIdentity = candidate;
+                    break;
+                }
+            }
+            if (!interfaceIdentity.Contains('.', StringComparison.Ordinal))
+            {
+                interfaceIdentity = Qualify(interfaceIdentity);
+            }
+        }
+        return interfaceIdentity + identity[separator..];
     }
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
@@ -944,6 +1155,11 @@ internal sealed partial class Binder
                 {
                     isTransparent = layout.Token.Text == "Transparent";
                     isSequential = layout.Token.Text == "Sequential";
+                }
+                else if (AttributeName(attribute) == "Terrum.Interop.NativeComOwner"
+                    && NativeComCallContract.IsCataloguedOwnerName(qualified, _nativeImportCatalog))
+                {
+                    continue;
                 }
                 else
                 {
@@ -1534,6 +1750,11 @@ internal sealed partial class Binder
         var doesNotReturn = false;
         SyntaxNode? nativeImportAttribute = null;
         string? nativeImportKey = null;
+        string? nativeLibraryName = null;
+        string? nativeExportName = null;
+        var nativeOutputParameterIndexes = new HashSet<int>();
+        var nativeComAcquisitionOutputParameterIndexes = new HashSet<int>();
+        var nativeComAcquisitionSources = new List<NativeComAcquisitionSourceDefinition>();
         SyntaxNode? captures = null;
         SyntaxNode? resultDependencies = null;
         var accessModifiers = 0;
@@ -1546,9 +1767,11 @@ internal sealed partial class Binder
                     && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
                 var attributeName = AttributeName(attribute);
                 if (attributeName.Contains('.')
-                    && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName)
+                    && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                    && attributeName != "Terrum.Interop.NativeOutput"
+                    && attributeName != "Terrum.Interop.NativeComAcquisition")
                 {
-                    Report("TRM3001", "Only the compiler-owned NativeImport qualified attribute is supported.",
+                    Report("TRM3001", "Only the compiler-owned NativeImport, NativeOutput, and NativeComAcquisition qualified attributes are supported.",
                         attribute.Span);
                     continue;
                 }
@@ -1558,14 +1781,53 @@ internal sealed partial class Binder
                     {
                         Report("TRM3030", "NativeImport is a nonrepeatable compiler-owned attribute.", attribute.Span);
                     }
+                    else if (TryDecodeDirectNativeImportAttribute(attribute,
+                        out var decodedLibraryName, out var decodedExportName))
+                    {
+                        nativeLibraryName = decodedLibraryName;
+                        nativeExportName = decodedExportName;
+                    }
                     else if (!TryDecodeNativeImportAttribute(attribute,
                         NativeImportCatalog.AttributeDefinition, out nativeImportKey))
                     {
                         Report("TRM3030",
-                            "NativeImport requires exactly one string-literal key in its compiler-owned schema.",
+                            "NativeImport requires one catalog key or a library and export string literal.",
                             attribute.Span);
                     }
                     nativeImportAttribute = attribute;
+                    continue;
+                }
+                if (attributeName == "Terrum.Interop.NativeOutput")
+                {
+                    if (returnTarget || !TryDecodeNativeOutputAttribute(attribute, out var outputParameterIndex)
+                        || !nativeOutputParameterIndexes.Add(outputParameterIndex))
+                    {
+                        Report("TRM3030",
+                            "NativeOutput requires one distinct nonnegative parameter ordinal.",
+                            attribute.Span);
+                    }
+                    continue;
+                }
+                if (attributeName == "Terrum.Interop.NativeComAcquisition")
+                {
+                    if (returnTarget
+                        || !TryDecodeNativeComAcquisitionAttribute(attribute, out var outputParameterIndex,
+                            out var acquisitionSource)
+                        || !nativeComAcquisitionOutputParameterIndexes.Add(outputParameterIndex))
+                    {
+                        Report("TRM3030",
+                            "NativeComAcquisition requires a distinct output ordinal and, for source metadata, an owner, source output, and failure disposition.",
+                            attribute.Span);
+                    }
+                    else if (acquisitionSource is not null)
+                    {
+                        nativeComAcquisitionSources.Add(acquisitionSource with {
+                            OwnerTypeIdentity = ResolveNativeComOwnerIdentity(
+                                acquisitionSource.OwnerTypeIdentity),
+                            SourceMethodIdentity = ResolveNativeComAcquisitionIdentity(
+                                acquisitionSource.SourceMethodIdentity),
+                        });
+                    }
                     continue;
                 }
                 if (property)
@@ -1695,6 +1957,10 @@ internal sealed partial class Binder
         {
             Report("TRM3030", "NativeImport may appear only on an extern callable.", nativeImportAttribute.Span);
         }
+        if (nativeOutputParameterIndexes.Count != 0 && !isExternal)
+        {
+            Report("TRM3030", "NativeOutput may appear only on an extern callable.", declaration.Span);
+        }
         if (isExternal)
         {
             if (nativeImportAttribute is null)
@@ -1702,7 +1968,7 @@ internal sealed partial class Binder
                 Report("TRM3030", "An extern callable requires the compiler-owned NativeImport attribute.",
                     declaration.Span);
             }
-            if (_nativeImportCatalog is null)
+            if (nativeImportKey is not null && _nativeImportCatalog is null)
             {
                 Report("TRM3030", "Source native imports require an explicitly selected compiler import catalog.",
                     declaration.Span);
@@ -1825,6 +2091,10 @@ internal sealed partial class Binder
                 Report("TRM3030", $"Native import key '{importKey}' is not present in the selected catalog.",
                     nativeImportAttribute?.Span ?? declaration.Span);
             }
+            else if (importDefinition is not null)
+            {
+                requiresUnsafeCaller |= importDefinition.RequiresUnsafeCaller;
+            }
         }
 
         foreach (var child in parameters?.Children ?? [])
@@ -1836,7 +2106,18 @@ internal sealed partial class Binder
 
             var typeNode = parameter.Children.OfType<SyntaxNode>().Single();
             var token = ((SyntaxTokenElement)parameter.Children[^1]).Token;
-            var type = BindType(typeNode, allowVoid: false);
+            PrimitiveType? nativePointeeType = null;
+            PrimitiveType type;
+            if (nativeLibraryName is not null
+                && TryBindDirectNativePointerType(typeNode, out var pointeeType))
+            {
+                type = PrimitiveType.NativeStorageAddress;
+                nativePointeeType = pointeeType;
+            }
+            else
+            {
+                type = BindType(typeNode, allowVoid: false);
+            }
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
             {
                 Report("TRM3023", "A native buffer view cannot be a parameter.", parameter.Span);
@@ -1900,7 +2181,110 @@ internal sealed partial class Binder
                 Report("TRM3004", $"Duplicate parameter '{token.Text}'.", token.Span);
             }
 
-            declared.Add(new Parameter(token.Name, type, token.Span, isOut || isInit, isInit, isImplicitRef));
+            declared.Add(new Parameter(token.Name, type, token.Span, isOut || isInit, isInit,
+                isImplicitRef, nativePointeeType));
+        }
+
+        DirectNativeImport? directNativeImport = null;
+        if (nativeLibraryName is not null && nativeExportName is not null)
+        {
+            var nativeOutputs = ImmutableArray.CreateBuilder<DirectNativeOutput>();
+            foreach (var outputIndex in nativeOutputParameterIndexes.Order())
+            {
+                if (outputIndex >= declared.Count
+                    || declared[outputIndex].NativePointeeType is not PrimitiveType outputType)
+                {
+                    Report("TRM3030",
+                        "NativeOutput must identify a write ptr<T> parameter in the direct native signature.",
+                        nativeImportAttribute?.Span ?? declaration.Span);
+                    continue;
+                }
+                nativeOutputs.Add(new DirectNativeOutput(outputIndex, outputType,
+                    returnType == PrimitiveType.Int32 ? 1u : returnType == PrimitiveType.UInt32 ? 2u : 0u,
+                    1));
+            }
+            for (var index = 0; index < declared.Count; index++)
+            {
+                var parameter = declared[index];
+                if (parameter.NativePointeeType is PrimitiveType pointee
+                    && !nativeOutputParameterIndexes.Contains(index))
+                {
+                    Report("TRM3030",
+                        "The first direct native import profile permits pointer parameters only as result-correlated outputs.",
+                        parameter.Span);
+                }
+                else if (parameter.NativePointeeType is null
+                    && parameter.Type != PrimitiveType.NativeStorageAddress
+                    && !DirectNativeImportContract.IsScalar(parameter.Type))
+                {
+                    Report("TRM3030",
+                        "The first direct native import profile requires directly Blittable scalar parameters.",
+                        parameter.Span);
+                }
+            }
+            if (nativeOutputs.Count > 0
+                && returnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
+            {
+                Report("TRM3030",
+                    "NativeOutput currently requires an int32 or uint32 result; the output is valid only when it is nonzero.",
+                    declaration.Span);
+            }
+            if (nativeOutputParameterIndexes.Count != nativeOutputs.Count)
+            {
+                Report("TRM3030", "Every NativeOutput ordinal must resolve to one supported pointer parameter.",
+                    declaration.Span);
+            }
+            if (returnType is not (PrimitiveType.Void or PrimitiveType.Int32 or PrimitiveType.UInt32))
+            {
+                Report("TRM3030",
+                    "The first direct native import profile requires a void, int32, or uint32 result.",
+                    declaration.Span);
+            }
+            requiresUnsafeCaller = true;
+            directNativeImport = new DirectNativeImport(nativeLibraryName, nativeExportName,
+                nativeOutputs.ToImmutable());
+        }
+        else if (nativeOutputParameterIndexes.Count != 0)
+        {
+            Report("TRM3030", "NativeOutput requires a two-string direct NativeImport declaration.",
+                declaration.Span);
+        }
+        if (nativeComAcquisitionOutputParameterIndexes.Count != 0)
+        {
+            if (isExternal || constructor || property || operatorDeclaration || isCleanup
+                || returnType != PrimitiveType.Bool)
+            {
+                Report("TRM3030",
+                    "NativeComAcquisition is limited to a non-extern bool wrapper with ordinary output parameters.",
+                    declaration.Span);
+            }
+            foreach (var outputIndex in nativeComAcquisitionOutputParameterIndexes)
+            {
+                if (outputIndex >= declared.Count
+                    || !declared[outputIndex].IsOut || declared[outputIndex].IsInit
+                    || !IsCataloguedNativeComOwner(declared[outputIndex].Type))
+                {
+                    Report("TRM3030",
+                        "NativeComAcquisition must identify an out parameter with a catalogued unique COM owner type.",
+                        declaration.Span);
+                }
+            }
+            foreach (var acquisitionSource in nativeComAcquisitionSources)
+            {
+                if (acquisitionSource.OutputParameterIndex >= declared.Count
+                    || !TryGetNativeComOwner(
+                        declared[acquisitionSource.OutputParameterIndex].Type, out var owner)
+                    || owner is null
+                    || owner.BoundOwnerName != acquisitionSource.OwnerTypeIdentity
+                    || owner.AcquisitionIdentity != acquisitionSource.SourceMethodIdentity
+                    || owner.OutputParameterIndex != acquisitionSource.SourceOutputParameterIndex
+                    || owner.OutputMayBeWrittenOnFailure != acquisitionSource.OutputMayBeWrittenOnFailure)
+                {
+                    Report("TRM3030",
+                        "NativeComAcquisition must match the declared owner, acquisition source output, and failure disposition.",
+                        declaration.Span);
+                }
+            }
         }
         if (operatorDeclaration && operatorKey.Arity == 1
             && (containingType is null || !TryResolveStruct(Qualify(containingType), out var ownerType)
@@ -1924,9 +2308,10 @@ internal sealed partial class Binder
             var declaringType = containingType is null ? null
                 : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + containingType;
             externalFunction = new BoundFunction(qualifiedName, classConstructor ? PrimitiveType.Void : returnType,
-                [.. boundParameters.Select(static parameter => new BoundVariable(
+                [.. boundParameters.Select((parameter, index) => new BoundVariable(
                     parameter.Name, parameter.Type, false, parameter.Span) {
-                    IsOut = parameter.IsOut,
+                    IsOut = parameter.IsOut || directNativeImport?.Outputs.Any(
+                        output => output.ParameterIndex == index) == true,
                     IsInit = parameter.IsInit,
                     IsImplicitRef = parameter.IsImplicitRef,
                 })], boundParameters.Length, new BoundBlock([], declaration.Span), declaration.Span) {
@@ -1943,6 +2328,7 @@ internal sealed partial class Binder
                 IsCleanup = isCleanup,
                 DeclaringStruct = declaringType,
                 NativeImportKey = nativeImportKey,
+                DirectNativeImport = directNativeImport,
             };
 
             if (isExternal && importDefinition is not null && externalFunction is not null
@@ -2036,6 +2422,9 @@ internal sealed partial class Binder
             CapturedParameters = capturedParameters,
             ReturnsForwardedBacking = spanResultCandidate && !resultDependencyParameters.IsEmpty,
             ResultDependencyParameters = resultDependencyParameters,
+            NativeComAcquisitionOutputParameterIndexes =
+                [.. nativeComAcquisitionOutputParameterIndexes.Order()],
+            NativeComAcquisitionSources = [.. nativeComAcquisitionSources],
         });
     }
 
@@ -2177,6 +2566,11 @@ internal sealed partial class Binder
             {
                 Report("TRM3005", "This FFI profile supports only readonly ptr<char16> parameters.", node.Span);
                 return PrimitiveType.Int32;
+            }
+            if (TypeNameIdentifier(typeArgumentNodes[0]) == "void"
+                && typeArgumentNodes[0].Children.Length == 1)
+            {
+                return PrimitiveType.NativeRawPointer;
             }
             if (IsUnshadowedBareChar8Type(typeArgumentNodes[0]))
             {
@@ -3803,7 +4197,11 @@ internal sealed partial class Binder
                 var literalToken = ((SyntaxTokenElement)node.Children[0]).Token;
                 if (literalToken.Kind == TokenKind.NullKeyword)
                 {
-                    if (expected == PrimitiveType.NativeNullPointer
+                    if (expected == PrimitiveType.NativeRawPointer)
+                    {
+                        expression = new BoundConstant(0, PrimitiveType.NativeRawPointer, node.Span);
+                    }
+                    else if (expected == PrimitiveType.NativeNullPointer
                         && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeNullPointer) == true)
                     {
                         expression = new BoundConstant(0, PrimitiveType.NativeNullPointer, node.Span);
@@ -5116,7 +5514,10 @@ internal sealed partial class Binder
                 argumentParameterIndices?.Add(position + receiverCount);
                 continue;
             }
-            if (expectedParameter?.IsOut == true)
+            if (expectedParameter?.IsOut == true
+                && !(signature?.External?.DirectNativeImport is DirectNativeImport directOutputImport
+                    && position >= 0
+                    && directOutputImport.Outputs.Any(output => output.ParameterIndex == position)))
             {
                 Report("TRM3011", "An output parameter requires the matching out or init argument.", argument.Span);
             }
@@ -5202,7 +5603,17 @@ internal sealed partial class Binder
             }
             else
             {
-                bound.Add(BindExpression(value, expected));
+                if (signature?.External?.DirectNativeImport is DirectNativeImport directImport
+                    && expectedParameter is not null && position >= 0
+                    && directImport.Outputs.FirstOrDefault(output =>
+                        output.ParameterIndex == position) is DirectNativeOutput nativeOutput)
+                {
+                    bound.Add(BindDirectNativeOutputAddress(value, nativeOutput, argument.Span));
+                }
+                else
+                {
+                    bound.Add(BindExpression(value, expected));
+                }
             }
             argumentParameterIndices?.Add(position + receiverCount);
         }
@@ -6019,6 +6430,7 @@ internal sealed partial class Binder
         PrimitiveType.NativeUtf8ZPointer => "ptr<char8>",
         PrimitiveType.NativeWindowHandle => NativeWindowHandleContract.TypeName,
         PrimitiveType.NativeNullPointer => NativeImportCatalog.NativeNullPointerTypeName,
+        PrimitiveType.NativeRawPointer => "ptr<void>",
         PrimitiveType.NativeCallbackAddress => NativeCallbackContract.TypeName,
         PrimitiveType.NativeStorageAddress => NativeStorageParameterContract.AddressTypeName,
         PrimitiveType.NativeStorageRecord => "catalogued native storage record",
@@ -6053,7 +6465,7 @@ internal sealed partial class Binder
     }
 
     private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut, bool IsInit = false,
-        bool IsImplicitRef = false);
+        bool IsImplicitRef = false, PrimitiveType? NativePointeeType = null);
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
@@ -6070,5 +6482,7 @@ internal sealed partial class Binder
         internal ImmutableArray<int> CapturedParameters { get; init; } = [];
         internal bool ReturnsForwardedBacking { get; init; }
         internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
+        internal ImmutableArray<int> NativeComAcquisitionOutputParameterIndexes { get; init; } = [];
+        internal ImmutableArray<NativeComAcquisitionSourceDefinition> NativeComAcquisitionSources { get; init; } = [];
     }
 }

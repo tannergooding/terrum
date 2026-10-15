@@ -77,7 +77,7 @@ internal static class NativeDx11ComCatalog
             PrimitiveType.UInt32, PrimitiveType.NativeStorageAddress,
             PrimitiveType.NativeComInterfaceOutputAddress, PrimitiveType.NativeComInterfaceOutputAddress,
             PrimitiveType.NativeStorageAddress, PrimitiveType.NativeComInterfaceOutputAddress,
-        ], PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.System32) {
+        ], PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.System32) {
         ParameterContracts = [
             NativeImportParameterContract.NullPointerOnly, NativeImportParameterContract.Value,
             NativeImportParameterContract.NullPointerOnly, NativeImportParameterContract.Value,
@@ -114,7 +114,7 @@ internal static class NativeDx11ComCatalog
             PrimitiveType.NativeNullPointer, PrimitiveType.NativeUtf8ZPointer,
             PrimitiveType.NativeUtf8ZPointer, PrimitiveType.UInt32, PrimitiveType.UInt32,
             PrimitiveType.NativeComInterfaceOutputAddress, PrimitiveType.NativeNullPointer,
-        ], PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.System32) {
+        ], PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.System32) {
         ParameterContracts = [
             NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
             NativeImportParameterContract.NullPointerOnly,

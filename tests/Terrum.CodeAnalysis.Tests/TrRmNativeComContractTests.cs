@@ -22,6 +22,7 @@ public sealed class TrRmNativeComContractTests
         Assert.Throws<InvalidDataException>(() => Create(acquisitionFailureDisposition: 0));
         Assert.Throws<InvalidDataException>(() => Create(acquisitionOwnerTypeDef: 1));
         Assert.Throws<InvalidDataException>(() => Create(includeOwnerCleanup: false));
+        Assert.Throws<InvalidDataException>(() => Create(includeNativeComFeature: false));
     }
 
     private static void Create(
@@ -30,7 +31,8 @@ public sealed class TrRmNativeComContractTests
         uint sourceOutputOrdinal = 0,
         uint acquisitionFailureDisposition = 1,
         uint acquisitionOwnerTypeDef = 2,
-        bool includeOwnerCleanup = true)
+        bool includeOwnerCleanup = true,
+        bool includeNativeComFeature = true)
     {
         var typeContracts = new List<byte[]>
         {
@@ -73,8 +75,9 @@ public sealed class TrRmNativeComContractTests
         [
             ("", 0), ("Module", 0), ("Owner", 0), ("Acquire", 0),
             ("TryAcquire", 0), ("Close", 0), ("value", 0), ("IFixture", 0),
+            ("kernel32.dll", 0), ("GetFixture", 0),
         ]);
-        var strings = new TrRmStringTableReader(stringBytes, 8);
+        var strings = new TrRmStringTableReader(stringBytes, 10);
         var moduleBytes = new byte[44];
         Write(moduleBytes, 0, 2);
         Write(moduleBytes, 4, 1);
@@ -133,8 +136,42 @@ public sealed class TrRmNativeComContractTests
         var methods = new TrRmMethodDefTableReader(methodBytes, 3, strings, modules,
             types, signatures, allContracts.Count, bodyCount: 2);
 
-        _ = new TrRmContractTableReader(Section(allContracts),
+        var contractBytes = Section(allContracts);
+        _ = new TrRmContractTableReader(contractBytes,
             allContracts.Count, types, methods, signatures, parameters, typeSpecs);
+
+        var featureBytes = includeNativeComFeature
+            ? TrRmFeatureTableWriter.Encode([TrRmFeatureRow.NativeComContracts])
+            : [];
+        var featureCount = includeNativeComFeature ? 1 : 0;
+        Write(moduleBytes, 16, includeNativeComFeature ? 1u : 0u);
+        Write(moduleBytes, 20, (uint)featureCount);
+        var bodyBytes = new byte[]
+        {
+            0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0,
+        };
+        var nativeImportBytes = new byte[16];
+        Write(nativeImportBytes, 0, 1);
+        Write(nativeImportBytes, 4, 9);
+        Write(nativeImportBytes, 8, 10);
+        Write(nativeImportBytes, 12, 1);
+        TrRmSection[] featureSections = includeNativeComFeature
+            ? [new TrRmSection(0x0004, 0, (uint)featureCount, featureBytes)]
+            : [];
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 10, stringBytes),
+            .. featureSections,
+            new TrRmSection(0x0011, 0, 6, typeSpecBytes),
+            new TrRmSection(0x0013, 0, 2, typeDefBytes),
+            new TrRmSection(0x0016, 0, 3, methodBytes),
+            new TrRmSection(0x0017, 0, 3, signaturesBytes),
+            new TrRmSection(0x0018, 0, 2, parameterBytes),
+            new TrRmSection(0x001B, 0, (uint)allContracts.Count, contractBytes),
+            new TrRmSection(0x0020, 0, 2, bodyBytes),
+            new TrRmSection(0x0021, 0, 1, nativeImportBytes),
+        ]);
+        TrRmStructuralMetadataValidator.Validate(artifact);
     }
 
     private static byte[] NativeComInterface(Guid iid)

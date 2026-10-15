@@ -33,19 +33,19 @@ internal static class NativeWindowClassContract
 
     internal static ImmutableArray<NativeImportDefinition> Imports { get; } = [
         new(GetModuleHandleKey, "kernel32.dll", GetModuleHandleExport,
-            [PrimitiveType.NativeNullPointer], PrimitiveType.NativeModuleHandle, true, false, false,
+            [PrimitiveType.NativeNullPointer], PrimitiveType.NativeModuleHandle, true, true, false,
             NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [NativeImportParameterContract.NullPointerOnly],
             ResultContract = NativeImportResultContract.CurrentModuleHandle,
         },
         new(RegisterClassExKey, "user32.dll", RegisterClassExExport,
-            [PrimitiveType.NativeWindowClassExAddress], PrimitiveType.Char16, true, false, false,
+            [PrimitiveType.NativeWindowClassExAddress], PrimitiveType.Char16, true, true, false,
             NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [NativeImportParameterContract.RegisteredWindowClassDescriptorNoEscape],
         },
         new(UnregisterClassKey, "user32.dll", UnregisterClassExport,
             [PrimitiveType.NativeUtf16ZPointer, PrimitiveType.NativeModuleHandle],
-            PrimitiveType.Int32, true, false, false, NativeImportDeploymentPolicy.System32) {
+            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.System32) {
             ParameterContracts = [
                 NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
                 NativeImportParameterContract.CurrentModuleHandleNoEscape,

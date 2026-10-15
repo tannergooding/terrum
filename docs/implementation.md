@@ -142,6 +142,41 @@ inspect the import without calling the modal API; displaying the dialog
 requires an explicitly selected interactive run. This is a narrow provisional slice,
 not general pointer, handle or foreign-function support.
 
+A separate prototype under the unapproved
+[TRRM native interop proposal](proposals/trrm-native-interop-metadata.md)
+supports two-string `Terrum.Interop.NativeImport` declarations with
+`Terrum.Interop.NativeOutput` for result-correlated writable scalar pointers
+and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. The latter
+represents only unmanaged pointer bits; it adds no backing, provenance,
+ownership, pinning, or cleanup guarantee. The prototype carries the raw
+import's caller-unsafety and direct representation through a provisional TRRM
+NativeImport table and source-reference path; that standard path is limited to
+named Windows System32 imports. Its section, clause, and Feature assignments
+are not canonical TRRM assignments. Direct imports with writable scalar
+outputs also round-trip through the private semantic producer and native
+package paths, where the PE imports are checked against the retained call
+contracts. Active tests cover an unrelated synthetic DLL, a consumer linked
+against its producer package, and rejection of a tampered output condition.
+This establishes compilation, metadata validation, and PE emission—not
+execution of the foreign function. JIT, module-set/graph paths, semantic TRRM
+COM serialization/dependency binding, and runtime qualification remain
+unsupported by this slice.
+
+Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,
+`NativeParameter`, and `NativeComAcquisition` metadata is also provisionally
+bound and verified for in-compilation Windows x64 vtable calls, fixed-interface
+owner acquisition, and cleanup. The metadata is an authored trust contract;
+it does not prove a foreign provider returned the declared interface. Focused
+synthetic tests cover a direct native import and a COM-method output
+acquisition, including mismatched interface, source ordinal, source method,
+and failure-disposition rejection. This source-level path does not establish
+TRRM COM persistence: clauses 7–11 remain provisional structural-reader
+experiments and require the provisional NativeComContracts Feature assignment
+on their owning module. The low-level contract-table writer can frame those
+clause rows, but no semantic producer serializes source-authored COM metadata
+and no consumer reconstructs or binds COM dependencies for lowering. This
+also does not establish foreign COM runtime behavior.
+
 ## Syntax and CLI
 
 The public C# syntax APIs are experimental. Syntax trees preserve source text

@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Text;
 using Terrum.CodeAnalysis.Native;
@@ -248,38 +249,35 @@ internal static class NativeModuleImageValidator
                 var table = header.ImportTableDirectory;
                 // The address table is later bounded to .idata; lookup pointers retain general RVA mapping.
                 var importSection = sections[1];
-                var providerCount = providerImports.Count;
-                var count = 1 + providerCount + (checkedExceptions ? 1 : 0);
+                var systemCount = checkedExceptions ? 2 : 1;
+                var providerDlls = new List<string>();
+                var seenProviderDlls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var providerDll in providerImports.Keys)
+                {
+                    if (StringComparer.OrdinalIgnoreCase.Equals(providerDll, "KERNEL32.dll")
+                        || checkedExceptions
+                            && StringComparer.OrdinalIgnoreCase.Equals(providerDll, "NTDLL.dll"))
+                    {
+                        continue;
+                    }
+                    if (!seenProviderDlls.Add(providerDll))
+                    {
+                        throw Invalid();
+                    }
+                    providerDlls.Add(providerDll);
+                }
+                providerDlls.Sort(static (left, right) =>
+                {
+                    var comparison = StringComparer.OrdinalIgnoreCase.Compare(left, right);
+                    return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left, right);
+                });
+                var providerCount = providerDlls.Count;
+                var count = systemCount + providerCount;
                 if (table.Size != 20 * (count + 1))
                 {
                     throw Invalid();
                 }
-                var systemCount = checkedExceptions ? 2 : 1;
                 var importsMatchProviders = true;
-                string? singleProviderDll = null;
-                var expectedDlls = Array.Empty<string>();
-                if (providerCount == 1)
-                {
-                    foreach (var providerDll in providerImports.Keys)
-                    {
-                        singleProviderDll = providerDll;
-                        break;
-                    }
-                }
-                else if (providerCount > 1)
-                {
-                    expectedDlls = new string[providerCount];
-                    var providerIndex = 0;
-                    foreach (var providerDll in providerImports.Keys)
-                    {
-                        expectedDlls[providerIndex++] = providerDll;
-                    }
-                    Array.Sort(expectedDlls, static (left, right) =>
-                    {
-                        var comparison = StringComparer.OrdinalIgnoreCase.Compare(left, right);
-                        return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left, right);
-                    });
-                }
                 for (var index = 0; index < count; index++)
                 {
                     var at = Offset(table.RelativeVirtualAddress + (index * 20), 20, ".idata");
@@ -291,22 +289,20 @@ internal static class NativeModuleImageValidator
                         throw Invalid();
                     }
                     var dll = Name(name);
-                    var providerIndex = index - systemCount;
                     var expectedDll = index == 0 ? "KERNEL32.dll"
                         : checkedExceptions && index == 1 ? "NTDLL.dll"
-                        : providerCount == 1 ? singleProviderDll : expectedDlls[providerIndex];
-                    if (dll != expectedDll)
+                        : providerDlls[index - systemCount];
+                    if (!StringComparer.OrdinalIgnoreCase.Equals(dll, expectedDll))
                     {
                         throw Invalid();
                     }
-                    var expectedSymbols = index < systemCount
-                        ? Array.Empty<string>()
-                        : SortOrdinalIfNeeded(providerImports[dll]);
+                    var expectedSymbols = ProviderSymbols(dll);
+                    var matchedProviderSymbols = new HashSet<string>(StringComparer.Ordinal);
                     var symbolCount = 0;
-                    string? firstSymbol = null;
                     string? previousSymbol = null;
                     var hasExitProcess = false;
                     var hasRaiseException = false;
+                    var hasExceptionHandler = false;
                     var hasGetProcessHeap = false;
                     var hasHeapAlloc = false;
                     var hasHeapFree = false;
@@ -334,6 +330,11 @@ internal static class NativeModuleImageValidator
                         {
                             throw Invalid();
                         }
+                        var isProviderSymbol = expectedSymbols.Contains(symbolName, StringComparer.Ordinal);
+                        if (isProviderSymbol)
+                        {
+                            _ = matchedProviderSymbols.Add(symbolName);
+                        }
                         if (index == 0)
                         {
                             switch (symbolName)
@@ -342,32 +343,48 @@ internal static class NativeModuleImageValidator
                                     hasExitProcess = true;
                                     break;
                                 case "RaiseException":
-                                    hasRaiseException = true;
+                                    hasRaiseException = checkedExceptions;
                                     break;
                                 case "GetProcessHeap":
-                                    hasOwnedBufferKernelSymbol = true;
-                                    hasGetProcessHeap = true;
+                                    if (!isProviderSymbol)
+                                    {
+                                        hasOwnedBufferKernelSymbol = true;
+                                        hasGetProcessHeap = true;
+                                    }
                                     break;
                                 case "HeapAlloc":
-                                    hasOwnedBufferKernelSymbol = true;
-                                    hasHeapAlloc = true;
+                                    if (!isProviderSymbol)
+                                    {
+                                        hasOwnedBufferKernelSymbol = true;
+                                        hasHeapAlloc = true;
+                                    }
                                     break;
                                 case "HeapFree":
-                                    hasOwnedBufferKernelSymbol = true;
-                                    hasHeapFree = true;
+                                    if (!isProviderSymbol)
+                                    {
+                                        hasOwnedBufferKernelSymbol = true;
+                                        hasHeapFree = true;
+                                    }
                                     break;
                                 default:
-                                    hasUnsupportedKernelSymbol = true;
+                                    hasUnsupportedKernelSymbol |= !isProviderSymbol;
                                     break;
                             }
                         }
-                        if (symbolCount == 0)
+                        if (checkedExceptions && index == 1 && symbolName == "__C_specific_handler")
                         {
-                            firstSymbol = symbolName;
+                            hasExceptionHandler = true;
                         }
                         if (index >= systemCount
                             && (symbolCount >= expectedSymbols.Count
                                 || symbolName != expectedSymbols[symbolCount]))
+                        {
+                            importsMatchProviders = false;
+                        }
+                        else if (index < systemCount && !isProviderSymbol
+                            && !(index == 0 && (symbolName is "ExitProcess" or "RaiseException"
+                                or "GetProcessHeap" or "HeapAlloc" or "HeapFree"))
+                            && !(checkedExceptions && index == 1 && symbolName == "__C_specific_handler"))
                         {
                             importsMatchProviders = false;
                         }
@@ -392,12 +409,15 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (checkedExceptions && index == 1
-                        && (symbolCount != 1 || firstSymbol != "__C_specific_handler"))
+                    if (checkedExceptions && index == 1 && !hasExceptionHandler)
                     {
                         throw Invalid();
                     }
                     if (index >= systemCount && symbolCount != expectedSymbols.Count)
+                    {
+                        importsMatchProviders = false;
+                    }
+                    if (index < systemCount && matchedProviderSymbols.Count != expectedSymbols.Count)
                     {
                         importsMatchProviders = false;
                     }
@@ -411,6 +431,18 @@ internal static class NativeModuleImageValidator
                 if (!importsMatchProviders)
                 {
                     throw Invalid();
+                }
+
+                IReadOnlyList<string> ProviderSymbols(string dll)
+                {
+                    foreach (var (providerDll, symbols) in providerImports)
+                    {
+                        if (StringComparer.OrdinalIgnoreCase.Equals(providerDll, dll))
+                        {
+                            return SortOrdinalIfNeeded(symbols);
+                        }
+                    }
+                    return Array.Empty<string>();
                 }
             }
 

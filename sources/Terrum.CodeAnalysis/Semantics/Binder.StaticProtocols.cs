@@ -341,6 +341,12 @@ internal sealed partial class Binder
                 {
                     continue;
                 }
+                if (node.Children.OfType<SyntaxNode>().Any(static child =>
+                    child.Kind == SyntaxKind.Attribute
+                    && AttributeName(child) == "Terrum.Interop.NativeComInterface"))
+                {
+                    continue;
+                }
                 SyntaxToken? nameToken = null;
                 SyntaxNode? parameters = null;
                 SyntaxNode? operatorMember = null;

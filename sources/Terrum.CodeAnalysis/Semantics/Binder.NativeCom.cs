@@ -24,7 +24,10 @@ internal sealed partial class Binder
                 new Parameter(variable.Name, variable.Type, default, variable.IsOut));
             _signatures.Add(new Signature(function.Name, function.ReturnType, [.. parameters],
                 null, null, _trees[0], function.DeclaringStruct, false, false, function.IsInternal,
-                false, false, true, false, function) { IsCleanup = function.IsCleanup });
+                false, false, true, false, function) {
+                    IsCleanup = function.IsCleanup,
+                    RequiresUnsafeCaller = function.RequiresUnsafeCaller,
+                });
         }
     }
 
@@ -89,11 +92,24 @@ internal sealed partial class Binder
             if (_structNames.TryGetValue(owner.BoundOwnerName, out var ownerType))
             {
                 var index = (int)ownerType - 100;
-                if (index < 0 || index >= _structs.Count
-                    || _structDeclarations.ContainsKey(index))
+                if (index < 0 || index >= _structs.Count)
                 {
                     Report("TRM3030", $"Catalogued COM owner '{owner.BoundOwnerName}' cannot be declared in source.",
                         _trees[0].Root.Span);
+                    continue;
+                }
+                if (_structDeclarations.ContainsKey(index))
+                {
+                    if (!NativeComCallContract.HasOwnerCellLayout(_structs[index], owner))
+                    {
+                        Report("TRM3030",
+                            $"Source COM owner '{owner.BoundOwnerName}' must be unique and contain one private pointer cell.",
+                            _trees[0].Root.Span);
+                        continue;
+                    }
+                    _structs[index] = _structs[index] with {
+                        CleanupMethod = owner.BoundOwnerName + ".Close",
+                    };
                     continue;
                 }
                 try
