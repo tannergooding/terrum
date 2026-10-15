@@ -10,7 +10,3 @@ internal readonly record struct TrRmNativeComMethodContract(uint VTableSlot, uin
 
 internal readonly record struct TrRmNativeParameterContract(
     int ParameterOrdinal, byte Access, byte Retention, uint Extent);
-
-internal readonly record struct TrRmNativeComAcquisitionContract(
-    int MethodDefRow, int OutputParameterOrdinal, int OwnerTypeDefRow, int SourceMethodDefRow,
-    int SourceOutputParameterOrdinal, byte FailureDisposition);

@@ -108,10 +108,10 @@ public sealed class TrRmContractTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
-        Assert.Throws<InvalidDataException>(() => Create(section,
+        Create(section,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
-            hasOutputParam: true, paramMode: 0));
+            hasOutputParam: true, paramMode: 0);
         Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
@@ -171,30 +171,20 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
-    public void NativeComOwnerRequiresDeclaredInterfaceAndNoThrowCleanup()
+    public void RemovedNativeComOwnerAndAcquisitionClausesAreRejected()
     {
-        Create(Section(
+        Assert.Throws<InvalidDataException>(() => Create(Section(
                 NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
                 NativeComOwner(1, 2), Cleanup(2), Effects()),
             recordCount: 4, declaredCount: 4,
             typeFirst: 1, typeCount: 1, methodFirst: 4, methodCount: 1,
             typeFlags: 12, typeRows: 2, secondTypeFirst: 2, secondTypeCount: 2,
-            methodOwnerType: 2);
+            methodOwnerType: 2));
 
-        Assert.Throws<InvalidDataException>(() => Create(Section(
-                NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
-                NativeComOwner(2, 2), Cleanup(2), Effects()),
-            recordCount: 4, declaredCount: 4,
-            typeFirst: 1, typeCount: 1, methodFirst: 4, methodCount: 1,
-            typeFlags: 12, typeRows: 2, secondTypeFirst: 2, secondTypeCount: 2,
-            methodOwnerType: 2));
-        Assert.Throws<InvalidDataException>(() => Create(Section(
-                NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
-                NativeComOwner(1, 2), Effects()),
-            recordCount: 3, declaredCount: 3,
-            typeFirst: 1, typeCount: 1, methodFirst: 3, methodCount: 1,
-            typeFlags: 12, typeRows: 2, secondTypeFirst: 2, secondTypeCount: 1,
-            methodOwnerType: 2));
+        var acquisition = Contract(0x1600_0001, 11, new byte[20]);
+        Assert.Throws<InvalidDataException>(() => Create(Section(acquisition),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
     }
 
     [Test]
