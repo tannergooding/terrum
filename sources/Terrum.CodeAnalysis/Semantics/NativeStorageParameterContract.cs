@@ -286,6 +286,40 @@ internal static class NativeStorageParameterContract
             && address.ByteExtent == parameter.ByteExtent
             && address.IsReadonly == parameter.IsReadonly;
 
+    internal static bool MatchesComParameterAddress(BoundNativeStorageAddress address,
+        NativeComMethodDefinition method, int nativeParameterIndex, BoundFunction caller,
+        BoundProgram program)
+    {
+        if (program.NativeImportCatalog is not NativeImportCatalog catalog
+            || !NativeComCallContract.TryGetNativeParameter(method, nativeParameterIndex,
+                out var parameter)
+            || parameter is null || parameter.Retention != NativeComParameterRetention.NoEscape
+            || parameter.Extent != 1
+            || !NativeComCallContract.TryGetNativeParameterPointeeType(method,
+                nativeParameterIndex, catalog, program.Structures, out var pointeeType)
+            || !(DirectNativeImportContract.IsScalar(pointeeType)
+                || pointeeType == PrimitiveType.NativeRawPointer))
+        {
+            return false;
+        }
+
+        var extent = ValueLayout.Size(pointeeType, program.Structures);
+        var variable = address.Variable;
+        var isReadonly = parameter.Access == NativeComParameterAccess.Read;
+        return parameter.Access is NativeComParameterAccess.Read
+                or NativeComParameterAccess.Write or NativeComParameterAccess.ReadWrite
+            && address.Type == PrimitiveType.NativeStorageAddress
+            && address.AddressType == PrimitiveType.NativeStorageAddress
+            && address.CarrierType == pointeeType && address.ElementType == pointeeType
+            && address.ElementCount == 1 && address.ElementStride == extent
+            && address.ByteExtent == extent && address.IsReadonly == isReadonly
+            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
+            && (uint)variable < (uint)caller.Variables.Length
+            && caller.Variables[variable].Type == pointeeType
+            && (isReadonly || caller.Variables[variable].IsMutable)
+            && !caller.Variables[variable].IsInitializationLocal;
+    }
+
     internal static bool MatchesAggregateAddress(BoundNativeStorageAddress address,
         NativeAggregateStorageParameterDefinition parameter, BoundProgram program)
     {

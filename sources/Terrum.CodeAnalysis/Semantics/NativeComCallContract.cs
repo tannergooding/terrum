@@ -255,9 +255,25 @@ internal static class NativeComCallContract
                         variables.Add(new($"parameter{index}", borrowedOwnerType, false, default));
                         continue;
                     }
-                    if (IsPointerSignatureType(parameterIdentities[index], catalog)
-                        || !TryResolveBoundType(parameterIdentities[index], catalog, program,
-                            allowVoid: false, out var parameterType))
+                    if (IsPointerSignatureType(parameterIdentities[index], catalog))
+                    {
+                        if (!TryGetNativeParameter(method, index, out var nativeParameter)
+                            || nativeParameter is null
+                            || nativeParameter.Retention != NativeComParameterRetention.NoEscape
+                            || nativeParameter.Extent != 1
+                            || !TryGetNativeParameterPointeeType(method, index, catalog,
+                                program.Structures, out _))
+                        {
+                            supported = false;
+                            break;
+                        }
+                        AddParameterMapping(mappings, variables.Count, index);
+                        variables.Add(new($"parameter{index}", PrimitiveType.NativeStorageAddress,
+                            false, default));
+                        continue;
+                    }
+                    if (!TryResolveBoundType(parameterIdentities[index], catalog, program,
+                        allowVoid: false, out var parameterType))
                     {
                         supported = false;
                         break;
@@ -943,6 +959,50 @@ internal static class NativeComCallContract
         && method.ParameterAdaptations.Any(adaptation => adaptation.ParameterIndex == nativeIndex
             && adaptation.Kind == NativeComParameterAdaptationKind.ValueArrayAddress);
 
+    internal static bool TryGetNativeParameter(NativeComMethodDefinition method, int nativeIndex,
+        out NativeComParameterDefinition? parameter)
+    {
+        foreach (var candidate in method.NativeParameters)
+        {
+            if (candidate?.ParameterIndex == nativeIndex)
+            {
+                parameter = candidate;
+                return true;
+            }
+        }
+        parameter = null;
+        return false;
+    }
+
+    internal static bool TryGetNativeParameterPointeeType(NativeComMethodDefinition method,
+        int nativeIndex, NativeImportCatalog catalog, ImmutableArray<BoundStruct> structures,
+        out PrimitiveType type)
+    {
+        if (!NativeComCatalog.TryParseSignature(method.Signature, out _, out var parameters)
+            || nativeIndex <= 0 || nativeIndex >= parameters.Length
+            || !parameters[nativeIndex].EndsWith("*", StringComparison.Ordinal)
+            || parameters[nativeIndex].EndsWith("**", StringComparison.Ordinal))
+        {
+            type = default;
+            return false;
+        }
+        var program = new BoundProgram([], -1) {
+            Structures = structures,
+            NativeImportCatalog = catalog,
+        };
+        return TryResolveBoundType(parameters[nativeIndex][..^1].Trim(), catalog, program,
+            allowVoid: false, out type);
+    }
+
+    internal static bool IsNativeStorageAddressParameter(NativeComMethodDefinition method,
+        int nativeIndex, NativeImportCatalog catalog, ImmutableArray<BoundStruct> structures) =>
+        TryGetNativeParameter(method, nativeIndex, out var parameter)
+        && parameter is not null && parameter.Retention == NativeComParameterRetention.NoEscape
+        && parameter.Extent == 1
+        && TryGetNativeParameterPointeeType(method, nativeIndex, catalog, structures, out var pointeeType)
+        && (DirectNativeImportContract.IsScalar(pointeeType)
+            || pointeeType == PrimitiveType.NativeRawPointer);
+
     internal static NativeComParameterAdaptation? ComObjectBufferContentsAdaptation(
         NativeComMethodDefinition method, int nativeIndex) =>
         method.ParameterAdaptations.IsDefaultOrEmpty ? null
@@ -959,6 +1019,11 @@ internal static class NativeComCallContract
     private static bool IsValidBoundParameterType(PrimitiveType boundType, string signatureType,
         int nativeIndex, NativeComMethodDefinition method, NativeImportCatalog catalog, BoundProgram program)
     {
+        if (boundType == PrimitiveType.NativeStorageAddress
+            && IsNativeStorageAddressParameter(method, nativeIndex, catalog, program.Structures))
+        {
+            return true;
+        }
         var bufferContents = ComObjectBufferContentsAdaptation(method, nativeIndex);
         if (bufferContents is not null)
         {

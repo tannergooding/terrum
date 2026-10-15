@@ -190,7 +190,7 @@ public sealed class NativeComSourceMetadataTests
                 NativeComParameterRetention.NoEscape, 1)));
 
         var reference = TrRmExecutableCompiler.CreateReference(artifact);
-        var consumer = Compilation.Create(SyntaxTree.Parse("""
+        var consumerSource = """
             using Example.Interop;
 
             [Terrum.Interop.NativeComOwner("IClock")]
@@ -216,12 +216,14 @@ public sealed class NativeComSourceMetadataTests
             }
 
             int32 Main() {
+                mut int32 factor = 1;
                 if (TryCreateClock(out var clock)) {
-                    unsafe { return clock.Read() ? 0 : -1; }
+                    unsafe { return clock.Scale(&factor); }
                 }
                 return -1;
             }
-            """), reference);
+            """;
+        var consumer = Compilation.Create(SyntaxTree.Parse(consumerSource), reference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
         Assert.That(consumer.Program!.NativeImportCatalog!.ComInterfaces.Single().NominalIdentity,
@@ -229,6 +231,14 @@ public sealed class NativeComSourceMetadataTests
         var image = NativeEmitter.EmitWithNativeImports(consumer.Program,
             NativeRuntimePolicy.FailFast);
         Assert.That(System.Text.Encoding.ASCII.GetString(image), Does.Contain("CreateClock"));
+
+        var mismatchedPointee = Compilation.Create(
+            SyntaxTree.Parse(consumerSource.Replace("mut int32 factor = 1;",
+                "mut int64 factor = 1;", StringComparison.Ordinal)), reference);
+        Assert.That(mismatchedPointee.Program, Is.Null);
+        Assert.That(mismatchedPointee.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, mismatchedPointee.Diagnostics));
 
         var malformed = CorruptNativeComMethodSlot(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));

@@ -4529,6 +4529,9 @@ public static partial class SemanticVerifier
                             }
                             NativeComParameterAdaptation? comAggregateStorageAdaptation = null;
                             NativeComParameterAdaptation? comValueOutputAddressAdaptation = null;
+                            NativeComMethodDefinition? comNativeParameterMethod = null;
+                            NativeComParameterDefinition? comNativeParameter = null;
+                            var comNativeParameterIndex = -1;
                             if (target.Intrinsic == BoundIntrinsic.NativeComVTableCall
                                 && target.NativeComMethod is NativeComMethodDefinition method
                                 && program.NativeImportCatalog is NativeImportCatalog comCatalog
@@ -4537,6 +4540,10 @@ public static partial class SemanticVerifier
                             {
                                 var nativeParameter = NativeComCallContract.NativeParameterIndex(
                                     target, parameterIndex, method);
+                                comNativeParameterMethod = method;
+                                comNativeParameterIndex = nativeParameter;
+                                _ = NativeComCallContract.TryGetNativeParameter(method,
+                                    nativeParameter, out comNativeParameter);
                                 comAggregateStorageAdaptation = method.ParameterAdaptations.IsDefaultOrEmpty
                                     ? null : method.ParameterAdaptations.SingleOrDefault(adaptation =>
                                         adaptation.ParameterIndex == nativeParameter
@@ -4560,6 +4567,12 @@ public static partial class SemanticVerifier
                                 && comValueOutputAddressAdaptation is not null
                                 && NativeStorageParameterContract.MatchesValueOutputAddress(
                                     comValueOutputAddress, comValueOutputAddressAdaptation, program);
+                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress comParameterAddress
+                                && comNativeParameterMethod is not null
+                                && comNativeParameter is not null
+                                && NativeStorageParameterContract.MatchesComParameterAddress(
+                                    comParameterAddress, comNativeParameterMethod,
+                                    comNativeParameterIndex, function, program);
                             if (directNativeOutput is not null)
                             {
                                 if (argument is not BoundNativeStorageAddress outputAddress
@@ -4656,6 +4669,17 @@ public static partial class SemanticVerifier
                                 }
                                 VerifyNativeValueOutputAddress(address, comValueOutputAddressAdaptation,
                                     initialized, declarations, function, program, ref remaining, depth + 1);
+                            }
+                            else if (comNativeParameter is not null
+                                && comNativeParameterMethod is not null)
+                            {
+                                if (argument is not BoundNativeStorageAddress address)
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                VerifyNativeComParameterAddress(address, comNativeParameterMethod,
+                                    comNativeParameterIndex, initialized, fieldMasks, declarations,
+                                    function, program, ref remaining, depth + 1, failures);
                             }
                             else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeCallbackAddress)
                             {

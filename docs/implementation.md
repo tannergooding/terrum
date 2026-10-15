@@ -176,7 +176,9 @@ and `NativeParameter` facts through TypeDef/MethodDef rows and Contract clauses
 7, 8, and 10 under Feature ID 3/revision 1. The consumer reconstructs those
 facts into the generic COM catalog for source binding. An active regression
 uses that reference with a consumer-authored fixed-interface owner/acquisition
-wrapper and emits a vtable call; a malformed slot is rejected. The provider
+wrapper, passes an initialized local through a readonly no-escape
+`NativeParameter`, and emits a vtable call; a mismatched pointee and malformed
+slot are rejected. The provider
 artifact does not yet persist/reconstruct `NativeComOwner` or
 `NativeComAcquisition` clauses 9 and 11, so those ownership wrappers cannot yet
 be supplied by a separate TRRM dependency. These wire assignments remain

@@ -5,11 +5,55 @@ using System.Collections.Generic;
 using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed partial class Binder
 {
+    private BoundExpression BindNativeComParameterAddress(SyntaxNode expression,
+        NativeComParameterAccess access, int extent, PrimitiveType pointeeType, TextSpan span)
+    {
+        while (expression.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            expression = (SyntaxNode)expression.Children[1];
+        }
+        if (extent != 1 || expression is not {
+                Kind: SyntaxKind.UnaryExpression,
+            } || ((SyntaxTokenElement)expression.Children[0]).Token.Kind != TokenKind.Ampersand)
+        {
+            Report("TRM3030",
+                "This COM NativeParameter requires the address of one stable local value.",
+                span);
+            return ErrorExpression(span);
+        }
+
+        var target = (SyntaxNode)expression.Children[1];
+        while (target.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            target = (SyntaxNode)target.Children[1];
+        }
+        if (target.Kind != SyntaxKind.NameExpression
+            || !TryFindVariable(NameText(target), out var variable)
+            || _variables[variable].Type != pointeeType
+            || _variables[variable].IsInitializationLocal
+            || _unresolvedVacantLocals.Contains(variable)
+            || access is NativeComParameterAccess.Write or NativeComParameterAccess.ReadWrite
+                && !_variables[variable].IsMutable)
+        {
+            Report("TRM3030",
+                "A COM NativeParameter address requires an initialized local with the exact pointee type and access.",
+                span);
+            return ErrorExpression(span);
+        }
+
+        var extentBytes = ValueLayout.Size(pointeeType, _structs);
+        return new BoundNativeStorageAddress(variable,
+            new BoundConstant(0, PrimitiveType.Int32, span), pointeeType, pointeeType,
+            PrimitiveType.NativeStorageAddress, 1, extentBytes, extentBytes,
+            IsReadonly: access == NativeComParameterAccess.Read, Span: span);
+    }
+
     private void DeclareNativeComDirectMethods(NativeImportCatalog catalog)
     {
         var usedMethodNames = InvokedMemberNames();

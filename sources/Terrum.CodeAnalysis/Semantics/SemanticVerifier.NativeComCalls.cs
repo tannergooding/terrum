@@ -173,6 +173,23 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static void VerifyNativeComParameterAddress(BoundNativeStorageAddress address,
+        NativeComMethodDefinition method, int nativeParameterIndex, InitializationState initialized,
+        uint[] fieldMasks, HashSet<int> declarations, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth, FailureEdges? failures)
+    {
+        Count(ref remaining, depth);
+        if (!NativeStorageParameterContract.MatchesComParameterAddress(
+                address, method, nativeParameterIndex, function, program)
+            || (uint)address.Variable >= (uint)function.Variables.Length
+            || !declarations.Contains(address.Variable) || !initialized[address.Variable])
+        {
+            throw InvalidEffect(address.Span, "NativeImport");
+        }
+        Expression(address.Index, initialized, fieldMasks, declarations, function, program,
+            ref remaining, depth + 1, failures);
+    }
+
     private static void VerifyNativeComLoan(BoundCall call, int parameter, BoundReceiverLoan loan,
         InitializationState initialized, BoundFunction function, BoundProgram program)
     {

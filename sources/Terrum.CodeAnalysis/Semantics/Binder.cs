@@ -5611,6 +5611,40 @@ internal sealed partial class Binder
                 {
                     bound.Add(BindDirectNativeOutputAddress(value, nativeOutput, argument.Span));
                 }
+                else if (expected == PrimitiveType.NativeStorageAddress
+                    && signature?.External is BoundFunction comTarget
+                    && comTarget.NativeComMethod is NativeComMethodDefinition comMethod)
+                {
+                    if (_nativeImportCatalog is not NativeImportCatalog comCatalog)
+                    {
+                        Report("TRM3030",
+                            "A COM pointer address requires its selected metadata catalog.",
+                            argument.Span);
+                        bound.Add(ErrorExpression(argument.Span));
+                    }
+                    else
+                    {
+                        var nativeParameterIndex = NativeComCallContract.NativeParameterIndex(
+                            comTarget, position + receiverCount, comMethod);
+                        if (!NativeComCallContract.TryGetNativeParameter(
+                            comMethod, nativeParameterIndex, out var nativeParameter)
+                            || nativeParameter is null
+                            || !NativeComCallContract.TryGetNativeParameterPointeeType(
+                                comMethod, nativeParameterIndex, comCatalog, [.. _structs],
+                                out var pointeeType))
+                        {
+                            Report("TRM3030",
+                                "A COM pointer address requires matching NativeParameter metadata.",
+                                argument.Span);
+                            bound.Add(ErrorExpression(argument.Span));
+                        }
+                        else
+                        {
+                            bound.Add(BindNativeComParameterAddress(value,
+                                nativeParameter.Access, nativeParameter.Extent, pointeeType, argument.Span));
+                        }
+                    }
+                }
                 else
                 {
                     bound.Add(BindExpression(value, expected));
