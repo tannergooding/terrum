@@ -13,7 +13,8 @@ public static class TrRmStructuralMetadataValidator
     {
         internal ValidatedExecutionTables(TrRmStringTableReader strings,
             TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
-            TrRmTypeSpecTableReader typeSpecs,
+            TrRmTypeSpecTableReader typeSpecs, TrRmFieldDefTableReader fields,
+            TrRmLayoutTableReader layouts,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
             TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
             TrRmContractTableReader contracts, TrRmNativeImportTableReader nativeImports)
@@ -22,6 +23,8 @@ public static class TrRmStructuralMetadataValidator
             Modules = modules;
             TypeDefs = typeDefs;
             TypeSpecs = typeSpecs;
+            Fields = fields;
+            Layouts = layouts;
             Signatures = signatures;
             Parameters = parameters;
             Methods = methods;
@@ -34,6 +37,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmModuleTableReader Modules { get; }
         internal TrRmTypeDefTableReader TypeDefs { get; }
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
+        internal TrRmFieldDefTableReader Fields { get; }
+        internal TrRmLayoutTableReader Layouts { get; }
         internal TrRmMethodSigTableReader Signatures { get; }
         internal TrRmParamTableReader Parameters { get; }
         internal TrRmMethodDefTableReader Methods { get; }
@@ -148,6 +153,7 @@ public static class TrRmStructuralMetadataValidator
                 generics, typeSpecs);
         var contracts = new TrRmContractTableReader(contractBytes, contractCount,
             types, methods, signatures, parameters, typeSpecs);
+        ValidateBlittableLayouts(types, layouts, contracts);
         var nativeImports = new TrRmNativeImportTableReader(nativeImportBytes,
             nativeImportCount, strings, methods, signatures, parameters, typeSpecs, contracts);
         ValidateNativeComFeatureAssignments(features, modules, methods, contracts, nativeImports);
@@ -237,7 +243,7 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceFiles;
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
-            signatures, parameters, methods, bodies, contracts, nativeImports);
+            fields, layouts, signatures, parameters, methods, bodies, contracts, nativeImports);
     }
 
     private static void ValidateNativeComFeatureAssignments(
@@ -249,10 +255,12 @@ public static class TrRmStructuralMetadataValidator
         for (var module = 1; module <= modules.Count; module++)
         {
             var hasNativeComContracts = false;
+            var hasNativeBlittableLayouts = false;
             var (typeStart, typeEnd) = modules.GetTypeDefRange(module);
             for (var type = typeStart; type < typeEnd; type++)
             {
                 hasNativeComContracts |= contracts.HasNativeComContractsForTypeDef(type);
+                hasNativeBlittableLayouts |= contracts.GetNativeBlittableTargetRequirement(type) != 0;
             }
 
             var (methodStart, methodEnd) = modules.GetMethodDefRange(module);
@@ -268,24 +276,48 @@ public static class TrRmStructuralMetadataValidator
                     && contracts.HasNativeComContractsForMethodDef(method);
             }
 
-            if (!hasNativeComContracts)
+            var (featureStart, moduleFeatureCount) = modules.GetFeatureRange(module);
+            var declaresNativeComFeature = false;
+            var declaresNativeBlittableFeature = false;
+            for (var offset = 0; offset < moduleFeatureCount; offset++)
+            {
+                var featureId = features.GetFeature(featureStart + offset).FeatureId;
+                if (featureId == TrRmFeatureTableReader.NativeComContractsFeatureId)
+                {
+                    declaresNativeComFeature = true;
+                }
+                else if (featureId == TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId)
+                {
+                    declaresNativeBlittableFeature = true;
+                }
+            }
+
+            if (hasNativeComContracts && !declaresNativeComFeature
+                || hasNativeBlittableLayouts != declaresNativeBlittableFeature)
+            {
+                throw InvalidMetadata();
+            }
+        }
+    }
+
+    private static void ValidateBlittableLayouts(TrRmTypeDefTableReader types,
+        TrRmLayoutTableReader layouts, TrRmContractTableReader contracts)
+    {
+        for (var type = 1; type <= types.Count; type++)
+        {
+            var targetRequirement = contracts.GetNativeBlittableTargetRequirement(type);
+            if (targetRequirement == 0)
             {
                 continue;
             }
 
-            var (featureStart, moduleFeatureCount) = modules.GetFeatureRange(module);
-            var declaresNativeComFeature = false;
-            for (var offset = 0; offset < moduleFeatureCount; offset++)
-            {
-                if (features.GetFeature(featureStart + offset).FeatureId
-                    == TrRmFeatureTableReader.NativeComContractsFeatureId)
-                {
-                    declaresNativeComFeature = true;
-                    break;
-                }
-            }
-
-            if (!declaresNativeComFeature)
+            var layoutRow = types.GetLayoutRow(type);
+            if (layoutRow == 0
+                || layouts.GetTargetRequirement(layoutRow) != targetRequirement
+                || layouts.GetSize(layoutRow) == 0
+                || layouts.GetAlignment(layoutRow) == 0
+                || layouts.GetPack(layoutRow) != 0
+                || layouts.GetFlags(layoutRow) != 0)
             {
                 throw InvalidMetadata();
             }

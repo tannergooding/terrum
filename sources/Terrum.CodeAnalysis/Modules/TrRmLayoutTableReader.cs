@@ -62,6 +62,28 @@ public readonly ref struct TrRmLayoutTableReader
         return Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
     }
 
+    /// <summary>Gets the target requirement for a validated Layout row.</summary>
+    public uint GetTargetRequirement(int row) => GetValue(row, 4);
+
+    /// <summary>Gets the alignment for a validated Layout row.</summary>
+    public uint GetAlignment(int row) => GetValue(row, 12);
+
+    /// <summary>Gets the packing value for a validated Layout row.</summary>
+    public uint GetPack(int row) => GetValue(row, 16);
+
+    /// <summary>Gets the flags for a validated Layout row.</summary>
+    public uint GetFlags(int row) => GetValue(row, 20);
+
+    private uint GetValue(int row, int offset)
+    {
+        if (row <= 0 || (long)row * RowSize > _rows.Length)
+        {
+            throw InvalidLayout();
+        }
+
+        return Read(_rows.Slice((row - 1) * RowSize, RowSize), offset);
+    }
+
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
 

@@ -73,10 +73,19 @@ public static partial class TrRmExecutableCompiler
             SemanticVerifier.Verify(program);
         }
 
-        if (program.RuntimePolicy != BoundRuntimePolicy.FailFast
-            || !program.Structures.IsEmpty || !program.Classes.IsEmpty || !program.Buffers.IsEmpty)
+        if (!program.NativeFunctionPointerSignatures.IsEmpty)
         {
-            throw Unsupported("Only fail-fast scalar modules are executable.");
+            throw Unsupported("Executable TRRM does not persist native function-pointer signatures.");
+        }
+        var blittableStructureIndexes = CollectNativeBlittableStructureIndexes(program);
+        if (program.RuntimePolicy != BoundRuntimePolicy.FailFast
+            || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
+            || (blittableStructureIndexes.IsEmpty
+                ? !program.Structures.IsEmpty
+                : program.EntryPoint != -1
+                    || program.Functions.Any(static function => !function.IsExternal)))
+        {
+            throw Unsupported("Executable TRRM supports fail-fast scalar bodies and declaration-only native aggregate imports.");
         }
         if (program.Functions.Any(static function => function.IndexedBody is not null))
         {
@@ -136,12 +145,44 @@ public static partial class TrRmExecutableCompiler
             exportCount += !function.IsPrivate && !function.IsInternal ? 1 : 0;
             nativeImportCount += function.DirectNativeImport is not null ? 1 : 0;
         }
+        foreach (var structureIndex in blittableStructureIndexes)
+        {
+            hasFloatingTypes |= program.Structures[structureIndex].Fields
+                .Any(static field => IsFloat(field.Type));
+        }
         var names = new List<(string Text, int Encoding)>(program.Functions.Length + 1)
         {
             (moduleIdentity, 1),
         };
         var interfaceRows = nativeComInterfaces
             .OrderBy(static definition => definition.NominalIdentity, StringComparer.Ordinal).ToArray();
+        var structureTypeDefRows = new Dictionary<int, int>(blittableStructureIndexes.Length);
+        var structureNamespaceRows = new int[blittableStructureIndexes.Length];
+        var structureNameRows = new int[blittableStructureIndexes.Length];
+        var structureFieldNameRows = new int[blittableStructureIndexes.Length][];
+        for (var index = 0; index < blittableStructureIndexes.Length; index++)
+        {
+            var structureIndex = blittableStructureIndexes[index];
+            var structure = program.Structures[structureIndex];
+            var separator = structure.Name.LastIndexOf('.');
+            var typeNamespace = separator < 0 ? "" : structure.Name[..separator];
+            var typeName = separator < 0 ? structure.Name : structure.Name[(separator + 1)..];
+            if (typeName.Length == 0 || !structureTypeDefRows.TryAdd(structureIndex, index + 1))
+            {
+                throw Unsupported($"Native Blittable structure identity '{structure.Name}' cannot be represented in TRRM.");
+            }
+            structureNamespaceRows[index] = names.Count + 1;
+            names.Add((typeNamespace, 1));
+            structureNameRows[index] = names.Count + 1;
+            names.Add((typeName, 1));
+            structureFieldNameRows[index] = new int[structure.Fields.Length];
+            for (var field = 0; field < structure.Fields.Length; field++)
+            {
+                structureFieldNameRows[index][field] = names.Count + 1;
+                names.Add((structure.Fields[field].Name, 1));
+            }
+        }
+
         var interfaceTypeRows = new Dictionary<string, int>(interfaceRows.Length, StringComparer.Ordinal);
         var interfaceNamespaceRows = new int[interfaceRows.Length];
         var interfaceNameRows = new int[interfaceRows.Length];
@@ -151,7 +192,8 @@ public static partial class TrRmExecutableCompiler
             var separator = identity.LastIndexOf('.');
             var typeNamespace = separator < 0 ? "" : identity[..separator];
             var typeName = separator < 0 ? identity : identity[(separator + 1)..];
-            if (typeName.Length == 0 || !interfaceTypeRows.TryAdd(identity, index + 1))
+            var typeDefRow = blittableStructureIndexes.Length + index + 1;
+            if (typeName.Length == 0 || !interfaceTypeRows.TryAdd(identity, typeDefRow))
             {
                 throw Unsupported($"Native COM interface identity '{identity}' cannot be represented in TRRM.");
             }
@@ -168,7 +210,15 @@ public static partial class TrRmExecutableCompiler
         var signatures = new List<TrRmMethodSigRow>(program.Functions.Length + nativeComMethods.Length);
         var parameters = new List<TrRmParamRow>(parameterCount);
         var methods = new List<TrRmMethodDefRow>(program.Functions.Length + nativeComMethods.Length);
-        var contracts = new List<TrRmContractRow>(effectCount + nativeImportCount + interfaceRows.Length);
+        var contracts = new List<TrRmContractRow>(
+            effectCount + nativeImportCount + interfaceRows.Length + blittableStructureIndexes.Length);
+        var structureContractFirst = new int[blittableStructureIndexes.Length];
+        for (var index = 0; index < blittableStructureIndexes.Length; index++)
+        {
+            structureContractFirst[index] = contracts.Count + 1;
+            contracts.Add(new TrRmContractRow(0x1300_0000u | (uint)(index + 1), 12,
+                NativeBlittableLayoutPayload(FixedLayoutStorage.WindowsX64TargetRequirement)));
+        }
         var interfaceContractFirst = new int[interfaceRows.Length];
         for (var index = 0; index < interfaceRows.Length; index++)
         {
@@ -178,22 +228,50 @@ public static partial class TrRmExecutableCompiler
                     : throw Unsupported($"Native COM interface '{definition.NominalIdentity}' has an unrepresented base.")
                 : 0;
             interfaceContractFirst[index] = contracts.Count + 1;
-            contracts.Add(new TrRmContractRow(0x1300_0000u | (uint)(index + 1), 7,
+            var typeDefRow = interfaceTypeRows[definition.NominalIdentity];
+            contracts.Add(new TrRmContractRow(0x1300_0000u | (uint)typeDefRow, 7,
                 NativeComInterfacePayload(definition.SdkIid, baseTypeRow)));
         }
         var exports = new List<TrRmExportRow>(exportCount);
         var typeRowsList = (hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows).ToList();
         var nativeOutputTypeRows = new Dictionary<PrimitiveType, int>();
         var nativeParameterTypeRows = new Dictionary<PrimitiveType, int>();
+        var blittableParameterTypeRows = new Dictionary<PrimitiveType, int>();
+        var typeDefTypeSpecRows = new Dictionary<int, int>();
         var interfacePointerTypeRows = new Dictionary<string, int>(interfaceRows.Length,
             StringComparer.Ordinal);
         foreach (var (identity, typeRow) in interfaceTypeRows)
         {
-            var typeDefReference = typeRowsList.Count + 1;
-            typeRowsList.Add(TrRmTypeSpecTableWriter.Reference(0x02, (uint)typeRow));
+            var typeDefReference = TypeDefTypeSpecRow(typeRowsList, typeDefTypeSpecRows, typeRow);
             var pointerType = typeRowsList.Count + 1;
             typeRowsList.Add(TrRmTypeSpecTableWriter.IndexedFamily(0x8C, (uint)typeDefReference));
             interfacePointerTypeRows.Add(identity, pointerType);
+        }
+        var structureFieldFirst = new int[blittableStructureIndexes.Length];
+        var fieldRows = new List<TrRmFieldDefRow>();
+        var layoutRows = new List<TrRmLayoutRow>(blittableStructureIndexes.Length);
+        var fixedLayoutAlignments = blittableStructureIndexes.IsEmpty
+            ? [] : FixedLayoutStorage.Validate(program.Structures);
+        for (var index = 0; index < blittableStructureIndexes.Length; index++)
+        {
+            var structureIndex = blittableStructureIndexes[index];
+            var structure = program.Structures[structureIndex];
+            structureFieldFirst[index] = structure.Fields.IsEmpty ? 0 : fieldRows.Count + 1;
+            for (var field = 0; field < structure.Fields.Length; field++)
+            {
+                var fieldDefinition = structure.Fields[field];
+                var fieldTypeRow = NativeBlittableFieldTypeRow(typeRowsList,
+                    typeDefTypeSpecRows, structureTypeDefRows, fieldDefinition.Type);
+                var visibility = fieldDefinition.IsPrivate ? 0u
+                    : fieldDefinition.IsInternal ? 1u : 2u;
+                var fieldFlags = visibility | (fieldDefinition.IsMutable ? 4u : 0u);
+                fieldRows.Add(new TrRmFieldDefRow(index + 1, structureFieldNameRows[index][field],
+                    fieldTypeRow, fieldFlags, (uint)fieldDefinition.Offset));
+            }
+
+            layoutRows.Add(new TrRmLayoutRow(index + 1,
+                FixedLayoutStorage.WindowsX64TargetRequirement, (uint)structure.Size,
+                (uint)fixedLayoutAlignments[structureIndex], 0, 0));
         }
         for (var index = 0; index < program.Functions.Length; index++)
         {
@@ -238,7 +316,9 @@ public static partial class TrRmExecutableCompiler
                 var parameterType = isNativeOutput
                     ? NativeOutputTypeRow(typeRowsList, nativeOutputTypeRows, nativeOutput!.PointeeType)
                     : nativeParameter is not null
-                        ? NativeParameterTypeRow(typeRowsList, nativeParameterTypeRows, nativeParameter.PointeeType)
+                        ? NativeParameterTypeRow(typeRowsList, nativeParameterTypeRows,
+                            nativeParameter.PointeeType, structureTypeDefRows,
+                            typeDefTypeSpecRows, blittableParameterTypeRows)
                         : TypeRow(variable.Type);
                 if (variable.Type == PrimitiveType.Void || variable.IsInitializationLocal
                     || (function.DirectNativeImport is null
@@ -382,7 +462,7 @@ public static partial class TrRmExecutableCompiler
             : TrRmStringTableWriter.EncodeNames(names);
         var strings = new TrRmStringTableReader(stringsBytes, names.Count);
         var hasOutputFeatures = outputFeatures.Any(static enabled => enabled);
-        var featureRows = new List<TrRmFeatureRow>(2);
+        var featureRows = new List<TrRmFeatureRow>(4);
         if (hasOutputFeatures)
         {
             featureRows.Add(TrRmFeatureRow.ScalarInitOutput);
@@ -395,32 +475,55 @@ public static partial class TrRmExecutableCompiler
         {
             featureRows.Add(TrRmFeatureRow.NativeComContracts);
         }
+        if (!blittableStructureIndexes.IsEmpty)
+        {
+            featureRows.Add(TrRmFeatureRow.NativeBlittableLayouts);
+        }
         var featureCount = featureRows.Count;
         var featureBytes = featureCount == 0
             ? [] : TrRmFeatureTableWriter.Encode(featureRows);
+        var typeDefCount = blittableStructureIndexes.Length + interfaceRows.Length;
         var moduleBytes = TrRmModuleTableWriter.Encode(
             [new TrRmModuleRow(1, 1, 0, program.EntryPoint + 1, 1, 1, 1, 1,
                 featureCount == 0 ? 0 : 1, featureCount)],
-            strings, 0, interfaceRows.Length, methods.Count, 0, featureCount);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, interfaceRows.Length,
+            strings, 0, typeDefCount, methods.Count, 0, featureCount);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, typeDefCount,
             methods.Count, 0, featureCount);
         var typeRows = typeRowsList.ToArray();
-        var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, interfaceRows.Length, 0, 0, 0);
+        var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, typeDefCount, 0, 0, 0);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length,
-            interfaceRows.Length, 0, 0, 0);
+            typeDefCount, 0, 0, 0);
         var sigBytes = TrRmMethodSigTableWriter.Encode(signatures, types, parameters.Count, 0);
         var sigs = new TrRmMethodSigTableReader(sigBytes, signatures.Count, types, parameters.Count, 0);
         var paramBytes = parameters.Count == 0 ? [] : TrRmParamTableWriter.Encode(parameters, sigs, types);
-        var typeDefRows = new TrRmTypeDefRow[interfaceRows.Length];
-        for (var type = 0; type < typeDefRows.Length; type++)
+        var typeDefRows = new TrRmTypeDefRow[typeDefCount];
+        for (var type = 0; type < blittableStructureIndexes.Length; type++)
         {
-            typeDefRows[type] = new TrRmTypeDefRow(interfaceNamespaceRows[type], interfaceNameRows[type],
-                0x0E, 0, 0, 0, 0, 0, interfaceContractFirst[type], 1);
+            var structure = program.Structures[blittableStructureIndexes[type]];
+            var visibility = structure.IsPrivate ? 0u : structure.IsInternal ? 1u : 2u;
+            var layoutKind = structure.IsSequential ? 1u : 3u;
+            typeDefRows[type] = new TrRmTypeDefRow(structureNamespaceRows[type],
+                structureNameRows[type], visibility | 4u | (layoutKind << 4),
+                structureFieldFirst[type], structure.Fields.Length, 0, 0, type + 1,
+                structureContractFirst[type], 1);
+        }
+        for (var type = 0; type < interfaceRows.Length; type++)
+        {
+            typeDefRows[blittableStructureIndexes.Length + type] =
+                new TrRmTypeDefRow(interfaceNamespaceRows[type], interfaceNameRows[type],
+                    0x0E, 0, 0, 0, 0, 0, interfaceContractFirst[type], 1);
         }
         var typeDefBytes = typeDefRows.Length == 0 ? []
-            : TrRmTypeDefTableWriter.Encode(typeDefRows, strings, modules, 0, 0, 0, contracts.Count);
+            : TrRmTypeDefTableWriter.Encode(typeDefRows, strings, modules, fieldRows.Count,
+                0, layoutRows.Count, contracts.Count);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, typeDefRows.Length,
-            strings, modules, 0, 0, 0, contracts.Count);
+            strings, modules, fieldRows.Count, 0, layoutRows.Count, contracts.Count);
+        var layoutBytes = layoutRows.Count == 0 ? []
+            : TrRmLayoutTableWriter.Encode(layoutRows, typeDefs);
+        var layouts = layoutRows.Count == 0 ? default
+            : new TrRmLayoutTableReader(layoutBytes, layoutRows.Count, typeDefs);
+        var fieldBytes = fieldRows.Count == 0 ? []
+            : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs, types, layouts);
         var methodBytes = TrRmMethodDefTableWriter.Encode(methods, strings, modules, typeDefs,
             sigs, contracts.Count, bodies.Count);
         var defs = new TrRmMethodDefTableReader(methodBytes, methods.Count, strings, modules,
@@ -447,6 +550,7 @@ public static partial class TrRmExecutableCompiler
                 paramReader, types, contractReader);
         var sectionCount = 5 + (featureCount != 0 ? 1 : 0)
             + (typeDefRows.Length != 0 ? 1 : 0)
+            + (fieldRows.Count != 0 ? 1 : 0) + (layoutRows.Count != 0 ? 1 : 0)
             + (parameters.Count != 0 ? 1 : 0)
             + (contracts.Count != 0 ? 1 : 0) + (exports.Count != 0 ? 1 : 0)
             + (bodies.Count != 0 ? 1 : 0) + (nativeImportRows.Count != 0 ? 1 : 0);
@@ -463,6 +567,14 @@ public static partial class TrRmExecutableCompiler
         if (typeDefRows.Length != 0)
         {
             sections.Add(new(0x13, 0, (uint)typeDefRows.Length, typeDefBytes));
+        }
+        if (fieldRows.Count != 0)
+        {
+            sections.Add(new(0x14, 0, (uint)fieldRows.Count, fieldBytes));
+        }
+        if (layoutRows.Count != 0)
+        {
+            sections.Add(new(0x15, 0, (uint)layoutRows.Count, layoutBytes));
         }
         sections.Add(new(0x16, 0, (uint)methods.Count, methodBytes));
         sections.Add(new(0x17, 0, (uint)signatures.Count, sigBytes));
@@ -510,6 +622,8 @@ public static partial class TrRmExecutableCompiler
         var typeDefs = validatedTables.TypeDefs;
         var strings = validatedTables.Strings;
         var types = validatedTables.TypeSpecs;
+        var fields = validatedTables.Fields;
+        var layouts = validatedTables.Layouts;
         var sigs = validatedTables.Signatures;
         var defs = validatedTables.Methods;
         var parameters = validatedTables.Parameters;
@@ -520,7 +634,8 @@ public static partial class TrRmExecutableCompiler
         for (var section = 0; section < index.SectionCount; section++)
         {
             index.GetSection(section, out var kind, out _, out _, out _);
-            if (kind is not (1 or 2 or 4 or 0x11 or 0x13 or 0x16 or 0x17 or 0x18
+            if (kind is not (1 or 2 or 4 or 0x11 or 0x13 or 0x14 or 0x15
+                or 0x16 or 0x17 or 0x18
                 or 0x1B or 0x1D or 0x20 or 0x21))
             {
                 throw Invalid($"Section 0x{kind:X4} is not executable.");
@@ -557,6 +672,7 @@ public static partial class TrRmExecutableCompiler
         uint scalarInitOutputRuleRevision = 0;
         uint nativeImportRuleRevision = 0;
         uint nativeComRuleRevision = 0;
+        uint nativeBlittableLayoutRuleRevision = 0;
         for (var feature = firstFeature; feature < firstFeature + requiredFeatureCount; feature++)
         {
             var required = featureTable.GetFeature(feature);
@@ -572,6 +688,10 @@ public static partial class TrRmExecutableCompiler
             {
                 nativeComRuleRevision = required.MinimumRuleRevision;
             }
+            else if (required.FeatureId == TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId)
+            {
+                nativeBlittableLayoutRuleRevision = required.MinimumRuleRevision;
+            }
         }
         if ((nativeImports.Count != 0) != (nativeImportRuleRevision != 0))
         {
@@ -586,6 +706,20 @@ public static partial class TrRmExecutableCompiler
         {
             throw Invalid("The native COM feature does not match its interface contracts.");
         }
+        var hasNativeBlittableLayouts = false;
+        for (var typeRow = 1; typeRow <= typeDefCount; typeRow++)
+        {
+            hasNativeBlittableLayouts |=
+                contractTable.GetNativeBlittableTargetRequirement(typeRow) != 0;
+        }
+        if (hasNativeBlittableLayouts != (nativeBlittableLayoutRuleRevision != 0))
+        {
+            throw Invalid("The native Blittable-layout feature does not match its TypeDef contracts.");
+        }
+
+        var optionalStructures = hasOptionalScalarTypes ? TrRmOptionalScalar.Structures : [];
+        var structures = LoadBlittableStructures(typeDefs, fields, layouts, contractTable,
+            types, optionalStructures, out var structureTypeByTypeDef);
 
         var declaredExports = new HashSet<int>(exportCount);
         for (var row = 0; row < exportCount; row++)
@@ -729,9 +863,9 @@ public static partial class TrRmExecutableCompiler
                     foreach (var parameter in nativeParameters)
                     {
                         var typeSpecRow = parameters.GetTypeSpec(first + parameter.ParameterOrdinal);
-                        if (!TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-                                types, typeSpecRow, out var pointeeType)
-                            || parameter.Access is < 1 or > 3
+                        var pointeeType = NativeParameterPointee(types, typeSpecRow,
+                            contractTable, structureTypeByTypeDef);
+                        if (parameter.Access is < 1 or > 3
                             || parameter.Retention != (byte)NativeParameterRetention.NoEscape
                             || parameter.Extent > int.MaxValue)
                         {
@@ -891,7 +1025,7 @@ public static partial class TrRmExecutableCompiler
         var program = new BoundProgram(programFunctions, entryFunctionIndex)
         {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
-            Structures = hasOptionalScalarTypes ? TrRmOptionalScalar.Structures : [],
+            Structures = structures,
             NativeImportCatalog = nativeComCatalog,
             NativeImportCatalogId = nativeComCatalog?.Identity,
         };
@@ -919,7 +1053,7 @@ public static partial class TrRmExecutableCompiler
         ArgumentNullException.ThrowIfNull(providerArtifact);
         var program = Load(providerArtifact);
         var hasNativeComContracts = program.NativeImportCatalog?.SupportsNativeComContracts == true;
-        if (program.EntryPoint != -1 || !program.Structures.IsEmpty
+        if (program.EntryPoint != -1
             || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
             || program.Functions.Any(static function =>
                 !function.IsPrivate && !function.IsInternal
@@ -929,16 +1063,80 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("A TRRM native import reference requires a library of public external declarations.");
         }
 
+        var structureMap = new int[program.Structures.Length];
+        Array.Fill(structureMap, -1);
+        var includedStructureIndexes = new List<int>();
+        var structures = ImmutableArray.CreateBuilder<BoundStruct>();
+        for (var index = 0; index < program.Structures.Length; index++)
+        {
+            if (program.Structures[index].BlittableTargetRequirement == 0)
+            {
+                continue;
+            }
+
+            structureMap[index] = includedStructureIndexes.Count;
+            includedStructureIndexes.Add(index);
+        }
+        foreach (var index in includedStructureIndexes)
+        {
+            var structure = program.Structures[index];
+            var fields = ImmutableArray.CreateBuilder<BoundStructField>(structure.Fields.Length);
+            foreach (var field in structure.Fields)
+            {
+                fields.Add(field with { Type = RemapStructureType(field.Type, structureMap) });
+            }
+            structures.Add(structure with { Fields = fields.MoveToImmutable() });
+        }
+
         var functions = program.Functions
             .Where(static function => !function.IsPrivate && !function.IsInternal)
+            .Select(function => RemapNativeImportStructureTypes(function, structureMap))
             .ToImmutableArray();
         if (functions.IsEmpty && !hasNativeComContracts)
         {
             throw Unsupported("A TRRM reference requires at least one public declaration or COM interface.");
         }
 
-        return new CompilationReference([], functions, program.RuntimePolicy,
+        return new CompilationReference(structures.ToImmutable(), functions, program.RuntimePolicy,
             nativeImportCatalog: program.NativeImportCatalog);
+    }
+
+    private static BoundFunction RemapNativeImportStructureTypes(BoundFunction function,
+        int[] structureMap)
+    {
+        if (function.DirectNativeImport is not DirectNativeImport import
+            || import.Parameters.IsDefaultOrEmpty)
+        {
+            return function;
+        }
+
+        var parameters = ImmutableArray.CreateBuilder<DirectNativeParameter>(import.Parameters.Length);
+        foreach (var parameter in import.Parameters)
+        {
+            parameters.Add(parameter with {
+                PointeeType = RemapStructureType(parameter.PointeeType, structureMap),
+            });
+        }
+
+        return function with
+        {
+            DirectNativeImport = import with { Parameters = parameters.MoveToImmutable() },
+        };
+    }
+
+    private static PrimitiveType RemapStructureType(PrimitiveType type, int[] structureMap)
+    {
+        if ((int)type < 100 || (int)type >= ManagedClassTypes.First)
+        {
+            return type;
+        }
+
+        var sourceIndex = (int)type - 100;
+        if (sourceIndex >= structureMap.Length || structureMap[sourceIndex] < 0)
+        {
+            throw Unsupported("A native import reference has an unrepresentable aggregate type.");
+        }
+        return (PrimitiveType)(100 + structureMap[sourceIndex]);
     }
 
     private static bool Scalar(PrimitiveType type) => Array.IndexOf(s_types, type) >= 0;
@@ -1094,6 +1292,89 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
+    private static ImmutableArray<int> CollectNativeBlittableStructureIndexes(BoundProgram program)
+    {
+        var required = new bool[program.Structures.Length];
+        var visiting = new bool[program.Structures.Length];
+        foreach (var function in program.Functions)
+        {
+            if (function.DirectNativeImport is not DirectNativeImport import)
+            {
+                continue;
+            }
+
+            foreach (var parameter in import.Parameters)
+            {
+                if ((int)parameter.PointeeType >= 100
+                    && (int)parameter.PointeeType < ManagedClassTypes.First)
+                {
+                    Visit((int)parameter.PointeeType - 100);
+                }
+            }
+        }
+
+        var indexes = ImmutableArray.CreateBuilder<int>();
+        for (var index = 0; index < required.Length; index++)
+        {
+            if (required[index])
+            {
+                indexes.Add(index);
+            }
+        }
+        return indexes.ToImmutable();
+
+        void Visit(int index)
+        {
+            if (index < 0 || index >= program.Structures.Length)
+            {
+                throw Unsupported("A native import aggregate pointee is outside the structure table.");
+            }
+            if (required[index])
+            {
+                return;
+            }
+            if (visiting[index])
+            {
+                throw Unsupported("A native Blittable structure graph is recursive.");
+            }
+
+            var structure = program.Structures[index];
+            if (structure.BlittableTargetRequirement != FixedLayoutStorage.WindowsX64TargetRequirement
+                || structure.IsSequential == structure.IsTransparent
+                || structure.IsUnique || structure.CleanupMethod is not null
+                || structure.IsPrivate && structure.IsInternal
+                || structure.Fields.IsDefaultOrEmpty)
+            {
+                throw Unsupported($"Native aggregate '{structure.Name}' lacks a supported fixed Blittable contract.");
+            }
+
+            visiting[index] = true;
+            foreach (var field in structure.Fields)
+            {
+                if (field is null || field.RequiresUnsafeCaller
+                    || field.IsPrivate && field.IsInternal)
+                {
+                    throw Unsupported($"Native Blittable field in '{structure.Name}' has unsupported access metadata.");
+                }
+
+                if (DirectNativeImportContract.IsScalar(field.Type))
+                {
+                    continue;
+                }
+                if ((int)field.Type >= 100 && (int)field.Type < ManagedClassTypes.First)
+                {
+                    Visit((int)field.Type - 100);
+                    continue;
+                }
+
+                throw Unsupported($"Native Blittable field type '{field.Type}' has no provisional TRRM encoding.");
+            }
+
+            visiting[index] = false;
+            required[index] = true;
+        }
+    }
+
     private static int TypeRow(PrimitiveType type)
     {
         var row = Array.IndexOf(s_types, type) + 1;
@@ -1199,6 +1480,73 @@ public static partial class TrRmExecutableCompiler
 
         typeRowMap.Add(pointeeType, row);
         return row;
+    }
+
+    private static int NativeParameterTypeRow(List<ReadOnlyMemory<byte>> typeRows,
+        Dictionary<PrimitiveType, int> typeRowMap, PrimitiveType pointeeType,
+        Dictionary<int, int> structureTypeDefRows, Dictionary<int, int> typeDefTypeSpecRows,
+        Dictionary<PrimitiveType, int> structurePointerTypeRows)
+    {
+        if ((int)pointeeType >= 100 && (int)pointeeType < ManagedClassTypes.First)
+        {
+            if (structurePointerTypeRows.TryGetValue(pointeeType, out var existing))
+            {
+                return existing;
+            }
+
+            var structureIndex = (int)pointeeType - 100;
+            if (!structureTypeDefRows.TryGetValue(structureIndex, out var typeDefRow))
+            {
+                throw Unsupported($"Unsupported native parameter aggregate pointee {pointeeType}.");
+            }
+
+            var typeDefTypeSpecRow = TypeDefTypeSpecRow(typeRows, typeDefTypeSpecRows, typeDefRow);
+            var pointerTypeSpecRow = typeRows.Count + 1;
+            typeRows.Add(TrRmTypeSpecTableWriter.IndexedFamily(0x8C,
+                (uint)typeDefTypeSpecRow));
+            structurePointerTypeRows.Add(pointeeType, pointerTypeSpecRow);
+            return pointerTypeSpecRow;
+        }
+
+        return NativeParameterTypeRow(typeRows, typeRowMap, pointeeType);
+    }
+
+    private static int NativeBlittableFieldTypeRow(List<ReadOnlyMemory<byte>> typeRows,
+        Dictionary<int, int> typeDefTypeSpecRows, Dictionary<int, int> structureTypeDefRows,
+        PrimitiveType fieldType)
+    {
+        if ((int)fieldType >= 100 && (int)fieldType < ManagedClassTypes.First)
+        {
+            var structureIndex = (int)fieldType - 100;
+            if (!structureTypeDefRows.TryGetValue(structureIndex, out var typeDefRow))
+            {
+                throw Unsupported($"Unsupported native Blittable field type {fieldType}.");
+            }
+            return TypeDefTypeSpecRow(typeRows, typeDefTypeSpecRows, typeDefRow);
+        }
+
+        return TypeRow(fieldType);
+    }
+
+    private static int TypeDefTypeSpecRow(List<ReadOnlyMemory<byte>> typeRows,
+        Dictionary<int, int> typeDefTypeSpecRows, int typeDefRow)
+    {
+        if (typeDefTypeSpecRows.TryGetValue(typeDefRow, out var row))
+        {
+            return row;
+        }
+
+        row = typeRows.Count + 1;
+        typeRows.Add(TrRmTypeSpecTableWriter.Reference(0x02, (uint)typeDefRow));
+        typeDefTypeSpecRows.Add(typeDefRow, row);
+        return row;
+    }
+
+    private static ReadOnlyMemory<byte> NativeBlittableLayoutPayload(int targetRequirement)
+    {
+        var payload = new byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, (uint)targetRequirement);
+        return payload;
     }
 
     private static ReadOnlyMemory<byte> NativeOutputPayload(int parameterIndex,
@@ -1478,6 +1826,158 @@ public static partial class TrRmExecutableCompiler
             throw new InvalidDataException(
                 "Invalid reconstructed TRRM native COM interfaces.", exception);
         }
+    }
+
+    private static ImmutableArray<BoundStruct> LoadBlittableStructures(
+        TrRmTypeDefTableReader typeDefs, TrRmFieldDefTableReader fields,
+        TrRmLayoutTableReader layouts, TrRmContractTableReader contracts,
+        TrRmTypeSpecTableReader typeSpecs, ImmutableArray<BoundStruct> optionalStructures,
+        out int[] structureTypeByTypeDef)
+    {
+        var structureRows = new List<int>();
+        structureTypeByTypeDef = new int[typeDefs.Count + 1];
+        Array.Fill(structureTypeByTypeDef, -1);
+        for (var row = 1; row <= typeDefs.Count; row++)
+        {
+            if (contracts.GetNativeBlittableTargetRequirement(row) == 0)
+            {
+                continue;
+            }
+
+            structureTypeByTypeDef[row] = optionalStructures.Length + structureRows.Count;
+            structureRows.Add(row);
+        }
+
+        var structures = optionalStructures.ToList();
+        foreach (var row in structureRows)
+        {
+            var flags = typeDefs.GetFlags(row);
+            var layoutRow = typeDefs.GetLayoutRow(row);
+            var size = layouts.GetSize(layoutRow);
+            if (size is 0 or > ValueLayout.MaximumStructureSize)
+            {
+                throw Invalid("A native Blittable TypeDef has an unsupported size.");
+            }
+
+            var typeNamespace = typeDefs.GetNamespace(row);
+            var name = typeNamespace.Length == 0
+                ? typeDefs.GetName(row) : typeNamespace + "." + typeDefs.GetName(row);
+            var layoutKind = (flags >> 4) & 0x03;
+            structures.Add(new BoundStruct(name, [], (int)size)
+            {
+                IsSequential = layoutKind == 1,
+                IsTransparent = layoutKind == 3,
+                BlittableTargetRequirement = (int)contracts.GetNativeBlittableTargetRequirement(row),
+                IsPrivate = (flags & 3) == 0,
+                IsInternal = (flags & 3) == 1,
+            });
+        }
+
+        foreach (var row in structureRows)
+        {
+            var structureIndex = structureTypeByTypeDef[row];
+            var (firstField, endField) = typeDefs.GetFieldRange(row);
+            if (firstField == 0 || endField <= firstField)
+            {
+                throw Invalid("A native Blittable TypeDef must have fields.");
+            }
+
+            var structureFields = ImmutableArray.CreateBuilder<BoundStructField>(
+                endField - firstField);
+            for (var fieldRow = firstField; fieldRow < endField; fieldRow++)
+            {
+                if (!TryGetBlittableFieldType(typeSpecs, fields.GetTypeSpecRow(fieldRow),
+                    structureTypeByTypeDef, out var fieldType))
+                {
+                    throw Invalid("A native Blittable field has an unsupported TypeSpec.");
+                }
+
+                var fieldFlags = fields.GetFlags(fieldRow);
+                var fieldOffset = fields.GetByteOffset(fieldRow);
+                var fieldSize = ValueLayout.Size(fieldType, structures);
+                if (fieldOffset == uint.MaxValue || fieldOffset > int.MaxValue
+                    || fieldSize <= 0)
+                {
+                    throw Invalid("A native Blittable field has an unsupported fixed layout.");
+                }
+
+                structureFields.Add(new BoundStructField(fields.GetName(fieldRow), fieldType,
+                    (int)fieldOffset, fieldSize)
+                {
+                    IsPrivate = (fieldFlags & 3) == 0,
+                    IsInternal = (fieldFlags & 3) == 1,
+                    IsMutable = (fieldFlags & 4) != 0,
+                });
+            }
+
+            structures[structureIndex] = structures[structureIndex] with
+            {
+                Fields = structureFields.MoveToImmutable(),
+            };
+        }
+
+        var result = structures.ToImmutableArray();
+        ImmutableArray<int> alignments;
+        try
+        {
+            alignments = FixedLayoutStorage.Validate(result);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+        {
+            throw new InvalidDataException(
+                $"TRRM native Blittable-layout audit failed: {exception.Message}", exception);
+        }
+
+        foreach (var row in structureRows)
+        {
+            var structureIndex = structureTypeByTypeDef[row];
+            var layoutRow = typeDefs.GetLayoutRow(row);
+            if (layouts.GetSize(layoutRow) != result[structureIndex].Size
+                || layouts.GetAlignment(layoutRow) != (uint)alignments[structureIndex])
+            {
+                throw Invalid("A native Blittable Layout row differs from its recomputed structure.");
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryGetBlittableFieldType(TrRmTypeSpecTableReader typeSpecs,
+        int typeSpecRow, int[] structureTypeByTypeDef, out PrimitiveType fieldType)
+    {
+        var type = typeSpecs.GetRow(typeSpecRow);
+        if (type.Length == 6 && type[0] == 0x02 && type[1] == 0)
+        {
+            var typeDefRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(type[2..]));
+            if (typeDefRow < structureTypeByTypeDef.Length
+                && structureTypeByTypeDef[typeDefRow] >= 0)
+            {
+                fieldType = (PrimitiveType)(100 + structureTypeByTypeDef[typeDefRow]);
+                return true;
+            }
+        }
+
+        return TrRmNativeImportTypeContract.TryGetScalarType(typeSpecs, typeSpecRow, out fieldType);
+    }
+
+    private static PrimitiveType NativeParameterPointee(TrRmTypeSpecTableReader typeSpecs,
+        int typeSpecRow, TrRmContractTableReader contracts, int[] structureTypeByTypeDef)
+    {
+        if (TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+            typeSpecs, typeSpecRow, out var pointeeType))
+        {
+            return pointeeType;
+        }
+
+        if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
+            typeSpecs, typeSpecRow, contracts, out var typeDefRow)
+            && typeDefRow < structureTypeByTypeDef.Length
+            && structureTypeByTypeDef[typeDefRow] >= 0)
+        {
+            return (PrimitiveType)(100 + structureTypeByTypeDef[typeDefRow]);
+        }
+
+        throw Invalid("Invalid native parameter pointee TypeSpec.");
     }
 
     private static string ReadComSignatureType(TrRmTypeSpecTableReader typeSpecs, int row,

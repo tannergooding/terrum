@@ -25,6 +25,11 @@ public readonly record struct TrRmFeatureRow(uint FeatureId, uint MinimumRuleRev
     public static TrRmFeatureRow NativeComContracts
         => new(TrRmFeatureTableReader.NativeComContractsFeatureId,
             TrRmFeatureTableReader.NativeComContractsRuleRevision);
+
+    /// <summary>The provisional explicit native Blittable-layout assignment.</summary>
+    public static TrRmFeatureRow NativeBlittableLayouts
+        => new(TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId,
+            TrRmFeatureTableReader.NativeBlittableLayoutsRuleRevision);
 }
 
 /// <summary>Validates the required feature assignments supported by provisional TRRM (1, 0).</summary>
@@ -40,6 +45,9 @@ public readonly ref struct TrRmFeatureTableReader
     /// <summary>The provisional feature identifier assigned to native COM contracts.</summary>
     public const uint NativeComContractsFeatureId = 3;
 
+    /// <summary>The provisional feature identifier assigned to native Blittable layouts.</summary>
+    public const uint NativeBlittableLayoutsFeatureId = 4;
+
     /// <summary>The initial ScalarInitOutput rule revision supported by this implementation.</summary>
     public const uint ScalarInitOutputInitialRuleRevision = 1;
 
@@ -51,6 +59,9 @@ public readonly ref struct TrRmFeatureTableReader
 
     /// <summary>The provisional native COM contract rule revision supported by this implementation.</summary>
     public const uint NativeComContractsRuleRevision = 1;
+
+    /// <summary>The provisional native Blittable-layout rule revision supported by this implementation.</summary>
+    public const uint NativeBlittableLayoutsRuleRevision = 1;
 
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
@@ -83,6 +94,7 @@ public readonly ref struct TrRmFeatureTableReader
                 ScalarInitOutputFeatureId => ScalarInitOutputRuleRevision,
                 WindowsNamedNativeImportsFeatureId => WindowsNamedNativeImportsRuleRevision,
                 NativeComContractsFeatureId => NativeComContractsRuleRevision,
+                NativeBlittableLayoutsFeatureId => NativeBlittableLayoutsRuleRevision,
                 _ => 0u,
             };
             if (featureId <= previousFeatureId || minimumRuleRevision == 0

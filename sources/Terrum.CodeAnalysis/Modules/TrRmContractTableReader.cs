@@ -29,6 +29,7 @@ public readonly ref struct TrRmContractTableReader
     private readonly bool[] _methodHasNativeComContracts;
     private readonly ImmutableArray<TrRmNativeParameterContract>[] _nativeParameters;
     private readonly ImmutableArray<TrRmNativeComAcquisitionContract>[] _comAcquisitions;
+    private readonly uint[] _nativeBlittableTargetRequirements;
 
     public TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
@@ -54,6 +55,7 @@ public readonly ref struct TrRmContractTableReader
         _methodHasNativeComContracts = new bool[methods.Count + 1];
         _nativeParameters = new ImmutableArray<TrRmNativeParameterContract>[methods.Count + 1];
         _comAcquisitions = new ImmutableArray<TrRmNativeComAcquisitionContract>[methods.Count + 1];
+        _nativeBlittableTargetRequirements = new uint[types.Count + 1];
         var owners = new uint[recordCount + 1];
         for (var type = 1; type <= types.Count; type++)
         {
@@ -88,7 +90,7 @@ public readonly ref struct TrRmContractTableReader
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
             if (owners[row] == 0 || owner != owners[row]
                 || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0
-                || (kind is 1 or 5 or 7 or 8 or 9 && !singletons.Add((owner, kind))))
+                || (kind is 1 or 5 or 7 or 8 or 9 or 12 && !singletons.Add((owner, kind))))
             {
                 throw InvalidContract();
             }
@@ -313,6 +315,27 @@ public readonly ref struct TrRmContractTableReader
                         (int)sourceMethod, (int)sourceOutput, (byte)acquisitionFailureDisposition));
                     _methodHasNativeComContracts[acquisitionMethod] = true;
                     break;
+                case 12:
+                    if (data.Length != 12 || owner >> 24 != 0x13)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var blittableType = (int)(owner & 0xFF_FFFF);
+                    var blittableTargetRequirement = Read(data, 8);
+                    var blittableFlags = types.GetFlags(blittableType);
+                    var blittableLayout = (blittableFlags >> 4) & 0x03;
+                    if (((blittableFlags >> 2) & 0x03) != 1
+                        || blittableLayout is not (1 or 3)
+                        || types.GetLayoutRow(blittableType) == 0
+                        || types.GetGenericRange(blittableType).Count != 0
+                        || blittableTargetRequirement != 1)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    _nativeBlittableTargetRequirements[blittableType] = blittableTargetRequirement;
+                    break;
                 default:
                     throw InvalidContract();
             }
@@ -321,6 +344,15 @@ public readonly ref struct TrRmContractTableReader
         foreach (var method in cleanupMethods)
         {
             if (!noThrowMethods.Contains(method))
+            {
+                throw InvalidContract();
+            }
+        }
+
+        for (var type = 1; type < _nativeBlittableTargetRequirements.Length; type++)
+        {
+            if (_nativeBlittableTargetRequirements[type] != 0
+                && (cleanupTypes.Contains(type) || _comOwnerInterfaces[type] != 0))
             {
                 throw InvalidContract();
             }
@@ -492,6 +524,10 @@ public readonly ref struct TrRmContractTableReader
     internal int GetNativeComOwnerInterface(int typeDefRow)
         => typeDefRow > 0 && typeDefRow < _comOwnerInterfaces.Length
             ? _comOwnerInterfaces[typeDefRow] : 0;
+
+    internal uint GetNativeBlittableTargetRequirement(int typeDefRow)
+        => typeDefRow > 0 && typeDefRow < _nativeBlittableTargetRequirements.Length
+            ? _nativeBlittableTargetRequirements[typeDefRow] : 0;
 
     internal bool HasNativeComContractsForTypeDef(int typeDefRow)
         => typeDefRow > 0 && typeDefRow < _typeHasNativeComContracts.Length

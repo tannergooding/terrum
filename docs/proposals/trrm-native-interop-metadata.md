@@ -32,12 +32,14 @@ callable signatures, parameter modes, semantic contracts, and
 producer/key imports. Its existing `Import` row selects a Terrum producer and
 export; it does not identify an operating-system DLL or native export.
 
-The current native catalog fills that gap out of band. For DX11 it also holds
-COM IIDs and inheritance, vtable slots, native output ownership, cleanup,
-effects, and argument adaptations. A source `[NativeImport(key)]` selects a
-catalog entry rather than producing the binding metadata that a binary
-dependency can carry. This proposal moves only the irreducible declarations
-into TRRM; it does not preserve catalog-only convenience behavior.
+An earlier native-catalog prototype filled that gap out of band, including
+DX11 COM and sample behavior; that API-specific catalog policy has been
+retired. The production Windows x64 import catalog is empty. The branch now
+has a provisional source-authored direct-import form, but its experimental
+TRRM assignments and incomplete dependency paths are not canonical metadata.
+This proposal addresses portable dependency consumption of authored native
+declarations and generic COM contracts; it does not preserve catalog-only
+convenience behavior or add API-specific compiler policy.
 
 ## Unsafe boundary and representation
 
@@ -250,6 +252,29 @@ reader validates clause shapes and the owning module's feature assignment;
 semantic producer serialization, dependency reconstruction, and consumer-side
 lowering remain unsupported. The metadata is an authored trust contract and
 does not prove a foreign provider returned the declared interface.
+
+For a branch-local aggregate-pointer experiment, use provisional Feature ID
+`4` (`NativeBlittableLayouts`, revision `1`) and Contract kind `12`. Kind `12`
+is owned by a `TypeDef` and has one `u32` payload: the explicit
+`targetRequirement`, currently limited to Windows x64 requirement `1`. The
+referencing `NativeParameter` signature uses `ptr<TypeDef>`; its existing
+clause carries access, retention, and extent. The marked `TypeDef` must be a
+non-unique struct with `Sequential` or `Transparent` layout, a matching
+`Layout` row with default packing and zero flags, and recursively marked
+value-struct fields. The initial executable subset accepts scalar fields and
+nested marked structs. Pointer and function-pointer fields are excluded
+because the current bound field representation does not retain their complete
+type identity. Consumers must recompute field offsets, size, and alignment
+and reject mismatched marker, feature, or layout facts; neither layout values
+nor the target requirement alone imply the commitment.
+
+Feature ID `4` and Contract kind `12` are temporary branch assignments, not
+canonical `(1, 0)` assignments. They do not change the normative
+specification's explicit statement that `(1, 0)` has no `Blittable` marker.
+The experiment is limited to declaration-only native-import dependencies;
+it does not add aggregate Body storage, by-value aggregate ABI, or
+aggregate-output validity. The proposal remains unapproved and these choices
+must be reconciled with a future assigned schema before any conformance claim.
 
 `NativeParameter` and `NativeOutput` are needed because a pointer type alone
 does not say whether the callee reads, writes, or retains the address, and a

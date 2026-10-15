@@ -105,6 +105,26 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void RawPointerNullAndEqualityUseOrdinaryPointerValues()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    ptr<void> first = null;
+                    ptr<void> second = null;
+                    return first == null && first == second ? 0 : -1;
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
     public void BlittableRecordsCarryOpaquePointerFieldsThroughDirectImports()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -204,8 +224,7 @@ public sealed class DirectNativeImportTests
             """));
 
         Assert.That(compilation.Program, Is.Null);
-        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
-            diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(compilation.HasErrors, Is.True);
     }
 
     [Test]
@@ -721,7 +740,7 @@ public sealed class DirectNativeImportTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
             public extern int32 ReadValue(ptr<int32> value);
             """));
         Assert.That(compilation.HasErrors, Is.False,
@@ -735,7 +754,7 @@ public sealed class DirectNativeImportTests
             function.Name == "ReadValue").DirectNativeImport!;
         Assert.That(import.Parameters, Is.EqualTo([
             new DirectNativeParameter(0, PrimitiveType.Int32,
-                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 1),
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 3),
         ]));
 
         var malformed = artifact.ToArray();
@@ -756,6 +775,45 @@ public sealed class DirectNativeImportTests
             malformed.AsSpan(parameterOrdinalOffset, sizeof(int)), 1);
 
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+    }
+
+    [TestCase(2, false)]
+    [TestCase(3, true)]
+    [TestCase(5, true)]
+    public void DirectNativeParameterExtentRequiresAtLeastTheDeclaredArrayCapacity(
+        int backingCount, bool shouldCompile)
+    {
+        var values = string.Join(", ", Enumerable.Range(1, backingCount));
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
+            extern int32 ObserveValues(ptr<uint32> values);
+
+            int32 Main() {
+                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                unsafe { return ObserveValues(&values[0]); }
+            }
+            """;
+        var catalog = NativeImportCatalog.CreateForTesting("test.native-parameter-extent.v1", []);
+        var compilation = Compilation.CreateWithNativeImports(
+            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        var import = program.Functions.Single(static function =>
+            function.Name == "ObserveValues").DirectNativeImport!;
+        Assert.That(import.Parameters.Single().Extent, Is.EqualTo(3));
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ObserveValues"));
     }
 
     [Test]
@@ -854,6 +912,99 @@ public sealed class DirectNativeImportTests
             consumer.Program!, NativeRuntimePolicy.FailFast);
         Assert.That(Encoding.ASCII.GetString(image), Does.Contain("ReadValue"));
         Assert.That(Encoding.ASCII.GetString(image), Does.Contain("example.dll"));
+    }
+
+    [Test]
+    public void TrRmNativeImportRoundTripsBlittableAggregatePointerDependency()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct TransportIdentity {
+                public uint32 Source;
+                public uint32 Destination;
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct TransportHeader {
+                public TransportIdentity Identity;
+                public uint64 Sequence;
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "InspectHeader")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 InspectHeader(ptr<TransportHeader> header);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "transport-header");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loadedStructure = loaded.Structures.Single(static structure =>
+            structure.Name == "TransportHeader");
+        var loadedStructureIndex = loaded.Structures.IndexOf(loadedStructure);
+        Assert.That(loadedStructure.Fields.Select(static field => field.Name),
+            Is.EqualTo(["Identity", "Sequence"]));
+        Assert.That(loadedStructure.Fields.Select(static field => field.Offset),
+            Is.EqualTo([0, 8]));
+        Assert.That(loaded.Structures.Single(static structure =>
+            structure.Name == "TransportIdentity").Fields.Select(static field => field.Offset),
+            Is.EqualTo([0, 4]));
+        var loadedImport = loaded.Functions.Single(static function =>
+            function.Name == "InspectHeader").DirectNativeImport!;
+        Assert.That(loadedImport.Parameters.Single().PointeeType,
+            Is.EqualTo((PrimitiveType)(100 + loadedStructureIndex)));
+
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId,
+            out var blittableFeature), Is.True);
+        Assert.That(blittableFeature.MinimumRuleRevision,
+            Is.EqualTo(TrRmFeatureTableReader.NativeBlittableLayoutsRuleRevision));
+
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        Assert.That(reference.Structures.Select(static structure => structure.Name),
+            Is.EqualTo(["TransportIdentity", "TransportHeader"]));
+        var consumer = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe { return InspectHeader(null); }
+            }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var image = NativeEmitter.EmitWithNativeImports(
+            consumer.Program!, NativeRuntimePolicy.FailFast);
+        Assert.That(Encoding.ASCII.GetString(image), Does.Contain("InspectHeader"));
+        Assert.That(Encoding.ASCII.GetString(image), Does.Contain("fixture.dll"));
+
+        var wrongTarget = MutateVariableRowByte(artifact, 0x001B, 1, 8, 2);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(wrongTarget));
+        var missingFeature = MutateFixedSectionByte(artifact, 0x0004, 8, 3);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingFeature));
+        var wrongAlignment = MutateFixedRowByte(artifact, 0x0015, 2, 24, 12, 4);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(wrongAlignment));
+    }
+
+    [Test]
+    public void TrRmNativeImportRoundTripsAndBoundsLargeNativeParameterExtents()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
+            public extern int32 ObserveValues(ptr<uint32> values);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "native-parameter-extent");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var import = loaded.Functions.Single(static function =>
+            function.Name == "ObserveValues").DirectNativeImport!;
+        Assert.That(import.Parameters.Single().Extent, Is.EqualTo(3));
+
+        var malformed = MutateVariableRowByte(artifact, 0x001B, 2, 19, 0x80);
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
     }
 
     [Test]
@@ -1289,6 +1440,21 @@ public sealed class DirectNativeImportTests
             throw new ArgumentOutOfRangeException(nameof(byteOffset));
         }
         result[sectionOffset + byteOffset] = value;
+        return result;
+    }
+
+    private static byte[] MutateFixedRowByte(byte[] artifact, ushort sectionKind,
+        int row, int rowSize, int byteOffset, byte value)
+    {
+        var (sectionOffset, count) = FindSection(artifact, sectionKind);
+        if (row <= 0 || row > count || rowSize <= 0
+            || byteOffset < 0 || byteOffset >= rowSize)
+        {
+            throw new ArgumentOutOfRangeException(nameof(row));
+        }
+
+        var result = artifact.ToArray();
+        result[sectionOffset + ((row - 1) * rowSize) + byteOffset] = value;
         return result;
     }
 

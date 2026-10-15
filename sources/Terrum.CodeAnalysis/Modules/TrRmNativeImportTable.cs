@@ -99,6 +99,27 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
+    internal static bool TryGetBlittableAggregateParameterTypeDef(
+        TrRmTypeSpecTableReader types, int typeSpecRow,
+        TrRmContractTableReader contracts, out int typeDefRow)
+    {
+        var type = types.GetRow(typeSpecRow);
+        if (type.Length == 7 && type[0] == 0x0C && type[1] == 0
+            && type[2] == 0x8C)
+        {
+            var innerRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(type[3..]));
+            var inner = types.GetRow(innerRow);
+            if (inner.Length == 6 && inner[0] == 0x02 && inner[1] == 0)
+            {
+                typeDefRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner[2..]));
+                return contracts.GetNativeBlittableTargetRequirement(typeDefRow) == 1;
+            }
+        }
+
+        typeDefRow = 0;
+        return false;
+    }
+
     private static PrimitiveType FromAtomicCode(byte typeCode) => typeCode switch
     {
         1 => PrimitiveType.Bool,
@@ -209,7 +230,8 @@ public readonly ref struct TrRmNativeImportTableReader
 
             _rowByMethod[method] = row;
             ValidateSignature((int)method, methods, signatures, parameters, types,
-                contracts.GetNativeOutputs((int)method), contracts.GetNativeParameters((int)method));
+                contracts.GetNativeOutputs((int)method), contracts.GetNativeParameters((int)method),
+                contracts);
         }
 
         for (var method = 1; method <= methods.Count; method++)
@@ -259,7 +281,8 @@ public readonly ref struct TrRmNativeImportTableReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types,
         System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
-        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters)
+        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters,
+        TrRmContractTableReader contracts)
     {
         var signature = methods.GetSignature(method);
         if (!TrRmNativeImportTypeContract.TryGetDirectNativeImportResultType(
@@ -308,6 +331,18 @@ public readonly ref struct TrRmNativeImportTableReader
                 if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
                     || !TryGetNativeParameter(nativeParameters, parameter, out var nativeParameter)
                     || !ValidNativeParameter(nativeParameter, nativePointeeType))
+                {
+                    throw InvalidNativeImport();
+                }
+
+                seenNativeParameters[parameter] = true;
+            }
+            else if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
+                    types, typeRow, contracts, out _))
+            {
+                if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
+                    || !TryGetNativeParameter(nativeParameters, parameter, out var nativeParameter)
+                    || !ValidNativeParameter(nativeParameter, PrimitiveType.NativeRawPointer))
                 {
                     throw InvalidNativeImport();
                 }
@@ -368,7 +403,7 @@ public readonly ref struct TrRmNativeImportTableReader
         return parameter.Retention == (byte)NativeParameterRetention.NoEscape
             && (pointeeType == PrimitiveType.Void
                 ? access == (byte)NativeParameterAccess.Read && parameter.Extent == 0
-                : parameter.Extent is 0 or 1
+                : parameter.Extent <= int.MaxValue
                     && access is >= (byte)NativeParameterAccess.Read
                         and <= (byte)NativeParameterAccess.ReadWrite);
     }

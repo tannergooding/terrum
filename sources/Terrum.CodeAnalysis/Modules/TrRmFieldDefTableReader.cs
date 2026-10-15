@@ -100,6 +100,35 @@ public readonly ref struct TrRmFieldDefTableReader
         return _strings.DecodeName((int)name);
     }
 
+    /// <summary>Gets the referenced TypeSpec row for a validated FieldDef row.</summary>
+    public int GetTypeSpecRow(int row)
+    {
+        CheckRow(row);
+        return checked((int)Read(row - 1, 8));
+    }
+
+    /// <summary>Gets the flags for a validated FieldDef row.</summary>
+    public uint GetFlags(int row)
+    {
+        CheckRow(row);
+        return Read(row - 1, 12);
+    }
+
+    /// <summary>Gets the byte offset for a validated FieldDef row.</summary>
+    public uint GetByteOffset(int row)
+    {
+        CheckRow(row);
+        return Read(row - 1, 16);
+    }
+
+    private void CheckRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidField();
+        }
+    }
+
     private uint Read(int row, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice((row * RowSize) + offset, sizeof(uint)));
 

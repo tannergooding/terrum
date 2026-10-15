@@ -122,35 +122,18 @@ or persisted-AOT support. The [proposal index](proposals/README.md) records
 those boundaries and pending promotion decisions.
 
 The first Windows x64 source-native-import slice is also implemented
-provisionally under the unapproved stage contracts of the
-[Windows native FFI proposal](proposals/windows-native-ffi.md):
-bodyless top-level or static `extern` callables use the exact
-`Terrum.Interop.NativeImport` attribute and a key in the compiler-owned
-immutable catalog. Binding, mandatory verification and PE emission check the
-catalogued fixed-width integer/`void` signature and effects; the production
-catalog contains `GetCurrentThreadId`, `Sleep(uint32) -> void`, and the
-sample-specific `MessageBoxW`. `Sleep` covers the design sketch's exact
-`Sleep(16)` import only; the DX11 triangle remains a non-compiling design
-sketch and this does not establish support for its other native boundaries.
-Unsupported module/JIT/TRRM persistence paths reject these imports. This is
-not general foreign-function support and does not move scalar frontend
-verification or emission into Terrum. Test-only fixtures exercise the
-proposed static UTF-16-NUL literal pointer subgate using read-only image
-storage and catalogued readonly/no-escape parameters against an independent C
-reader, and the sample-specific `HWND.NoOwner` marker against a nonmodal
-ABI-equivalent C function. The production catalog also includes the exact
-`user32.dll!MessageBoxW` signature, callable only with `HWND.NoOwner` and
-static readonly UTF-16-NUL literals. The provisional target scope is supported
-Windows x64 desktop-class NT releases where `user32.dll` is a KnownDLL. A
-separate static-import probe checks the current host with
-application-directory, current-directory and `PATH` shadow DLLs present, not a
-cross-version matrix. The opt-in command `terrumc build-native-import`
-explicitly selects this immutable catalog; ordinary `build` remains unchanged.
-Its runnable sample returns
-success only for `MessageBoxW`'s `IDOK` result. Unattended tests build and
-inspect the import without calling the modal API; displaying the dialog
-requires an explicitly selected interactive run. This is a narrow provisional slice,
-not general pointer, handle or foreign-function support.
+Native DLL imports are a provisional source feature under the unapproved
+[TRRM native interop proposal](proposals/trrm-native-interop-metadata.md).
+Source declarations name a library and export directly and carry generic
+pointer access, retention, output-validity, and unsafe-caller contracts; they
+do not select a compiler-owned Win32 or DX11 API catalog. The production
+Windows x64 `NativeImportCatalog` is empty. `build-native-import` explicitly
+selects the Windows x64 native source profile, while ordinary `build` does not
+enable native imports. The `MessageBoxW` sample is authored using the same
+direct import form as any other native function; its unattended CLI test
+checks the emitted import without invoking the modal API. This remains
+provisional implementation support, not canonical TRRM approval or a
+cross-platform FFI contract.
 
 A separate prototype under the unapproved
 [TRRM native interop proposal](proposals/trrm-native-interop-metadata.md)
@@ -187,10 +170,14 @@ round-trips through private semantic-module revision 80, native packages,
 consumer sets, and graph-JIT roots. The experimental TRRM direct-import path
 also round-trips scalar, opaque-pointer, and `ptr<void>` pointees, plus
 supported scalar and `ptr<void>` results, using provisional clause kind 10.
-It includes extent-zero scalar and character-pointer inputs; fixed-layout
-aggregate pointees remain unsupported in that executable profile. The clause
-assignment remains unapproved and this implementation does not establish
-canonical TRRM conformance.
+It includes extent-zero scalar and character-pointer inputs and explicitly
+committed `ptr<TypeDef>` aggregate pointees using provisional feature ID 4 and
+contract kind 12. The loader recomputes supported scalar/nested-struct layouts,
+and `CreateReference` reconstructs their identities for consumer binding.
+This path is limited to declaration-only import libraries; pointer fields,
+function-pointer fields, aggregate bodies, by-value aggregate ABI, and
+aggregate outputs remain unsupported. These assignments remain unapproved
+and do not establish canonical TRRM conformance.
 
 Direct imports with writable scalar outputs and `NativeParameter` inputs also
 round-trip through private semantic producer/consumer and native package
@@ -203,6 +190,19 @@ arbitrary raw-import DLLs. Runtime regressions exercise
 `CompareStringOrdinal` with readonly local `char16` inputs and
 `GetCurrentThreadId` in standalone and graph JIT paths. Arbitrary
 non-System32 imports and COM runtime behavior remain unqualified.
+
+An additional, provisional prototype supports `[Terrum.Interop.NativeCallable]`
+functions and explicit `fnptr<NativeAbi, ...>` values on Windows x64. It
+retains concrete signatures through address formation, local/field transport,
+indirect calls, private semantic modules (revision 82), native module sets and
+graph consumers. Address formation and indirect invocation require an explicit
+unsafe scope; native-callable entries are `NoThrow` and caller-unsafe. Function
+pointers carry code addresses only: they do not root or extend the lifetime of
+the image containing the target. A supervised independent C caller exercises
+the exported native ABI, and JIT/module regressions exercise provider callback
+transport. Standard TRRM explicitly rejects this feature until its declaration,
+type, and body records are reviewed; the source forms and private revision are
+not normative grammar or interchange assignments.
 
 Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,
 `NativeParameter`, and `NativeComAcquisition` metadata is also provisionally
@@ -245,17 +245,21 @@ structural rule requires an acquisition Body. That boundary is preserved, so
 dependency-provided acquisition wrappers remain unsupported rather than
 silently treating inspectable Body forms as executable.
 
-DX11 generalization remains incomplete: the Windows x64 compiler catalog still
-installs `NativeDx11ComCatalog` with D3D imports, COM identities/methods, and
-native storage layouts. Window-handle ownership no longer depends on the exact
-`Triangle.Interop.WindowOwner`/`Host` protocol; it uses a unique type with a
-private readonly handle field and ordinary cleanup. However, the window API
-imports, callback and descriptor contracts, and DX11 storage layouts remain
-compiler-catalogued rather than authored dependencies. The active test project
-excludes the unconverted DX11 and Win32-window prototypes, so those files are
-not acceptance evidence. Generic source/dependency contracts for the
-remaining native storage, callback, and API-import paths are still required
-before the DX11 catalog can be removed without losing the intended behavior.
+The source-only prototype also provisionally supports
+`NativeComParameterAdaptation` for validated pointer-preserving base-interface,
+single-element owner-pointer-array, and COM-object buffer-content adaptations.
+These attributes are implementation experiments, not canonical TRRM contracts.
+
+The maintained DX11 sample authors its Win32 imports, ABI layouts, callbacks,
+message loop, and resource cleanup in Terrum source. The compiler has no
+DX11-, HWND-, module-path-, or window-message-specific policy; its remaining
+native mechanisms are generic direct imports, pointers, function pointers,
+fixed layouts, COM metadata, and ownership/effect verification. DX11
+generalization is not yet accepted: source-authored COM owner/acquisition
+metadata is not yet provided through standard TRRM dependencies, native COM
+runtime behavior remains unqualified, and earlier unconverted DX11/Win32
+prototype tests remain excluded from the active project. Those are explicit
+acceptance gaps, not evidence that the compiler should regain sample policy.
 
 ## Syntax and CLI
 
