@@ -67,9 +67,10 @@ Public fixed-layout source support is implemented for natural Windows x64
 private semantic modules persist them. Packing, alignment controls, unions,
 opaque handle fields, and standard TRRM layout persistence remain unsupported.
 Direct `NativeParameter` inputs can point at committed aggregates in source,
-private semantic modules, and native execution; the standard TRRM
-`NativeParameter` encoding remains unapproved and is rejected. Direct native
-outputs remain limited to scalar and raw-pointer pointees.
+private semantic modules, and native execution. The canonical standard TRRM
+`NativeParameter` encoding remains unapproved; the provisional executable
+experiment is described below. Direct native outputs remain limited to scalar
+and raw-pointer pointees.
 The detailed [hosted output profiles](implementation/output-profiles.md)
 are informative development inventories. Their historical `out` modes do not
 add parameter forms to the canonical reference model.
@@ -174,9 +175,11 @@ When a call forms an address with `&local`, the local must be initialized and
 match the pointee type; `Write` and `ReadWrite` require mutable backing. Raw
 pointer values remain caller-authored unsafe inputs. This input metadata
 round-trips through private semantic-module revision 80, native packages,
-consumer sets, and graph-JIT roots. The current TRRM direct-import path rejects
-these inputs rather than dropping their metadata; its required standard clause
-assignment remains unapproved.
+consumer sets, and graph-JIT roots. The experimental TRRM direct-import path
+also round-trips scalar, opaque-pointer, and `ptr<void>` pointees using
+provisional clause kind 10; fixed-layout aggregate pointees remain unsupported
+in that executable profile. The clause assignment remains unapproved and this
+implementation does not establish canonical TRRM conformance.
 
 Direct imports with writable scalar outputs and `NativeParameter` inputs also
 round-trip through private semantic producer/consumer and native package

@@ -148,9 +148,9 @@ public static class TrRmStructuralMetadataValidator
                 generics, typeSpecs);
         var contracts = new TrRmContractTableReader(contractBytes, contractCount,
             types, methods, signatures, parameters, typeSpecs);
-        ValidateNativeComFeatureAssignments(features, modules, methods, contracts);
         var nativeImports = new TrRmNativeImportTableReader(nativeImportBytes,
             nativeImportCount, strings, methods, signatures, parameters, typeSpecs, contracts);
+        ValidateNativeComFeatureAssignments(features, modules, methods, contracts, nativeImports);
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
@@ -243,7 +243,8 @@ public static class TrRmStructuralMetadataValidator
     private static void ValidateNativeComFeatureAssignments(
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmMethodDefTableReader methods,
-        TrRmContractTableReader contracts)
+        TrRmContractTableReader contracts,
+        TrRmNativeImportTableReader nativeImports)
     {
         for (var module = 1; module <= modules.Count; module++)
         {
@@ -257,7 +258,14 @@ public static class TrRmStructuralMetadataValidator
             var (methodStart, methodEnd) = modules.GetMethodDefRange(module);
             for (var method = methodStart; method < methodEnd; method++)
             {
-                hasNativeComContracts |= contracts.HasNativeComContractsForMethodDef(method);
+                var isNativeImport = nativeImports.HasImportForMethod(method);
+                if (isNativeImport && contracts.GetNativeComMethod(method) is not null)
+                {
+                    throw InvalidMetadata();
+                }
+
+                hasNativeComContracts |= !isNativeImport
+                    && contracts.HasNativeComContractsForMethodDef(method);
             }
 
             if (!hasNativeComContracts)

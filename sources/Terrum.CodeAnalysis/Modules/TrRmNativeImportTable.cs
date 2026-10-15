@@ -46,6 +46,38 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
+    internal static bool TryGetNativeParameterPointee(TrRmTypeSpecTableReader types,
+        int typeSpecRow, out PrimitiveType pointeeType)
+    {
+        var type = types.GetRow(typeSpecRow);
+        if (type.Length == 4 && type[0] == 1 && type[1] == 0 && type[2] == 0x8C)
+        {
+            if (type[3] == 0)
+            {
+                pointeeType = PrimitiveType.Void;
+                return true;
+            }
+
+            pointeeType = FromAtomicCode(type[3]);
+            return DirectNativeImportContract.IsScalar(pointeeType);
+        }
+
+        if (type.Length == 7 && type[0] == 0x0C && type[1] == 0 && type[2] == 0x8C)
+        {
+            var innerRow = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            var inner = types.GetRow(checked((int)innerRow));
+            if (inner.Length == 4 && inner[0] == 1 && inner[1] == 0
+                && inner[2] == 0x8C && inner[3] == 0)
+            {
+                pointeeType = PrimitiveType.NativeRawPointer;
+                return true;
+            }
+        }
+
+        pointeeType = PrimitiveType.Void;
+        return false;
+    }
+
     private static PrimitiveType FromAtomicCode(byte typeCode) => typeCode switch
     {
         1 => PrimitiveType.Bool,
@@ -156,7 +188,7 @@ public readonly ref struct TrRmNativeImportTableReader
 
             _rowByMethod[method] = row;
             ValidateSignature((int)method, methods, signatures, parameters, types,
-                contracts.GetNativeOutputs((int)method));
+                contracts.GetNativeOutputs((int)method), contracts.GetNativeParameters((int)method));
         }
 
         for (var method = 1; method <= methods.Count; method++)
@@ -164,7 +196,9 @@ public readonly ref struct TrRmNativeImportTableReader
             var outputs = contracts.GetNativeOutputs(method);
             if (_rowByMethod[method] == 0)
             {
-                if (!outputs.IsEmpty)
+                if (!outputs.IsEmpty
+                    || !contracts.GetNativeParameters(method).IsDefaultOrEmpty
+                        && contracts.GetNativeComMethod(method) is null)
                 {
                     throw InvalidNativeImport();
                 }
@@ -202,12 +236,15 @@ public readonly ref struct TrRmNativeImportTableReader
 
     private static void ValidateSignature(int method, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs)
+        TrRmTypeSpecTableReader types,
+        System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
+        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters)
     {
         var signature = methods.GetSignature(method);
         var resultType = ScalarType(types, signatures.GetResultTypeSpec(signature));
         var (first, count) = signatures.GetParamRange(signature);
         var seenOutputs = new bool[count];
+        var seenNativeParameters = new bool[count];
         foreach (var output in outputs)
         {
             if (output.ParameterOrdinal >= count || seenOutputs[output.ParameterOrdinal]
@@ -224,11 +261,11 @@ public readonly ref struct TrRmNativeImportTableReader
         for (var parameter = 0; parameter < count; parameter++)
         {
             var typeRow = parameters.GetTypeSpec(first + parameter);
-            var type = types.GetRow(typeRow);
             if (TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
                 types, typeRow, out var pointeeType))
             {
                 if (parameters.GetMode(first + parameter) != 0
+                    || HasNativeParameter(nativeParameters, parameter)
                     || !seenOutputs[parameter])
                 {
                     throw InvalidNativeImport();
@@ -240,11 +277,75 @@ public readonly ref struct TrRmNativeImportTableReader
                     throw InvalidNativeImport();
                 }
             }
-            else if (seenOutputs[parameter] || !IsScalar(types, typeRow))
+            else if (TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+                    types, typeRow, out var nativePointeeType))
+            {
+                if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
+                    || !TryGetNativeParameter(nativeParameters, parameter, out var nativeParameter)
+                    || !ValidNativeParameter(nativeParameter, nativePointeeType))
+                {
+                    throw InvalidNativeImport();
+                }
+
+                seenNativeParameters[parameter] = true;
+            }
+            else if (seenOutputs[parameter] || HasNativeParameter(nativeParameters, parameter)
+                || !IsScalar(types, typeRow))
             {
                 throw InvalidNativeImport();
             }
         }
+
+        if (!nativeParameters.IsDefaultOrEmpty)
+        {
+            foreach (var nativeParameter in nativeParameters)
+            {
+                if (nativeParameter.ParameterOrdinal < 0
+                    || nativeParameter.ParameterOrdinal >= count
+                    || !seenNativeParameters[nativeParameter.ParameterOrdinal])
+                {
+                    throw InvalidNativeImport();
+                }
+            }
+        }
+    }
+
+    private static bool HasNativeParameter(
+        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> parameters, int ordinal)
+        => TryGetNativeParameter(parameters, ordinal, out _);
+
+    private static bool TryGetNativeParameter(
+        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> parameters,
+        int ordinal, out TrRmNativeParameterContract result)
+    {
+        if (parameters.IsDefaultOrEmpty)
+        {
+            result = default;
+            return false;
+        }
+
+        foreach (var parameter in parameters)
+        {
+            if (parameter.ParameterOrdinal == ordinal)
+            {
+                result = parameter;
+                return true;
+            }
+        }
+
+        result = default;
+        return false;
+    }
+
+    private static bool ValidNativeParameter(TrRmNativeParameterContract parameter, PrimitiveType pointeeType)
+    {
+        var access = parameter.Access - 1;
+        return parameter.Retention == (byte)NativeParameterRetention.NoEscape
+            && (pointeeType == PrimitiveType.Void
+                ? access == (byte)NativeParameterAccess.Read && parameter.Extent == 0
+                : parameter.Extent == 1
+                    && access is >= (byte)NativeParameterAccess.Read
+                        and <= (byte)NativeParameterAccess.ReadWrite);
     }
 
     private static TrRmNativeOutputContract FindOutput(

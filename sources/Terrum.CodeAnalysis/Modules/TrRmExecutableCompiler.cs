@@ -60,12 +60,6 @@ public static partial class TrRmExecutableCompiler
             throw new ArgumentException("A module identity is required.", nameof(moduleIdentity));
         }
 
-        if (program.Functions.Any(static function =>
-                function.DirectNativeImport is DirectNativeImport import && !import.Parameters.IsEmpty))
-        {
-            throw Unsupported("TRRM does not persist source-authored NativeParameter contracts on direct imports.");
-        }
-
         if (program.EntryPoint == -1)
         {
             SemanticVerifier.VerifyLibraryReferences(program);
@@ -132,6 +126,7 @@ public static partial class TrRmExecutableCompiler
             if (function.DirectNativeImport is DirectNativeImport directImport)
             {
                 hasFloatingTypes |= directImport.Outputs.Any(static output => IsFloat(output.PointeeType));
+                hasFloatingTypes |= directImport.Parameters.Any(static parameter => IsFloat(parameter.PointeeType));
                 hasFloatingTypes |= function.Variables.Take(function.ParameterCount)
                     .Any(static variable => IsFloat(variable.Type));
             }
@@ -188,6 +183,7 @@ public static partial class TrRmExecutableCompiler
         var exports = new List<TrRmExportRow>(exportCount);
         var typeRowsList = (hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows).ToList();
         var nativeOutputTypeRows = new Dictionary<PrimitiveType, int>();
+        var nativeParameterTypeRows = new Dictionary<PrimitiveType, int>();
         var interfacePointerTypeRows = new Dictionary<string, int>(interfaceRows.Length,
             StringComparer.Ordinal);
         foreach (var (identity, typeRow) in interfaceTypeRows)
@@ -234,10 +230,13 @@ public static partial class TrRmExecutableCompiler
             {
                 var variable = function.Variables[parameter];
                 var nativeOutput = DirectNativeImportContract.OutputForParameter(function, parameter);
+                var nativeParameter = DirectNativeImportContract.ParameterForParameter(function, parameter);
                 var isNativeOutput = nativeOutput is not null;
                 var parameterType = isNativeOutput
                     ? NativeOutputTypeRow(typeRowsList, nativeOutputTypeRows, nativeOutput!.PointeeType)
-                    : TypeRow(variable.Type);
+                    : nativeParameter is not null
+                        ? NativeParameterTypeRow(typeRowsList, nativeParameterTypeRows, nativeParameter.PointeeType)
+                        : TypeRow(variable.Type);
                 if (variable.Type == PrimitiveType.Void || variable.IsInitializationLocal
                     || (function.DirectNativeImport is null
                         && (!Scalar(variable.Type) || variable.IsOut != variable.IsInit
@@ -246,7 +245,10 @@ public static partial class TrRmExecutableCompiler
                         && (isNativeOutput
                             ? variable.Type != PrimitiveType.NativeStorageAddress
                                 || !variable.IsOut || variable.IsInit
-                            : !Scalar(variable.Type) || variable.IsOut || variable.IsInit)))
+                            : nativeParameter is not null
+                                ? variable.Type != PrimitiveType.NativeRawPointer
+                                    || variable.IsOut || variable.IsInit
+                                : !Scalar(variable.Type) || variable.IsOut || variable.IsInit)))
                 {
                     throw Unsupported($"Function '{function.Name}' has a non-value scalar parameter.");
                 }
@@ -285,6 +287,13 @@ public static partial class TrRmExecutableCompiler
                     contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 6,
                         NativeOutputPayload(output.ParameterIndex, output.ResultCondition,
                             output.FailureDisposition)));
+                }
+                foreach (var parameter in nativeImport.Parameters)
+                {
+                    contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)(index + 1), 10,
+                        NativeParameterPayload(parameter.ParameterIndex,
+                            (byte)((byte)parameter.Access + 1), (byte)parameter.Retention,
+                            (uint)parameter.Extent)));
                 }
             }
 
@@ -635,18 +644,25 @@ public static partial class TrRmExecutableCompiler
             var variables = ImmutableArray.CreateBuilder<BoundVariable>(count);
             var nativeOutputs = isNativeImport
                 ? contractTable.GetNativeOutputs(row) : [];
+            var nativeParameters = isNativeImport
+                ? contractTable.GetNativeParameters(row) : [];
             for (var param = 0; param < count; param++)
             {
                 var nativeOutput = FindNativeOutput(nativeOutputs, param);
-                var type = nativeOutput is null
-                    ? FromRow(types, parameters.GetTypeSpec(first + param))
-                    : PrimitiveType.NativeStorageAddress;
+                var nativeParameter = FindNativeParameter(nativeParameters, param);
+                var typeSpecRow = parameters.GetTypeSpec(first + param);
+                var type = nativeOutput is not null
+                    ? PrimitiveType.NativeStorageAddress
+                    : nativeParameter is not null
+                        ? PrimitiveType.NativeRawPointer
+                        : FromRow(types, typeSpecRow);
                 var mode = parameters.GetMode(first + param);
                 if (type == PrimitiveType.Void
                     || mode != 0 && mode != 2
                     || isNativeImport && (mode != 0
-                        || nativeOutput is null && !Scalar(type)
-                        || nativeOutput is not null && type != PrimitiveType.NativeStorageAddress)
+                        || nativeOutput is null && nativeParameter is null && !Scalar(type)
+                        || nativeOutput is not null && type != PrimitiveType.NativeStorageAddress
+                        || nativeParameter is not null && type != PrimitiveType.NativeRawPointer)
                     || !isNativeImport && mode == 2 && (scalarInitOutputRuleRevision == 0
                         || scalarInitOutputRuleRevision == TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision
                             && type != PrimitiveType.Int32
@@ -672,7 +688,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     var clause = contractTable.GetRow(contractFirst + contractIndex);
                     var kind = BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]);
-                    if (kind == 6 && isNativeImport)
+                    if ((kind is 6 or 10) && isNativeImport)
                     {
                         continue;
                     }
@@ -699,8 +715,32 @@ public static partial class TrRmExecutableCompiler
                         output.PointeeType,
                         output.ResultCondition, output.FailureDisposition));
                 }
+                var directParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>(
+                    nativeParameters.IsDefault ? 0 : nativeParameters.Length);
+                if (!nativeParameters.IsDefaultOrEmpty)
+                {
+                    foreach (var parameter in nativeParameters)
+                    {
+                        var typeSpecRow = parameters.GetTypeSpec(first + parameter.ParameterOrdinal);
+                        if (!TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+                                types, typeSpecRow, out var pointeeType)
+                            || parameter.Access is < 1 or > 3
+                            || parameter.Retention != (byte)NativeParameterRetention.NoEscape
+                            || parameter.Extent > int.MaxValue)
+                        {
+                            throw Invalid("Invalid direct native parameter contract.");
+                        }
+
+                        directParameters.Add(new DirectNativeParameter(parameter.ParameterOrdinal,
+                            pointeeType, (NativeParameterAccess)(parameter.Access - 1),
+                            (NativeParameterRetention)parameter.Retention, (int)parameter.Extent));
+                    }
+                }
                 directNativeImport = new DirectNativeImport(nativeImports.GetLibraryName(row),
-                    nativeImports.GetExportName(row), directOutputs.MoveToImmutable());
+                    nativeImports.GetExportName(row), directOutputs.MoveToImmutable())
+                {
+                    Parameters = directParameters.MoveToImmutable(),
+                };
             }
             functionIndexByMethodRow[row] = functions.Count;
             functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
@@ -1064,6 +1104,25 @@ public static partial class TrRmExecutableCompiler
         return null;
     }
 
+    private static TrRmNativeParameterContract? FindNativeParameter(
+        ImmutableArray<TrRmNativeParameterContract> parameters, int parameterIndex)
+    {
+        if (parameters.IsDefaultOrEmpty)
+        {
+            return null;
+        }
+
+        foreach (var parameter in parameters)
+        {
+            if (parameter.ParameterOrdinal == parameterIndex)
+            {
+                return parameter;
+            }
+        }
+
+        return null;
+    }
+
     private static int NativeOutputTypeRow(List<ReadOnlyMemory<byte>> typeRows,
         Dictionary<PrimitiveType, int> typeRowMap, PrimitiveType pointeeType)
     {
@@ -1089,6 +1148,41 @@ public static partial class TrRmExecutableCompiler
         }
         row = typeRows.Count + 1;
         typeRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C, s_codes[typeIndex], 1));
+        typeRowMap.Add(pointeeType, row);
+        return row;
+    }
+
+    private static int NativeParameterTypeRow(List<ReadOnlyMemory<byte>> typeRows,
+        Dictionary<PrimitiveType, int> typeRowMap, PrimitiveType pointeeType)
+    {
+        if (typeRowMap.TryGetValue(pointeeType, out var row))
+        {
+            return row;
+        }
+
+        if (pointeeType == PrimitiveType.Void)
+        {
+            row = typeRows.Count + 1;
+            typeRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0));
+        }
+        else if (pointeeType == PrimitiveType.NativeRawPointer)
+        {
+            var innerRow = typeRows.Count + 1;
+            typeRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0));
+            row = typeRows.Count + 1;
+            typeRows.Add(TrRmTypeSpecTableWriter.IndexedFamily(0x8C, (uint)innerRow));
+        }
+        else
+        {
+            var typeIndex = Array.IndexOf(s_types, pointeeType);
+            if (typeIndex < 0)
+            {
+                throw Unsupported($"Unsupported native parameter pointee type {pointeeType}.");
+            }
+            row = typeRows.Count + 1;
+            typeRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C, s_codes[typeIndex]));
+        }
+
         typeRowMap.Add(pointeeType, row);
         return row;
     }

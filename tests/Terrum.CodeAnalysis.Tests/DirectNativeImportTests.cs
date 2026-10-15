@@ -523,18 +523,124 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void TrRmNativeImportRejectsPointerInputWithoutAnApprovedContractEncoding()
+    public void TrRmNativeImportRoundTripsNativeParameterPointerInput()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             public extern int32 ReadValue(ptr<int32> value);
             """));
-        Assert.That(compilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
 
-        Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.Emit(compilation.Program!, "pointer-input"));
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-input");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var import = loaded.Functions.Single(static function =>
+            function.Name == "ReadValue").DirectNativeImport!;
+        Assert.That(import.Parameters,
+            Is.EqualTo(new[]
+            {
+                new DirectNativeParameter(0, PrimitiveType.Int32,
+                    NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 1),
+            }));
+
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.That(featureCount, Is.EqualTo(1));
+        Assert.That(features.GetFeature(1).FeatureId,
+            Is.EqualTo(TrRmFeatureTableReader.WindowsNamedNativeImportsFeatureId));
+
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var consumer = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 value = 42;
+                unsafe { return ReadValue(&value); }
+            }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var image = NativeEmitter.EmitWithNativeImports(
+            consumer.Program!, NativeRuntimePolicy.FailFast);
+        Assert.That(Encoding.ASCII.GetString(image), Does.Contain("ReadValue"));
+        Assert.That(Encoding.ASCII.GetString(image), Does.Contain("example.dll"));
+    }
+
+    [Test]
+    public void TrRmNativeImportRoundTripsNestedNativeParameterPointerInput()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "WritePointer")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            public extern int32 WritePointer(ptr<ptr<void>> value);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "nested-pointer-input");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var import = loaded.Functions.Single(static function =>
+            function.Name == "WritePointer").DirectNativeImport!;
+        Assert.That(import.Parameters,
+            Is.EqualTo(new[]
+            {
+                new DirectNativeParameter(0, PrimitiveType.NativeRawPointer,
+                    NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
+            }));
+
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var consumer = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut ptr<void> result = null;
+                unsafe { return WritePointer(&result); }
+            }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+
+        var image = NativeEmitter.EmitWithNativeImports(
+            consumer.Program!, NativeRuntimePolicy.FailFast);
+        Assert.That(Encoding.ASCII.GetString(image), Does.Contain("WritePointer"));
+    }
+
+    [Test]
+    public void TrRmNativeImportRoundTripsVoidPointeeNativeParameter()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "InspectPointer")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            public extern int32 InspectPointer(ptr<void> value);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "void-pointer-input");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var import = loaded.Functions.Single(static function =>
+            function.Name == "InspectPointer").DirectNativeImport!;
+        Assert.That(import.Parameters,
+            Is.EqualTo(new[]
+            {
+                new DirectNativeParameter(0, PrimitiveType.Void,
+                    NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            }));
+    }
+
+    [Test]
+    public void TrRmNativeImportRejectsMalformedNativeParameterContract()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 ReadValue(ptr<int32> value);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-input");
+        var malformed = MutateVariableRowByte(artifact, 0x001B, 2, 12, 0);
+
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
     }
 
     [Test]
