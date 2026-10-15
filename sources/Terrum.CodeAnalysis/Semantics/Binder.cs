@@ -2475,10 +2475,11 @@ internal sealed partial class Binder
                 Report("TRM3030", "Every NativeOutput ordinal must resolve to one supported pointer parameter.",
                     declaration.Span);
             }
-            if (returnType is not (PrimitiveType.Void or PrimitiveType.Int32 or PrimitiveType.UInt32))
+            if (returnType is not (PrimitiveType.Void or PrimitiveType.NativeRawPointer)
+                && !DirectNativeImportContract.IsScalar(returnType))
             {
                 Report("TRM3030",
-                    "The first direct native import profile requires a void, int32, or uint32 result.",
+                    "A direct native import result must have a directly supported scalar or raw-pointer representation.",
                     declaration.Span);
             }
             requiresUnsafeCaller = true;

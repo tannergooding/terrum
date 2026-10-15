@@ -57,6 +57,107 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeImportBindsOpaqueContextAndWritableBlittableRecordWithoutCatalogPolicy()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct FixtureRectangle {
+                int32 Left;
+                int32 Top;
+                int32 Right;
+                int32 Bottom;
+
+                public FixtureRectangle(int32 left, int32 top, int32 right, int32 bottom) {
+                    Left = left;
+                    Top = top;
+                    Right = right;
+                    Bottom = bottom;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadRectangle")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            extern int32 ReadRectangle(ptr<void> context, ptr<FixtureRectangle> rectangle);
+
+            int32 Main() {
+                mut FixtureRectangle rectangle = new FixtureRectangle(0, 0, 0, 0);
+                unsafe { return ReadRectangle(null, &rectangle); }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.NativeImportCatalog, Is.Null);
+        var import = compilation.Program.Functions.Single(static function =>
+            function.Name == "ReadRectangle");
+        Assert.That(import.Variables.Select(static variable => variable.Type),
+            Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.NativeRawPointer]));
+        Assert.That(import.DirectNativeImport!.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(1, (PrimitiveType)100,
+                NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
+        ]));
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(compilation.Program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ReadRectangle"));
+    }
+
+    [Test]
+    public void DirectNativeImportSupportsOpaquePointerAndFloatingResultsThroughTrRm()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "AcquireContext")]
+            public extern ptr<void> AcquireContext();
+
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadTemperature")]
+            public extern float64 ReadTemperature();
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-results");
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var consumer = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    ptr<void> context = AcquireContext();
+                    _ = ReadTemperature();
+                }
+                return 0;
+            }
+            """), reference);
+
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var imports = TrRmExecutableCompiler.Load(artifact).Functions
+            .Where(static function => function.IsExternal).ToArray();
+        Assert.That(imports.Select(static function => function.ReturnType),
+            Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.Float64]));
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(consumer.Program!, NativeRuntimePolicy.FailFast)),
+            Does.Contain("AcquireContext"));
+    }
+
+    [Test]
+    public void TrRmNativeImportRejectsWritablePointerResultType()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "AcquireContext")]
+            public extern ptr<void> AcquireContext();
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-result");
+        var resultTypeRow = FindVariableRow(artifact, 0x0011, [1, 0, 0x8C, 0]);
+        var malformed = MutateVariableRowByte(artifact, 0x0011, resultTypeRow, 1, 1);
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Test]
     public void NativeJitExecutesAValidatedSystem32DirectImport()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -1136,6 +1237,26 @@ public sealed class DirectNativeImportTests
         var result = artifact.ToArray();
         result[sectionOffset + offsetTableBytes + first + byteOffset] = value;
         return result;
+    }
+
+    private static int FindVariableRow(byte[] artifact, ushort sectionKind, byte[] expected)
+    {
+        var (sectionOffset, count) = FindSection(artifact, sectionKind);
+        var offsetTableBytes = checked((count + 1) * sizeof(uint));
+        for (var row = 1; row <= count; row++)
+        {
+            var first = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(sectionOffset + (row - 1) * sizeof(uint), sizeof(uint))));
+            var last = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(sectionOffset + row * sizeof(uint), sizeof(uint))));
+            var rowBytes = artifact.AsSpan(sectionOffset + offsetTableBytes + first, last - first);
+            if (rowBytes.SequenceEqual(expected))
+            {
+                return row;
+            }
+        }
+
+        throw new InvalidOperationException("The emitted artifact has no matching metadata row.");
     }
 
     private static byte[] RemoveNativeOutputWriteQualifier(byte[] artifact)

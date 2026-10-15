@@ -10,6 +10,27 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal static class TrRmNativeImportTypeContract
 {
+    internal static bool TryGetDirectNativeImportResultType(TrRmTypeSpecTableReader types,
+        int typeSpecRow, out PrimitiveType resultType)
+    {
+        var type = types.GetRow(typeSpecRow);
+        if (type.Length == 3 && type[0] == 1 && type[1] == 0)
+        {
+            if (type[2] == 0)
+            {
+                resultType = PrimitiveType.Void;
+                return true;
+            }
+
+            resultType = FromAtomicCode(type[2]);
+            return DirectNativeImportContract.IsScalar(resultType);
+        }
+
+        resultType = PrimitiveType.NativeRawPointer;
+        return type.Length == 4 && type[0] == 1 && type[1] == 0
+            && type[2] == 0x8C && type[3] == 0;
+    }
+
     internal static bool TryGetScalarType(TrRmTypeSpecTableReader types, int typeSpecRow,
         out PrimitiveType scalarType)
     {
@@ -241,7 +262,11 @@ public readonly ref struct TrRmNativeImportTableReader
         System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters)
     {
         var signature = methods.GetSignature(method);
-        var resultType = ScalarType(types, signatures.GetResultTypeSpec(signature));
+        if (!TrRmNativeImportTypeContract.TryGetDirectNativeImportResultType(
+                types, signatures.GetResultTypeSpec(signature), out var resultType))
+        {
+            throw InvalidNativeImport();
+        }
         var (first, count) = signatures.GetParamRange(signature);
         var seenOutputs = new bool[count];
         var seenNativeParameters = new bool[count];
@@ -364,10 +389,6 @@ public readonly ref struct TrRmNativeImportTableReader
 
     private static bool IsScalar(TrRmTypeSpecTableReader types, int row)
         => TrRmNativeImportTypeContract.TryGetScalarType(types, row, out _);
-
-    private static PrimitiveType ScalarType(TrRmTypeSpecTableReader types, int row)
-        => TrRmNativeImportTypeContract.TryGetScalarType(types, row, out var scalarType)
-            ? scalarType : PrimitiveType.Void;
 
     private ReadOnlySpan<byte> GetRow(int row)
     {

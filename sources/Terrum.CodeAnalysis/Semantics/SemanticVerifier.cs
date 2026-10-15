@@ -447,8 +447,10 @@ public static partial class SemanticVerifier
                 || (function.IsPrivate && function.IsInternal)
                 || (function.DoesNotReturn && function.ReturnType != PrimitiveType.Void)
                 || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeNullPointer or PrimitiveType.NativeRawPointer
-                    or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress
+                    or PrimitiveType.NativeNullPointer
+                || (function.ReturnType == PrimitiveType.NativeRawPointer
+                    && (!function.IsExternal || function.DirectNativeImport is null))
+                || function.ReturnType is PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress
                 || (function.ReturnType == PrimitiveType.NativeWindowHandle
                     && !NativeWindowCreationContract.IsCreateWindowFunction(function, program.NativeImportCatalog))
                 || (function.ReturnType == PrimitiveType.NativeModuleHandle

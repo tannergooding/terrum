@@ -92,7 +92,8 @@ internal static class DirectNativeImportContract
             || import.Outputs.IsDefault || import.Parameters.IsDefault
             || function.Variables.IsDefault || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length
-            || function.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32 or PrimitiveType.UInt32)
+            || function.ReturnType is not (PrimitiveType.Void or PrimitiveType.NativeRawPointer)
+                && !IsScalar(function.ReturnType)
             || import.Outputs.Length > function.ParameterCount)
         {
             return false;

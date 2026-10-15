@@ -125,6 +125,7 @@ public static partial class TrRmExecutableCompiler
             hasFloatingTypes |= features.HasFloatingTypes;
             if (function.DirectNativeImport is DirectNativeImport directImport)
             {
+                hasFloatingTypes |= IsFloat(function.ReturnType);
                 hasFloatingTypes |= directImport.Outputs.Any(static output => IsFloat(output.PointeeType));
                 hasFloatingTypes |= directImport.Parameters.Any(static parameter => IsFloat(parameter.PointeeType));
                 hasFloatingTypes |= function.Variables.Take(function.ParameterCount)
@@ -201,7 +202,9 @@ public static partial class TrRmExecutableCompiler
                 || function.IsClassConstructor || function.ClassConstructor != -1
                 || function.DeclaringStruct is not null || function.PropertyName is not null
                 || function.IsStatic || function.Intrinsic != BoundIntrinsic.None || function.IsCleanup
-                || !Scalar(function.ReturnType))
+                || !Scalar(function.ReturnType)
+                    && !(function.IsExternal && function.DirectNativeImport is not null
+                        && function.ReturnType == PrimitiveType.NativeRawPointer))
             {
                 throw Unsupported($"Function '{function.Name}' has an unsupported declaration or effect.");
             }
@@ -257,7 +260,11 @@ public static partial class TrRmExecutableCompiler
                     variable.IsInit && function.DirectNativeImport is null ? (byte)2 : (byte)0));
             }
 
-            signatures.Add(new TrRmMethodSigRow(TypeRow(function.ReturnType), 0,
+            var resultTypeRow = function.DirectNativeImport is not null
+                && function.ReturnType == PrimitiveType.NativeRawPointer
+                    ? NativeParameterTypeRow(typeRowsList, nativeParameterTypeRows, PrimitiveType.Void)
+                    : TypeRow(function.ReturnType);
+            signatures.Add(new TrRmMethodSigRow(resultTypeRow, 0,
                 first, function.ParameterCount, 0, 0));
             var bodyRow = 0;
             if (!function.IsExternal)
@@ -743,7 +750,14 @@ public static partial class TrRmExecutableCompiler
                 };
             }
             functionIndexByMethodRow[row] = functions.Count;
-            functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
+            var resultTypeRow = sigs.GetResultTypeSpec(signature);
+            var returnType = isNativeImport
+                ? TrRmNativeImportTypeContract.TryGetDirectNativeImportResultType(
+                    types, resultTypeRow, out var directImportReturnType)
+                        ? directImportReturnType
+                        : throw Invalid("Unsupported direct native import result type.")
+                : FromRow(types, resultTypeRow);
+            functions.Add(new BoundFunction(name, returnType,
                 variables.ToImmutable(), count, new BoundBlock([], default), default)
             {
                 IsNoThrow = noThrow,
