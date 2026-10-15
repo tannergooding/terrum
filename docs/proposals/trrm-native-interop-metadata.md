@@ -532,9 +532,11 @@ TRRM record alone does not prove provider conformance.
   Source-authored COM binding and verification exist. A bounded semantic
   producer/consumer experiment now serializes and reconstructs interface IID/
   ancestry, vtable slot/effect, and `NativeParameter` metadata using clauses
-  `7`, `8`, and `10`; it does not yet persist owner/acquisition clauses `9`
-  and `11`, bind COM calls through an independently selected dependency, or
-  lower owner acquisition and cleanup.
+  `7`, `8`, and `10`; a consumer-authored fixed-interface owner/acquisition
+  wrapper can bind against that reference and lower a vtable call. It does not
+  yet persist/reconstruct owner/acquisition clauses `9` and `11`, allowing
+  those wrappers to be supplied by a separate TRRM dependency, or establish
+  foreign COM runtime behavior.
 - The prototype represents `write ptr<T>` with the existing inline
   `TypeSpec` family encoding for `ptr<T>` (`familyCode=0x8C`, writable
   qualifier `0x01`, and the atomic code for `T`). This reuses the existing

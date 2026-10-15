@@ -150,6 +150,10 @@ public sealed class NativeComSourceMetadataTests
                 [Terrum.Interop.NativeComMethod(1)]
                 [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
                 unsafe int32 Scale(ptr<int32> factor);
+
+                [Terrum.Interop.NativeComMethod(2, ReleasesReference)]
+                [NoThrow]
+                unsafe uint32 Release();
             }
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             [Terrum.Interop.NativeOutput(0)]
@@ -163,7 +167,7 @@ public sealed class NativeComSourceMetadataTests
         Assert.That(index.TryGetSection(0x13, out _, out var typeCount), Is.True);
         Assert.That(typeCount, Is.EqualTo(1));
         Assert.That(index.TryGetSection(0x1B, out _, out var contractCount), Is.True);
-        Assert.That(contractCount, Is.EqualTo(8));
+        Assert.That(contractCount, Is.EqualTo(10));
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(TrRmFeatureTableReader.NativeComContractsFeatureId,
@@ -175,7 +179,11 @@ public sealed class NativeComSourceMetadataTests
             Is.EqualTo("Example.Interop.IClock"));
         var loadedMethods = loaded.NativeImportCatalog.ComMethods;
         Assert.That(loadedMethods.Select(static method => method.VTableMethodIdentity),
-            Is.EqualTo(["Example.Interop.IClock::Read", "Example.Interop.IClock::Scale"]));
+            Is.EqualTo([
+                "Example.Interop.IClock::Read",
+                "Example.Interop.IClock::Scale",
+                "Example.Interop.IClock::Release",
+            ]));
         Assert.That(loadedMethods[1].NativeParameters, Has.Length.EqualTo(1));
         Assert.That(loadedMethods[1].NativeParameters.Single(),
             Is.EqualTo(new NativeComParameterDefinition(1, NativeComParameterAccess.Read,
@@ -185,16 +193,42 @@ public sealed class NativeComSourceMetadataTests
         var consumer = Compilation.Create(SyntaxTree.Parse("""
             using Example.Interop;
 
+            [Terrum.Interop.NativeComOwner("IClock")]
+            public unique struct ClockOwner {
+                private ptr<void> Pointer;
+                public unsafe ClockOwner(ptr<void> pointer) {
+                    unsafe { Pointer = pointer; }
+                }
+            }
+
+            [Terrum.Interop.NativeImport("example.dll", "CreateClock")]
+            [Terrum.Interop.NativeOutput(0)]
+            public extern int32 CreateClock(write ptr<ptr<void>> output);
+
+            [Terrum.Interop.NativeComAcquisition(
+                0, "ClockOwner", "CreateClock", 0, OutputMayBeWrittenOnFailure)]
+            bool TryCreateClock(out ClockOwner owner) {
+                mut ptr<void> raw = null;
+                mut int32 result = 0;
+                unsafe { result = CreateClock(&raw); }
+                owner = unsafe(new ClockOwner(raw));
+                return result >= 0;
+            }
+
             int32 Main() {
-                mut int32 value = 0;
-                unsafe { return ReadValue(&value); }
+                if (TryCreateClock(out var clock)) {
+                    unsafe { return clock.Read() ? 0 : -1; }
+                }
+                return -1;
             }
             """), reference);
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
         Assert.That(consumer.Program!.NativeImportCatalog!.ComInterfaces.Single().NominalIdentity,
             Is.EqualTo("Example.Interop.IClock"));
-        Assert.That(consumer.Program.NativeImportCatalog.ComMethods.Length, Is.EqualTo(2));
+        var image = NativeEmitter.EmitWithNativeImports(consumer.Program,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(System.Text.Encoding.ASCII.GetString(image), Does.Contain("CreateClock"));
 
         var malformed = CorruptNativeComMethodSlot(artifact);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));

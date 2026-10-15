@@ -174,10 +174,14 @@ foreign COM runtime behavior. Provisional TRRM producer/consumer support now
 round-trips source-authored interface IIDs/base edges, vtable slots/effects,
 and `NativeParameter` facts through TypeDef/MethodDef rows and Contract clauses
 7, 8, and 10 under Feature ID 3/revision 1. The consumer reconstructs those
-facts into the generic COM catalog for source binding; it does not yet lower
-COM calls through TRRM or preserve owner cleanup/acquisition clauses 9 and 11.
-These wire assignments remain implementation experiments, not canonical TRRM
-assignments.
+facts into the generic COM catalog for source binding. An active regression
+uses that reference with a consumer-authored fixed-interface owner/acquisition
+wrapper and emits a vtable call; a malformed slot is rejected. The provider
+artifact does not yet persist/reconstruct `NativeComOwner` or
+`NativeComAcquisition` clauses 9 and 11, so those ownership wrappers cannot yet
+be supplied by a separate TRRM dependency. These wire assignments remain
+implementation experiments, not canonical TRRM assignments, and no foreign
+COM runtime behavior is established.
 
 ## Syntax and CLI
 
