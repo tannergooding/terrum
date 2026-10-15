@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -219,15 +220,68 @@ public static partial class NativeModuleCompiler
             StringComparer.OrdinalIgnoreCase));
         var program = ModuleCompiler.RestoreConsumerAgainstReference(root.Contract, GraphReference(direct));
         var declarations = NativeBindings(root.Dependencies);
-        var code = declarations.Length == 0
-            ? NativeEmitter.EmitCode(program, runtimePolicy)
-            : NativeEmitter.EmitCodeWithImports(program, declarations, runtimePolicy);
-        var used = root.Dependencies.SelectMany(item => item.Imports.Select(name =>
-            new NativeImportBinding(name, DllName(item.Identity), name))).ToArray();
+        var directBindings = DirectNativeBindings(program);
+        var imageBindings = new NativeImportBinding[declarations.Length + directBindings.Length];
+        declarations.CopyTo(imageBindings, 0);
+        directBindings.CopyTo(imageBindings, declarations.Length);
+        var (code, emittedImports) = imageBindings.Length == 0
+            ? (NativeEmitter.EmitCode(program, runtimePolicy),
+                ImmutableArray<NativeImportBinding>.Empty)
+            : NativeEmitter.EmitCodeWithImportUsage(program, imageBindings, runtimePolicy,
+                allowDirectNativeImports: directBindings.Length != 0);
+        var expectedImports = new List<NativeImportBinding>();
+        foreach (var dependency in root.Dependencies)
+        {
+            foreach (var name in dependency.Imports)
+            {
+                expectedImports.Add(new NativeImportBinding(name, DllName(dependency.Identity), name));
+            }
+        }
+        var directImportPairs = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (dllName, symbols) in ModuleCompiler.GetConsumerNativeImports(root.Contract))
+        {
+            foreach (var symbol in symbols)
+            {
+                _ = directImportPairs.Add(DirectImportKey(dllName, symbol));
+            }
+        }
+        var expectedDirectImports = new List<NativeImportBinding>();
+        foreach (var binding in directBindings)
+        {
+            if (directImportPairs.Remove(DirectImportKey(binding.DllName, binding.ExportName)))
+            {
+                expectedDirectImports.Add(binding);
+            }
+        }
+        if (directImportPairs.Count != 0)
+        {
+            throw new ModuleFormatException("Graph JIT direct import declarations differ from the retained calls.");
+        }
+        expectedImports.AddRange(expectedDirectImports);
+        var providerDllNames = new HashSet<string>(order.Length, StringComparer.OrdinalIgnoreCase);
+        foreach (var provider in order)
+        {
+            _ = providerDllNames.Add(DllName(provider.Identity!));
+        }
+        var directImportsByDll = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var binding in expectedDirectImports)
+        {
+            if (providerDllNames.Contains(binding.DllName))
+            {
+                throw new ModuleContractException(
+                    $"Graph JIT direct import DLL '{binding.DllName}' conflicts with a selected provider.");
+            }
+            if (!directImportsByDll.TryGetValue(binding.DllName, out var exports))
+            {
+                exports = [];
+                directImportsByDll.Add(binding.DllName, exports);
+            }
+            exports.Add(binding.ExportName);
+        }
         var images = new List<FileStream>(order.Length);
         try
         {
-            var modules = new List<NativeJitModule>(order.Length);
+            var modules = new List<NativeJitModule>(order.Length + directImportsByDll.Count);
             foreach (var provider in order)
             {
                 var imagePath = Path.Combine(directory, DllName(provider.Identity!));
@@ -245,7 +299,21 @@ public static partial class NativeModuleCompiler
                 }
                 modules.Add(new NativeJitModule(DllName(provider.Identity!), imagePath, provider.Exports));
             }
-            return NativeJit.ExecuteImportedCode(code, modules, used, registrarAssembly,
+            foreach (var (dllName, exports) in directImportsByDll)
+            {
+                exports.Sort(StringComparer.Ordinal);
+                modules.Add(new NativeJitModule(dllName,
+                    NativeEmitter.System32ImportPath(dllName), exports));
+            }
+            if (!emittedImports.Select(import => DirectImportKey(import.DllName,
+                    import.ExportName)).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(expectedImports.Select(import => DirectImportKey(import.DllName,
+                    import.ExportName))))
+            {
+                throw new ModuleFormatException(
+                    "Graph JIT emitted imports differ from the persisted import contracts.");
+            }
+            return NativeJit.ExecuteImportedCode(code, modules, expectedImports, registrarAssembly,
                 registrarInputPipe, registrarOutputPipe);
         }
         finally
@@ -256,6 +324,9 @@ public static partial class NativeModuleCompiler
             }
         }
     }
+
+    private static string DirectImportKey(string dllName, string exportName) =>
+        dllName.ToUpperInvariant() + "\0" + exportName;
 
     private static async Task ServiceGraphRegistrationAsync(Process process, Stream requests, Stream responses,
         CancellationToken cancellationToken)

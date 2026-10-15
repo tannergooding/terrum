@@ -31,8 +31,9 @@ instruction encoder, source interpreter or CIL/LLVM backend.
 Standalone `NativeJit.Execute` accepts direct source imports when every
 external declaration has a retained direct-import contract; it resolves those
 DLL names by absolute System32 path. Catalogued imports are not JIT bindings.
-The separate graph-JIT path continues to bind only selected provider DLLs and
-does not stage arbitrary raw-import DLLs.
+The graph-JIT root uses the same System32 path for direct imports while
+selected package imports resolve to staged provider DLLs. Neither path stages
+arbitrary raw-import DLLs.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll jit samples\native\factorial.terrum --runtime fail-fast

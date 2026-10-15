@@ -1,15 +1,29 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeGraphJitTests
 {
+    private static string CompilerApphost()
+    {
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        return Path.Combine(root, "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+    }
+
     [Test]
     public async Task RejectsUnboundedOrNullInputsBeforeSnapshotAllocationAsync()
     {
@@ -28,5 +42,38 @@ public sealed class NativeGraphJitTests
         _ = (await Assert.ThrowsAsync<ModuleFormatException>(() =>
             NativeModuleCompiler.RunGraphJitAsync(root,
                 [new byte[MaximumArtifactBytes + 1]], "missing.dll", timeout, Policy)))!;
+    }
+
+    [Test]
+    public async Task GraphJitExecutesDirectSystem32ImportsAlongsideProviderImportsAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const NativeRuntimePolicy Policy = NativeRuntimePolicy.FailFast;
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 ProviderValue() { return 42; }"), (BoundRuntimePolicy)Policy);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["ProviderValue"], "GraphJitProvider", Policy);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+            [NoThrow]
+            extern unsafe uint32 GetCurrentThreadId();
+
+            int32 Main() {
+                unsafe {
+                    if (GetCurrentThreadId() == 0) { return -1; }
+                }
+                return ProviderValue();
+            }
+            """), NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)Policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(consumerCompilation.Program!,
+            [provider], Policy);
+
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(consumer, [provider],
+            CompilerApphost(), TimeSpan.FromSeconds(15), Policy).ConfigureAwait(true), Is.EqualTo(42));
     }
 }

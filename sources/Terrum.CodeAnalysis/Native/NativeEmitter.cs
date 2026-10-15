@@ -146,7 +146,24 @@ public static class NativeEmitter
     /// <summary>Emits callable native code with verified external declaration bindings for graph JIT callers.</summary>
     internal static NativeCode EmitCodeWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
-        CompileWithImports(program, bindings, runtimePolicy, cancellationToken).Code;
+        EmitCodeWithImportUsage(program, bindings, runtimePolicy,
+            cancellationToken: cancellationToken).Code;
+
+    internal static (NativeCode Code, ImmutableArray<NativeImportBinding> Imports)
+        EmitCodeWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
+            NativeRuntimePolicy runtimePolicy, bool allowDirectNativeImports = false,
+            CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(bindings);
+        if (allowDirectNativeImports)
+        {
+            ValidateDirectNativeBindings(program, bindings);
+        }
+        var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken,
+            allowNativeImports: allowDirectNativeImports);
+        return (code, UsedImports(code, selected));
+    }
 
     internal static (NativeCode Code, ImmutableArray<NativeImportBinding> Imports)
         EmitCodeWithDirectNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
@@ -185,10 +202,8 @@ public static class NativeEmitter
             throw new ArgumentException("The program contains no direct native imports.", nameof(program));
         }
         var directBindings = bindings.ToImmutable();
-        ValidateDirectNativeBindings(program, directBindings);
-        var (code, selected) = CompileWithImports(program, directBindings, runtimePolicy,
-            cancellationToken, allowNativeImports: true);
-        return (code, UsedImports(code, selected));
+        return EmitCodeWithImportUsage(program, directBindings, runtimePolicy,
+            allowDirectNativeImports: true, cancellationToken: cancellationToken);
     }
 
     private static (NativeCode Code, Dictionary<int, NativeImportBinding> Selected)
