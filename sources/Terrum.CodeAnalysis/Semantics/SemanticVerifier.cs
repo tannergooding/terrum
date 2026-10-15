@@ -4560,6 +4560,9 @@ public static partial class SemanticVerifier
                                         && adaptation.Kind
                                         == NativeComParameterAdaptationKind.ValueOutputAddress);
                             }
+                            var isComBorrowedOwnerParameter = comNativeParameterMethod is not null
+                                && comNativeParameterMethod.BorrowedOwnerParameters.Contains(
+                                    comNativeParameterIndex);
                             isAllowedStorageAddress |= argument is BoundNativeStorageAddress aggregateAddress
                                 && aggregateStorageParameter is not null
                                 && NativeStorageParameterContract.MatchesAggregateAddress(aggregateAddress,
@@ -4694,7 +4697,8 @@ public static partial class SemanticVerifier
                                     initialized, declarations, function, program, ref remaining, depth + 1);
                             }
                             else if (comNativeParameter is not null
-                                && comNativeParameterMethod is not null)
+                                && comNativeParameterMethod is not null
+                                && !isComBorrowedOwnerParameter)
                             {
                                 if (argument is not BoundNativeStorageAddress address)
                                 {

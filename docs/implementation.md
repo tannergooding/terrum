@@ -197,7 +197,10 @@ owner acquisition, and cleanup. The metadata is an authored trust contract;
 it does not prove a foreign provider returned the declared interface. Focused
 synthetic tests cover a direct native import and a COM-method output
 acquisition, including mismatched interface, source ordinal, source method,
-and failure-disposition rejection. This source-level path does not establish
+and failure-disposition rejection. A source-authored owner is also inferred as
+a borrowed COM method parameter only for an exact single-interface pointer
+with read-only, no-escape, extent-one metadata; writable or escaping parameters
+do not gain owner-loan treatment. This source-level path does not establish
 foreign COM runtime behavior. Provisional TRRM producer/consumer support now
 round-trips source-authored interface IIDs/base edges, vtable slots/effects,
 and `NativeParameter` facts through TypeDef/MethodDef rows and Contract clauses

@@ -377,6 +377,81 @@ public sealed class NativeComSourceMetadataTests
     }
 
     [Test]
+    public void SourceComMethodsBorrowExactNoEscapeOwnerParameters()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            SourceComBorrowedOwnerCall("Read", "NoEscape")));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var useMethod = program.NativeImportCatalog!.ComMethods.Single(static method =>
+            method.Identity == "Example.Interop.IThing::UseThing");
+        Assert.That(useMethod.BorrowedOwnerParameters, Is.EqualTo([1]));
+        var structure = program.Structures.Single(static structure =>
+            structure.Name == "Example.Interop.ThingOwner");
+        var ownerType = (PrimitiveType)(100 + program.Structures.IndexOf(structure));
+        var useFunction = program.Functions.Single(static function =>
+            function.Name == "Example.Interop.ThingOwner.UseThing");
+        Assert.That(useFunction.Variables[1].Type, Is.EqualTo(ownerType));
+        var useFunctionIndex = program.Functions.IndexOf(useFunction);
+        var exercise = program.Functions.Single(static function =>
+            function.Name == "Example.Interop.ExerciseBorrowedOwner");
+        BoundCall? useCall = null;
+        _ = BoundTreeTraversal.RewriteCalls(exercise, call => {
+            if (call.Function == useFunctionIndex)
+            {
+                useCall = call;
+            }
+            return call;
+        });
+        Assert.That(useCall, Is.Not.Null);
+        Assert.That(useCall!.Arguments[1], Is.TypeOf<BoundReceiverLoan>());
+        Assert.That(useCall.NativeComCall!.Loans.Single(static loan => loan.ParameterIndex == 1)
+            .Owner.BoundOwnerName,
+            Is.EqualTo("Example.Interop.ThingOwner"));
+        _ = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
+    }
+
+    [TestCase("Read", "MayEscape")]
+    [TestCase("Write", "NoEscape")]
+    public void SourceComMethodDoesNotInferAnEscapingOrWritableOwnerLoan(
+        string access, string retention)
+    {
+        var source = SourceOwnerAcquisition
+            .Replace("NativeParameter(1, Read, NoEscape, 1)",
+                $"NativeParameter(1, {access}, {retention}, 1)", StringComparison.Ordinal)
+            .Replace("SetData(ptr<void> data);", "UseThing(ptr<IThing> other);", StringComparison.Ordinal);
+        var metadataCompilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(metadataCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, metadataCompilation.Diagnostics));
+        Assert.That(metadataCompilation.Program!.NativeImportCatalog!.ComMethods.Single(static method =>
+            method.Identity == "Example.Interop.IThing::UseThing").BorrowedOwnerParameters, Is.Empty);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            SourceComBorrowedOwnerCall(access, retention)));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3011"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    private static string SourceComBorrowedOwnerCall(string access, string retention) =>
+        SourceOwnerAcquisition
+            .Replace("NativeParameter(1, Read, NoEscape, 1)",
+                $"NativeParameter(1, {access}, {retention}, 1)", StringComparison.Ordinal)
+            .Replace("SetData(ptr<void> data);", "UseThing(ptr<IThing> other);", StringComparison.Ordinal)
+            .Replace("int32 Main() {",
+                "int32 ExerciseBorrowedOwner() {\n"
+                + "    if (TryAcquireThing(out var first)) {\n"
+                + "        unsafe { first.UseThing(first); }\n"
+                + "    }\n"
+                + "    return 0;\n"
+                + "}\n\n"
+                + "int32 Main() {", StringComparison.Ordinal);
+
+    [Test]
     public void SignedNonnegativeNativeOutputSupportsFixedOwnerAcquisition()
     {
         var source = SourceOwnerAcquisition.Replace("[Terrum.Interop.NativeOutput(0)]",

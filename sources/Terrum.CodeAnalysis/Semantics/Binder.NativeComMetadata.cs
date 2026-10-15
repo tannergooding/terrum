@@ -67,6 +67,13 @@ internal sealed partial class Binder
                     declaration.Span);
             }
         }
+        var ownedInterfaceIdentities = sourceOwners.Values
+            .Select(static owner => owner.InterfaceIdentity).ToHashSet(StringComparer.Ordinal);
+        if (_nativeImportCatalog is NativeImportCatalog existingCatalog)
+        {
+            ownedInterfaceIdentities.UnionWith(existingCatalog.ComOwners
+                .Select(static owner => owner.InterfaceIdentity));
+        }
         var hasNativeComMethodAttribute = false;
         foreach (var tree in _trees)
         {
@@ -306,6 +313,20 @@ internal sealed partial class Binder
                         }
                         hasNoThrow = true;
                     }
+                    var borrowedOwnerParameters = nativeParameters
+                        .Where(parameter => parameter.Access == NativeParameterAccess.Read
+                            && parameter.Retention == NativeParameterRetention.NoEscape
+                            && parameter.Extent == 1
+                            && parameter.ParameterIndex > 0
+                            && parameter.ParameterIndex < parameterTypes.Count
+                            && parameterTypes[parameter.ParameterIndex]
+                                .EndsWith("*", StringComparison.Ordinal)
+                            && !parameterTypes[parameter.ParameterIndex]
+                                .EndsWith("**", StringComparison.Ordinal)
+                            && ownedInterfaceIdentities.Contains(
+                                parameterTypes[parameter.ParameterIndex][..^1].Trim()))
+                        .Select(static parameter => parameter.ParameterIndex)
+                        .ToImmutableArray();
                     var method = new NativeComMethodDefinition(vtableIdentity, identity, identity,
                         slot, signature, abi, effects, IsCallable: true,
                         OutputParameterIndex: outputParameterIndex,
@@ -315,6 +336,7 @@ internal sealed partial class Binder
                         IsNoThrow = hasNoThrow,
                         RequiresNativeParameterMetadata = true,
                         NativeParameters = nativeParameters.ToImmutable(),
+                        BorrowedOwnerParameters = borrowedOwnerParameters,
                     };
                     declaredMethods.Add(method);
                 }
