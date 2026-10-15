@@ -12,13 +12,15 @@ public static class TrRmStructuralMetadataValidator
     internal readonly ref struct ValidatedExecutionTables
     {
         internal ValidatedExecutionTables(TrRmStringTableReader strings,
-            TrRmModuleTableReader modules, TrRmTypeSpecTableReader typeSpecs,
+            TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
+            TrRmTypeSpecTableReader typeSpecs,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
             TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
             TrRmContractTableReader contracts, TrRmNativeImportTableReader nativeImports)
         {
             Strings = strings;
             Modules = modules;
+            TypeDefs = typeDefs;
             TypeSpecs = typeSpecs;
             Signatures = signatures;
             Parameters = parameters;
@@ -30,6 +32,7 @@ public static class TrRmStructuralMetadataValidator
 
         internal TrRmStringTableReader Strings { get; }
         internal TrRmModuleTableReader Modules { get; }
+        internal TrRmTypeDefTableReader TypeDefs { get; }
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmMethodSigTableReader Signatures { get; }
         internal TrRmParamTableReader Parameters { get; }
@@ -233,7 +236,7 @@ public static class TrRmStructuralMetadataValidator
         _ = exports;
         _ = sourceFiles;
         _ = sourceMaps;
-        return new ValidatedExecutionTables(strings, modules, typeSpecs,
+        return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
             signatures, parameters, methods, bodies, contracts, nativeImports);
     }
 

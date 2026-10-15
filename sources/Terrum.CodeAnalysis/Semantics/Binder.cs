@@ -124,8 +124,9 @@ internal sealed partial class Binder
         _coreLibrary = coreLibrary;
         _reference = reference;
         _runtimePolicy = runtimePolicy;
-        _nativeImportCatalog = nativeImportCatalog;
-        _usesNativeImportCatalog = nativeImportCatalog?.SupportsCataloguedFixedArrayStorage == true;
+        _nativeImportCatalog = nativeImportCatalog ?? reference?.NativeImportCatalog;
+        _usesNativeImportCatalog = _nativeImportCatalog is NativeImportCatalog catalog
+            && (catalog.SupportsCataloguedFixedArrayStorage || catalog.SupportsNativeComContracts);
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null

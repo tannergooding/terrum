@@ -529,9 +529,12 @@ TRRM record alone does not prove provider conformance.
 - The separate structural COM reader experiment provisionally uses Contract
   kinds `7` through `11` and Feature ID `3`, rule revision `1`, as described
   above. These remain implementation experiments, not standard assignments.
-  Source-authored COM binding and verification exist, but semantic producer
-  serialization, dependency binding, and ownership lowering remain
-  unsupported.
+  Source-authored COM binding and verification exist. A bounded semantic
+  producer/consumer experiment now serializes and reconstructs interface IID/
+  ancestry, vtable slot/effect, and `NativeParameter` metadata using clauses
+  `7`, `8`, and `10`; it does not yet persist owner/acquisition clauses `9`
+  and `11`, bind COM calls through an independently selected dependency, or
+  lower owner acquisition and cleanup.
 - The prototype represents `write ptr<T>` with the existing inline
   `TypeSpec` family encoding for `ptr<T>` (`familyCode=0x8C`, writable
   qualifier `0x01`, and the atomic code for `T`). This reuses the existing

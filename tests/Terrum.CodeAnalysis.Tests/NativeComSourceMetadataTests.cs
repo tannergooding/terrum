@@ -1,8 +1,11 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -19,6 +22,10 @@ public sealed class NativeComSourceMetadataTests
             [Terrum.Interop.NativeComMethod(0, ReleasesReference)]
             [NoThrow]
             unsafe uint32 Release();
+
+            [Terrum.Interop.NativeComMethod(1)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            unsafe void SetData(ptr<void> data);
         }
 
         [Terrum.Interop.NativeComOwner("IThing")]
@@ -129,6 +136,71 @@ public sealed class NativeComSourceMetadataTests
         """;
 
     [Test]
+    public void SourceAuthoredComInterfaceRoundTripsThroughProvisionalTrRm()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            namespace Example.Interop;
+
+            [Terrum.Interop.NativeComInterface("76e1b75f-286c-4571-a9cd-43aa5b64a381")]
+            interface IClock {
+                [Terrum.Interop.NativeComMethod(0, SignedHResult)]
+                [NoThrow]
+                unsafe HRESULT Read();
+
+                [Terrum.Interop.NativeComMethod(1)]
+                [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+                unsafe int32 Scale(ptr<int32> factor);
+            }
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeOutput(0)]
+            public extern int32 ReadValue(write ptr<int32> value);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "com-marker");
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x13, out _, out var typeCount), Is.True);
+        Assert.That(typeCount, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x1B, out _, out var contractCount), Is.True);
+        Assert.That(contractCount, Is.EqualTo(8));
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.NativeComContractsFeatureId,
+            out var comFeature), Is.True);
+        Assert.That(comFeature, Is.EqualTo(TrRmFeatureRow.NativeComContracts));
+
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.That(loaded.NativeImportCatalog!.ComInterfaces.Single().NominalIdentity,
+            Is.EqualTo("Example.Interop.IClock"));
+        var loadedMethods = loaded.NativeImportCatalog.ComMethods;
+        Assert.That(loadedMethods.Select(static method => method.VTableMethodIdentity),
+            Is.EqualTo(["Example.Interop.IClock::Read", "Example.Interop.IClock::Scale"]));
+        Assert.That(loadedMethods[1].NativeParameters, Has.Length.EqualTo(1));
+        Assert.That(loadedMethods[1].NativeParameters.Single(),
+            Is.EqualTo(new NativeComParameterDefinition(1, NativeComParameterAccess.Read,
+                NativeComParameterRetention.NoEscape, 1)));
+
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var consumer = Compilation.Create(SyntaxTree.Parse("""
+            using Example.Interop;
+
+            int32 Main() {
+                mut int32 value = 0;
+                unsafe { return ReadValue(&value); }
+            }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        Assert.That(consumer.Program!.NativeImportCatalog!.ComInterfaces.Single().NominalIdentity,
+            Is.EqualTo("Example.Interop.IClock"));
+        Assert.That(consumer.Program.NativeImportCatalog.ComMethods.Length, Is.EqualTo(2));
+
+        var malformed = CorruptNativeComMethodSlot(artifact);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+    }
+
+    [Test]
     public void SourceAuthoredOwnerAndNativeImportAcquisitionAreGeneric()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(SourceOwnerAcquisition));
@@ -236,6 +308,46 @@ public sealed class NativeComSourceMetadataTests
             Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
         }
+    }
+
+    private static byte[] CorruptNativeComMethodSlot(byte[] artifact)
+    {
+        var sectionCount = BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12, sizeof(uint)));
+        for (var entry = 0; entry < sectionCount; entry++)
+        {
+            var directoryOffset = 32 + entry * 16;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(directoryOffset, sizeof(ushort)))
+                != 0x001B)
+            {
+                continue;
+            }
+            var count = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(directoryOffset + 4, sizeof(uint))));
+            var sectionOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(directoryOffset + 8, sizeof(uint))));
+            var offsetBytes = checked((count + 1) * sizeof(uint));
+            for (var row = 0; row < count; row++)
+            {
+                var first = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(sectionOffset + row * sizeof(uint), sizeof(uint))));
+                var last = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(sectionOffset + (row + 1) * sizeof(uint), sizeof(uint))));
+                var dataOffset = sectionOffset + offsetBytes + first;
+                if (last - first == 16
+                    && BinaryPrimitives.ReadUInt16LittleEndian(
+                        artifact.AsSpan(dataOffset + 4, sizeof(ushort))) == 8
+                    && BinaryPrimitives.ReadUInt32LittleEndian(
+                        artifact.AsSpan(dataOffset + 8, sizeof(uint))) == 0)
+                {
+                    var malformed = artifact.ToArray();
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        malformed.AsSpan(dataOffset + 8, sizeof(uint)), 5);
+                    return malformed;
+                }
+            }
+            break;
+        }
+        throw new InvalidOperationException("The emitted TRRM artifact has no zero-slot COM method clause.");
     }
 
     [Test]

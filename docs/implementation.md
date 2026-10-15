@@ -170,12 +170,14 @@ it does not prove a foreign provider returned the declared interface. Focused
 synthetic tests cover a direct native import and a COM-method output
 acquisition, including mismatched interface, source ordinal, source method,
 and failure-disposition rejection. This source-level path does not establish
-TRRM COM persistence: clauses 7–11 remain provisional structural-reader
-experiments and require the provisional NativeComContracts Feature assignment
-on their owning module. The low-level contract-table writer can frame those
-clause rows, but no semantic producer serializes source-authored COM metadata
-and no consumer reconstructs or binds COM dependencies for lowering. This
-also does not establish foreign COM runtime behavior.
+foreign COM runtime behavior. Provisional TRRM producer/consumer support now
+round-trips source-authored interface IIDs/base edges, vtable slots/effects,
+and `NativeParameter` facts through TypeDef/MethodDef rows and Contract clauses
+7, 8, and 10 under Feature ID 3/revision 1. The consumer reconstructs those
+facts into the generic COM catalog for source binding; it does not yet lower
+COM calls through TRRM or preserve owner cleanup/acquisition clauses 9 and 11.
+These wire assignments remain implementation experiments, not canonical TRRM
+assignments.
 
 ## Syntax and CLI
 

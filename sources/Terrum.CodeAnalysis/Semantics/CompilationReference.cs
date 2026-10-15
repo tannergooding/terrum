@@ -8,13 +8,15 @@ namespace Terrum.CodeAnalysis.Semantics;
 public sealed class CompilationReference
 {
     internal CompilationReference(ImmutableArray<BoundStruct> structures, ImmutableArray<BoundFunction> functions,
-        BoundRuntimePolicy runtimePolicy, bool requiresSourceGrant = false, string? invocationProfileId = null)
+        BoundRuntimePolicy runtimePolicy, bool requiresSourceGrant = false, string? invocationProfileId = null,
+        NativeImportCatalog? nativeImportCatalog = null)
     {
         Structures = structures;
         Functions = functions;
         RuntimePolicy = runtimePolicy;
         RequiresSourceGrant = requiresSourceGrant;
         InvocationProfileId = invocationProfileId;
+        NativeImportCatalog = nativeImportCatalog;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -31,4 +33,6 @@ public sealed class CompilationReference
 
     /// <summary>The retained provider's named invocation profile, if it has one.</summary>
     public string? InvocationProfileId { get; }
+
+    internal NativeImportCatalog? NativeImportCatalog { get; }
 }
