@@ -210,17 +210,24 @@ public static partial class ModuleCompiler
         byte[] producerBytes)
     {
         var producer = Read(producerBytes, expectedConsumer: false);
-        return GetProducerNativeImports(producer);
+        return GetDirectNativeImports(producer);
     }
 
     internal static IReadOnlyDictionary<string, IReadOnlyList<string>> GetGraphProducerNativeImports(
         byte[] producerBytes)
     {
         var producer = ReadGraphLibrary(producerBytes);
-        return GetProducerNativeImports(producer);
+        return GetDirectNativeImports(producer);
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyList<string>> GetProducerNativeImports(Module producer)
+    internal static IReadOnlyDictionary<string, IReadOnlyList<string>> GetConsumerNativeImports(
+        byte[] consumerBytes)
+    {
+        var consumer = Read(consumerBytes, expectedConsumer: true);
+        return GetDirectNativeImports(consumer);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> GetDirectNativeImports(Module producer)
     {
         var indexes = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
         for (var index = 0; index < producer.Functions.Length; index++)
@@ -855,7 +862,8 @@ public static partial class ModuleCompiler
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
     {
         ArgumentNullException.ThrowIfNull(program);
-        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules");
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
+            allowDirectNativeImports: true);
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
@@ -931,6 +939,23 @@ public static partial class ModuleCompiler
             }
             if (!hasExternalDeclarations && implementationFunctions.Contains(function.Name))
             {
+                if (functionCalls is not null)
+                {
+                    functionCalls[i] = null;
+                }
+                continue;
+            }
+            if (function.IsExternal && function.DirectNativeImport is not null)
+            {
+                if (!DirectNativeImportContract.IsValid(function) || exports.ContainsKey(function.Name))
+                {
+                    throw new ModuleContractException(
+                        $"Direct native import '{function.Name}' is invalid or ambiguous.");
+                }
+                declarations.Add(new ModuleFunction(function.Name,
+                    Contract(function, program.Structures), function, false) {
+                    HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                });
                 if (functionCalls is not null)
                 {
                     functionCalls[i] = null;

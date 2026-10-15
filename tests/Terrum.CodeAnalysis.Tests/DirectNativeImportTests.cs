@@ -126,6 +126,41 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeOutputCanBeCombinedWithOneNativeProducerDependency()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 ProviderValue() { return 40; }"));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["ProviderValue"], "ProviderValue", NativeRuntimePolicy.FailFast);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeOutput(0)]
+            public extern int32 ReadValue(write ptr<int32> value);
+
+            int32 Main() {
+                mut int32 value = 0;
+                unsafe {
+                    if (ReadValue(&value) == 0) { return ProviderValue() + value; }
+                }
+                return -1;
+            }
+            """), NativeModuleCompiler.CreateReference(provider));
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+
+        var consumer = NativeModuleCompiler.CreateConsumer(consumerCompilation.Program!, provider,
+            NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.Validate(consumer, provider);
+
+        var packageText = Encoding.ASCII.GetString(consumer);
+        Assert.That(packageText, Does.Contain("example.dll"));
+        Assert.That(packageText, Does.Contain("ProviderValue.dll"));
+        Assert.That(packageText, Does.Contain("ReadValue"));
+    }
+
+    [Test]
     public void PrivateSemanticModuleRevalidatesNativeOutputMetadata()
     {
         var source = """

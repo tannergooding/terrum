@@ -129,10 +129,16 @@ public static class NativeEmitter
     internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
             NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default,
-            bool allowNativeImports = false)
+            bool allowNativeImports = false, bool allowDirectNativeImports = false)
     {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(bindings);
+        if (allowDirectNativeImports)
+        {
+            ValidateDirectNativeBindings(program, bindings);
+        }
         var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken,
-            allowNativeImports);
+            allowNativeImports || allowDirectNativeImports);
         return (PeImage.Build(code), UsedImports(code, selected));
     }
 
@@ -338,10 +344,11 @@ public static class NativeEmitter
             IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
             CancellationToken cancellationToken = default, bool allowDirectNativeImports = false)
     {
+        ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(bindings);
         if (allowDirectNativeImports)
         {
-            ValidateDirectNativeLibraryBindings(program, bindings);
+            ValidateDirectNativeBindings(program, bindings);
         }
         return EmitLibraryCore(program, exports, bindings, runtimePolicy, cancellationToken,
             allowDirectNativeImports: allowDirectNativeImports);
@@ -380,7 +387,7 @@ public static class NativeEmitter
             allowDirectNativeImports: true).Image;
     }
 
-    private static void ValidateDirectNativeLibraryBindings(BoundProgram program,
+    private static void ValidateDirectNativeBindings(BoundProgram program,
         IReadOnlyList<NativeImportBinding> bindings)
     {
         var directFunctions = program.Functions.Where(static function => function.IsExternal

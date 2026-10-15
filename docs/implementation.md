@@ -153,14 +153,14 @@ import's caller-unsafety and direct representation through a provisional TRRM
 NativeImport table and source-reference path; that standard path is limited to
 named Windows System32 imports. Its section, clause, and Feature assignments
 are not canonical TRRM assignments. Direct imports with writable scalar
-outputs also round-trip through the private semantic producer and native
-package paths, where the PE imports are checked against the retained call
-contracts. Private native graph producers retain these imports separately from
-graph-provider dependencies; active coverage validates the producer and a
-consumer/provider graph pair with an unrelated synthetic DLL. This establishes
+outputs also round-trip through private semantic producer/consumer, native
+package, native consumer-set, and graph producer paths. Their PE imports are
+checked against retained calls and kept separate from selected provider
+dependencies. Active synthetic coverage validates single-provider and
+consumer-set pairs plus a graph consumer/provider pair. This establishes
 compilation, metadata validation, and PE emission—not execution of the foreign
-function. Graph execution does not stage arbitrary raw-import DLLs. JIT,
-module-set paths, semantic TRRM COM ownership/dependency binding, and runtime
+function. Graph and consumer-set execution do not stage arbitrary raw-import
+DLLs. JIT, semantic TRRM COM ownership/dependency binding, and runtime
 qualification remain unsupported by this slice.
 
 Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,

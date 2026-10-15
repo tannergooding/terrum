@@ -131,6 +131,30 @@ public sealed class NativeModuleSetsTests
     }
 
     [Test]
+    public void DirectNativeImportsRemainSeparateFromModuleSetDependencies()
+    {
+        var alpha = Producer(Alpha, "Alpha", "First");
+        var beta = Producer(Beta, "Beta", "Second");
+        var consumer = MakeConsumerSource("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeOutput(0)]
+            extern int32 ReadValue(write ptr<int32> value);
+
+            int32 Main() {
+                mut int32 value = 0;
+                unsafe {
+                    if (ReadValue(&value) == 0) { return Alpha() + Beta() + value; }
+                }
+                return -1;
+            }
+            """, alpha, beta);
+
+        Assert.That(NativeModuleCompiler.InspectConsumerSet(consumer).Dependencies,
+            Is.EqualTo(["First", "Second"]));
+        NativeModuleCompiler.ValidateConsumerSet(consumer, [beta, alpha]);
+    }
+
+    [Test]
     public void PersistedConsumerSetWithoutImportsValidatesAgainstPopulatedProviders()
     {
         var alpha = Producer("""

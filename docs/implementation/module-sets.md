@@ -53,6 +53,10 @@ come from the same emission's fixups, including implicit recursive cleanup calls
 They must belong to the selected provider's retained declarations, cover
 semantic calls, and exactly match the persisted PE's import table. Keeping a
 declaration for type or cleanup contracts does not itself create an IAT entry.
+Source-authored direct native imports are retained in the consumer's semantic
+module and checked against the same PE import table, separately from provider
+exports. Their arbitrary DLLs are not set dependencies or staged by set
+execution; the Windows loader must resolve them under its normal search policy.
 
 The set is intentionally leaf-only: it does not model transitive graphs,
 cycles, arbitrary version roll-forward, hot servicing, resilient layouts,

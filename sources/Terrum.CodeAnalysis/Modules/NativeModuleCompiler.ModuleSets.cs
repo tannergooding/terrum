@@ -59,22 +59,23 @@ public static partial class NativeModuleCompiler
                 _ = externalFunctionNames.Add(function.Name);
             }
         }
-        var bindings = new List<NativeImportBinding>(imports.Count);
+        var providerBindings = new List<NativeImportBinding>(imports.Count);
         foreach (var provider in providers)
         {
             foreach (var function in provider.Reference.Functions)
             {
                 if (externalFunctionNames.Contains(function.Name))
                 {
-                    bindings.Add(new NativeImportBinding(function.Name, DllName(provider.Package.Identity), function.Name));
+                    providerBindings.Add(new NativeImportBinding(function.Name,
+                        DllName(provider.Package.Identity), function.Name));
                 }
             }
         }
-        if (bindings.Count == 0 || bindings.Count != imports.Count)
+        if (providerBindings.Count != imports.Count)
         {
             throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
         }
-        foreach (var binding in bindings)
+        foreach (var binding in providerBindings)
         {
             if (!imports.Remove(binding.FunctionName))
             {
@@ -85,8 +86,28 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
         }
-        var (image, used) = NativeEmitter.EmitWithImportUsage(program, bindings, runtimePolicy);
-        var artifact = WriteSet(providers, runtimePolicy, semantic, image, used, contractSnapshot);
+        var directNativeBindings = DirectNativeBindings(program);
+        var providerBindingNames = new HashSet<string>(providerBindings.Count, StringComparer.Ordinal);
+        foreach (var binding in providerBindings)
+        {
+            _ = providerBindingNames.Add(binding.FunctionName);
+        }
+        var imageBindings = new List<NativeImportBinding>(
+            providerBindings.Count + directNativeBindings.Length);
+        imageBindings.AddRange(providerBindings);
+        imageBindings.AddRange(directNativeBindings);
+        var (image, used) = NativeEmitter.EmitWithImportUsage(program, imageBindings, runtimePolicy,
+            allowDirectNativeImports: directNativeBindings.Length != 0);
+        var providerUsedBuilder = ImmutableArray.CreateBuilder<NativeImportBinding>();
+        foreach (var import in used)
+        {
+            if (providerBindingNames.Contains(import.FunctionName))
+            {
+                providerUsedBuilder.Add(import);
+            }
+        }
+        var artifact = WriteSet(providers, runtimePolicy, semantic, image,
+            providerUsedBuilder.ToImmutable(), contractSnapshot);
         ValidateSet(ReadSet(artifact), providers);
         return artifact;
     }
@@ -264,27 +285,51 @@ public static partial class NativeModuleCompiler
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> Imports(SetPackage set)
     {
-        var count = 0;
+        var imports = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var dependency in set.Dependencies)
         {
-            if (dependency.MachineImports.Length != 0)
+            if (dependency.MachineImports.Length == 0)
             {
-                count++;
+                continue;
+            }
+            var dllName = DllName(dependency.Identity);
+            if (!imports.TryGetValue(dllName, out var symbols))
+            {
+                symbols = new HashSet<string>(StringComparer.Ordinal);
+                imports.Add(dllName, symbols);
+            }
+            foreach (var symbol in dependency.MachineImports)
+            {
+                _ = symbols.Add(symbol);
             }
         }
-        if (count == 0)
+        foreach (var (dllName, directImports) in
+            ModuleCompiler.GetConsumerNativeImports(set.Contract))
+        {
+            if (!imports.TryGetValue(dllName, out var symbols))
+            {
+                symbols = new HashSet<string>(StringComparer.Ordinal);
+                imports.Add(dllName, symbols);
+            }
+            foreach (var symbol in directImports)
+            {
+                _ = symbols.Add(symbol);
+            }
+        }
+        if (imports.Count == 0)
         {
             return ImmutableDictionary<string, IReadOnlyList<string>>.Empty;
         }
-        var imports = new Dictionary<string, IReadOnlyList<string>>(count, StringComparer.Ordinal);
-        foreach (var dependency in set.Dependencies)
+        var result = new Dictionary<string, IReadOnlyList<string>>(imports.Count,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var (dllName, symbols) in imports)
         {
-            if (dependency.MachineImports.Length != 0)
-            {
-                imports.Add(DllName(dependency.Identity), dependency.MachineImports);
-            }
+            var sorted = new string[symbols.Count];
+            symbols.CopyTo(sorted);
+            Array.Sort(sorted, StringComparer.Ordinal);
+            result.Add(dllName, sorted);
         }
-        return imports;
+        return result;
     }
 
     private static byte[] WriteSet(ValidatedProvider[] providers, NativeRuntimePolicy policy, byte[] contract, byte[] image,

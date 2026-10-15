@@ -71,32 +71,42 @@ public static partial class NativeModuleCompiler
         var contract = ModuleCompiler.CreateConsumer(program, package.Contract);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
         var dll = DllName(package.Identity);
-        var bindings = new List<NativeImportBinding>();
-        var bindingNames = new HashSet<string>(StringComparer.Ordinal);
+        var providerBindings = new List<NativeImportBinding>();
+        var providerBindingNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var function in program.Functions)
         {
-            if (!function.IsExternal)
+            if (!function.IsExternal || function.DirectNativeImport is not null)
             {
                 continue;
             }
             var binding = new NativeImportBinding(function.Name, dll, function.Name);
-            bindings.Add(binding);
-            bindingNames.Add(binding.FunctionName);
+            providerBindings.Add(binding);
+            _ = providerBindingNames.Add(binding.FunctionName);
         }
         var imports = contractSnapshot.CallImports;
         foreach (var import in imports)
         {
-            if (!bindingNames.Contains(import))
+            if (!providerBindingNames.Contains(import))
             {
                 throw new ModuleContractException("Persisted consumer calls differ from native import bindings.");
             }
         }
-        var (image, used) = NativeEmitter.EmitWithImportUsage(program, bindings, runtimePolicy);
-        var machineImports = new string[used.Length];
-        for (var i = 0; i < machineImports.Length; i++)
+        var directNativeBindings = DirectNativeBindings(program);
+        var imageBindings = new List<NativeImportBinding>(
+            providerBindings.Count + directNativeBindings.Length);
+        imageBindings.AddRange(providerBindings);
+        imageBindings.AddRange(directNativeBindings);
+        var (image, used) = NativeEmitter.EmitWithImportUsage(program, imageBindings, runtimePolicy,
+            allowDirectNativeImports: directNativeBindings.Length != 0);
+        var machineImportsBuilder = new List<string>(used.Length);
+        foreach (var import in used)
         {
-            machineImports[i] = used[i].FunctionName;
+            if (providerBindingNames.Contains(import.FunctionName))
+            {
+                machineImportsBuilder.Add(import.FunctionName);
+            }
         }
+        var machineImports = machineImportsBuilder.ToArray();
         var consumer = Write(isConsumer: true, package.Identity, runtimePolicy, contract, image,
             machineImports, contractSnapshot);
         ValidatePair(Read(consumer), provider);
@@ -290,12 +300,43 @@ public static partial class NativeModuleCompiler
     {
         var contractSnapshot = consumer.ContractSnapshot
             ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.");
-        IReadOnlyList<string> imports = consumer.MachineImports;
-        IReadOnlyDictionary<string, IReadOnlyList<string>> groups = imports.Count == 0
-            ? EmptyProviderImports
-            : new Dictionary<string, IReadOnlyList<string>>(1, StringComparer.Ordinal) {
-                [DllName(consumer.Identity)] = imports,
-            };
+        var imports = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        if (consumer.MachineImports.Length != 0)
+        {
+            var symbols = new HashSet<string>(consumer.MachineImports, StringComparer.Ordinal);
+            imports.Add(DllName(consumer.Identity), symbols);
+        }
+        foreach (var (dllName, directImports) in
+            ModuleCompiler.GetConsumerNativeImports(consumer.Contract))
+        {
+            if (!imports.TryGetValue(dllName, out var symbols))
+            {
+                symbols = new HashSet<string>(StringComparer.Ordinal);
+                imports.Add(dllName, symbols);
+            }
+            foreach (var symbol in directImports)
+            {
+                _ = symbols.Add(symbol);
+            }
+        }
+        IReadOnlyDictionary<string, IReadOnlyList<string>> groups;
+        if (imports.Count == 0)
+        {
+            groups = EmptyProviderImports;
+        }
+        else
+        {
+            var expected = new Dictionary<string, IReadOnlyList<string>>(imports.Count,
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var (dllName, symbols) in imports)
+            {
+                var sorted = new string[symbols.Count];
+                symbols.CopyTo(sorted);
+                Array.Sort(sorted, StringComparer.Ordinal);
+                expected.Add(dllName, sorted);
+            }
+            groups = expected;
+        }
         var profile = contractSnapshot.Profile;
         NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(profile),

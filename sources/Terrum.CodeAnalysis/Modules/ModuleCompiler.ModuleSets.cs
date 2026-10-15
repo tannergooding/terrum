@@ -131,7 +131,8 @@ public static partial class ModuleCompiler
         bool allowManagedParticipant = false)
     {
         ArgumentNullException.ThrowIfNull(program);
-        SemanticVerifier.RejectSourceNativeImports(program, "semantic module sets");
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic module sets",
+            allowDirectNativeImports: true);
         if (reference.RequiresSourceGrant)
         {
             throw new ModuleContractException("Native module sets do not support Host.Source requirements.");
@@ -161,6 +162,20 @@ public static partial class ModuleCompiler
         {
             if (function.IsExternal)
             {
+                if (function.DirectNativeImport is not null)
+                {
+                    if (!DirectNativeImportContract.IsValid(function)
+                        || reference.Functions.Any(export => export.Name == function.Name))
+                    {
+                        throw new ModuleContractException(
+                            $"Direct native import '{function.Name}' is invalid or ambiguous.");
+                    }
+                    declarations.Add(new ModuleFunction(function.Name,
+                        Contract(function, program.Structures), function, false) {
+                        HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                    });
+                    continue;
+                }
                 available ??= reference.Functions.IsEmpty
                     ? ImmutableDictionary<string, BoundFunction>.Empty
                     : reference.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
