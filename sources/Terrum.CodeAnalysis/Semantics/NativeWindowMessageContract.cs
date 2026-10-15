@@ -267,12 +267,12 @@ internal static class NativeWindowMessageContract
     internal static bool IsAccessorWindowArgument(BoundExpression argument, BoundFunction target,
         int parameter, BoundFunction caller, BoundProgram program) =>
         parameter == 1 && target.Name == WindowIsAccessorName && IsAccessorFunction(target)
-        && NativeWindowOwnerContract.IsOwnerHandleFieldRead(argument, caller, program);
+        && NativeHandleOwnerContract.IsOwnerHandleFieldRead(argument, caller, program);
 
     internal static bool IsWindowProcedureHandleArgument(BoundExpression argument, BoundFunction target,
         int parameter, BoundFunction caller, BoundProgram program)
         => parameter == 0 && target.NativeImportKey is DefWindowProcKey or PostMessageKey
-        && caller.Name == NativeWindowOwnerContract.CallbackName
         && argument is BoundRead { Variable: 0, Type: PrimitiveType.NativeWindowHandle }
-        && NativeWindowOwnerContract.MatchesProgram(program);
+        && program.NativeImportCatalog?.MatchesCallbackFunction(
+            PrimitiveType.NativeCallbackAddress, caller) == true;
 }

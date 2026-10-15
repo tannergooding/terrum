@@ -231,7 +231,6 @@ public static partial class SemanticVerifier
                     layout.TypeName == @class.Name) == true
                 || program.NativeImportCatalog?.IsCallbackTypeName(@class.Name) == true
                 || NativeWindowMessageContract.IsTypeName(@class.Name)
-                || NativeWindowOwnerContract.IsReservedTypeName(@class.Name)
                 || NativeComCallContract.IsCataloguedOwnerName(@class.Name, program.NativeImportCatalog)
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
@@ -308,17 +307,6 @@ public static partial class SemanticVerifier
                 layoutStates[index] = 2;
                 return;
             }
-            if (structure is not null && structure.Name == NativeWindowOwnerContract.TypeName)
-            {
-                if (!NativeWindowOwnerContract.MatchesProgram(program) || !structNames.Add(structure.Name))
-                {
-                    throw InvalidEffect(default, "NativeImport");
-                }
-                alignments[index] = 8;
-                layoutHeights[index] = 1;
-                layoutStates[index] = 2;
-                return;
-            }
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
                 || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
                     or NativeManagedNodeIntrinsics.HeapName or NativeWindowHandleContract.TypeName
@@ -328,7 +316,6 @@ public static partial class SemanticVerifier
                     layout.TypeName == structure.Name) == true
                 || program.NativeImportCatalog?.IsCallbackTypeName(structure.Name) == true
                 || NativeWindowMessageContract.IsTypeName(structure.Name)
-                || NativeWindowOwnerContract.IsReservedTypeName(structure.Name)
                 || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
@@ -352,7 +339,8 @@ public static partial class SemanticVerifier
                             program.Structures, isReadonly: false)
                         && !NativeStorageParameterContract.SupportsAggregateType(
                             program.NativeImportCatalog, (PrimitiveType)(100 + index),
-                            program.Structures, isReadonly: true))
+                            program.Structures, isReadonly: true)
+                        && !NativeHandleOwnerContract.IsWindowHandleField(structure, field))
                     || NativeFixedArrayContract.IsCarrier(field.Type)
                     || IsRestrictedNativeDescriptor(field.Type))
                 {
@@ -507,15 +495,11 @@ public static partial class SemanticVerifier
                                 || classFacts.ClassNameLiteralIndex < 0
                                 || classFacts.ClassNameLiteralIndex >= program.NativeUtf16ZLiterals.Length
                                 || program.NativeImportCatalog?.SupportsWindowClassInitialization != true
-                                || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
-                                    && !NativeWindowOwnerContract.MatchesProgram(program))
                             : variable.NativeWindowClassExFacts is not null)
                         || (variable.Type == PrimitiveType.NativeWindowClassExAddress
-                            && (!function.IsExternal || variableIndex >= function.ParameterCount
-                                || function.NativeImportKey != NativeWindowClassContract.RegisterClassExKey
-                                || program.NativeImportCatalog?.SupportsWindowClassInitialization != true
-                                || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
-                                    && !NativeWindowOwnerContract.MatchesProgram(program))))
+                            && (!function.IsExternal                             || variableIndex >= function.ParameterCount
+                            || function.NativeImportKey != NativeWindowClassContract.RegisterClassExKey
+                            || program.NativeImportCatalog?.SupportsWindowClassInitialization != true))
                         || (variable.Type == PrimitiveType.NativeWindowMessage
                             ? function.IsExternal || function.IndexedBody is not null
                                 || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -2151,20 +2135,6 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "NativeImport");
         }
-        if (NativeWindowClassContract.MatchesCatalog(catalog))
-        {
-            if (NativeWindowOwnerContract.HasOwnerType(program.Structures))
-            {
-                if (!NativeWindowOwnerContract.MatchesProgram(program))
-                {
-                    throw InvalidEffect(default, "NativeImport");
-                }
-            }
-            else
-            {
-                VerifyNativeWindowClassLifecycles(program);
-            }
-        }
     }
 
     internal static void RejectSourceNativeImports(BoundProgram program, string target,
@@ -3580,7 +3550,7 @@ public static partial class SemanticVerifier
                 Type: PrimitiveType.NativeWindowHandle,
             } window
                 && NativeWindowCreationContract.IsCreatedWindowLocal(caller, window.Variable, program)
-            || NativeWindowOwnerContract.IsOwnedHandleExpression(argument, caller, program));
+            || NativeHandleOwnerContract.IsOwnedHandleExpression(argument, caller, program));
 
     private static void Expression(BoundExpression expression, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
@@ -3601,8 +3571,8 @@ public static partial class SemanticVerifier
             && !allowPlainAggregateWindowHandle
             && !(allowCreatedWindowResult && expression is (BoundCall or BoundRead))
             && !IsPlainAggregateWindowHandleParameter(expression, function, program)
-            && !NativeWindowOwnerContract.IsOwnerHandleFieldRead(expression, function, program)
-            && !NativeWindowOwnerContract.IsOwnedHandleExpression(expression, function, program)
+            && !NativeHandleOwnerContract.IsOwnerHandleFieldRead(expression, function, program)
+            && !NativeHandleOwnerContract.IsOwnedHandleExpression(expression, function, program)
             && !(allowCallbackWindowHandle
                 && program.NativeImportCatalog?.MatchesCallbackFunction(
                     PrimitiveType.NativeCallbackAddress, function) == true
@@ -3663,7 +3633,7 @@ public static partial class SemanticVerifier
                 break;
             case BoundNativeNoOwner noOwner:
                 if (!allowPlainAggregateWindowHandle
-                    && !NativeWindowOwnerContract.IsOwnedHandleExpression(noOwner, function, program))
+                    && !NativeHandleOwnerContract.IsOwnedHandleExpression(noOwner, function, program))
                 {
                     throw InvalidEffect(expression.Span, "NativeImport");
                 }
@@ -3700,22 +3670,21 @@ public static partial class SemanticVerifier
                         Variable: 0, Type: PrimitiveType.NativeWindowHandle,
                     }
                     && program.NativeImportCatalog?.MatchesCallbackFunction(
-                        PrimitiveType.NativeCallbackAddress, function) == true
-                    && program.RuntimePolicy == BoundRuntimePolicy.FailFast;
-                var isCreatedWindowNullTest = handleTest.Type == PrimitiveType.Bool && !handleTest.IsNegated
+                        PrimitiveType.NativeCallbackAddress, function) == true;
+                var isCreatedWindowTest = handleTest.Type == PrimitiveType.Bool
                     && handleTest.Handle is BoundRead {
                         Type: PrimitiveType.NativeWindowHandle,
                     } createdWindow
                     && NativeWindowCreationContract.IsCreatedWindowLocal(
                         function, createdWindow.Variable, program);
                 if (handleTest.Type != PrimitiveType.Bool
-                    || (!isCallbackHandleTest && !isCreatedWindowNullTest
-                        && !NativeWindowOwnerContract.IsOwnerHandleComparison(handleTest, function, program)))
+                    || (!isCallbackHandleTest && !isCreatedWindowTest
+                        && !NativeHandleOwnerContract.IsOwnerHandleComparison(handleTest, function, program)))
                 {
                     throw InvalidEffect(handleTest.Span, "NativeImport");
                 }
                 Expression(handleTest.Handle, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures, allowCreatedWindowResult: isCreatedWindowNullTest,
+                    ref remaining, depth + 1, failures, allowCreatedWindowResult: isCreatedWindowTest,
                     allowCallbackWindowHandle: isCallbackHandleTest);
                 break;
             case BoundNull:
@@ -4726,8 +4695,7 @@ public static partial class SemanticVerifier
                                             != function.DeclaringStruct)
                                     || !NativeCallbackContract.MatchesFunction(
                                         program.Functions[callback.Function], callbackParameter.Signature)
-                                    || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
-                                        && !NativeWindowOwnerContract.MatchesProgram(program)))
+                                    )
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
@@ -4825,13 +4793,8 @@ public static partial class SemanticVerifier
                                 throw InvalidEffect(argument.Span, "NativeImport");
                             }
                             else if (IsNativeUtfZPointer(target.Variables[parameterSlot].Type)
-                                && !HasValidNativeStringArgument(argument, target.Variables[parameterSlot].Type,
-                                    parameterIndex, target, program)
-                                || (IsNativeUtfZPointer(target.Variables[parameterSlot].Type)
-                                    && (target.NativeImportKey is NativeWindowCreationContract.CreateWindowExKey
-                                        or NativeWindowClassContract.UnregisterClassKey)
-                                    && !IsRegisteredWindowClassNameArgument(
-                                        argument, target, parameterIndex, function, program)))
+                                && !HasValidNativeStringArgument(argument,
+                                    target.Variables[parameterSlot].Type, parameterIndex, target, program))
                             {
                                 throw InvalidEffect(argument.Span, "NativeImport");
                             }
@@ -4921,13 +4884,6 @@ public static partial class SemanticVerifier
                                 {
                                     if (!HasValidNativeStringArgument(argument,
                                         target.Variables[parameterSlot].Type, parameterIndex, target, program))
-                                    {
-                                        throw InvalidEffect(argument.Span, "NativeImport");
-                                    }
-                                    if ((target.NativeImportKey is NativeWindowCreationContract.CreateWindowExKey
-                                        or NativeWindowClassContract.UnregisterClassKey)
-                                        && !IsRegisteredWindowClassNameArgument(
-                                            argument, target, parameterIndex, function, program))
                                     {
                                         throw InvalidEffect(argument.Span, "NativeImport");
                                     }

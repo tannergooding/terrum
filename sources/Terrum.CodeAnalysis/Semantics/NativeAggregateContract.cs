@@ -112,7 +112,7 @@ internal static class NativeAggregateContract
         BoundFunction target, int parameter, BoundFunction caller, BoundProgram program)
     {
         var hasWindowHandleProvenance = argument is BoundNativeNoOwner
-            || NativeWindowOwnerContract.IsOwnedWindowArgument(argument, caller, program)
+            || NativeHandleOwnerContract.IsOwnedWindowArgument(argument, caller, program)
             || argument is BoundRead {
                 Type: PrimitiveType.NativeWindowHandle,
                 Variable: var windowVariable,

@@ -157,7 +157,7 @@ internal static class NativeWindowCreationContract
             || (key == NativeWindowMessageContract.PeekMessageKey && parameter == 1)
             || (key == SetWindowPosKey && parameter == 0))
         {
-            return NativeWindowOwnerContract.IsOwnedWindowArgument(argument, caller, program);
+            return NativeHandleOwnerContract.IsOwnedWindowArgument(argument, caller, program);
         }
         if (parameter != 0 || key != DestroyWindowKey && key != NativeWindowClientRectContract.ImportKey)
         {
@@ -171,7 +171,7 @@ internal static class NativeWindowCreationContract
             BoundRead { Type: PrimitiveType.NativeWindowHandle } window =>
                 IsCreatedWindowLocal(caller, window.Variable, program),
             BoundFieldRead { Type: PrimitiveType.NativeWindowHandle } =>
-                NativeWindowOwnerContract.IsOwnedWindowArgument(argument, caller, program),
+                NativeHandleOwnerContract.IsOwnedWindowArgument(argument, caller, program),
             _ => false,
         };
     }
@@ -187,8 +187,6 @@ internal static class NativeWindowCreationContract
         }
         && variable >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
         && !function.IsExternal
-        && function.Variables.Any(static local => local.Type == PrimitiveType.NativeWindowClassEx)
-        && program.RuntimePolicy == BoundRuntimePolicy.FailFast
         && NativeWindowClassContract.MatchesCatalog(program.NativeImportCatalog);
 
     internal static bool IsCreatedWindowInitializer(BoundExpression initializer, int variable,

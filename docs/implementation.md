@@ -209,14 +209,15 @@ silently treating inspectable Body forms as executable.
 
 DX11 generalization remains incomplete: the Windows x64 compiler catalog still
 installs `NativeDx11ComCatalog` with D3D imports, COM identities/methods, and
-native storage layouts, while `NativeWindowOwnerContract` still recognizes
-the exact `Triangle.Interop.WindowOwner`/`Host` protocol. Source-authored COM
-metadata does not yet replace those direct-import, descriptor-storage, and
-window-lifecycle contracts. The active test project excludes the unconverted
-DX11 and Win32-window prototypes, so those files are not acceptance evidence.
-Generic source/dependency contracts for the remaining native storage, handle,
-and callback paths are still required before these policies can be removed
-without losing the intended sample behavior.
+native storage layouts. Window-handle ownership no longer depends on the exact
+`Triangle.Interop.WindowOwner`/`Host` protocol; it uses a unique type with a
+private readonly handle field and ordinary cleanup. However, the window API
+imports, callback and descriptor contracts, and DX11 storage layouts remain
+compiler-catalogued rather than authored dependencies. The active test project
+excludes the unconverted DX11 and Win32-window prototypes, so those files are
+not acceptance evidence. Generic source/dependency contracts for the
+remaining native storage, callback, and API-import paths are still required
+before the DX11 catalog can be removed without losing the intended behavior.
 
 ## Syntax and CLI
 
