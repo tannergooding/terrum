@@ -162,6 +162,8 @@ internal sealed partial class Binder
                         AttributeName(attribute) == "Terrum.Interop.NativeOutput").ToArray();
                     var nativeParameters = ImmutableArray.CreateBuilder<NativeParameterDefinition>();
                     var nativeParameterIndexes = new HashSet<int>();
+                    var hiddenParameters = ImmutableArray.CreateBuilder<NativeComHiddenParameter>();
+                    var hiddenParameterIndexes = new HashSet<int>();
                     foreach (var attribute in methodAttributes)
                     {
                         var attributeName = AttributeName(attribute);
@@ -179,6 +181,24 @@ internal sealed partial class Binder
                                 nativeParameters.Add(nativeParameter);
                             }
                         }
+                        else if (attributeName == "Terrum.Interop.NativeComHiddenParameter")
+                        {
+                            if (!TryDecodeNativeComHiddenParameterAttribute(attribute,
+                                    out var hiddenParameter)
+                                || !hiddenParameterIndexes.Add(hiddenParameter.NativeParameterIndex))
+                            {
+                                Report("TRM3030",
+                                    "NativeComHiddenParameter requires a unique ordinal and a supported constant value.",
+                                    attribute.Span);
+                            }
+                            else
+                            {
+                                hiddenParameters.Add(hiddenParameter with {
+                                    InterfaceIdentity = hiddenParameter.InterfaceIdentity is string hiddenIdentity
+                                        ? ResolveComTypeIdentity(hiddenIdentity, sourceInterfaceIdentities) : null,
+                                });
+                            }
+                        }
                         else if (attributeName == "Terrum.Interop.NativeOutput")
                         {
                             if (!TryDecodeNativeOutputAttribute(attribute, out _))
@@ -188,10 +208,11 @@ internal sealed partial class Binder
                                     attribute.Span);
                             }
                         }
-                        else if (attributeName is not ("Terrum.Interop.NativeComMethod" or "NoThrow"))
+                        else if (attributeName is not ("Terrum.Interop.NativeComMethod"
+                            or "Terrum.Interop.NativeComHiddenParameter" or "NoThrow"))
                         {
                             Report("TRM3030",
-                                "Native COM methods support only NativeComMethod, NativeParameter, NativeOutput, and NoThrow attributes.",
+                                "Native COM methods support only NativeComMethod, NativeComHiddenParameter, NativeParameter, NativeOutput, and NoThrow attributes.",
                                 attribute.Span);
                         }
                     }
@@ -336,6 +357,7 @@ internal sealed partial class Binder
                         IsNoThrow = hasNoThrow,
                         RequiresNativeParameterMetadata = true,
                         NativeParameters = nativeParameters.ToImmutable(),
+                        HiddenParameters = hiddenParameters.ToImmutable(),
                         BorrowedOwnerParameters = borrowedOwnerParameters,
                     };
                     declaredMethods.Add(method);
@@ -811,6 +833,83 @@ internal sealed partial class Binder
 
         parameter = new((int)ordinal, access, retention, (int)extent);
         return true;
+    }
+
+    private static bool TryDecodeNativeComHiddenParameterAttribute(SyntaxNode attribute,
+        out NativeComHiddenParameter parameter)
+    {
+        parameter = new(-1, default);
+        var children = attribute.Children;
+        if (children.Length is not (12 or 14)
+            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
+            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
+            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
+            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[5] is not SyntaxTokenElement { Token.Name: "NativeComHiddenParameter" }
+            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+            || children[7] is not SyntaxTokenElement ordinalToken
+            || ordinalToken.Token.Kind != TokenKind.NumericLiteral
+            || !ScannerHost.TryParseIntegerMagnitude(ordinalToken.Token.Text.AsSpan(), out var ordinal)
+            || ordinal is 0 or > int.MaxValue
+            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[9] is not SyntaxTokenElement kindToken
+            || kindToken.Token.Kind != TokenKind.Identifier)
+        {
+            return false;
+        }
+
+        var kind = kindToken.Token.Name switch {
+            "UInt32" => NativeComHiddenParameterKind.UInt32,
+            "NullPointer" => NativeComHiddenParameterKind.NullPointer,
+            "InterfaceIdAddress" => NativeComHiddenParameterKind.InterfaceIdAddress,
+            _ => (NativeComHiddenParameterKind)byte.MaxValue,
+        };
+        if ((byte)kind == byte.MaxValue)
+        {
+            return false;
+        }
+
+        if (kind == NativeComHiddenParameterKind.NullPointer)
+        {
+            if (children.Length != 12
+                || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+                || children[11] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+            {
+                return false;
+            }
+            parameter = new((int)ordinal, kind);
+            return true;
+        }
+
+        if (children.Length != 14
+            || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[12] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+            || children[13] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+        {
+            return false;
+        }
+
+        if (kind == NativeComHiddenParameterKind.UInt32
+            && children[11] is SyntaxTokenElement valueToken
+            && valueToken.Token.Kind == TokenKind.NumericLiteral
+            && ScannerHost.TryParseIntegerMagnitude(valueToken.Token.Text.AsSpan(), out var value)
+            && value <= uint.MaxValue)
+        {
+            parameter = new((int)ordinal, kind, (uint)value);
+            return true;
+        }
+        if (kind == NativeComHiddenParameterKind.InterfaceIdAddress
+            && children[11] is SyntaxTokenElement interfaceToken
+            && interfaceToken.Token.Kind == TokenKind.StringLiteral
+            && StringLiteralDecoder.TryDecode(interfaceToken.Token.Text.AsSpan(), out var interfaceIdentity)
+            && !string.IsNullOrWhiteSpace(interfaceIdentity))
+        {
+            parameter = new((int)ordinal, kind, InterfaceIdentity: interfaceIdentity);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryParseNativeComEffect(string name, out NativeComEffects effect)

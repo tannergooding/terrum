@@ -366,7 +366,8 @@ internal sealed class Parser
                         attribute.Add(Expect(TokenKind.Identifier));
                     }
                 }
-                else if (attributeName == "Terrum.Interop.NativeParameter")
+                else if (attributeName is "Terrum.Interop.NativeParameter"
+                    or "Terrum.Interop.NativeComHiddenParameter")
                 {
                     while (Current.Kind != TokenKind.CloseParen
                         && Current.Kind != TokenKind.EndOfFile)

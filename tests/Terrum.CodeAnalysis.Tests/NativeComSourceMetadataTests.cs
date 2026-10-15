@@ -215,6 +215,83 @@ public sealed class NativeComSourceMetadataTests
         }
         """;
 
+    private const string SourceComFixedInterfaceAcquisition = """
+        namespace Example.Interop;
+
+        [Terrum.Interop.NativeComInterface("d6c3f6ac-39d7-4b9c-9a8d-a2d927605808")]
+        interface IThing {
+            [Terrum.Interop.NativeComMethod(0, ReleasesReference)]
+            [NoThrow]
+            unsafe uint32 Release();
+        }
+
+        [Terrum.Interop.NativeComInterface("0d35e0b0-f419-4d8f-a1c3-c3969c35b9ed")]
+        interface IFactory {
+            [Terrum.Interop.NativeComMethod(0, ReleasesReference)]
+            [NoThrow]
+            unsafe uint32 Release();
+
+            [Terrum.Interop.NativeComMethod(
+                1, SignedHResult, AcquiresReference, OutputMayBeWrittenOnFailure)]
+            [Terrum.Interop.NativeComHiddenParameter(1, UInt32, 0)]
+            [Terrum.Interop.NativeComHiddenParameter(2, NullPointer)]
+            [Terrum.Interop.NativeComHiddenParameter(3, InterfaceIdAddress, "IThing")]
+            [Terrum.Interop.NativeParameter(4, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeOutput(4)]
+            unsafe HRESULT GetThing(uint32 reserved, LPVOID outer, REFIID interfaceId,
+                write ptr<ptr<IThing>> output);
+        }
+
+        [Terrum.Interop.NativeComOwner("IThing")]
+        public unique struct ThingOwner {
+            private ptr<void> Pointer;
+
+            public unsafe ThingOwner(ptr<void> pointer) {
+                unsafe { Pointer = pointer; }
+            }
+        }
+
+        [Terrum.Interop.NativeComOwner("IFactory")]
+        public unique struct FactoryOwner {
+            private ptr<void> Pointer;
+
+            public unsafe FactoryOwner(ptr<void> pointer) {
+                unsafe { Pointer = pointer; }
+            }
+        }
+
+        [Terrum.Interop.NativeImport("example.dll", "CreateFactory")]
+        [Terrum.Interop.NativeOutput(0)]
+        extern unsafe int32 CreateFactory(write ptr<ptr<void>> output);
+
+        [Terrum.Interop.NativeComAcquisition(
+            0, "FactoryOwner", "CreateFactory", 0, OutputMayBeWrittenOnFailure)]
+        bool TryCreateFactory(out FactoryOwner owner) {
+            mut ptr<void> raw = null;
+            mut int32 result = 0;
+            unsafe { result = CreateFactory(&raw); }
+            owner = unsafe(new FactoryOwner(raw));
+            return result >= 0;
+        }
+
+        [Terrum.Interop.NativeComAcquisition(
+            0, "ThingOwner", "IFactory::GetThing", 4, OutputMayBeWrittenOnFailure)]
+        bool TryGetThing(out ThingOwner owner) {
+            if (!TryCreateFactory(out var factory)) {
+                owner = unsafe(new ThingOwner(null));
+                return false;
+            }
+            unsafe { return factory.GetThing(out owner); }
+        }
+
+        int32 Main() {
+            if (TryGetThing(out var thing)) {
+                return 0;
+            }
+            return 1;
+        }
+        """;
+
     private const string SourceComOwnerAcquisition = """
         namespace Example.Interop;
 
@@ -746,6 +823,41 @@ public sealed class NativeComSourceMetadataTests
         var source = SourceComAggregateParameter.Replace(
             "RecordIdentity identity = new RecordIdentity(1, 2);",
             "mut RecordIdentity identity;", StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void SourceAuthoredComAcquisitionCanFixItsInterfaceId()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(SourceComFixedInterfaceAcquisition));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var method = compilation.Program!.Functions.Single(static function =>
+            function.Name == "Example.Interop.FactoryOwner.GetThing");
+        Assert.That(method.Variables, Has.Length.EqualTo(2));
+        Assert.That(method.NativeComHiddenParameters, Is.EqualTo([
+            new NativeComHiddenParameter(1, NativeComHiddenParameterKind.UInt32),
+            new NativeComHiddenParameter(2, NativeComHiddenParameterKind.NullPointer),
+            new NativeComHiddenParameter(3, NativeComHiddenParameterKind.InterfaceIdAddress,
+                InterfaceIdentity: "Example.Interop.IThing"),
+        ]));
+        Assert.That(NativeComCallContract.Acquisitions(
+            compilation.Program.Functions.Single(static function =>
+                function.Name == "Example.Interop.TryGetThing"),
+            compilation.Program), Is.Not.Null);
+        _ = NativeEmitter.EmitWithNativeImports(compilation.Program, NativeRuntimePolicy.FailFast);
+    }
+
+    [Test]
+    public void SourceAuthoredComAcquisitionRejectsMismatchedFixedInterfaceId()
+    {
+        var source = SourceComFixedInterfaceAcquisition.Replace(
+            "NativeComHiddenParameter(3, InterfaceIdAddress, \"IThing\")",
+            "NativeComHiddenParameter(3, InterfaceIdAddress, \"IFactory\")",
+            StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.True);

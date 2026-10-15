@@ -212,7 +212,11 @@ do not gain owner-loan treatment. This source-level path does not establish
 foreign COM runtime behavior. Source-authored `NativeParameter` storage-address
 arguments also admit no-escape, extent-one Windows x64 Blittable aggregate
 pointees; read and read-write accesses require full initialization. This does
-not approve or newly qualify a serialized metadata profile. Provisional TRRM
+not approve or newly qualify a serialized metadata profile. Source-authored
+`NativeComHiddenParameter` can supply fixed unsigned constants, null pointers,
+and interface IDs; when a method also has a typed output, its hidden interface
+ID must match that output. These hidden-parameter facts remain source-only and
+have no newly assigned TRRM clause. Provisional TRRM
 producer/consumer support now
 round-trips source-authored interface IIDs/base edges, vtable slots/effects,
 and `NativeParameter` facts through TypeDef/MethodDef rows and Contract clauses

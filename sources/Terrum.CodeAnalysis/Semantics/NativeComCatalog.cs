@@ -461,6 +461,8 @@ internal static class NativeComCatalog
             if (method.RequiresNativeParameterMetadata
                 && Enumerable.Range(1, Math.Max(0, parameters.Length - 1))
                     .Any(index => parameters[index].EndsWith("*", StringComparison.Ordinal)
+                        && !method.HiddenParameters.Any(parameter =>
+                            parameter.NativeParameterIndex == index)
                         && !method.NativeParameters.Any(parameter => parameter.ParameterIndex == index)))
             {
                 return Invalid(out failureReason,
@@ -489,6 +491,8 @@ internal static class NativeComCatalog
                     && hiddenIndex != method.OutputParameterIndex
                     && !method.BorrowedOwnerParameters.IsDefault
                     && !method.BorrowedOwnerParameters.Contains(hiddenIndex)
+                    && !method.NativeParameters.Any(parameter =>
+                        parameter.ParameterIndex == hiddenIndex)
                     && (method.ParameterAdaptations.IsDefaultOrEmpty
                         || !method.ParameterAdaptations.Any(adaptation =>
                             adaptation.ParameterIndex == hiddenIndex))
@@ -511,6 +515,17 @@ internal static class NativeComCatalog
                     return Invalid(out failureReason,
                         $"COM method '{method.Identity}' has an invalid hidden parameter.");
                 }
+            }
+            var fixedInterfaceIdParameters = method.HiddenParameters
+                .Where(static parameter =>
+                    parameter.Kind == NativeComHiddenParameterKind.InterfaceIdAddress).ToArray();
+            if (fixedInterfaceIdParameters.Length > 1
+                || fixedInterfaceIdParameters.Length == 1
+                    && method.OutputParameterIndex >= 0
+                    && fixedInterfaceIdParameters[0].InterfaceIdentity != method.OutputInterfaceIdentity)
+            {
+                return Invalid(out failureReason,
+                    $"COM method '{method.Identity}' has an output that does not match its fixed interface ID.");
             }
             if (!IsAssignable(method.OwnerInterfaceIdentity, method.DeclaringInterfaceIdentity,
                     interfacesByIdentity)
