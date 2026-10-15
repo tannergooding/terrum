@@ -194,7 +194,8 @@ public readonly ref struct TrRmContractTableReader
                     var interfaceType = (int)(owner & 0xFF_FFFF);
                     var interfaceIid = new Guid(data.Slice(8, 16), bigEndian: true);
                     var baseInterface = Read(data, 24);
-                    if (interfaceIid == Guid.Empty || !interfaceIids.Add(interfaceIid)
+                    if (((types.GetFlags(interfaceType) >> 2) & 0x03) != 3
+                        || interfaceIid == Guid.Empty || !interfaceIids.Add(interfaceIid)
                         || baseInterface > types.Count || baseInterface == (uint)interfaceType)
                     {
                         throw InvalidContract();
@@ -235,7 +236,10 @@ public readonly ref struct TrRmContractTableReader
 
                     var ownerType = (int)(owner & 0xFF_FFFF);
                     var ownerInterface = Read(data, 8);
-                    if (ownerInterface is 0 or > 0xFF_FFFF || ownerInterface > types.Count)
+                    if (ownerInterface is 0 or > 0xFF_FFFF || ownerInterface > types.Count
+                        || ownerType == ownerInterface
+                        || ((types.GetFlags(ownerType) >> 2) & 0x03) != 1
+                        || ((types.GetFlags((int)ownerInterface) >> 2) & 0x03) != 3)
                     {
                         throw InvalidContract();
                     }
@@ -384,7 +388,8 @@ public readonly ref struct TrRmContractTableReader
 
         foreach (var acquisition in acquisitions)
         {
-            if (_comOwnerInterfaces[acquisition.OwnerTypeDefRow] == 0)
+            if (_comOwnerInterfaces[acquisition.OwnerTypeDefRow] == 0
+                || ((types.GetFlags(acquisition.OwnerTypeDefRow) >> 2) & 0x03) != 1)
             {
                 throw InvalidContract();
             }

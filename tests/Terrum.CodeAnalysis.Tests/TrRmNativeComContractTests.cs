@@ -20,7 +20,7 @@ public sealed class TrRmNativeComContractTests
         Assert.Throws<InvalidDataException>(() => Create(outputStateOnFalse: 1));
         Assert.Throws<InvalidDataException>(() => Create(sourceOutputOrdinal: 1));
         Assert.Throws<InvalidDataException>(() => Create(acquisitionFailureDisposition: 0));
-        Assert.Throws<InvalidDataException>(() => Create(acquisitionOwnerTypeDef: 2));
+        Assert.Throws<InvalidDataException>(() => Create(acquisitionOwnerTypeDef: 1));
         Assert.Throws<InvalidDataException>(() => Create(includeOwnerCleanup: false));
     }
 
@@ -29,17 +29,17 @@ public sealed class TrRmNativeComContractTests
         byte outputStateOnFalse = 0,
         uint sourceOutputOrdinal = 0,
         uint acquisitionFailureDisposition = 1,
-        uint acquisitionOwnerTypeDef = 1,
+        uint acquisitionOwnerTypeDef = 2,
         bool includeOwnerCleanup = true)
     {
         var typeContracts = new List<byte[]>
         {
             NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
-            NativeComOwner(1),
+            NativeComOwner(1, 2),
         };
         if (includeOwnerCleanup)
         {
-            typeContracts.Add(Cleanup(3));
+            typeContracts.Add(Cleanup(3, 2));
         }
 
         var sourceContracts = new[]
@@ -72,9 +72,9 @@ public sealed class TrRmNativeComContractTests
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(
         [
             ("", 0), ("Module", 0), ("Owner", 0), ("Acquire", 0),
-            ("TryAcquire", 0), ("Close", 0), ("value", 0),
+            ("TryAcquire", 0), ("Close", 0), ("value", 0), ("IFixture", 0),
         ]);
-        var strings = new TrRmStringTableReader(stringBytes, 7);
+        var strings = new TrRmStringTableReader(stringBytes, 8);
         var moduleBytes = new byte[44];
         Write(moduleBytes, 0, 2);
         Write(moduleBytes, 4, 1);
@@ -83,15 +83,20 @@ public sealed class TrRmNativeComContractTests
         Write(moduleBytes, 36, 1);
         Write(moduleBytes, 40, 1);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, 1, 3, 0);
+            0, 2, 3, 0);
 
-        var typeDefBytes = new byte[40];
+        var typeDefBytes = new byte[2 * 40];
         Write(typeDefBytes, 0, 2);
-        Write(typeDefBytes, 4, 3);
-        Write(typeDefBytes, 8, 4);
+        Write(typeDefBytes, 4, 8);
+        Write(typeDefBytes, 8, 12);
         Write(typeDefBytes, 32, (uint)typeFirst);
-        Write(typeDefBytes, 36, (uint)typeContracts.Count);
-        var types = new TrRmTypeDefTableReader(typeDefBytes, 1, strings, modules,
+        Write(typeDefBytes, 36, 1);
+        Write(typeDefBytes, 40, 2);
+        Write(typeDefBytes, 44, 3);
+        Write(typeDefBytes, 48, 4);
+        Write(typeDefBytes, 72, 2);
+        Write(typeDefBytes, 76, (uint)typeContracts.Count - 1);
+        var types = new TrRmTypeDefTableReader(typeDefBytes, 2, strings, modules,
             0, 0, 0, allContracts.Count);
 
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(
@@ -101,10 +106,10 @@ public sealed class TrRmNativeComContractTests
             TrRmTypeSpecTableWriter.Builtin(0),
             TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0),
             TrRmTypeSpecTableWriter.IndexedFamily(0x8C, 4, qualifiers: 1),
-            TrRmTypeSpecTableWriter.Reference(0x02, 1),
-        ], typeDefCount: 1, importCount: 0, genericParamCount: 0, typeArgCount: 0);
+            TrRmTypeSpecTableWriter.Reference(0x02, 2),
+        ], typeDefCount: 2, importCount: 0, genericParamCount: 0, typeArgCount: 0);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 6,
-            typeDefCount: 1, importCount: 0, genericParamCount: 0, typeArgCount: 0);
+            typeDefCount: 2, importCount: 0, genericParamCount: 0, typeArgCount: 0);
 
         var signaturesBytes = new byte[3 * 24];
         WriteSignature(signaturesBytes, 0, resultTypeSpec: 1, firstParameter: 1, parameterCount: 1);
@@ -123,7 +128,7 @@ public sealed class TrRmNativeComContractTests
             flags: 2, contractFirst: sourceFirst, contractCount: sourceContracts.Length);
         WriteMethod(methodBytes, 28, ownerType: 0, name: 5, signature: 2,
             flags: 2, contractFirst: wrapperFirst, contractCount: wrapperContracts.Count, body: 1);
-        WriteMethod(methodBytes, 56, ownerType: 1, name: 6, signature: 3,
+        WriteMethod(methodBytes, 56, ownerType: 2, name: 6, signature: 3,
             flags: 0, contractFirst: cleanupFirst, contractCount: cleanupContracts.Length, body: 2);
         var methods = new TrRmMethodDefTableReader(methodBytes, 3, strings, modules,
             types, signatures, allContracts.Count, bodyCount: 2);
@@ -139,18 +144,18 @@ public sealed class TrRmNativeComContractTests
         return Contract(0x1300_0001, 7, payload);
     }
 
-    private static byte[] NativeComOwner(uint interfaceTypeDef)
+    private static byte[] NativeComOwner(uint interfaceTypeDef, uint ownerTypeDef)
     {
         var payload = new byte[4];
         Write(payload, 0, interfaceTypeDef);
-        return Contract(0x1300_0001, 9, payload);
+        return Contract(0x1300_0000u | ownerTypeDef, 9, payload);
     }
 
-    private static byte[] Cleanup(uint methodDef)
+    private static byte[] Cleanup(uint methodDef, uint ownerTypeDef)
     {
         var payload = new byte[4];
         Write(payload, 0, methodDef);
-        return Contract(0x1300_0001, 5, payload);
+        return Contract(0x1300_0000u | ownerTypeDef, 5, payload);
     }
 
     private static byte[] Effects(uint ownerDefId, uint mask)

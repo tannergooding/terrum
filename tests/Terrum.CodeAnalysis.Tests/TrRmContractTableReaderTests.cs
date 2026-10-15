@@ -128,12 +128,18 @@ public sealed class TrRmContractTableReaderTests
     {
         Create(Section(NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"))),
             recordCount: 1, declaredCount: 1,
-            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0);
+            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
+            typeFlags: 12);
         Assert.Throws<InvalidDataException>(() => Create(
             Section(NativeComInterface(Guid.Empty)), recordCount: 1, declaredCount: 1,
-            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0));
+            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
+            typeFlags: 12));
         Assert.Throws<InvalidDataException>(() => Create(
             Section(NativeComInterface(Guid.NewGuid(), 2)), recordCount: 1, declaredCount: 1,
+            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
+            typeFlags: 12));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(NativeComInterface(Guid.NewGuid())), recordCount: 1, declaredCount: 1,
             typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0));
     }
 
@@ -144,19 +150,19 @@ public sealed class TrRmContractTableReaderTests
         var methodContract = NativeComMethod(slot: 0, effects: 0);
         Create(Section(interfaceContract, Effects(4), methodContract),
             recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 1);
+            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12);
         Assert.Throws<InvalidDataException>(() => Create(
             Section(interfaceContract, Effects(0), methodContract),
             recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 1));
+            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12));
         Assert.Throws<InvalidDataException>(() => Create(
             Section(interfaceContract, Effects(4), NativeComMethod(slot: 1, effects: 0)),
             recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 1));
+            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12));
         Assert.Throws<InvalidDataException>(() => Create(
             Section(interfaceContract, Effects(4), methodContract),
             recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 0));
+            methodFirst: 2, methodCount: 2, methodOwnerType: 0, typeFlags: 12));
     }
 
     [Test]
@@ -164,20 +170,26 @@ public sealed class TrRmContractTableReaderTests
     {
         Create(Section(
                 NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
-                NativeComOwner(1), Cleanup(), Effects()),
+                NativeComOwner(1, 2), Cleanup(2), Effects()),
             recordCount: 4, declaredCount: 4,
-            typeFirst: 1, typeCount: 3, methodFirst: 4, methodCount: 1);
+            typeFirst: 1, typeCount: 1, methodFirst: 4, methodCount: 1,
+            typeFlags: 12, typeRows: 2, secondTypeFirst: 2, secondTypeCount: 2,
+            methodOwnerType: 2);
 
         Assert.Throws<InvalidDataException>(() => Create(Section(
                 NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
-                NativeComOwner(2), Cleanup(), Effects()),
+                NativeComOwner(2, 2), Cleanup(2), Effects()),
             recordCount: 4, declaredCount: 4,
-            typeFirst: 1, typeCount: 3, methodFirst: 4, methodCount: 1));
+            typeFirst: 1, typeCount: 1, methodFirst: 4, methodCount: 1,
+            typeFlags: 12, typeRows: 2, secondTypeFirst: 2, secondTypeCount: 2,
+            methodOwnerType: 2));
         Assert.Throws<InvalidDataException>(() => Create(Section(
                 NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
-                NativeComOwner(1), Effects()),
+                NativeComOwner(1, 2), Effects()),
             recordCount: 3, declaredCount: 3,
-            typeFirst: 1, typeCount: 2, methodFirst: 3, methodCount: 1));
+            typeFirst: 1, typeCount: 1, methodFirst: 3, methodCount: 1,
+            typeFlags: 12, typeRows: 2, secondTypeFirst: 2, secondTypeCount: 1,
+            methodOwnerType: 2));
     }
 
     [Test]
@@ -218,11 +230,12 @@ public sealed class TrRmContractTableReaderTests
         uint typeFirst = 1, uint typeCount = 1, uint methodFirst = 2, uint methodCount = 1,
         bool hasOutputParam = false, byte paramMode = 1, bool nonBooleanResult = false,
         bool writeRows = false, bool frameArtifact = false,
-        bool pointerParameter = false, int methodOwnerType = 1)
+        bool pointerParameter = false, int methodOwnerType = 1, uint typeFlags = 4,
+        int typeRows = 1, uint secondTypeFirst = 0, uint secondTypeCount = 0)
     {
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
-            [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0)]);
-        var names = new TrRmStringTableReader(nameBytes, 4);
+            [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0), ("Owner", 0)]);
+        var names = new TrRmStringTableReader(nameBytes, 5);
         var module = new byte[44];
         Write(module, 0, 2);
         Write(module, 4, 1);
@@ -230,14 +243,18 @@ public sealed class TrRmContractTableReaderTests
         Write(module, 32, 1);
         Write(module, 36, 1);
         Write(module, 40, 1);
-        var modules = new TrRmModuleTableReader(module, 1, names, 0, 1, 1, 0);
-        var type = new byte[40];
-        Write(type, 0, 1);
-        Write(type, 4, 3);
-        Write(type, 8, 4);
-        Write(type, 32, typeFirst);
-        Write(type, 36, typeCount);
-        var types = new TrRmTypeDefTableReader(type, 1, names, modules,
+        var modules = new TrRmModuleTableReader(module, 1, names, 0, typeRows, 1, 0);
+        var type = new byte[typeRows * 40];
+        for (var index = 0; index < typeRows; index++)
+        {
+            var offset = index * 40;
+            Write(type, offset, 1);
+            Write(type, offset + 4, index == 0 ? 3u : 4u);
+            Write(type, offset + 8, index == 0 ? typeFlags : 4u);
+            Write(type, offset + 32, index == 0 ? typeFirst : secondTypeFirst);
+            Write(type, offset + 36, index == 0 ? typeCount : secondTypeCount);
+        }
+        var types = new TrRmTypeDefTableReader(type, typeRows, names, modules,
             0, 0, 0, declaredCount);
         byte[] spec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         if (pointerParameter)
@@ -302,9 +319,9 @@ public sealed class TrRmContractTableReaderTests
         {
             var artifact = TrRmArtifactWriter.Encode([
                 new TrRmSection(0x0001, 0, 1, module),
-                new TrRmSection(0x0002, 0, 4, nameBytes),
+                new TrRmSection(0x0002, 0, 5, nameBytes),
                 new TrRmSection(0x0011, 0, 1, spec),
-                new TrRmSection(0x0013, 0, 1, type),
+                new TrRmSection(0x0013, 0, (uint)typeRows, type),
                 new TrRmSection(0x0016, 0, 1, method),
                 new TrRmSection(0x0017, 0, 1, signature),
                 new TrRmSection(0x001B, 0, (uint)recordCount, section),
@@ -313,11 +330,11 @@ public sealed class TrRmContractTableReaderTests
         }
     }
 
-    private static byte[] Cleanup()
+    private static byte[] Cleanup(uint typeRow = 1)
     {
         var data = new byte[4];
         Write(data, 0, 1);
-        return Contract(0x1300_0001, 5, data);
+        return Contract(0x1300_0000u | typeRow, 5, data);
     }
 
     private static byte[] Effects()
@@ -346,11 +363,11 @@ public sealed class TrRmContractTableReaderTests
         return Contract(0x1600_0001, 8, data);
     }
 
-    private static byte[] NativeComOwner(uint interfaceTypeDefRow)
+    private static byte[] NativeComOwner(uint interfaceTypeDefRow, uint ownerTypeDefRow = 1)
     {
         var data = new byte[4];
         Write(data, 0, interfaceTypeDefRow);
-        return Contract(0x1300_0001, 9, data);
+        return Contract(0x1300_0000u | ownerTypeDefRow, 9, data);
     }
 
     private static byte[] NativeParameter(uint ordinal, byte access, byte retention, uint extent)
