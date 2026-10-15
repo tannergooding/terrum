@@ -206,7 +206,10 @@ facts into the generic COM catalog for source binding. An active regression
 uses that reference with a consumer-authored fixed-interface owner/acquisition
 wrapper, passes an initialized local through a readonly no-escape
 `NativeParameter`, and emits a vtable call; a mismatched pointee and malformed
-slot are rejected. The provider
+slot are rejected. Source-authored methods may use sparse explicit slots;
+omitted positions remain opaque, and a derived interface cannot overlap the
+inherited vtable extent. A synthetic sparse-slot interface hierarchy exercises
+source binding and the provisional round trip. The provider
 artifact does not yet persist/reconstruct `NativeComOwner` or
 `NativeComAcquisition` clauses 9 and 11, so those ownership wrappers cannot yet
 be supplied by a separate TRRM dependency. These wire assignments remain

@@ -1224,7 +1224,7 @@ public static partial class TrRmExecutableCompiler
             }
             var ownerType = methods.GetOwnerType(methodRow);
             if (!identityRows.TryGetValue(ownerType, out var interfaceIdentity)
-                || comMethod.VTableSlot > int.MaxValue
+                || comMethod.VTableSlot > (uint)(int.MaxValue / NativeTargetProfile.PointerSize)
                 || !contracts.GetNativeOutputs(methodRow).IsDefaultOrEmpty)
             {
                 throw Invalid("Unsupported TRRM native COM method owner, slot, or output contract.");
@@ -1323,13 +1323,19 @@ public static partial class TrRmExecutableCompiler
                 baseIdentity = baseDefinition.NominalIdentity;
             }
             var declaredMethods = methodsByInterface.TryGetValue(row, out var declared)
-                ? declared.OrderBy(static method => method.Slot)
-                    .Select(static method => method.VTableMethodIdentity).ToImmutableArray()
+                ? declared.OrderBy(static method => method.Slot).ToImmutableArray()
+                : ImmutableArray<NativeComMethodDefinition>.Empty;
+            var declaredMethodIdentities = declaredMethods.Length != 0
+                ? declaredMethods.Select(static method => method.VTableMethodIdentity).ToImmutableArray()
                 : ImmutableArray<string>.Empty;
             var flattenedMethods = (baseDefinition?.FlattenedMethods ?? [])
-                .AddRange(declaredMethods);
+                .AddRange(declaredMethodIdentities);
+            var flattenedMethodSlots = (baseDefinition?.GetFlattenedMethodSlots() ?? [])
+                .AddRange(declaredMethods.Select(static method => method.Slot));
             var definition = new NativeComInterfaceDefinition(identityRows[row], contract.Iid,
-                baseIdentity, flattenedMethods, declaredMethods);
+                baseIdentity, flattenedMethods, declaredMethodIdentities) {
+                FlattenedMethodSlots = flattenedMethodSlots,
+            };
             visiting.Remove(row);
             interfacesByRow.Add(row, definition);
             return definition;

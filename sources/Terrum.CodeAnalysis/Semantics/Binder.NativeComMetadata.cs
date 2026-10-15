@@ -124,7 +124,6 @@ internal sealed partial class Binder
                 var baseIdentity = baseTypes.Length == 0 ? null
                     : ResolveComTypeIdentity(NameText(baseTypes[0]), sourceInterfaceIdentities);
                 var declaredMethods = ImmutableArray.CreateBuilder<NativeComMethodDefinition>();
-                var declaredMethodIdentities = ImmutableArray.CreateBuilder<string>();
                 var methodDeclarations = declaration.Children.OfType<SyntaxNode>()
                     .Where(static child => child.Kind == SyntaxKind.FunctionDeclaration).ToArray();
                 foreach (var attribute in attributes)
@@ -318,11 +317,13 @@ internal sealed partial class Binder
                         NativeParameters = nativeParameters.ToImmutable(),
                     };
                     declaredMethods.Add(method);
-                    declaredMethodIdentities.Add(vtableIdentity);
                 }
 
+                var orderedMethods = declaredMethods.OrderBy(static method => method.Slot).ToImmutableArray();
+                var declaredMethodIdentities = orderedMethods
+                    .Select(static method => method.VTableMethodIdentity).ToImmutableArray();
                 if (!sourceInterfaces.TryAdd(identity, new(iid, baseIdentity,
-                        declaredMethodIdentities.ToImmutable(), declaredMethods.ToImmutable())))
+                        declaredMethodIdentities, orderedMethods)))
                 {
                     Report("TRM3003", $"Duplicate native COM interface '{name}'.", declaration.Span);
                 }
@@ -337,13 +338,16 @@ internal sealed partial class Binder
         }
         foreach (var (identity, definition) in sourceInterfaces)
         {
-            var firstDeclaredSlot = GetBaseMethodCount(definition.BaseIdentity, sourceInterfaces);
-            for (var index = 0; index < definition.Methods.Length; index++)
+            var inheritedSlotCount = GetBaseVTableSlotCount(definition.BaseIdentity, sourceInterfaces);
+            var declaredSlots = new HashSet<int>();
+            foreach (var method in definition.Methods)
             {
-                if (definition.Methods[index].Slot != firstDeclaredSlot + index)
+                if (method.Slot < inheritedSlotCount
+                    || method.Slot > int.MaxValue / NativeTargetProfile.PointerSize
+                    || !declaredSlots.Add(method.Slot))
                 {
                     Report("TRM3030",
-                        "Native COM method slots must follow the inherited vtable and declaration order.",
+                        "Native COM method slots must be unique and outside the inherited vtable extent.",
                         _trees[0].Root.Span);
                 }
             }
@@ -387,8 +391,12 @@ internal sealed partial class Binder
                 }
             }
             var flattened = (baseDefinition?.FlattenedMethods ?? []).AddRange(source.DeclaredMethodIdentities);
+            var flattenedSlots = (baseDefinition?.GetFlattenedMethodSlots() ?? [])
+                .AddRange(source.Methods.Select(static method => method.Slot));
             var definition = new NativeComInterfaceDefinition(identity, source.Iid,
-                source.BaseIdentity, flattened, source.DeclaredMethodIdentities);
+                source.BaseIdentity, flattened, source.DeclaredMethodIdentities) {
+                FlattenedMethodSlots = flattenedSlots,
+            };
             visiting.Remove(identity);
             interfacesByIdentity.Add(identity, definition);
             interfaces.Add(definition);
@@ -612,20 +620,36 @@ internal sealed partial class Binder
         return true;
     }
 
-    private int GetBaseMethodCount(string? identity,
-        IReadOnlyDictionary<string, SourceNativeComInterface> sourceInterfaces)
+    private int GetBaseVTableSlotCount(string? identity,
+        IReadOnlyDictionary<string, SourceNativeComInterface> sourceInterfaces,
+        HashSet<string>? visiting = null)
     {
         if (identity is null)
         {
             return 0;
         }
+        visiting ??= new(StringComparer.Ordinal);
+        if (!visiting.Add(identity))
+        {
+            return 0;
+        }
+        int slotCount;
         if (sourceInterfaces.TryGetValue(identity, out var source))
         {
-            return GetBaseMethodCount(source.BaseIdentity, sourceInterfaces)
-                + source.DeclaredMethodIdentities.Length;
+            var inheritedSlotCount = GetBaseVTableSlotCount(source.BaseIdentity, sourceInterfaces, visiting);
+            var highestDeclaredSlot = source.Methods.IsEmpty
+                ? -1 : source.Methods.Max(static method => method.Slot);
+            var declaredSlotCount = highestDeclaredSlot == int.MaxValue
+                ? int.MaxValue : highestDeclaredSlot + 1;
+            slotCount = Math.Max(inheritedSlotCount, declaredSlotCount);
         }
-        return _nativeImportCatalog?.ComInterfaces.FirstOrDefault(definition =>
-            definition.NominalIdentity == identity)?.FlattenedMethods.Length ?? 0;
+        else
+        {
+            slotCount = _nativeImportCatalog?.ComInterfaces.FirstOrDefault(definition =>
+                definition.NominalIdentity == identity)?.EffectiveVTableSlotCount ?? 0;
+        }
+        visiting.Remove(identity);
+        return slotCount;
     }
 
     private static bool TryDecodeNativeComInterfaceAttribute(SyntaxNode attribute, out Guid iid)

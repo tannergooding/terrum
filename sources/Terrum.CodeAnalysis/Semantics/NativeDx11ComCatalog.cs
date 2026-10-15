@@ -574,7 +574,7 @@ internal static class NativeDx11ComCatalog
         && Interface(source).ImmediateBaseIdentity == target;
 
     internal static int Slot(string interfaceIdentity, string methodIdentity) =>
-        Interface(interfaceIdentity).FlattenedMethods.IndexOf(methodIdentity);
+        Interface(interfaceIdentity).FindMethodSlot(methodIdentity);
 
     private static NativeComMethodDefinition Method(string identity, string owner, string declaring,
         string method, string signature, string abi, NativeComEffects effects,

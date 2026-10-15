@@ -351,7 +351,7 @@ public readonly ref struct TrRmContractTableReader
                 current = currentInterface.BaseTypeDefRow;
             }
 
-            var inheritedMethodCount = 0;
+            var inheritedSlotCount = 0u;
             for (var index = inheritance.Count - 1; index >= 0; index--)
             {
                 var declaringInterface = inheritance[index];
@@ -367,14 +367,16 @@ public readonly ref struct TrRmContractTableReader
                             throw InvalidContract();
                         }
                     }
-                    if (localMethods.Any(method => method.Slot < inheritedMethodCount)
-                        || !localMethods.Select(static method => method.Slot).Order()
-                            .SequenceEqual(Enumerable.Range(inheritedMethodCount, localMethods.Count)
-                                .Select(static slot => (uint)slot)))
+                    if (localMethods.Any(method => method.Slot < inheritedSlotCount
+                            || method.Slot > (uint)(int.MaxValue / NativeTargetProfile.PointerSize)))
                     {
                         throw InvalidContract();
                     }
-                    inheritedMethodCount += localMethods.Count;
+                    if (localMethods.Count != 0)
+                    {
+                        inheritedSlotCount = Math.Max(inheritedSlotCount,
+                            localMethods.Max(static method => method.Slot) + 1);
+                    }
                 }
             }
         }

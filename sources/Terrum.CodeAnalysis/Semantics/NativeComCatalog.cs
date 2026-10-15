@@ -73,7 +73,36 @@ internal sealed record NativeComInterfaceDefinition(
     ImmutableArray<string> FlattenedMethods,
     ImmutableArray<string> DeclaredMethods = default)
 {
+    internal ImmutableArray<int> FlattenedMethodSlots { get; init; } = [];
     internal ImmutableArray<string> SignatureAliases { get; init; } = [];
+
+    internal int EffectiveVTableSlotCount =>
+        FlattenedMethodSlots.IsDefaultOrEmpty
+            ? FlattenedMethods.Length : FlattenedMethodSlots[^1] + 1;
+
+    internal int GetMethodSlot(int methodIndex) =>
+        FlattenedMethodSlots.IsDefaultOrEmpty ? methodIndex : FlattenedMethodSlots[methodIndex];
+
+    internal ImmutableArray<int> GetFlattenedMethodSlots()
+    {
+        if (!FlattenedMethodSlots.IsDefaultOrEmpty)
+        {
+            return FlattenedMethodSlots;
+        }
+
+        var slots = ImmutableArray.CreateBuilder<int>(FlattenedMethods.Length);
+        for (var index = 0; index < FlattenedMethods.Length; index++)
+        {
+            slots.Add(index);
+        }
+        return slots.ToImmutable();
+    }
+
+    internal int FindMethodSlot(string methodIdentity)
+    {
+        var methodIndex = FlattenedMethods.IndexOf(methodIdentity);
+        return methodIndex < 0 ? -1 : GetMethodSlot(methodIndex);
+    }
 }
 
 internal sealed record NativeComOwnerDefinition(
@@ -213,7 +242,8 @@ internal static class NativeComCatalog
         {
             if (definition is null || string.IsNullOrWhiteSpace(definition.NominalIdentity)
                 || definition.SdkIid == Guid.Empty || definition.FlattenedMethods.IsDefault
-                || definition.DeclaredMethods.IsDefault || definition.SignatureAliases.IsDefault
+                || definition.DeclaredMethods.IsDefault || definition.FlattenedMethodSlots.IsDefault
+                || definition.SignatureAliases.IsDefault
                 || definition.FlattenedMethods.Any(string.IsNullOrWhiteSpace)
                 || definition.DeclaredMethods.Any(string.IsNullOrWhiteSpace)
                 || definition.SignatureAliases.Any(string.IsNullOrWhiteSpace)
@@ -221,6 +251,14 @@ internal static class NativeComCatalog
                     != definition.FlattenedMethods.Length
                 || definition.DeclaredMethods.Distinct(StringComparer.Ordinal).Count()
                     != definition.DeclaredMethods.Length
+                || (!definition.FlattenedMethodSlots.IsEmpty
+                    && (definition.FlattenedMethodSlots.Length != definition.FlattenedMethods.Length
+                        || definition.FlattenedMethodSlots.Any(slot =>
+                            slot < 0 || slot > int.MaxValue / NativeTargetProfile.PointerSize)
+                        || definition.FlattenedMethodSlots.Distinct().Count()
+                            != definition.FlattenedMethodSlots.Length
+                        || !definition.FlattenedMethodSlots.SequenceEqual(
+                            definition.FlattenedMethodSlots.Order())))
                 || !interfacesByIdentity.TryAdd(definition.NominalIdentity, definition)
                 || !interfaceIds.Add(definition.SdkIid))
             {
@@ -302,9 +340,22 @@ internal static class NativeComCatalog
                 }
                 continue;
             }
-            if (!interfacesByIdentity.TryGetValue(baseIdentity, out var baseDefinition)
-                || !definition.FlattenedMethods.SequenceEqual(
-                    baseDefinition.FlattenedMethods.Concat(definition.DeclaredMethods), StringComparer.Ordinal)
+            if (!interfacesByIdentity.TryGetValue(baseIdentity, out var baseDefinition))
+            {
+                return Invalid(out failureReason, "COM inheritance is cyclic or its flattened slots are inconsistent.");
+            }
+            var inheritedMethodCount = baseDefinition.FlattenedMethods.Length;
+            var flattenedSlots = definition.GetFlattenedMethodSlots();
+            var inheritedSlots = baseDefinition.GetFlattenedMethodSlots();
+            if (definition.FlattenedMethods.Length
+                    != inheritedMethodCount + definition.DeclaredMethods.Length
+                || !definition.FlattenedMethods.Take(inheritedMethodCount)
+                    .SequenceEqual(baseDefinition.FlattenedMethods, StringComparer.Ordinal)
+                || !definition.FlattenedMethods.Skip(inheritedMethodCount)
+                    .SequenceEqual(definition.DeclaredMethods, StringComparer.Ordinal)
+                || !flattenedSlots.Take(inheritedMethodCount).SequenceEqual(inheritedSlots)
+                || flattenedSlots.Skip(inheritedMethodCount)
+                    .Any(slot => slot < baseDefinition.EffectiveVTableSlotCount)
                 || !expectedBaseEdges.Add((definition.NominalIdentity, baseIdentity)))
             {
                 return Invalid(out failureReason, "COM inheritance is cyclic or its flattened slots are inconsistent.");
@@ -463,11 +514,11 @@ internal static class NativeComCatalog
             }
             if (!IsAssignable(method.OwnerInterfaceIdentity, method.DeclaringInterfaceIdentity,
                     interfacesByIdentity)
-                || method.Slot < 0 || method.Slot >= ownerInterface.FlattenedMethods.Length
-                || method.Slot >= declaringInterface.FlattenedMethods.Length
+                || method.Slot < 0 || method.Slot >= ownerInterface.EffectiveVTableSlotCount
+                || method.Slot >= declaringInterface.EffectiveVTableSlotCount
                 || string.IsNullOrWhiteSpace(method.VTableMethodIdentity)
-                || ownerInterface.FlattenedMethods[method.Slot] != method.VTableMethodIdentity
-                || declaringInterface.FlattenedMethods[method.Slot] != method.VTableMethodIdentity)
+                || ownerInterface.FindMethodSlot(method.VTableMethodIdentity) != method.Slot
+                || declaringInterface.FindMethodSlot(method.VTableMethodIdentity) != method.Slot)
             {
                 return Invalid(out failureReason, $"COM method '{method.Identity}' has an invalid owner, slot, or vtable method.");
             }
@@ -520,9 +571,9 @@ internal static class NativeComCatalog
             }
 
             var declaredMethodIndex = declaringInterface.DeclaredMethods.IndexOf(method.VTableMethodIdentity);
-            var firstDeclaredSlot = declaringInterface.FlattenedMethods.Length
-                - declaringInterface.DeclaredMethods.Length;
-            if (declaredMethodIndex < 0 || method.Slot != firstDeclaredSlot + declaredMethodIndex)
+            var flattenedMethodIndex = declaringInterface.FlattenedMethods.IndexOf(method.VTableMethodIdentity);
+            if (declaredMethodIndex < 0 || flattenedMethodIndex < 0
+                || declaringInterface.GetMethodSlot(flattenedMethodIndex) != method.Slot)
             {
                 return Invalid(out failureReason, $"COM method '{method.Identity}' is not declared at its recorded vtable slot.");
             }

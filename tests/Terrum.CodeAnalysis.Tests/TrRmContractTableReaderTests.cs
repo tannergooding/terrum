@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Semantics;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -144,7 +145,7 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
-    public void NativeComMethodRequiresUnsafeOwnerInterfaceAndContiguousSlot()
+    public void NativeComMethodRequiresUnsafeOwnerInterfaceAndRepresentableSlot()
     {
         var interfaceContract = NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"));
         var methodContract = NativeComMethod(slot: 0, effects: 0);
@@ -155,8 +156,12 @@ public sealed class TrRmContractTableReaderTests
             Section(interfaceContract, Effects(0), methodContract),
             recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
             methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12));
+        Create(Section(interfaceContract, Effects(4), NativeComMethod(slot: 5, effects: 0)),
+            recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
+            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12);
         Assert.Throws<InvalidDataException>(() => Create(
-            Section(interfaceContract, Effects(4), NativeComMethod(slot: 1, effects: 0)),
+            Section(interfaceContract, Effects(4), NativeComMethod(
+                slot: (uint)(int.MaxValue / NativeTargetProfile.PointerSize + 1), effects: 0)),
             recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
             methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12));
         Assert.Throws<InvalidDataException>(() => Create(

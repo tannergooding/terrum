@@ -212,6 +212,32 @@ public sealed class NativeComSourceMetadataTests
         }
         """;
 
+    private const string SparseSourceComInterfaces = """
+        namespace Example.Interop;
+
+        [Terrum.Interop.NativeComInterface("e35301d3-7071-4482-a6d6-3f74f04090f0")]
+        interface IClock {
+            [Terrum.Interop.NativeComMethod(5)]
+            unsafe int32 Finish();
+
+            [Terrum.Interop.NativeComMethod(2)]
+            unsafe int32 Begin();
+        }
+
+        [Terrum.Interop.NativeComInterface("f56cb04d-1b0c-4990-8fa5-2e08d7125d13")]
+        interface IPreciseClock : IClock {
+            [Terrum.Interop.NativeComMethod(8)]
+            unsafe int32 Pause();
+
+            [Terrum.Interop.NativeComMethod(6)]
+            unsafe int32 Reset();
+        }
+
+        [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+        [Terrum.Interop.NativeOutput(0)]
+        public extern int32 ReadValue(write ptr<int32> value);
+        """;
+
     [Test]
     public void SourceAuthoredComInterfaceRoundTripsThroughProvisionalTrRm()
     {
@@ -317,8 +343,10 @@ public sealed class NativeComSourceMetadataTests
             diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine, mismatchedPointee.Diagnostics));
 
-        var malformed = CorruptNativeComMethodSlot(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        var duplicateSlot = CorruptNativeComMethodSlot(artifact, 1);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(duplicateSlot));
+        var unrepresentableSlot = CorruptNativeComMethodSlot(artifact, uint.MaxValue);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(unrepresentableSlot));
     }
 
     [Test]
@@ -448,7 +476,7 @@ public sealed class NativeComSourceMetadataTests
         }
     }
 
-    private static byte[] CorruptNativeComMethodSlot(byte[] artifact)
+    private static byte[] CorruptNativeComMethodSlot(byte[] artifact, uint replacementSlot)
     {
         var sectionCount = BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12, sizeof(uint)));
         for (var entry = 0; entry < sectionCount; entry++)
@@ -479,13 +507,13 @@ public sealed class NativeComSourceMetadataTests
                 {
                     var malformed = artifact.ToArray();
                     BinaryPrimitives.WriteUInt32LittleEndian(
-                        malformed.AsSpan(dataOffset + 8, sizeof(uint)), 5);
+                        malformed.AsSpan(dataOffset + 8, sizeof(uint)), replacementSlot);
                     return malformed;
                 }
             }
             break;
         }
-        throw new InvalidOperationException("The emitted TRRM artifact has no zero-slot COM method clause.");
+        throw new InvalidOperationException("The emitted TRRM artifact has no zero-slot COM method clause to corrupt.");
     }
 
     [Test]
@@ -559,20 +587,80 @@ public sealed class NativeComSourceMetadataTests
     }
 
     [Test]
-    public void SourceAuthoredComMethodRejectsSlotsOutsideDeclarationOrder()
+    public void SourceAuthoredComInterfacesSupportSparseSlotsAndInheritanceThroughProvisionalTrRm()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [Terrum.Interop.NativeComInterface("76e1b75f-286c-4571-a9cd-43aa5b64a381")]
-            interface IClock {
-                [Terrum.Interop.NativeComMethod(1)]
-                unsafe int32 Read();
-            }
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(SparseSourceComInterfaces));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
 
-            int32 Main() { return 0; }
-            """));
+        var sourceInterfaces = compilation.Program!.NativeImportCatalog!.ComInterfaces;
+        var clock = sourceInterfaces.Single(static definition =>
+            definition.NominalIdentity == "Example.Interop.IClock");
+        Assert.That(clock.FlattenedMethods, Is.EqualTo([
+            "Example.Interop.IClock::Begin",
+            "Example.Interop.IClock::Finish",
+        ]));
+        Assert.That(clock.FlattenedMethodSlots, Is.EqualTo([2, 5]));
+        Assert.That(clock.EffectiveVTableSlotCount, Is.EqualTo(6));
+        var preciseClock = sourceInterfaces.Single(static definition =>
+            definition.NominalIdentity == "Example.Interop.IPreciseClock");
+        Assert.That(preciseClock.FlattenedMethods, Is.EqualTo([
+            "Example.Interop.IClock::Begin",
+            "Example.Interop.IClock::Finish",
+            "Example.Interop.IPreciseClock::Reset",
+            "Example.Interop.IPreciseClock::Pause",
+        ]));
+        Assert.That(preciseClock.FlattenedMethodSlots, Is.EqualTo([2, 5, 6, 8]));
+        Assert.That(preciseClock.EffectiveVTableSlotCount, Is.EqualTo(9));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program, "sparse-com-marker");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loadedClock = loaded.NativeImportCatalog!.ComInterfaces.Single(static definition =>
+            definition.NominalIdentity == "Example.Interop.IClock");
+        Assert.That(loadedClock.FlattenedMethodSlots, Is.EqualTo([2, 5]));
+        var loadedPreciseClock = loaded.NativeImportCatalog.ComInterfaces.Single(static definition =>
+            definition.NominalIdentity == "Example.Interop.IPreciseClock");
+        Assert.That(loadedPreciseClock.FlattenedMethodSlots, Is.EqualTo([2, 5, 6, 8]));
+        Assert.That(loaded.NativeImportCatalog.ComMethods.Single(static method =>
+            method.Identity == "Example.Interop.IPreciseClock::Pause").Slot, Is.EqualTo(8));
+    }
+
+    [Test]
+    public void SourceAuthoredComMethodRejectsDuplicateSparseSlots()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(SparseSourceComInterfaces.Replace(
+            "[Terrum.Interop.NativeComMethod(6)]",
+            "[Terrum.Interop.NativeComMethod(8)]", StringComparison.Ordinal)));
 
         Assert.That(compilation.Program, Is.Null);
-        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void SourceAuthoredComMethodRejectsSlotsInsideInheritedVTableExtent()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(SparseSourceComInterfaces.Replace(
+            "[Terrum.Interop.NativeComMethod(6)]",
+            "[Terrum.Interop.NativeComMethod(5)]", StringComparison.Ordinal)));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void SourceAuthoredComMethodRejectsUnrepresentableVTableOffsets()
+    {
+        var invalidSlotAttribute =
+            $"[Terrum.Interop.NativeComMethod({int.MaxValue / NativeTargetProfile.PointerSize + 1})]";
+        var compilation = Compilation.Create(SyntaxTree.Parse(SparseSourceComInterfaces.Replace(
+            "[Terrum.Interop.NativeComMethod(6)]",
+            invalidSlotAttribute, StringComparison.Ordinal)));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
