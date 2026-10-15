@@ -16,18 +16,90 @@ extern int32 D3D11CreateDeviceAndSwapChain(
     Terrum.Interop.NativeStorageAddress selectedFeatureLevel,
     out Terrum.Interop.Dx11.ProvisionalContextOwner immediateContext);
 
-[Terrum.Interop.NativeImport("windows-x64.system32.d3dcompiler47.D3DCompileFromFile")]
-[NoThrow]
-extern int32 D3DCompileFromFile(
+[Terrum.Interop.NativeImport("D3DCompiler_47.dll", "D3DCompileFromFile")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(9, Read, NoEscape, 0)]
+[Terrum.Interop.NativeOutput(7, NonNegative)]
+extern int32 D3DCompileFromFileRaw(
     ptr<char16> sourceFile,
-    Terrum.Interop.Windows.NativeNullPointer defines,
-    Terrum.Interop.Windows.NativeNullPointer include,
-    ptr<char8> entryPoint,
-    ptr<char8> target,
+    ptr<void> defines,
+    ptr<void> include,
+    ptr<void> entryPoint,
+    ptr<void> target,
     uint32 flags1,
     uint32 flags2,
-    out Terrum.Interop.Dx11.ProvisionalShaderCodeOwner code,
-    Terrum.Interop.Windows.NativeNullPointer diagnostics);
+    write ptr<ptr<void>> code,
+    ptr<void> diagnostics);
+
+[Terrum.Interop.NativeComOwner("ID3D10Blob")]
+public unique struct ShaderBlobOwner {
+    private ptr<void> Pointer;
+
+    public unsafe ShaderBlobOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+}
+
+[Terrum.Interop.NativeComAcquisition(
+    1, "ShaderBlobOwner", "D3DCompileFromFileRaw", 7, OutputMayBeWrittenOnFailure)]
+bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
+    mut InlineArray<char16, 260> shaderPath = [];
+    mut uint32 pathLength = 0;
+    mut uint32 scan = 0;
+    mut uint32 prefixLength = 0;
+    mut bool pathValid = false;
+    mut ptr<void> rawCode = null;
+    mut int32 result = -1;
+    unsafe {
+        pathLength = GetModuleFileNameW(null, &shaderPath[0], 260);
+        if (pathLength > 0 && pathLength < 260) {
+            pathValid = true;
+            scan = pathLength;
+            while (scan > 0 && prefixLength == 0 && pathValid) {
+                scan = scan - 1;
+                if (shaderPath[scan] == 92 || shaderPath[scan] == 47) {
+                    if (scan + 1 >= pathLength) {
+                        pathValid = false;
+                    } else {
+                        prefixLength = scan + 1;
+                    }
+                }
+            }
+            if (prefixLength == 0 || prefixLength + 14 > 260) {
+                pathValid = false;
+            }
+        }
+        if (pathValid) {
+            shaderPath[prefixLength + 0] = 116;
+            shaderPath[prefixLength + 1] = 114;
+            shaderPath[prefixLength + 2] = 105;
+            shaderPath[prefixLength + 3] = 97;
+            shaderPath[prefixLength + 4] = 110;
+            shaderPath[prefixLength + 5] = 103;
+            shaderPath[prefixLength + 6] = 108;
+            shaderPath[prefixLength + 7] = 101;
+            shaderPath[prefixLength + 8] = 46;
+            shaderPath[prefixLength + 9] = 104;
+            shaderPath[prefixLength + 10] = 108;
+            shaderPath[prefixLength + 11] = 115;
+            shaderPath[prefixLength + 12] = 108;
+            shaderPath[prefixLength + 13] = 0;
+            if (vertexShader) {
+                result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
+                    utf8z("VertexMain"), utf8z("vs_5_0"), 0, 0, &rawCode, null);
+            } else {
+                result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
+                    utf8z("PixelMain"), utf8z("ps_5_0"), 0, 0, &rawCode, null);
+            }
+        }
+    }
+    code = unsafe(new ShaderBlobOwner(rawCode));
+    return result >= 0;
+}
 
 [Layout(Sequential)]
 struct ModeDescription {
@@ -240,49 +312,9 @@ public unique struct WindowOwner {
             null, 1, null, 0, &featureLevels[0], 1, 7, &swapChainDescription,
             out var swapchain, out var device, &selectedFeatureLevel[0], out var context);
         if (deviceStatus >= 0) {
-            mut InlineArray<char16, 260> shaderPath = [];
-            uint32 pathLength = GetModuleFileNameW(null, &shaderPath[0], 260);
-            if (pathLength == 0) {
-                uint32 pathError = GetLastError();
-                return 1;
-            }
-            if (pathLength >= 260) {
-                return 1;
-            }
-            mut uint32 scan = pathLength;
-            mut uint32 prefixLength = 0;
-            while (scan > 0 && prefixLength == 0) {
-                scan = scan - 1;
-                if (shaderPath[scan] == 92 || shaderPath[scan] == 47) {
-                    if (scan + 1 >= pathLength) {
-                        return 1;
-                    }
-                    prefixLength = scan + 1;
-                } }
-            if (prefixLength == 0 || prefixLength + 14 > 260) {
-                return 1;
-            }
-            shaderPath[prefixLength + 0] = 116;
-            shaderPath[prefixLength + 1] = 114;
-            shaderPath[prefixLength + 2] = 105;
-            shaderPath[prefixLength + 3] = 97;
-            shaderPath[prefixLength + 4] = 110;
-            shaderPath[prefixLength + 5] = 103;
-            shaderPath[prefixLength + 6] = 108;
-            shaderPath[prefixLength + 7] = 101;
-            shaderPath[prefixLength + 8] = 46;
-            shaderPath[prefixLength + 9] = 104;
-            shaderPath[prefixLength + 10] = 108;
-            shaderPath[prefixLength + 11] = 115;
-            shaderPath[prefixLength + 12] = 108;
-            shaderPath[prefixLength + 13] = 0;
-            if (D3DCompileFromFile(&shaderPath[0], null, null,
-                utf8z("VertexMain"), utf8z("vs_5_0"), 0, 0,
-                out var vertexCode, null) >= 0) {
+            if (TryCompileShader(true, out var vertexCode)) {
                 if (device.CreateVertexShader(vertexCode, out var vertexShader)) {
-                    if (D3DCompileFromFile(&shaderPath[0], null, null,
-                        utf8z("PixelMain"), utf8z("ps_5_0"), 0, 0,
-                        out var pixelCode, null) >= 0) {
+                    if (TryCompileShader(false, out var pixelCode)) {
                         if (device.CreatePixelShader(pixelCode, out var pixelShader)) {
                             try {
                                 ShowWindow(Handle, 5);
@@ -422,10 +454,6 @@ extern uint32 GetModuleFileNameW(
     Terrum.Interop.Windows.NativeNullPointer moduleName,
     Terrum.Interop.NativeStorageAddress fileName,
     uint32 size);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetLastError")]
-[NoThrow]
-extern uint32 GetLastError();
 
 [Terrum.Interop.NativeImport("user32.dll", "GetClientRect")]
 [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]

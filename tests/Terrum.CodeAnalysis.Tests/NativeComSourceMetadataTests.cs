@@ -58,15 +58,19 @@ public sealed class NativeComSourceMetadataTests
             }
 
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireFixture")]
-            [Terrum.Interop.NativeOutput(0)]
-            extern unsafe int32 AcquireFixture(write ptr<ptr<void>> output);
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeOutput(2)]
+            extern unsafe int32 AcquireFixture(
+                ptr<char16> path, ptr<void> kind, write ptr<ptr<void>> output);
 
             [Terrum.Interop.NativeComAcquisition(
-                0, "FixtureOwner", "AcquireFixture", 0, OutputMayBeWrittenOnFailure)]
+                0, "FixtureOwner", "AcquireFixture", 2, OutputMayBeWrittenOnFailure)]
             bool TryAcquireFixture(out FixtureOwner owner) {
                 mut ptr<void> raw = null;
                 mut int32 result = 0;
-                unsafe { result = AcquireFixture(&raw); }
+                unsafe { result = AcquireFixture(
+                    utf16z("fixture.bin"), utf8z("fixture"), &raw); }
                 owner = unsafe(new FixtureOwner(raw));
                 return result >= 0;
             }
@@ -82,6 +86,18 @@ public sealed class NativeComSourceMetadataTests
         Assert.That(owners, Has.Length.EqualTo(1));
         Assert.That(owners[0].BoundOwnerName, Is.EqualTo("Example.Interop.FixtureOwner"));
         Assert.That(owners[0].InterfaceIdentity, Is.EqualTo("IFixture"));
+        var import = compilation.Program.Functions.Single(static function =>
+            function.Name == "Example.Interop.AcquireFixture").DirectNativeImport!;
+        Assert.That(import.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, PrimitiveType.Char16,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            new DirectNativeParameter(1, PrimitiveType.Void,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+        ]));
+        Assert.That(import.Outputs.Single().ParameterIndex, Is.EqualTo(2));
+        Assert.That(NativeComCallContract.Acquisitions(
+            compilation.Program.Functions.Single(static function =>
+                function.Name == "Example.Interop.TryAcquireFixture"), compilation.Program), Is.Not.Null);
 
         var unknownInterface = Compilation.CreateWithNativeImports(
             [SyntaxTree.Parse(source.Replace(

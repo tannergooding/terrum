@@ -515,6 +515,30 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void UnsafeWrapperCanCallDirectImportWithLocalBacking()
+    {
+        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadPath")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            extern int32 ReadPath(ptr<char16> path);
+
+            unsafe int32 ReadThroughWrapper() {
+                mut InlineArray<char16, 260> path = [];
+                unsafe { return ReadPath(&path[0]); }
+            }
+
+            int32 Main() {
+                unsafe { return ReadThroughWrapper(); }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast)), Does.Contain("ReadPath"));
+    }
+
+    [Test]
     public void DirectNativePointerInputSurvivesPrivateSemanticMetadataAndIsRevalidated()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

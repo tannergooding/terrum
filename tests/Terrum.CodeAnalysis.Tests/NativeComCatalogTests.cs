@@ -1239,21 +1239,6 @@ public sealed class NativeComCatalogTests
     }
 
     [Test]
-    public void D3DCompileCatalogUsesNullForOptionalDiagnosticsOutput()
-    {
-        var catalog = NativeImportCatalog.WindowsX64;
-        Assert.That(catalog.TryGetImport(NativeDx11ComCatalog.CompileShaderFromFileKey,
-            out var definition), Is.True);
-        TestAssertions.NotNull(definition);
-        Assert.That(definition.ParameterTypes[8], Is.EqualTo(PrimitiveType.NativeNullPointer));
-        Assert.That(definition.ParameterContracts[8], Is.EqualTo(NativeImportParameterContract.NullPointerOnly));
-        Assert.That(definition.ComOutputs.Select(static output => output.ParameterIndex), Is.EqualTo([7]));
-        var codeOwner = catalog.ComOwners.Single(owner =>
-            owner.BoundOwnerName == NativeDx11ComCatalog.ShaderCodeOwnerName);
-        Assert.That(codeOwner.AdditionalOutputParameterIndexes, Is.Empty);
-    }
-
-    [Test]
     public void D3DCreateBufferUsesGenericStorageRecordAndComOutputContracts()
     {
         var catalog = NativeImportCatalog.WindowsX64;
