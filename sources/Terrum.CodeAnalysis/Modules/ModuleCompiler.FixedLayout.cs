@@ -21,7 +21,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Fixed-storage commitments cannot yet be combined with private-span revision 77.");
         }
-        if (module.FormatVersion == DirectNativeImportVersion)
+        if (module.FormatVersion >= DirectNativeImportVersion)
         {
             return module;
         }

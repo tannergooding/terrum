@@ -46,7 +46,7 @@ internal static class DirectNativeImportContract
             || !function.IsExternal || function.NativeImportKey is not null
             || !function.RequiresUnsafeCaller
             || !IsValidLibraryName(import.LibraryName) || !IsValidExportName(import.ExportName)
-            || import.Outputs.IsDefault
+            || import.Outputs.IsDefault || import.Parameters.IsDefault
             || function.Variables.IsDefault || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length
             || function.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32 or PrimitiveType.UInt32)
@@ -56,6 +56,7 @@ internal static class DirectNativeImportContract
         }
 
         var outputs = new bool[function.ParameterCount];
+        var nativeParameters = new bool[function.ParameterCount];
         foreach (var output in import.Outputs)
         {
             if (output is null || output.ParameterIndex < 0 || output.ParameterIndex >= function.ParameterCount
@@ -72,6 +73,30 @@ internal static class DirectNativeImportContract
             outputs[output.ParameterIndex] = true;
         }
 
+        foreach (var parameter in import.Parameters)
+        {
+            if (parameter is null || parameter.ParameterIndex < 0
+                || parameter.ParameterIndex >= function.ParameterCount
+                || nativeParameters[parameter.ParameterIndex] || outputs[parameter.ParameterIndex]
+                || parameter.PointeeType is not (PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
+                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                    or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+                    or PrimitiveType.NativeRawPointer)
+                || parameter.Access is not (NativeParameterAccess.Read
+                    or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
+                || parameter.Retention != NativeParameterRetention.NoEscape
+                || (parameter.PointeeType == PrimitiveType.Void
+                    ? parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0
+                    : parameter.Extent != 1)
+                || function.Variables[parameter.ParameterIndex] is not BoundVariable pointerParameter
+                || pointerParameter.Type != PrimitiveType.NativeRawPointer
+                || pointerParameter.IsOut || pointerParameter.IsInit)
+            {
+                return false;
+            }
+            nativeParameters[parameter.ParameterIndex] = true;
+        }
+
         for (var index = 0; index < function.ParameterCount; index++)
         {
             if (function.Variables[index] is not BoundVariable parameter)
@@ -82,6 +107,13 @@ internal static class DirectNativeImportContract
             if (parameterType == PrimitiveType.NativeStorageAddress)
             {
                 if (!outputs[index] || !parameter.IsOut || parameter.IsInit)
+                {
+                    return false;
+                }
+            }
+            else if (parameterType == PrimitiveType.NativeRawPointer)
+            {
+                if (!nativeParameters[index] || parameter.IsOut || parameter.IsInit)
                 {
                     return false;
                 }
@@ -104,6 +136,16 @@ internal static class DirectNativeImportContract
         return import.Outputs.FirstOrDefault(output => output.ParameterIndex == parameterIndex);
     }
 
+    internal static DirectNativeParameter? ParameterForParameter(BoundFunction function, int parameterIndex)
+    {
+        if (function.DirectNativeImport is not DirectNativeImport import
+            || import.Parameters.IsDefault)
+        {
+            return null;
+        }
+        return import.Parameters.FirstOrDefault(parameter => parameter.ParameterIndex == parameterIndex);
+    }
+
     internal static bool MatchesAddress(BoundNativeStorageAddress address, DirectNativeOutput output,
         BoundFunction caller, BoundProgram program)
     {
@@ -121,5 +163,26 @@ internal static class DirectNativeImportContract
             && caller.Variables[address.Variable].Type == output.PointeeType
             && caller.Variables[address.Variable].IsMutable
             && !caller.Variables[address.Variable].IsInitializationLocal;
+    }
+
+    internal static bool MatchesAddress(BoundNativeStorageAddress address, DirectNativeParameter parameter,
+        BoundFunction caller, BoundProgram program)
+    {
+        var extent = ValueLayout.Size(parameter.PointeeType, program.Structures);
+        return parameter.Extent == 1
+            && address.Type == PrimitiveType.NativeStorageAddress
+            && address.AddressType == PrimitiveType.NativeStorageAddress
+            && address.CarrierType == parameter.PointeeType
+            && address.ElementType == parameter.PointeeType
+            && address.ElementCount == 1
+            && address.ElementStride == extent
+            && address.ByteExtent == extent
+            && address.IsReadonly == (parameter.Access == NativeParameterAccess.Read)
+            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
+            && (uint)address.Variable < (uint)caller.Variables.Length
+            && caller.Variables[address.Variable].Type == parameter.PointeeType
+            && !caller.Variables[address.Variable].IsInitializationLocal
+            && (parameter.Access == NativeParameterAccess.Read
+                || caller.Variables[address.Variable].IsMutable);
     }
 }

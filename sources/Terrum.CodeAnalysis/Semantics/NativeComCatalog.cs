@@ -18,21 +18,21 @@ internal enum NativeComEffects : byte
     ReleasesReference = 8,
 }
 
-internal enum NativeComParameterAccess : byte
+internal enum NativeParameterAccess : byte
 {
     Read,
     Write,
     ReadWrite,
 }
 
-internal enum NativeComParameterRetention : byte
+internal enum NativeParameterRetention : byte
 {
     NoEscape,
     MayEscape,
 }
 
-internal sealed record NativeComParameterDefinition(int ParameterIndex,
-    NativeComParameterAccess Access, NativeComParameterRetention Retention, int Extent);
+internal sealed record NativeParameterDefinition(int ParameterIndex,
+    NativeParameterAccess Access, NativeParameterRetention Retention, int Extent);
 
 internal enum NativeComOwnerAcquisitionKind : byte
 {
@@ -158,7 +158,7 @@ internal sealed record NativeComMethodDefinition(
     internal string? BoundMethodName { get; init; }
     internal bool IsNoThrow { get; init; }
     internal bool RequiresNativeParameterMetadata { get; init; }
-    internal ImmutableArray<NativeComParameterDefinition> NativeParameters { get; init; } = [];
+    internal ImmutableArray<NativeParameterDefinition> NativeParameters { get; init; } = [];
     internal ImmutableArray<int> BorrowedOwnerParameters { get; init; } = [];
     internal ImmutableArray<NativeComHiddenParameter> HiddenParameters { get; init; } = [];
     internal ImmutableArray<NativeStorageRecordParameterDefinition> StorageRecordParameters { get; init; } = [];
@@ -389,10 +389,10 @@ internal static class NativeComCatalog
             if (method.NativeParameters.IsDefault
                 || method.NativeParameters.Any(static parameter => parameter is null
                     || parameter.ParameterIndex < 1 || parameter.Extent < 0
-                    || parameter.Access is not (NativeComParameterAccess.Read
-                        or NativeComParameterAccess.Write or NativeComParameterAccess.ReadWrite)
-                    || parameter.Retention is not (NativeComParameterRetention.NoEscape
-                        or NativeComParameterRetention.MayEscape))
+                    || parameter.Access is not (NativeParameterAccess.Read
+                        or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
+                    || parameter.Retention is not (NativeParameterRetention.NoEscape
+                        or NativeParameterRetention.MayEscape))
                 || method.NativeParameters.Select(static parameter => parameter.ParameterIndex)
                     .Distinct().Count() != method.NativeParameters.Length)
             {
@@ -546,9 +546,9 @@ internal static class NativeComCatalog
                         && (!method.Effects.HasFlag(NativeComEffects.SignedHResult)
                             || !method.NativeParameters.Any(parameter =>
                                 parameter.ParameterIndex == method.OutputParameterIndex
-                                && (parameter.Access is NativeComParameterAccess.Write
-                                    or NativeComParameterAccess.ReadWrite)
-                                && parameter.Retention == NativeComParameterRetention.NoEscape)))
+                                && (parameter.Access is NativeParameterAccess.Write
+                                    or NativeParameterAccess.ReadWrite)
+                                && parameter.Retention == NativeParameterRetention.NoEscape)))
                 {
                     return Invalid(out failureReason, $"COM method '{method.Identity}' has invalid output metadata.");
                 }

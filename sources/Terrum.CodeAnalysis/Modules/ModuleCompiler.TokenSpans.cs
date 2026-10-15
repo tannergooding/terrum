@@ -17,9 +17,10 @@ public static partial class ModuleCompiler
 
     private static void RequirePrivateSpanRevision(BinaryReader reader)
     {
-        if (reader is not ModuleReader { FormatVersion: PrivateSpanVersion or DirectNativeImportVersion })
+        if (reader is not ModuleReader { FormatVersion:
+            PrivateSpanVersion or DirectNativeImportVersion or DirectNativeParameterVersion })
         {
-            throw new ModuleFormatException("Private span IR requires semantic-module revision 77 or 79.");
+            throw new ModuleFormatException("Private span IR requires semantic-module revision 77, 79, or 80.");
         }
     }
 
@@ -62,7 +63,8 @@ public static partial class ModuleCompiler
             }
             return;
         }
-        if (module.FormatVersion is not (PrivateSpanVersion or DirectNativeImportVersion)
+        if (module.FormatVersion is not (PrivateSpanVersion or DirectNativeImportVersion
+                or DirectNativeParameterVersion)
             || module.FormatVersion == PrivateSpanVersion && !module.RequiresSourceGrant
             || hasSpans && !module.RequiresSourceGrant
             || module.Functions.Any(static item => item.Import

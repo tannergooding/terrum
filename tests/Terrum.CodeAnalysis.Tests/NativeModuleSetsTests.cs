@@ -139,13 +139,21 @@ public sealed class NativeModuleSetsTests
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
             [Terrum.Interop.NativeOutput(0)]
             extern int32 ReadValue(write ptr<int32> value);
+            [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
+            extern int32 CompareStringOrdinal(ptr<char16> first, int32 firstLength,
+                ptr<char16> second, int32 secondLength, int32 ignoreCase);
 
             int32 Main() {
                 mut int32 value = 0;
+                char16 first = 'A';
+                char16 second = 'A';
                 unsafe {
-                    if (ReadValue(&value) == 0) { return Alpha() + Beta() + value; }
+                    if (ReadValue(&value) == 0) { return -1; }
+                    if (CompareStringOrdinal(&first, 1, &second, 1, 0) != 2) { return -2; }
                 }
-                return -1;
+                return Alpha() + Beta() + value;
             }
             """, alpha, beta);
 

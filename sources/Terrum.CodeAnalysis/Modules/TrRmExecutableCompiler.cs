@@ -333,10 +333,10 @@ public static partial class TrRmExecutableCompiler
             {
                 if (parameter.ParameterIndex <= 0
                     || parameter.ParameterIndex >= signatureParameters.Length
-                    || parameter.Access is < NativeComParameterAccess.Read
-                        or > NativeComParameterAccess.ReadWrite
-                    || parameter.Retention is < NativeComParameterRetention.NoEscape
-                        or > NativeComParameterRetention.MayEscape
+                    || parameter.Access is < NativeParameterAccess.Read
+                        or > NativeParameterAccess.ReadWrite
+                    || parameter.Retention is < NativeParameterRetention.NoEscape
+                        or > NativeParameterRetention.MayEscape
                     || !signatureParameters[parameter.ParameterIndex].EndsWith("*",
                         StringComparison.Ordinal))
                 {
@@ -1235,7 +1235,7 @@ public static partial class TrRmExecutableCompiler
             {
                 returnType = "HRESULT";
             }
-            var nativeParameters = ImmutableArray.CreateBuilder<NativeComParameterDefinition>();
+            var nativeParameters = ImmutableArray.CreateBuilder<NativeParameterDefinition>();
             var nativeParameterContracts = contracts.GetNativeParameters(methodRow);
             if (nativeParameterContracts.IsDefault)
             {
@@ -1247,10 +1247,10 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("A native COM NativeParameter is outside its signature.");
                 }
-                nativeParameters.Add(new NativeComParameterDefinition(
+                nativeParameters.Add(new NativeParameterDefinition(
                     parameter.ParameterOrdinal + 1,
-                    (NativeComParameterAccess)(parameter.Access - 1),
-                    (NativeComParameterRetention)parameter.Retention,
+                    (NativeParameterAccess)(parameter.Access - 1),
+                    (NativeParameterRetention)parameter.Retention,
                     (int)parameter.Extent));
             }
             var parameterTypes = new string[parameterCount + 1];

@@ -23,4 +23,22 @@ public static partial class SemanticVerifier
         Expression(address.Index, initialized, fieldMasks, declarations, function, program,
             ref remaining, depth + 1, failures);
     }
+
+    private static void VerifyDirectNativeParameterAddress(BoundNativeStorageAddress address,
+        DirectNativeParameter parameter, InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth, FailureEdges? failures)
+    {
+        Count(ref remaining, depth);
+        var firstLocal = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+        if (!DirectNativeImportContract.MatchesAddress(address, parameter, function, program)
+            || address.Variable < firstLocal || !declarations.Contains(address.Variable)
+            || !initialized[address.Variable])
+        {
+            throw InvalidEffect(address.Span, "NativeImport");
+        }
+
+        Expression(address.Index, initialized, fieldMasks, declarations, function, program,
+            ref remaining, depth + 1, failures);
+    }
 }

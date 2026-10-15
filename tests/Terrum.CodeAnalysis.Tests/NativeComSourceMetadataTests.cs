@@ -186,8 +186,8 @@ public sealed class NativeComSourceMetadataTests
             ]));
         Assert.That(loadedMethods[1].NativeParameters, Has.Length.EqualTo(1));
         Assert.That(loadedMethods[1].NativeParameters.Single(),
-            Is.EqualTo(new NativeComParameterDefinition(1, NativeComParameterAccess.Read,
-                NativeComParameterRetention.NoEscape, 1)));
+            Is.EqualTo(new NativeParameterDefinition(1, NativeParameterAccess.Read,
+                NativeParameterRetention.NoEscape, 1)));
 
         var reference = TrRmExecutableCompiler.CreateReference(artifact);
         var consumerSource = """
@@ -456,8 +456,8 @@ public sealed class NativeComSourceMetadataTests
         Assert.That(scale.Signature, Is.EqualTo("int32(Example.Interop.IClock*,int32*)"));
         Assert.That(scale.Abi, Is.EqualTo("windows-x64-rcx-rdx-eax"));
         Assert.That(scale.NativeParameters, Is.EqualTo([
-            new NativeComParameterDefinition(1, NativeComParameterAccess.Read,
-                NativeComParameterRetention.NoEscape, 1),
+            new NativeParameterDefinition(1, NativeParameterAccess.Read,
+                NativeParameterRetention.NoEscape, 1),
         ]));
         var acquire = catalog.ComMethods.Single(static method => method.BoundMethodName == "Acquire");
         Assert.That(acquire.OutputParameterIndex, Is.EqualTo(1));

@@ -51,11 +51,16 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 approved-TRRM loop envelope described above is a different wire format.
-The current semantic-module revision is 76. Writers emit only revision 76 and
-readers reject every other revision; older artifacts must be recreated from
-source. The current format preserves verified, typed, source-mapped structured
-IR and the supported declaration, layout, initialization, cleanup, and runtime
-contracts described in this reference and the [implementation reference](../implementation.md).
+Revision 76 is the semantic-module base. Private revisions 77 through 80 add
+private span metadata, fixed-layout commitments, direct imports and outputs,
+and direct `NativeParameter` input metadata, respectively; revisions 79 and 80
+retain the applicable earlier private fields. Writers select the required
+revision for the retained contracts, and readers accept revisions 76 through
+80 while rejecting unsupported combinations. Older artifacts must be
+recreated from source. These private formats preserve verified, typed,
+source-mapped structured IR and the supported declaration, layout,
+initialization, cleanup, and runtime contracts described in this reference and
+the [implementation reference](../implementation.md).
 
 ## Persisted caller-unsafe operations
 

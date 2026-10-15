@@ -293,7 +293,7 @@ internal static class NativeStorageParameterContract
         if (program.NativeImportCatalog is not NativeImportCatalog catalog
             || !NativeComCallContract.TryGetNativeParameter(method, nativeParameterIndex,
                 out var parameter)
-            || parameter is null || parameter.Retention != NativeComParameterRetention.NoEscape
+            || parameter is null || parameter.Retention != NativeParameterRetention.NoEscape
             || parameter.Extent != 1
             || !NativeComCallContract.TryGetNativeParameterPointeeType(method,
                 nativeParameterIndex, catalog, program.Structures, out var pointeeType)
@@ -305,9 +305,9 @@ internal static class NativeStorageParameterContract
 
         var extent = ValueLayout.Size(pointeeType, program.Structures);
         var variable = address.Variable;
-        var isReadonly = parameter.Access == NativeComParameterAccess.Read;
-        return parameter.Access is NativeComParameterAccess.Read
-                or NativeComParameterAccess.Write or NativeComParameterAccess.ReadWrite
+        var isReadonly = parameter.Access == NativeParameterAccess.Read;
+        return parameter.Access is NativeParameterAccess.Read
+                or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
             && address.Type == PrimitiveType.NativeStorageAddress
             && address.AddressType == PrimitiveType.NativeStorageAddress
             && address.CarrierType == pointeeType && address.ElementType == pointeeType

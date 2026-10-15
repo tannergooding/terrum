@@ -55,11 +55,12 @@ guarantees. Static proof support does not yet implement a general built-in
 predicate-refinement catalog for runtime values, so it does not fulfill the
 accepted v1 proof-floor scope.
 
-Current profile markers are syntax language version 46, semantic-module
-revision 76, and native profiles native-10 through
-native-20. These markers describe supported implementations, not approval of
-the remaining language contracts. The exact source, layout, metadata, ABI,
-and runtime contracts are in the [specification index](specs/README.md).
+Current profile markers are syntax language version 46, semantic-module base
+revision 76 with private feature revisions through 80, and native profiles
+native-10 through native-20. These markers describe supported implementations,
+not approval of the remaining language contracts. The exact source, layout,
+metadata, ABI, and runtime contracts are in the
+[specification index](specs/README.md).
 Public fixed-layout support is not implemented; its accepted bounded Windows
 x64 direction does not add source attributes, metadata encoding, or runtime
 support.
@@ -154,18 +155,30 @@ provenance, ownership, pinning, or cleanup guarantee. The prototype carries the 
 import's caller-unsafety and direct representation through a provisional TRRM
 NativeImport table and source-reference path; that standard path is limited to
 named Windows System32 imports. Its section, clause, and Feature assignments
-are not canonical TRRM assignments. Direct imports with writable scalar
-outputs also round-trip through private semantic producer/consumer, native
-package, native consumer-set, and graph producer paths. Their PE imports are
-checked against retained calls and kept separate from selected provider
-dependencies. Active synthetic coverage validates single-provider and
-consumer-set pairs plus a graph consumer/provider pair. This establishes
-compilation, metadata validation, and PE emission—not execution of the foreign
-function. Graph and consumer-set execution do not stage arbitrary raw-import
-DLLs. Standalone and graph NativeJit resolve direct imports from the consumer
-root only by absolute System32 path. Runtime evidence covers the System32
-`GetCurrentThreadId` smoke test in both paths, not arbitrary foreign DLLs or COM
-behavior.
+are not canonical TRRM assignments. The source prototype also accepts
+`NativeParameter` for raw pointer inputs with explicit `Read`, `Write`, or
+`ReadWrite` access, `NoEscape` retention, and a one-value extent for supported
+scalar or raw-pointer pointees; `ptr<void>` is limited to readonly,
+zero-extent metadata.
+When a call forms an address with `&local`, the local must be initialized and
+match the pointee type; `Write` and `ReadWrite` require mutable backing. Raw
+pointer values remain caller-authored unsafe inputs. This input metadata
+round-trips through private semantic-module revision 80, native packages,
+consumer sets, and graph-JIT roots. The current TRRM direct-import path rejects
+these inputs rather than dropping their metadata; its required standard clause
+assignment remains unapproved.
+
+Direct imports with writable scalar outputs and `NativeParameter` inputs also
+round-trip through private semantic producer/consumer and native package
+paths. Their PE imports are checked against retained calls and kept separate
+from selected provider dependencies. Active synthetic coverage validates
+single-provider and consumer-set pairs plus a graph consumer/provider pair.
+Standalone and graph NativeJit resolve direct imports from the consumer root
+only by absolute System32 path; graph and consumer-set execution do not stage
+arbitrary raw-import DLLs. Runtime regressions exercise
+`CompareStringOrdinal` with readonly local `char16` inputs and
+`GetCurrentThreadId` in standalone and graph JIT paths. Arbitrary
+non-System32 imports and COM runtime behavior remain unqualified.
 
 Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,
 `NativeParameter`, and `NativeComAcquisition` metadata is also provisionally

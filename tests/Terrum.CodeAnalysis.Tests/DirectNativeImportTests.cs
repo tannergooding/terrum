@@ -81,6 +81,31 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void NativeJitExecutesAValidatedSystem32DirectPointerInput()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
+            extern int32 CompareStringOrdinal(ptr<char16> first, int32 firstLength,
+                ptr<char16> second, int32 secondLength, int32 ignoreCase);
+
+            int32 Main() {
+                char16 first = 'A';
+                char16 second = 'A';
+                unsafe { return CompareStringOrdinal(&first, 1, &second, 1, 0) - 2; }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(0));
+    }
+
+    [Test]
     public void SourceAuthoredImportRequiresUnsafeCallers()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ImportDeclaration + """
@@ -106,6 +131,113 @@ public sealed class DirectNativeImportTests
 
         Assert.That(compilation.Program, Is.Null);
         Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public void DirectNativePointerInputRequiresAndUsesNativeParameterMetadata()
+    {
+        const string Source = """
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern int32 ReadValue(ptr<int32> value);
+
+            int32 Main() {
+                int32 value = 42;
+                unsafe { return ReadValue(&value); }
+            }
+            """;
+        var declarationOnly = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 ReadValue(ptr<int32> value);
+            """));
+        Assert.That(declarationOnly.HasErrors, Is.False,
+            string.Join(Environment.NewLine, declarationOnly.Diagnostics));
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var import = compilation.Program!.Functions.Single(static function =>
+            function.Name == "ReadValue").DirectNativeImport!;
+        Assert.That(import.Parameters, Has.Length.EqualTo(1));
+        Assert.That(import.Parameters.Single(),
+            Is.EqualTo(new DirectNativeParameter(0, PrimitiveType.Int32,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 1)));
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(compilation.Program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ReadValue"));
+
+        var missingMetadata = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+            "[Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]" + Environment.NewLine,
+            "", StringComparison.Ordinal)));
+        Assert.That(missingMetadata.Program, Is.Null);
+        Assert.That(missingMetadata.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+        var unauthorizedWrite = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+            "Read, NoEscape", "Write, NoEscape", StringComparison.Ordinal)));
+        Assert.That(unauthorizedWrite.Program, Is.Null);
+        Assert.That(unauthorizedWrite.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+        var safeCaller = Compilation.Create(SyntaxTree.Parse(Source.Replace(
+            "unsafe { return ReadValue(&value); }", "return ReadValue(&value);",
+            StringComparison.Ordinal)));
+        Assert.That(safeCaller.Program, Is.Null);
+        Assert.That(safeCaller.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
+    }
+
+    [Test]
+    public void DirectNativePointerInputSurvivesPrivateSemanticMetadataAndIsRevalidated()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 ReadValue(ptr<int32> value);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = ModuleCompiler.CreateProducer(compilation.Program!, ["ReadValue"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(80));
+        var reference = ModuleCompiler.CreateReference(artifact);
+        var import = reference.Functions.Single(static function =>
+            function.Name == "ReadValue").DirectNativeImport!;
+        Assert.That(import.Parameters, Is.EqualTo([
+            new DirectNativeParameter(0, PrimitiveType.Int32,
+                NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 1),
+        ]));
+
+        var malformed = artifact.ToArray();
+        var library = Encoding.UTF8.GetBytes("example.dll");
+        var libraryOffset = IndexOf(malformed, library);
+        Assert.That(libraryOffset, Is.GreaterThanOrEqualTo(sizeof(int)));
+        var exportLengthOffset = libraryOffset + library.Length;
+        var exportLength = BinaryPrimitives.ReadInt32LittleEndian(
+            malformed.AsSpan(exportLengthOffset, sizeof(int)));
+        var outputCountOffset = exportLengthOffset + sizeof(int) + exportLength;
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            malformed.AsSpan(outputCountOffset, sizeof(int))), Is.Zero);
+        var parameterCountOffset = outputCountOffset + sizeof(int);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            malformed.AsSpan(parameterCountOffset, sizeof(int))), Is.EqualTo(1));
+        var parameterOrdinalOffset = parameterCountOffset + sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            malformed.AsSpan(parameterOrdinalOffset, sizeof(int)), 1);
+
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void TrRmNativeImportRejectsPointerInputWithoutAnApprovedContractEncoding()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 ReadValue(ptr<int32> value);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(compilation.Program!, "pointer-input"));
     }
 
     [Test]
@@ -231,6 +363,41 @@ public sealed class DirectNativeImportTests
                     if (ReadValue(&value) == 0) { return ProviderValue() + value; }
                 }
                 return -1;
+            }
+            """), NativeModuleCompiler.CreateReference(provider));
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+
+        var consumer = NativeModuleCompiler.CreateConsumer(consumerCompilation.Program!, provider,
+            NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.Validate(consumer, provider);
+
+        var packageText = Encoding.ASCII.GetString(consumer);
+        Assert.That(packageText, Does.Contain("example.dll"));
+        Assert.That(packageText, Does.Contain("ProviderValue.dll"));
+        Assert.That(packageText, Does.Contain("ReadValue"));
+    }
+
+    [Test]
+    public void DirectNativePointerInputCanBeCombinedWithOneNativeProducerDependency()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 ProviderValue() { return 40; }"));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["ProviderValue"], "ProviderValue", NativeRuntimePolicy.FailFast);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 ReadValue(ptr<int32> value);
+
+            int32 Main() {
+                mut int32 value = 1;
+                mut int32 status = 0;
+                unsafe { status = ReadValue(&value); }
+                if (status == 0) { return -1; }
+                return ProviderValue() + value;
             }
             """), NativeModuleCompiler.CreateReference(provider));
         Assert.That(consumerCompilation.HasErrors, Is.False,

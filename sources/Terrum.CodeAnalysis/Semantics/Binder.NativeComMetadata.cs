@@ -154,14 +154,14 @@ internal sealed partial class Binder
                         AttributeName(attribute) == "Terrum.Interop.NativeComMethod").ToArray();
                     var outputAttributes = methodAttributes.Where(static attribute =>
                         AttributeName(attribute) == "Terrum.Interop.NativeOutput").ToArray();
-                    var nativeParameters = ImmutableArray.CreateBuilder<NativeComParameterDefinition>();
+                    var nativeParameters = ImmutableArray.CreateBuilder<NativeParameterDefinition>();
                     var nativeParameterIndexes = new HashSet<int>();
                     foreach (var attribute in methodAttributes)
                     {
                         var attributeName = AttributeName(attribute);
                         if (attributeName == "Terrum.Interop.NativeParameter")
                         {
-                            if (!TryDecodeNativeComParameterAttribute(attribute, out var nativeParameter)
+                            if (!TryDecodeNativeParameterAttribute(attribute, out var nativeParameter)
                                 || !nativeParameterIndexes.Add(nativeParameter.ParameterIndex))
                             {
                                 Report("TRM3030",
@@ -282,9 +282,9 @@ internal sealed partial class Binder
                             || !effects.HasFlag(NativeComEffects.AcquiresReference)
                             || !parameterTypes[outputParameterIndex].EndsWith("**", StringComparison.Ordinal)
                             || outputParameter is null
-                            || outputParameter.Access is not (NativeComParameterAccess.Write
-                                or NativeComParameterAccess.ReadWrite)
-                            || outputParameter.Retention != NativeComParameterRetention.NoEscape)
+                            || outputParameter.Access is not (NativeParameterAccess.Write
+                                or NativeParameterAccess.ReadWrite)
+                            || outputParameter.Retention != NativeParameterRetention.NoEscape)
                         {
                             Report("TRM3030",
                                 "A NativeOutput on a COM method must identify a typed interface double-pointer with HRESULT acquisition effects.",
@@ -706,8 +706,8 @@ internal sealed partial class Binder
         return true;
     }
 
-    private static bool TryDecodeNativeComParameterAttribute(SyntaxNode attribute,
-        out NativeComParameterDefinition parameter)
+    private static bool TryDecodeNativeParameterAttribute(SyntaxNode attribute,
+        out NativeParameterDefinition parameter)
     {
         parameter = new(-1, default, default, -1);
         var children = attribute.Children;
@@ -741,15 +741,15 @@ internal sealed partial class Binder
         }
 
         var access = accessToken.Token.Name switch {
-            "Read" => NativeComParameterAccess.Read,
-            "Write" => NativeComParameterAccess.Write,
-            "ReadWrite" => NativeComParameterAccess.ReadWrite,
-            _ => (NativeComParameterAccess)byte.MaxValue,
+            "Read" => NativeParameterAccess.Read,
+            "Write" => NativeParameterAccess.Write,
+            "ReadWrite" => NativeParameterAccess.ReadWrite,
+            _ => (NativeParameterAccess)byte.MaxValue,
         };
         var retention = retentionToken.Token.Name switch {
-            "NoEscape" => NativeComParameterRetention.NoEscape,
-            "MayEscape" => NativeComParameterRetention.MayEscape,
-            _ => (NativeComParameterRetention)byte.MaxValue,
+            "NoEscape" => NativeParameterRetention.NoEscape,
+            "MayEscape" => NativeParameterRetention.MayEscape,
+            _ => (NativeParameterRetention)byte.MaxValue,
         };
         if ((byte)access == byte.MaxValue || (byte)retention == byte.MaxValue)
         {

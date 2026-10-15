@@ -968,20 +968,23 @@ internal sealed partial class Binder
         return true;
     }
 
-    private bool TryBindDirectNativePointerType(SyntaxNode node, out PrimitiveType pointeeType)
+    private bool TryBindDirectNativePointerType(SyntaxNode node, out PrimitiveType pointeeType,
+        out bool isWritable)
     {
         pointeeType = PrimitiveType.Int32;
+        isWritable = false;
         var typeArguments = node.Children.OfType<SyntaxNode>().ToArray();
-        if (TypeNameIdentifier(node) != "ptr" || node.Children[0] is not SyntaxTokenElement {
-                Token.Kind: TokenKind.WriteKeyword
-            } || typeArguments.Length != 1
+        if (TypeNameIdentifier(node) != "ptr" || typeArguments.Length != 1
+            || node.Children[0] is not SyntaxTokenElement firstToken
+            || firstToken.Token.Kind is not (TokenKind.Identifier or TokenKind.WriteKeyword)
             || node.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.Greater })
         {
             return false;
         }
 
-        var pointee = BindType(typeArguments[0], allowVoid: false);
-        if (!DirectNativeImportContract.IsOutputPointee(pointee))
+        isWritable = firstToken.Token.Kind == TokenKind.WriteKeyword;
+        var pointee = BindType(typeArguments[0], allowVoid: true);
+        if (pointee != PrimitiveType.Void && !DirectNativeImportContract.IsOutputPointee(pointee))
         {
             return false;
         }
@@ -1794,6 +1797,7 @@ internal sealed partial class Binder
         string? nativeExportName = null;
         var nativeOutputParameterIndexes = new HashSet<int>();
         var nativeOutputResultConditions = new Dictionary<int, uint>();
+        var nativeParameters = new Dictionary<int, NativeParameterDefinition>();
         var nativeComAcquisitionOutputParameterIndexes = new HashSet<int>();
         var nativeComAcquisitionSources = new List<NativeComAcquisitionSourceDefinition>();
         SyntaxNode? captures = null;
@@ -1810,9 +1814,11 @@ internal sealed partial class Binder
                 if (attributeName.Contains('.')
                     && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                     && attributeName != "Terrum.Interop.NativeOutput"
+                    && attributeName != "Terrum.Interop.NativeParameter"
                     && attributeName != "Terrum.Interop.NativeComAcquisition")
                 {
-                    Report("TRM3001", "Only the compiler-owned NativeImport, NativeOutput, and NativeComAcquisition qualified attributes are supported.",
+                    Report("TRM3001",
+                        "Only the compiler-owned NativeImport, NativeOutput, NativeParameter, and NativeComAcquisition qualified attributes are supported.",
                         attribute.Span);
                     continue;
                 }
@@ -1836,6 +1842,18 @@ internal sealed partial class Binder
                             attribute.Span);
                     }
                     nativeImportAttribute = attribute;
+                    continue;
+                }
+                if (attributeName == "Terrum.Interop.NativeParameter")
+                {
+                    if (returnTarget
+                        || !TryDecodeNativeParameterAttribute(attribute, out var nativeParameter)
+                        || !nativeParameters.TryAdd(nativeParameter.ParameterIndex, nativeParameter))
+                    {
+                        Report("TRM3030",
+                            "NativeParameter requires a unique ordinal, access, retention, and nonnegative extent.",
+                            attribute.Span);
+                    }
                     continue;
                 }
                 if (attributeName == "Terrum.Interop.NativeOutput")
@@ -2007,6 +2025,11 @@ internal sealed partial class Binder
         {
             Report("TRM3030", "NativeOutput may appear only on an extern callable.", declaration.Span);
         }
+        if (nativeParameters.Count != 0 && (!isExternal || nativeLibraryName is null))
+        {
+            Report("TRM3030", "NativeParameter requires a two-string direct NativeImport declaration.",
+                nativeImportAttribute?.Span ?? declaration.Span);
+        }
         if (isExternal)
         {
             if (nativeImportAttribute is null)
@@ -2155,9 +2178,10 @@ internal sealed partial class Binder
             PrimitiveType? nativePointeeType = null;
             PrimitiveType type;
             if (nativeLibraryName is not null
-                && TryBindDirectNativePointerType(typeNode, out var pointeeType))
+                && TryBindDirectNativePointerType(typeNode, out var pointeeType, out var isWritablePointer))
             {
-                type = PrimitiveType.NativeStorageAddress;
+                type = isWritablePointer
+                    ? PrimitiveType.NativeStorageAddress : PrimitiveType.NativeRawPointer;
                 nativePointeeType = pointeeType;
             }
             else
@@ -2235,9 +2259,11 @@ internal sealed partial class Binder
         if (nativeLibraryName is not null && nativeExportName is not null)
         {
             var nativeOutputs = ImmutableArray.CreateBuilder<DirectNativeOutput>();
+            var directNativeParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>();
             foreach (var outputIndex in nativeOutputParameterIndexes.Order())
             {
                 if (outputIndex >= declared.Count
+                    || declared[outputIndex].Type != PrimitiveType.NativeStorageAddress
                     || declared[outputIndex].NativePointeeType is not PrimitiveType outputType)
                 {
                     Report("TRM3030",
@@ -2251,14 +2277,38 @@ internal sealed partial class Binder
                         : DirectNativeImportContract.DefaultResultCondition(returnType),
                     1));
             }
+            foreach (var (ordinal, nativeParameter) in nativeParameters.OrderBy(
+                static pair => pair.Key))
+            {
+                var parameterIndex = ordinal - 1;
+                if (parameterIndex < 0 || parameterIndex >= declared.Count
+                    || declared[parameterIndex].Type != PrimitiveType.NativeRawPointer
+                    || declared[parameterIndex].NativePointeeType is not PrimitiveType pointeeType
+                    || nativeOutputParameterIndexes.Contains(parameterIndex))
+                {
+                    Report("TRM3030",
+                        "NativeParameter must identify a non-output raw pointer parameter.",
+                        nativeImportAttribute?.Span ?? declaration.Span);
+                    continue;
+                }
+                directNativeParameters.Add(new DirectNativeParameter(parameterIndex, pointeeType,
+                    nativeParameter.Access, nativeParameter.Retention, nativeParameter.Extent));
+            }
             for (var index = 0; index < declared.Count; index++)
             {
                 var parameter = declared[index];
-                if (parameter.NativePointeeType is PrimitiveType pointee
+                if (parameter.Type == PrimitiveType.NativeStorageAddress
                     && !nativeOutputParameterIndexes.Contains(index))
                 {
                     Report("TRM3030",
-                        "The first direct native import profile permits pointer parameters only as result-correlated outputs.",
+                        "A direct native writable pointer requires NativeOutput metadata.",
+                        parameter.Span);
+                }
+                else if (parameter.Type == PrimitiveType.NativeRawPointer
+                    && !nativeParameters.ContainsKey(index + 1))
+                {
+                    Report("TRM3030",
+                        "A direct native input pointer requires NativeParameter access, retention, and extent metadata.",
                         parameter.Span);
                 }
                 else if (parameter.NativePointeeType is null
@@ -2290,7 +2340,9 @@ internal sealed partial class Binder
             }
             requiresUnsafeCaller = true;
             directNativeImport = new DirectNativeImport(nativeLibraryName, nativeExportName,
-                nativeOutputs.ToImmutable());
+                nativeOutputs.ToImmutable()) {
+                Parameters = directNativeParameters.ToImmutable(),
+            };
         }
         else if (nativeOutputParameterIndexes.Count != 0)
         {
@@ -5657,6 +5709,14 @@ internal sealed partial class Binder
                         output.ParameterIndex == position) is DirectNativeOutput nativeOutput)
                 {
                     bound.Add(BindDirectNativeOutputAddress(value, nativeOutput, argument.Span));
+                }
+                else if (signature?.External is BoundFunction directParameterFunction
+                    && directParameterFunction.DirectNativeImport is not null
+                    && expectedParameter?.Type == PrimitiveType.NativeRawPointer && position >= 0
+                    && DirectNativeImportContract.ParameterForParameter(
+                        directParameterFunction, position) is DirectNativeParameter directInputParameter)
+                {
+                    bound.Add(BindDirectNativeParameterAddress(value, directInputParameter, argument.Span));
                 }
                 else if (expected == PrimitiveType.NativeStorageAddress
                     && signature?.External is BoundFunction comTarget

@@ -259,7 +259,7 @@ internal static class NativeComCallContract
                     {
                         if (!TryGetNativeParameter(method, index, out var nativeParameter)
                             || nativeParameter is null
-                            || nativeParameter.Retention != NativeComParameterRetention.NoEscape
+                            || nativeParameter.Retention != NativeParameterRetention.NoEscape
                             || nativeParameter.Extent != 1
                             || !TryGetNativeParameterPointeeType(method, index, catalog,
                                 program.Structures, out _))
@@ -960,7 +960,7 @@ internal static class NativeComCallContract
             && adaptation.Kind == NativeComParameterAdaptationKind.ValueArrayAddress);
 
     internal static bool TryGetNativeParameter(NativeComMethodDefinition method, int nativeIndex,
-        out NativeComParameterDefinition? parameter)
+        out NativeParameterDefinition? parameter)
     {
         foreach (var candidate in method.NativeParameters)
         {
@@ -997,7 +997,7 @@ internal static class NativeComCallContract
     internal static bool IsNativeStorageAddressParameter(NativeComMethodDefinition method,
         int nativeIndex, NativeImportCatalog catalog, ImmutableArray<BoundStruct> structures) =>
         TryGetNativeParameter(method, nativeIndex, out var parameter)
-        && parameter is not null && parameter.Retention == NativeComParameterRetention.NoEscape
+        && parameter is not null && parameter.Retention == NativeParameterRetention.NoEscape
         && parameter.Extent == 1
         && TryGetNativeParameterPointeeType(method, nativeIndex, catalog, structures, out var pointeeType)
         && (DirectNativeImportContract.IsScalar(pointeeType)

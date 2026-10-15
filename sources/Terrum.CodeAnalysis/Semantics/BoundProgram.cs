@@ -430,10 +430,16 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 }
 
 internal sealed record DirectNativeImport(string LibraryName, string ExportName,
-    ImmutableArray<DirectNativeOutput> Outputs);
+    ImmutableArray<DirectNativeOutput> Outputs)
+{
+    internal ImmutableArray<DirectNativeParameter> Parameters { get; init; } = [];
+}
 
 internal sealed record DirectNativeOutput(int ParameterIndex, PrimitiveType PointeeType,
     uint ResultCondition, uint FailureDisposition);
+
+internal sealed record DirectNativeParameter(int ParameterIndex, PrimitiveType PointeeType,
+    NativeParameterAccess Access, NativeParameterRetention Retention, int Extent);
 
 /// <summary>A parameter or local storage declaration.</summary>
 /// <param name="Name">The source name.</param>

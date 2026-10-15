@@ -529,7 +529,8 @@ public static partial class SemanticVerifier
                         || (variable.Type == PrimitiveType.NativeStorageAddress
                             && !NativeStorageParameterContract.IsStorageAddressParameter(function,
                                 variableIndex, program.NativeImportCatalog)
-                            && DirectNativeImportContract.OutputForParameter(function, variableIndex) is null)
+                            && DirectNativeImportContract.OutputForParameter(function, variableIndex) is null
+                            && DirectNativeImportContract.ParameterForParameter(function, variableIndex) is null)
                         || (NativeFixedArrayContract.IsCarrier(variable.Type)
                             && (function.IsExternal || function.IndexedBody is not null
                                 || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -4425,6 +4426,13 @@ public static partial class SemanticVerifier
                         }
                         var directNativeOutput = DirectNativeImportContract.OutputForParameter(
                             target, parameterIndex);
+                        var directNativeParameter = DirectNativeImportContract.ParameterForParameter(
+                            target, parameterIndex);
+                        var isDirectNativeParameterAddress = argument is BoundNativeStorageAddress
+                            directParameterAddress
+                            && directNativeParameter is not null
+                            && DirectNativeImportContract.MatchesAddress(
+                                directParameterAddress, directNativeParameter, function, program);
                         NativeStorageRecordParameterDefinition? storageRecordParameter = null;
                         if (storageRecordImport is not null)
                         {
@@ -4513,6 +4521,7 @@ public static partial class SemanticVerifier
                                 && directNativeOutput is not null
                                 && DirectNativeImportContract.MatchesAddress(
                                     directOutputAddress, directNativeOutput, function, program);
+                            isAllowedStorageAddress |= isDirectNativeParameterAddress;
                             isAllowedStorageAddress |= argument is BoundNativeStorageAddress recordAddress
                                 && storageRecordParameter is not null
                                 && NativeStorageRecordContract.MatchesAddress(recordAddress,
@@ -4530,7 +4539,7 @@ public static partial class SemanticVerifier
                             NativeComParameterAdaptation? comAggregateStorageAdaptation = null;
                             NativeComParameterAdaptation? comValueOutputAddressAdaptation = null;
                             NativeComMethodDefinition? comNativeParameterMethod = null;
-                            NativeComParameterDefinition? comNativeParameter = null;
+                            NativeParameterDefinition? comNativeParameter = null;
                             var comNativeParameterIndex = -1;
                             if (target.Intrinsic == BoundIntrinsic.NativeComVTableCall
                                 && target.NativeComMethod is NativeComMethodDefinition method
@@ -4585,6 +4594,24 @@ public static partial class SemanticVerifier
                                 VerifyDirectNativeOutputAddress(outputAddress, directNativeOutput,
                                     initialized, fieldMasks, declarations, function, program,
                                     ref remaining, depth + 1, failures);
+                            }
+                            else if (directNativeParameter is not null)
+                            {
+                                if (argument is BoundNativeStorageAddress address)
+                                {
+                                    if (!DirectNativeImportContract.MatchesAddress(
+                                        address, directNativeParameter, function, program))
+                                    {
+                                        throw InvalidEffect(argument.Span, "NativeImport");
+                                    }
+                                    VerifyDirectNativeParameterAddress(address, directNativeParameter,
+                                        initialized, fieldMasks, declarations, function, program,
+                                        ref remaining, depth + 1, failures);
+                                }
+                                else if (argument.Type != PrimitiveType.NativeRawPointer)
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
                             }
                             else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeWindowClassExAddress)
                             {
@@ -4942,7 +4969,8 @@ public static partial class SemanticVerifier
                         {
                             reservedReceiver = loanRoot;
                         }
-                        if (argument.Type != target.Variables[parameterSlot].Type)
+                        if (argument.Type != target.Variables[parameterSlot].Type
+                            && !isDirectNativeParameterAddress)
                         {
                             throw Invalid();
                         }
