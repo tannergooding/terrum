@@ -164,8 +164,12 @@ named Windows System32 imports. Its section, clause, and Feature assignments
 are not canonical TRRM assignments. The source prototype also accepts
 `NativeParameter` for raw pointer inputs with explicit `Read`, `Write`, or
 `ReadWrite` access, `NoEscape` retention, and a one-value extent for supported
-scalar or raw-pointer pointees; `ptr<void>` is limited to readonly,
-zero-extent metadata.
+scalar, raw-pointer, and fixed-layout Blittable aggregate pointees. Aggregate
+addresses require an initialized local; writable access additionally requires
+mutable backing. Opaque `NativeWindowHandle` and `NativeModuleHandle` values
+are admitted as by-value parameters, relying on their explicit pointer-sized
+handle representation. `NativeOutput` remains limited to scalar and raw-pointer
+pointees, and `ptr<void>` is limited to readonly, zero-extent metadata.
 When a call forms an address with `&local`, the local must be initialized and
 match the pointee type; `Write` and `ReadWrite` require mutable backing. Raw
 pointer values remain caller-authored unsafe inputs. This input metadata

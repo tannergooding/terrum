@@ -38,6 +38,12 @@ internal static class DirectNativeImportContract
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
+    internal static bool IsNativeHandleValue(PrimitiveType type) =>
+        type is PrimitiveType.NativeWindowHandle or PrimitiveType.NativeModuleHandle;
+
+    internal static bool IsValueParameter(PrimitiveType type) =>
+        IsScalar(type) || IsNativeHandleValue(type);
+
     internal static bool IsOutputPointee(PrimitiveType type) =>
         IsScalar(type) || type == PrimitiveType.NativeRawPointer;
 
@@ -47,6 +53,11 @@ internal static class DirectNativeImportContract
         {
             return true;
         }
+        return IsBlittableAggregate(type, structures);
+    }
+
+    private static bool IsBlittableAggregate(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
+    {
         var index = (int)type - 100;
         return index >= 0 && index < structures.Count
             && structures[index].BlittableTargetRequirement == FixedLayoutStorage.WindowsX64TargetRequirement
@@ -128,7 +139,7 @@ internal static class DirectNativeImportContract
                     return false;
                 }
             }
-            else if (!IsScalar(parameterType) || outputs[index] || parameter.IsOut || parameter.IsInit)
+            else if (!IsValueParameter(parameterType) || outputs[index] || parameter.IsOut || parameter.IsInit)
             {
                 return false;
             }

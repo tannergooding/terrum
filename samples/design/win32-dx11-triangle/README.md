@@ -42,10 +42,12 @@ compiler features that have been retired.
 ## Compiler boundary
 
 The compiler lowers native imports, storage records, COM ownership, and vtable
-calls through generic contracts. DX11-specific imports, COM signatures, and
-layouts remain data in the selected Windows x64 catalog; the compiler no longer
-has DX11 primitives, intrinsics, source gates, verifier cases, or emitter
-branches. The Windows FFI, COM, and ownership proposals remain **UNAPPROVED**;
-this sample is implementation evidence, not acceptance of those contracts.
+calls through generic contracts. `GetClientRect` is authored as a named native
+import with a source-defined Blittable rectangle and writable pointer
+contract. Other Windows and DX11 imports, COM signatures, and layouts remain
+data in the selected Windows x64 catalog; the compiler no longer has DX11
+primitives, intrinsics, source gates, verifier cases, or emitter branches. The
+Windows FFI, COM, and ownership proposals remain **UNAPPROVED**; this sample
+is implementation evidence, not acceptance of those contracts.
 
 The [helper API sketch](interop.api.terrum) is not an input to these builds.

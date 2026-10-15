@@ -343,10 +343,9 @@ internal sealed partial class Binder
         {
             _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
         }
-        if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeWindowHandle) == true)
-        {
-            _ = _structNames.TryAdd(NativeWindowHandleContract.TypeName, PrimitiveType.NativeWindowHandle);
-        }
+        _ = _structNames.TryAdd(NativeWindowHandleContract.TypeName, PrimitiveType.NativeWindowHandle);
+        _ = _structNames.TryAdd(NativeWindowClassContract.ModuleHandleTypeName,
+            PrimitiveType.NativeModuleHandle);
         if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeNullPointer) == true)
         {
             foreach (var typeName in NativeWindowCreationContract.NullOnlyParameterTypeNames)
@@ -365,8 +364,6 @@ internal sealed partial class Binder
         }
         if (_nativeImportCatalog?.SupportsWindowClassInitialization == true)
         {
-            _ = _structNames.TryAdd(NativeWindowClassContract.ModuleHandleTypeName,
-                PrimitiveType.NativeModuleHandle);
             _ = _structNames.TryAdd(NativeWindowClassContract.WindowClassTypeName,
                 PrimitiveType.NativeWindowClassEx);
             _ = _structNames.TryAdd(NativeWindowClassContract.WindowClassAddressTypeName,
@@ -2452,10 +2449,10 @@ internal sealed partial class Binder
                 }
                 else if (parameter.NativePointeeType is null
                     && parameter.Type != PrimitiveType.NativeStorageAddress
-                    && !DirectNativeImportContract.IsScalar(parameter.Type))
+                    && !DirectNativeImportContract.IsValueParameter(parameter.Type))
                 {
                     Report("TRM3030",
-                        "The first direct native import profile requires directly Blittable scalar parameters.",
+                        "A direct native import value parameter requires a supported scalar or explicit native handle type.",
                         parameter.Span);
                 }
             }
@@ -2771,6 +2768,19 @@ internal sealed partial class Binder
             Report("TRM3030", "A catalogued native storage record is an immutable local-only type.",
                 node.Span);
             return PrimitiveType.Int32;
+        }
+        if (name == NativeWindowClassContract.ModuleHandleTypeName)
+        {
+            if (typeArgumentNodes.Length != 0 || writable || optional
+                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
+            {
+                Report("TRM3030",
+                    "A native module handle is an immutable opaque value type.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+
+            return PrimitiveType.NativeModuleHandle;
         }
         if (NativeWindowClassContract.IsTypeName(name))
         {

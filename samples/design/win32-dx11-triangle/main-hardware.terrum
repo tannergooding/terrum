@@ -427,10 +427,10 @@ extern uint32 GetModuleFileNameW(
 [NoThrow]
 extern uint32 GetLastError();
 
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.GetClientRect")]
+[Terrum.Interop.NativeImport("user32.dll", "GetClientRect")]
+[Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
 [NoThrow]
-extern int32 GetClientRect(
-    Terrum.Interop.Windows.HWND window, Terrum.Interop.NativeStorageAddress rectangle);
+extern int32 GetClientRect(Terrum.Interop.Windows.HWND window, ptr<ClientRectangle> rectangle);
 
 [Terrum.Interop.NativeImport("windows-x64.system32.user32.PostMessageW")]
 [NoThrow]
@@ -443,7 +443,7 @@ extern int32 PeekMessageW(
     Terrum.Interop.Windows.MSGAddress message, Terrum.Interop.Windows.HWND window,
     uint32 minimum, uint32 maximum, uint32 remove);
 
-[Layout(Sequential)]
+[Blittable] [Layout(LayoutKind.Sequential)]
 struct ClientRectangle {
     int32 Left;
     int32 Top;

@@ -159,7 +159,7 @@ internal static class NativeWindowCreationContract
         {
             return NativeHandleOwnerContract.IsOwnedWindowArgument(argument, caller, program);
         }
-        if (parameter != 0 || key != DestroyWindowKey && key != NativeWindowClientRectContract.ImportKey)
+        if (parameter != 0 || key != DestroyWindowKey)
         {
             return false;
         }

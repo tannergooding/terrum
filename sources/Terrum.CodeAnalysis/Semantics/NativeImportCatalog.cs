@@ -94,7 +94,6 @@ public sealed class NativeImportCatalog
             .. NativeWindowCreationContract.Imports,
             .. NativeWindowClassContract.Imports,
             .. NativeWindowMessageContract.Imports,
-            NativeWindowClientRectContract.Import,
             NativeDx11ComCatalog.CreateDeviceAndSwapChainImport,
             NativeDx11ComCatalog.CompileShaderFromFileImport,
             .. NativeWindowsModulePathContract.Imports,
@@ -106,10 +105,7 @@ public sealed class NativeImportCatalog
             .. NativeDx11ComCatalog.FixedArrayStorageLayouts,
             NativeWindowsModulePathContract.StorageLayout,
         ], nativeStorageRecordLayouts: NativeDx11ComCatalog.StorageRecordLayouts,
-        aggregateStorageLayouts: [
-            .. NativeDx11ComCatalog.AggregateStorageLayouts,
-            .. NativeWindowClientRectContract.AggregateStorageLayouts,
-        ]);
+        aggregateStorageLayouts: NativeDx11ComCatalog.AggregateStorageLayouts);
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;
     private readonly ImmutableHashSet<string> _callbackTypeNames;
@@ -133,10 +129,6 @@ public sealed class NativeImportCatalog
         if (NativeWindowsModulePathContract.IsReservedImport(import))
         {
             return !isForTesting && NativeWindowsModulePathContract.MatchesImport(import);
-        }
-        if (NativeWindowClientRectContract.IsReservedImport(import))
-        {
-            return !isForTesting && NativeWindowClientRectContract.MatchesImport(import);
         }
         if (NativeWindowMessageContract.IsReservedImport(import))
         {
@@ -201,7 +193,6 @@ public sealed class NativeImportCatalog
                 PrimitiveType.NativeWindowHandle =>
                     NativeWindowMessageContract.ExpectedHandleParameterContract(import, index)
                         ?? NativeWindowCreationContract.ExpectedHandleParameterContract(import, index)
-                        ?? NativeWindowClientRectContract.ExpectedHandleParameterContract(import, index)
                         ?? NativeImportParameterContract.NoOwnerWindowHandle,
                 PrimitiveType.NativeNullPointer => NativeImportParameterContract.NullPointerOnly,
                 PrimitiveType.NativeModuleHandle => NativeImportParameterContract.CurrentModuleHandleNoEscape,
@@ -368,9 +359,6 @@ public sealed class NativeImportCatalog
                     or PrimitiveType.NativeWindowMessageAddress
                     or PrimitiveType.NativeComInterfaceOutputAddress
                     or PrimitiveType.NativeStorageAddress))
-                || (NativeWindowClientRectContract.IsReservedImport(import)
-                    && (isForTesting || identity != NativeWindowClassContract.CatalogIdentity
-                        || !NativeWindowClientRectContract.MatchesImport(import)))
                 || (NativeWindowsModulePathContract.IsReservedImport(import)
                     && (isForTesting
                         || identity != NativeWindowClassContract.CatalogIdentity
@@ -435,12 +423,6 @@ public sealed class NativeImportCatalog
         _fixedArrayStorageLayouts = storageLayouts;
         _storageRecordLayouts = storageRecordLayouts;
         _aggregateStorageLayouts = aggregateLayouts;
-        if (_imports.Values.Any(NativeWindowClientRectContract.IsReservedImport)
-            && !NativeWindowClientRectContract.MatchesCatalog(this))
-        {
-            throw new ArgumentException("The Windows client-rectangle import requires its exact System32 contract.",
-                nameof(imports));
-        }
         if ((Identity == NativeWindowCreationContract.CatalogIdentity
                 || _imports.Values.Any(NativeWindowCreationContract.IsReservedImport))
             && !NativeWindowCreationContract.MatchesCatalog(this))
@@ -705,7 +687,6 @@ public sealed class NativeImportCatalog
                     && definition.ParameterContracts[parameter]
                         != (NativeWindowMessageContract.ExpectedHandleParameterContract(definition, parameter)
                             ?? NativeWindowCreationContract.ExpectedHandleParameterContract(definition, parameter)
-                            ?? NativeWindowClientRectContract.ExpectedHandleParameterContract(definition, parameter)
                             ?? NativeImportParameterContract.NoOwnerWindowHandle))
                 || (definition.ParameterTypes[parameter] == PrimitiveType.NativeNullPointer
                     && !IsNullPointerParameter(definition, parameter))

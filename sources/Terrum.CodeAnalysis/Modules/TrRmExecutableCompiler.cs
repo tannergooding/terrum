@@ -60,9 +60,19 @@ public static partial class TrRmExecutableCompiler
             throw new ArgumentException("A module identity is required.", nameof(moduleIdentity));
         }
 
+        if (program.Functions.Any(static function =>
+                function.DirectNativeImport is DirectNativeImport import && !import.Parameters.IsEmpty))
+        {
+            throw Unsupported("TRRM does not persist source-authored NativeParameter contracts on direct imports.");
+        }
+
         if (program.EntryPoint == -1)
         {
             SemanticVerifier.VerifyLibraryReferences(program);
+        }
+        else if (program.Functions.Any(static function => function.IsExternal))
+        {
+            SemanticVerifier.VerifyReferences(program);
         }
         else
         {

@@ -61,7 +61,7 @@ public sealed class DirectNativeImportTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
             [NoThrow]
             extern unsafe uint32 GetCurrentThreadId();
@@ -156,6 +156,133 @@ public sealed class DirectNativeImportTests
 
         Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast),
             Is.EqualTo(0));
+    }
+
+    [Test]
+    public void DirectNativeImportAcceptsOpaqueHandleValuesAndWritableBlittableAggregates()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct NativeRectangle {
+                public int32 Left;
+                public int32 Top;
+                public int32 Right;
+                public int32 Bottom;
+
+                public NativeRectangle(int32 left, int32 top, int32 right, int32 bottom) {
+                    Left = left;
+                    Top = top;
+                    Right = right;
+                    Bottom = bottom;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("example.dll", "UpdateRectangle")]
+            [Terrum.Interop.NativeParameter(3, Write, NoEscape, 1)]
+            [NoThrow]
+            extern int32 UpdateRectangle(Terrum.Interop.Windows.HWND window,
+                Terrum.Interop.Windows.HINSTANCE module, ptr<NativeRectangle> rectangle);
+
+            unsafe int32 Invoke(Terrum.Interop.Windows.HWND window,
+                Terrum.Interop.Windows.HINSTANCE module) {
+                mut NativeRectangle rectangle = new NativeRectangle(1, 2, 3, 4);
+                unsafe { return UpdateRectangle(window, module, &rectangle); }
+            }
+
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = compilation.Program!.Functions.Single(static candidate =>
+            candidate.Name == "UpdateRectangle");
+        Assert.That(function.RequiresUnsafeCaller, Is.True);
+        Assert.That(function.Variables.Take(2).Select(static variable => variable.Type),
+            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+        Assert.That(function.DirectNativeImport!.Parameters, Is.EqualTo([
+            new DirectNativeParameter(2, (PrimitiveType)100,
+                NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
+        ]));
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(compilation.Program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("UpdateRectangle"));
+    }
+
+    [Test]
+    public void DirectNativeWritableAggregateRequiresBlittabilityAndMutableInitializedBacking()
+    {
+        const string Import = """
+            [Terrum.Interop.NativeImport("example.dll", "UpdateRectangle")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 UpdateRectangle(ptr<NativeRectangle> rectangle);
+            """;
+        const string NonBlittable = """
+            struct NativeRectangle { public int32 Left; }
+            """;
+        var unsupportedLayout = Compilation.CreateLibrary(SyntaxTree.Parse(
+            NonBlittable + Import));
+        Assert.That(unsupportedLayout.Program, Is.Null);
+        Assert.That(unsupportedLayout.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
+
+        var readonlyBacking = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct NativeRectangle {
+                public int32 Left;
+                public NativeRectangle(int32 left) { Left = left; }
+            }
+            [Terrum.Interop.NativeImport("example.dll", "UpdateRectangle")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 UpdateRectangle(ptr<NativeRectangle> rectangle);
+            int32 Main() {
+                NativeRectangle rectangle = new NativeRectangle(1);
+                unsafe { return UpdateRectangle(&rectangle); }
+            }
+            """));
+        Assert.That(readonlyBacking.Program, Is.Null);
+        Assert.That(readonlyBacking.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public void OpaqueHandleAndWritableAggregateImportSurvivePrivateModulesButRemainUnencodedInTrRm()
+    {
+        const string Source = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct NativeRectangle {
+                public int32 Left;
+                public int32 Top;
+                public int32 Right;
+                public int32 Bottom;
+            }
+
+            [Terrum.Interop.NativeImport("example.dll", "UpdateRectangle")]
+            [Terrum.Interop.NativeParameter(3, Write, NoEscape, 1)]
+            public extern int32 UpdateRectangle(Terrum.Interop.Windows.HWND window,
+                Terrum.Interop.Windows.HINSTANCE module, ptr<NativeRectangle> rectangle);
+            """;
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var artifact = ModuleCompiler.CreateProducer(program, ["UpdateRectangle"]);
+        var reference = ModuleCompiler.CreateReference(artifact);
+        var function = reference.Functions.Single(static candidate =>
+            candidate.Name == "UpdateRectangle");
+        Assert.That(function.Variables.Take(2).Select(static variable => variable.Type),
+            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+        Assert.That(function.DirectNativeImport!.Parameters, Is.EqualTo([
+            new DirectNativeParameter(2, (PrimitiveType)100,
+                NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
+        ]));
+
+        var executable = Compilation.Create(SyntaxTree.Parse(Source + "\nint32 Main() { return 0; }"));
+        Assert.That(executable.HasErrors, Is.False,
+            string.Join(Environment.NewLine, executable.Diagnostics));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(executable.Program!, "unapproved-native-handle-write"));
     }
 
     [Test]
