@@ -337,6 +337,11 @@ internal sealed class Parser
                 else if (attributeName == "Terrum.Interop.NativeOutput")
                 {
                     attribute.Add(Expect(TokenKind.NumericLiteral));
+                    if (Current.Kind == TokenKind.Comma)
+                    {
+                        attribute.Add(Take());
+                        attribute.Add(Expect(TokenKind.Identifier));
+                    }
                 }
                 else if (attributeName == "Terrum.Interop.NativeComAcquisition")
                 {

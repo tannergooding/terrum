@@ -146,9 +146,11 @@ A separate prototype under the unapproved
 [TRRM native interop proposal](proposals/trrm-native-interop-metadata.md)
 supports two-string `Terrum.Interop.NativeImport` declarations with
 `Terrum.Interop.NativeOutput` for result-correlated writable scalar pointers
-and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. The latter
-represents only unmanaged pointer bits; it adds no backing, provenance,
-ownership, pinning, or cleanup guarantee. The prototype carries the raw
+and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. The default
+output condition is nonzero; `NativeOutput(ordinal, NonNegative)` provisionally
+expresses signed nonnegative status results such as HRESULT success. The latter
+pointer output represents only unmanaged pointer bits; it adds no backing,
+provenance, ownership, pinning, or cleanup guarantee. The prototype carries the raw
 import's caller-unsafety and direct representation through a provisional TRRM
 NativeImport table and source-reference path; that standard path is limited to
 named Windows System32 imports. Its section, clause, and Feature assignments

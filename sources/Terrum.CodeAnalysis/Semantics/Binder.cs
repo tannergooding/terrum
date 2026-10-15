@@ -864,6 +864,45 @@ internal sealed partial class Binder
         return true;
     }
 
+    private static bool TryDecodeDirectNativeOutputAttribute(SyntaxNode attribute,
+        out int parameterIndex, out uint resultCondition)
+    {
+        resultCondition = 0;
+        if (TryDecodeNativeOutputAttribute(attribute, out parameterIndex))
+        {
+            return true;
+        }
+
+        parameterIndex = -1;
+        var children = attribute.Children;
+        if (children.Length != 12
+            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
+            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
+            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
+            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[5] is not SyntaxTokenElement { Token.Name: "NativeOutput" }
+            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+            || children[7] is not SyntaxTokenElement index
+            || index.Token.Kind != TokenKind.NumericLiteral
+            || !ScannerHost.TryParseIntegerMagnitude(index.Token.Text.AsSpan(), out var magnitude)
+            || magnitude > int.MaxValue
+            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[9] is not SyntaxTokenElement {
+                Token.Name: "NonNegative",
+                Token.Kind: TokenKind.Identifier,
+            }
+            || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+            || children[11] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+        {
+            return false;
+        }
+
+        parameterIndex = (int)magnitude;
+        resultCondition = DirectNativeImportContract.Int32NonNegativeResultCondition;
+        return true;
+    }
+
     private static bool TryDecodeNativeComAcquisitionAttribute(SyntaxNode attribute,
         out int parameterIndex) =>
         TryDecodeNativeComAcquisitionAttribute(attribute, out parameterIndex, out _);
@@ -1754,6 +1793,7 @@ internal sealed partial class Binder
         string? nativeLibraryName = null;
         string? nativeExportName = null;
         var nativeOutputParameterIndexes = new HashSet<int>();
+        var nativeOutputResultConditions = new Dictionary<int, uint>();
         var nativeComAcquisitionOutputParameterIndexes = new HashSet<int>();
         var nativeComAcquisitionSources = new List<NativeComAcquisitionSourceDefinition>();
         SyntaxNode? captures = null;
@@ -1800,12 +1840,17 @@ internal sealed partial class Binder
                 }
                 if (attributeName == "Terrum.Interop.NativeOutput")
                 {
-                    if (returnTarget || !TryDecodeNativeOutputAttribute(attribute, out var outputParameterIndex)
+                    if (returnTarget || !TryDecodeDirectNativeOutputAttribute(attribute,
+                            out var outputParameterIndex, out var outputResultCondition)
                         || !nativeOutputParameterIndexes.Add(outputParameterIndex))
                     {
                         Report("TRM3030",
-                            "NativeOutput requires one distinct nonnegative parameter ordinal.",
+                            "NativeOutput requires one distinct parameter ordinal and an optional supported result condition.",
                             attribute.Span);
+                    }
+                    else
+                    {
+                        nativeOutputResultConditions.Add(outputParameterIndex, outputResultCondition);
                     }
                     continue;
                 }
@@ -2200,8 +2245,10 @@ internal sealed partial class Binder
                         nativeImportAttribute?.Span ?? declaration.Span);
                     continue;
                 }
+                var resultCondition = nativeOutputResultConditions[outputIndex];
                 nativeOutputs.Add(new DirectNativeOutput(outputIndex, outputType,
-                    returnType == PrimitiveType.Int32 ? 1u : returnType == PrimitiveType.UInt32 ? 2u : 0u,
+                    resultCondition != 0 ? resultCondition
+                        : DirectNativeImportContract.DefaultResultCondition(returnType),
                     1));
             }
             for (var index = 0; index < declared.Count; index++)
@@ -2227,7 +2274,7 @@ internal sealed partial class Binder
                 && returnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
             {
                 Report("TRM3030",
-                    "NativeOutput currently requires an int32 or uint32 result; the output is valid only when it is nonzero.",
+                    "NativeOutput currently requires an int32 or uint32 result.",
                     declaration.Span);
             }
             if (nativeOutputParameterIndexes.Count != nativeOutputs.Count)

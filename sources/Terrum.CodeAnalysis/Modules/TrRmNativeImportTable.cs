@@ -212,8 +212,8 @@ public readonly ref struct TrRmNativeImportTableReader
         {
             if (output.ParameterOrdinal >= count || seenOutputs[output.ParameterOrdinal]
                 || output.FailureDisposition != 1
-                || output.ResultCondition != (resultType == PrimitiveType.Int32 ? 1u
-                    : resultType == PrimitiveType.UInt32 ? 2u : 0u))
+                || !DirectNativeImportContract.IsValidResultCondition(
+                    resultType, output.ResultCondition))
             {
                 throw InvalidNativeImport();
             }

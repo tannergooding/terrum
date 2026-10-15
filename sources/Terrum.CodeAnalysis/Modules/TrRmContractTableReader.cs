@@ -170,11 +170,12 @@ public readonly ref struct TrRmContractTableReader
                     var outputResult = TrRmCompactLinearBodyReader.ResolveType(typeSpecs,
                         signatures.GetResultTypeSpec(outputSignature));
                     var (outputFirst, outputCount) = signatures.GetParamRange(outputSignature);
+                    var validOutputCondition = outputResult == 8
+                        ? outputCondition is 1 or 3
+                        : outputResult == 0x0D && outputCondition == 2;
                     if (outputOrdinal >= outputCount
                         || !outputs.Add((owner, outputOrdinal))
-                        || outputCondition != (outputResult == 8 ? 1u
-                            : outputResult == 0x0D ? 2u : 0u)
-                        || outputCondition == 0 || failureDisposition != 1
+                        || !validOutputCondition || failureDisposition != 1
                         || Read(data, 20) != 0
                         || parameters.GetMode(outputFirst + (int)outputOrdinal) != 0)
                     {

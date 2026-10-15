@@ -109,6 +109,67 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void SignedNonnegativeNativeOutputConditionRoundTripsThroughTrRm()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "AcquireInterface")]
+            [Terrum.Interop.NativeOutput(0, NonNegative)]
+            public extern int32 AcquireInterface(write ptr<ptr<void>> result);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "signed-native-output");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var output = loaded.Functions.Single(static function =>
+            function.Name == "AcquireInterface").DirectNativeImport!.Outputs.Single();
+
+        Assert.That(output.ResultCondition, Is.EqualTo(3u));
+
+        var invalid = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "AcquireInterface")]
+            [Terrum.Interop.NativeOutput(0, NonNegative)]
+            public extern uint32 AcquireInterface(write ptr<ptr<void>> result);
+            """));
+        Assert.That(invalid.Program, Is.Null);
+        Assert.That(invalid.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public void SignedNonnegativeNativeOutputSurvivesPrivateNativeDependencies()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "AcquireInterface")]
+            [Terrum.Interop.NativeOutput(0, NonNegative)]
+            extern int32 AcquireInterface(write ptr<ptr<void>> result);
+
+            public int32 AcquireAndReturn() {
+                mut ptr<void> result = null;
+                mut int32 status = 0;
+                unsafe { status = AcquireInterface(&result); }
+                if (status < 0) { return -1; }
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var semanticProducer = ModuleCompiler.CreateProducer(program, ["AcquireAndReturn"]);
+        var reference = ModuleCompiler.CreateReference(semanticProducer);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return AcquireAndReturn(); }"), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program,
+            ["AcquireAndReturn"], "SignedOutput", NativeRuntimePolicy.FailFast);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumerCompilation.Program!,
+            nativeProducer, NativeRuntimePolicy.FailFast);
+
+        NativeModuleCompiler.Validate(nativeConsumer, nativeProducer);
+    }
+
+    [Test]
     public void WritableNativeOutputSurvivesPrivateSemanticAndNativeModuleDependencies()
     {
         var source = """

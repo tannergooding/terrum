@@ -7,6 +7,22 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal static class DirectNativeImportContract
 {
+    internal const uint Int32NonZeroResultCondition = 1;
+    internal const uint UInt32NonZeroResultCondition = 2;
+    internal const uint Int32NonNegativeResultCondition = 3;
+
+    internal static uint DefaultResultCondition(PrimitiveType returnType) => returnType switch {
+        PrimitiveType.Int32 => Int32NonZeroResultCondition,
+        PrimitiveType.UInt32 => UInt32NonZeroResultCondition,
+        _ => 0,
+    };
+
+    internal static bool IsValidResultCondition(PrimitiveType returnType, uint resultCondition) =>
+        (returnType == PrimitiveType.Int32
+            && resultCondition is Int32NonZeroResultCondition or Int32NonNegativeResultCondition)
+        || (returnType == PrimitiveType.UInt32
+            && resultCondition == UInt32NonZeroResultCondition);
+
     internal static bool IsValidLibraryName(string name) =>
         name is { Length: >= 5 and <= 256 }
         && name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
@@ -44,8 +60,7 @@ internal static class DirectNativeImportContract
         {
             if (output is null || output.ParameterIndex < 0 || output.ParameterIndex >= function.ParameterCount
                 || outputs[output.ParameterIndex] || !IsOutputPointee(output.PointeeType)
-                || output.ResultCondition != (function.ReturnType == PrimitiveType.Int32 ? 1u
-                    : function.ReturnType == PrimitiveType.UInt32 ? 2u : 0u)
+                || !IsValidResultCondition(function.ReturnType, output.ResultCondition)
                 || output.FailureDisposition != 1
                 || function.Variables[output.ParameterIndex] is not BoundVariable outputParameter
                 || outputParameter.Type != PrimitiveType.NativeStorageAddress

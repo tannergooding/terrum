@@ -272,6 +272,23 @@ public sealed class NativeComSourceMetadataTests
     }
 
     [Test]
+    public void SignedNonnegativeNativeOutputSupportsFixedOwnerAcquisition()
+    {
+        var source = SourceOwnerAcquisition.Replace("[Terrum.Interop.NativeOutput(0)]",
+            "[Terrum.Interop.NativeOutput(0, NonNegative)]", StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var acquisition = compilation.Program!.Functions.Single(static function =>
+            function.Name == "Example.Interop.AcquireThing");
+        Assert.That(acquisition.DirectNativeImport!.Outputs.Single().ResultCondition, Is.EqualTo(3u));
+        Assert.That(NativeComCallContract.Acquisitions(
+            compilation.Program.Functions.Single(static function =>
+                function.Name == "Example.Interop.TryAcquireThing"), compilation.Program), Is.Not.Null);
+    }
+
+    [Test]
     public void SourceAuthoredOwnerAcquisitionRejectsWrongFailureDisposition()
     {
         var source = SourceOwnerAcquisition.Replace(

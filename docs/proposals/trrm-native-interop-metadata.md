@@ -232,8 +232,11 @@ unsupported interop semantics.
 For the current native-import/output experiment only, `NativeOutput` uses
 provisional Contract kind `6` with a 16-byte payload: 32-bit parameter
 ordinal, result-condition code, failure-disposition code, and a reserved
-zero word. This assignment is not standard approval. No wire encoding is
-approved for the COM clauses. A structural reader experiment provisionally
+zero word. The source experiment defaults integer outputs to a nonzero result;
+it also provisionally accepts `NativeOutput(ordinal, NonNegative)` for signed
+nonnegative status results such as HRESULT success, using result-condition
+code `3`. Neither the source form nor its wire code is standard approval. No
+wire encoding is approved for the COM clauses. A structural reader experiment provisionally
 uses Contract kinds `7` through `11`: kind `7` for `NativeComInterface`
 (16-byte big-endian IID and base TypeDef row), kind `8` for `NativeComMethod`
 (vtable slot and effect mask),
