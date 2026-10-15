@@ -463,27 +463,53 @@ public static partial class NativeModuleCompiler
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> GraphImports(GraphPackage package)
     {
-        var count = 0;
+        var imports = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var dependency in package.Dependencies)
         {
             if (dependency.Imports.Length != 0)
             {
-                count++;
+                var dllName = DllName(dependency.Identity);
+                if (!imports.TryGetValue(dllName, out var symbols))
+                {
+                    symbols = new HashSet<string>(StringComparer.Ordinal);
+                    imports.Add(dllName, symbols);
+                }
+                foreach (var symbol in dependency.Imports)
+                {
+                    _ = symbols.Add(symbol);
+                }
             }
         }
-        if (count == 0)
+        if (!package.Consumer && !package.IsLeaf)
+        {
+            foreach (var (dllName, directImports) in
+                ModuleCompiler.GetGraphProducerNativeImports(package.Contract))
+            {
+                if (!imports.TryGetValue(dllName, out var symbols))
+                {
+                    symbols = new HashSet<string>(StringComparer.Ordinal);
+                    imports.Add(dllName, symbols);
+                }
+                foreach (var symbol in directImports)
+                {
+                    _ = symbols.Add(symbol);
+                }
+            }
+        }
+        if (imports.Count == 0)
         {
             return ImmutableDictionary<string, IReadOnlyList<string>>.Empty;
         }
-        var imports = new Dictionary<string, IReadOnlyList<string>>(count, StringComparer.Ordinal);
-        foreach (var dependency in package.Dependencies)
+        var result = new Dictionary<string, IReadOnlyList<string>>(imports.Count,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var (dllName, symbols) in imports)
         {
-            if (dependency.Imports.Length != 0)
-            {
-                imports.Add(DllName(dependency.Identity), dependency.Imports);
-            }
+            var sorted = new string[symbols.Count];
+            symbols.CopyTo(sorted);
+            Array.Sort(sorted, StringComparer.Ordinal);
+            result.Add(dllName, sorted);
         }
-        return imports;
+        return result;
     }
 
     private static GraphDependency[] WithGraphUsage(GraphDependency[] declarations,

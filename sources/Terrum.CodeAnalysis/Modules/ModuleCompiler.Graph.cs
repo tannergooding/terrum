@@ -145,7 +145,8 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
-        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules");
+        SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
+            allowDirectNativeImports: true);
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
@@ -186,6 +187,15 @@ public static partial class ModuleCompiler
             }
             if (function.IsExternal)
             {
+                if (function.DirectNativeImport is not null)
+                {
+                    if (!DirectNativeImportContract.IsValid(function))
+                    {
+                        throw new ModuleContractException(
+                            $"Graph library direct import '{function.Name}' is invalid.");
+                    }
+                    continue;
+                }
                 available ??= dependencies.Functions.IsEmpty
                     ? ImmutableDictionary<string, BoundFunction>.Empty
                     : dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
@@ -244,9 +254,10 @@ public static partial class ModuleCompiler
         {
             var function = program.Functions[index];
             var remapped = RemapFunction(function, program.Structures, structures);
+            var isGraphImport = function.IsExternal && function.DirectNativeImport is null;
             functions.Add(new ModuleFunction(function.Name,
-                Contract(remapped, structures), function.IsExternal ? null : remapped, function.IsExternal) {
-                HasOwnershipTransfer = function.IsExternal
+                Contract(remapped, structures), isGraphImport ? null : remapped, isGraphImport) {
+                HasOwnershipTransfer = isGraphImport
                     ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
             });
         }

@@ -57,12 +57,30 @@ public static partial class NativeModuleCompiler
         var imports = contractSnapshot.Imports;
         var bindings = GraphBindings(providers, imports);
         var declarations = NativeBindings(bindings);
-        var (image, used) = declarations.Length == 0
+        var directNativeBindings = DirectNativeBindings(program);
+        var imageBindings = new NativeImportBinding[declarations.Length + directNativeBindings.Length];
+        declarations.CopyTo(imageBindings, 0);
+        directNativeBindings.CopyTo(imageBindings, declarations.Length);
+        var (image, used) = imageBindings.Length == 0
             ? (NativeEmitter.EmitLibrary(program, exports, runtimePolicy),
                 ImmutableArray<NativeImportBinding>.Empty)
-            : NativeEmitter.EmitLibraryWithImportUsage(program, exports, declarations, runtimePolicy);
+            : NativeEmitter.EmitLibraryWithImportUsage(program, exports, imageBindings, runtimePolicy,
+                allowDirectNativeImports: directNativeBindings.Length != 0);
+        var graphBindingNames = new HashSet<string>(declarations.Length, StringComparer.Ordinal);
+        foreach (var declaration in declarations)
+        {
+            _ = graphBindingNames.Add(declaration.FunctionName);
+        }
+        var graphUsedBuilder = ImmutableArray.CreateBuilder<NativeImportBinding>();
+        foreach (var import in used)
+        {
+            if (graphBindingNames.Contains(import.FunctionName))
+            {
+                graphUsedBuilder.Add(import);
+            }
+        }
         var package = new GraphPackage(false, identity, runtimePolicy,
-            sortedExports, WithGraphUsage(bindings, used), contract, image) {
+            sortedExports, WithGraphUsage(bindings, graphUsedBuilder.ToImmutable()), contract, image) {
             ContractSnapshot = contractSnapshot,
             ValidatedReference = contractSnapshot.Reference,
             Origins = CreateGraphOrigins(contractSnapshot, false, identity, providers),
@@ -473,6 +491,25 @@ public static partial class NativeModuleCompiler
             result.Add(structure.Name, origin);
         }
         return result;
+    }
+
+    private static NativeImportBinding[] DirectNativeBindings(BoundProgram program)
+    {
+        var bindings = new List<NativeImportBinding>();
+        foreach (var function in program.Functions)
+        {
+            if (function.DirectNativeImport is not DirectNativeImport import)
+            {
+                continue;
+            }
+            if (!function.IsExternal || !DirectNativeImportContract.IsValid(function))
+            {
+                throw new ModuleContractException(
+                    "Graph producer contains an invalid direct native import declaration.");
+            }
+            bindings.Add(new NativeImportBinding(function.Name, import.LibraryName, import.ExportName));
+        }
+        return [.. bindings];
     }
 
     private static GraphTypeOrigin[] CreateGraphOrigins(ModuleCompiler.GraphContractSnapshot contract,

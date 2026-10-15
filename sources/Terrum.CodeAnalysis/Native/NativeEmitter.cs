@@ -336,10 +336,15 @@ public static class NativeEmitter
     internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
         EmitLibraryWithImportUsage(BoundProgram program, IReadOnlyList<string> exports,
             IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, bool allowDirectNativeImports = false)
     {
         ArgumentNullException.ThrowIfNull(bindings);
-        return EmitLibraryCore(program, exports, bindings, runtimePolicy, cancellationToken);
+        if (allowDirectNativeImports)
+        {
+            ValidateDirectNativeLibraryBindings(program, bindings);
+        }
+        return EmitLibraryCore(program, exports, bindings, runtimePolicy, cancellationToken,
+            allowDirectNativeImports: allowDirectNativeImports);
     }
 
     internal static byte[] EmitLibraryWithNativeImports(BoundProgram program,
@@ -373,6 +378,30 @@ public static class NativeEmitter
         }
         return EmitLibraryCore(program, exports, bindings.ToImmutable(), runtimePolicy, cancellationToken,
             allowDirectNativeImports: true).Image;
+    }
+
+    private static void ValidateDirectNativeLibraryBindings(BoundProgram program,
+        IReadOnlyList<NativeImportBinding> bindings)
+    {
+        var directFunctions = program.Functions.Where(static function => function.IsExternal
+            && function.DirectNativeImport is not null).ToDictionary(static function => function.Name,
+                StringComparer.Ordinal);
+        foreach (var binding in bindings)
+        {
+            if (!directFunctions.TryGetValue(binding.FunctionName, out var function)
+                || function.DirectNativeImport is not DirectNativeImport import
+                || !DirectNativeImportContract.IsValid(function)
+                || import.LibraryName != binding.DllName || import.ExportName != binding.ExportName)
+            {
+                continue;
+            }
+            _ = directFunctions.Remove(binding.FunctionName);
+        }
+        if (directFunctions.Count != 0)
+        {
+            throw new ArgumentException("Every direct native import needs its declared DLL and export binding.",
+                nameof(bindings));
+        }
     }
 
     private static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)

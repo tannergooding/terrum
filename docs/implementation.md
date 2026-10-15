@@ -155,12 +155,13 @@ named Windows System32 imports. Its section, clause, and Feature assignments
 are not canonical TRRM assignments. Direct imports with writable scalar
 outputs also round-trip through the private semantic producer and native
 package paths, where the PE imports are checked against the retained call
-contracts. Active tests cover an unrelated synthetic DLL, a consumer linked
-against its producer package, and rejection of a tampered output condition.
-This establishes compilation, metadata validation, and PE emission—not
-execution of the foreign function. JIT, module-set/graph paths, semantic TRRM
-COM serialization/dependency binding, and runtime qualification remain
-unsupported by this slice.
+contracts. Private native graph producers retain these imports separately from
+graph-provider dependencies; active coverage validates the producer and a
+consumer/provider graph pair with an unrelated synthetic DLL. This establishes
+compilation, metadata validation, and PE emission—not execution of the foreign
+function. Graph execution does not stage arbitrary raw-import DLLs. JIT,
+module-set paths, semantic TRRM COM ownership/dependency binding, and runtime
+qualification remain unsupported by this slice.
 
 Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,
 `NativeParameter`, and `NativeComAcquisition` metadata is also provisionally

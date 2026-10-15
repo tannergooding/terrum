@@ -210,6 +210,18 @@ public static partial class ModuleCompiler
         byte[] producerBytes)
     {
         var producer = Read(producerBytes, expectedConsumer: false);
+        return GetProducerNativeImports(producer);
+    }
+
+    internal static IReadOnlyDictionary<string, IReadOnlyList<string>> GetGraphProducerNativeImports(
+        byte[] producerBytes)
+    {
+        var producer = ReadGraphLibrary(producerBytes);
+        return GetProducerNativeImports(producer);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> GetProducerNativeImports(Module producer)
+    {
         var indexes = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
         for (var index = 0; index < producer.Functions.Length; index++)
         {
@@ -3312,10 +3324,10 @@ public static partial class ModuleCompiler
                 RuntimePolicy = policy,
             };
             if (module.FormatVersion == DirectNativeImportVersion
-                && (expectedConsumer || !module.Functions.Any(static item =>
-                    item.Function?.DirectNativeImport is not null)))
+                && !module.Functions.Any(static item =>
+                    item.Function?.DirectNativeImport is not null))
             {
-                throw new ModuleFormatException("Revision 79 requires a producer with direct native imports.");
+                throw new ModuleFormatException("Revision 79 requires retained direct native import metadata.");
             }
             var retainedProfile = RetainedNativeProfile(module);
             if (profile != retainedProfile)

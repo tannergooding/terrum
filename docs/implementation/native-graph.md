@@ -21,7 +21,11 @@ sandbox. See [implementation](../implementation.md) for the broader compiler
 support boundary and [roadmap](../roadmap.md) for future format work.
 
 A `.trng` library package stores one verified DLL, its symbolic semantic
-library, public exports and exact direct DLL-import ownership. A `.trng` root
+library, public exports and exact direct graph-provider imports. A graph
+library may also retain source-authored raw native imports in its semantic
+contract; PE validation checks those DLL/export names against actual calls,
+separately from selected graph providers. Raw-import DLLs are not staged as
+graph dependencies. A `.trng` root
 stores one already emitted consumer EXE and its direct imports. Leaf `.trmn`
 producers remain unchanged. Each graph may contain at most 16 distinct
 producers. Validation walks the *entire selected closure*, rejecting missing
@@ -92,6 +96,8 @@ additional source snapshots, reports original source locations, accepts
 closure, in any argument order. Packages are trusted native artifacts, not
 an authenticated sandbox. Execution stages validated byte snapshots into a
 private directory and supervises a single subprocess with a deadline.
+Only selected graph packages are staged; arbitrary DLLs named by raw native
+imports must already be available through the Windows loader's search policy.
 `run-native-graph-jit` accepts the same explicit closure and runtime policy.
 It first validates all packages and graph edges, then starts a supervised
 `terrumc.exe` apphost worker. The worker revalidates the staged snapshots and DLL

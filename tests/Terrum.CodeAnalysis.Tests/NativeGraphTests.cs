@@ -238,6 +238,42 @@ public sealed class NativeGraphTests
     }
 
     [Test]
+    public void GraphProviderKeepsDirectNativeImportsSeparateFromGraphDependencies()
+    {
+        var leaf = Leaf("public int32 Leaf() { return 40; }");
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeOutput(0)]
+            extern int32 ReadValue(write ptr<int32> value);
+            public int32 ReadAndReturn() {
+                mut int32 value = 0;
+                unsafe {
+                    if (ReadValue(&value) == 0) { return Leaf() + value; }
+                }
+                return -1;
+            }
+            """), NativeModuleCompiler.CreateGraphReference([leaf]));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var provider = NativeModuleCompiler.CreateGraphProducer(compilation.Program!,
+            ["ReadAndReturn"], "NodeA", [leaf], NativeRuntimePolicy.FailFast);
+        var info = NativeModuleCompiler.InspectGraphArtifact(provider);
+
+        Assert.That(info.Dependencies, Is.EqualTo(["NodeB"]));
+        Assert.That(info.Exports, Is.EqualTo(["ReadAndReturn"]));
+
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return ReadAndReturn(); }"),
+            NativeModuleCompiler.CreateGraphReference([provider]));
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(consumerCompilation.Program!,
+            [provider], NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.ValidateGraph(consumer, [leaf, provider]);
+    }
+
+    [Test]
     public void GraphProvidersRejectCaseOnlyIdentityDuplicates()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
