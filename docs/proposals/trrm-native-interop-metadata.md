@@ -8,6 +8,15 @@ proposal describes the broader generic metadata surface needed to describe
 native DLL imports and COM calls in a Terrum dependency, so the compiler can
 consume the dependency's declarations instead of owning an API catalog.
 
+**Superseded scope notice:** the `NativeComOwner` and
+`NativeComAcquisition` clauses and compiler-owned COM reference-count,
+ownership, and cleanup policy described below are withdrawn. They are not
+required TRRM gaps and must not be implemented from this proposal. COM
+ownership and wrappers belong in authored Terrum code. A minimal generic
+interface/vtable mapping remains an open design question; the COM-named
+records below are not an approved answer. See
+[Unsafe FFI and native vtable cleanup](unsafe-ffi-vtable-cleanup.md).
+
 ## Goal
 
 A Terrum library should be able to declare a native boundary, compile that

@@ -148,10 +148,14 @@ approved.
   storage/calls are now selected canonically; the proposed import catalog,
   callback and closed-COM APIs remain unapproved. Exact sample gates do not
   establish general interop support.
+- [Unsafe FFI and native vtable cleanup](unsafe-ffi-vtable-cleanup.md)
+  records the user-settled trust boundary and recommends removing
+  compiler-owned COM ownership/acquisition policy. It does not approve a
+  generic vtable source form or any metadata assignments.
 - [Native imports and COM metadata in TRRM](trrm-native-interop-metadata.md)
-  proposes a native binding row and generic COM contract clauses so binary
-  Terrum dependencies can carry their own interop declarations, without a
-  compiler-owned API catalog or changes to native package architecture.
+  remains unapproved; its native binding and aggregate-pointer experiments
+  are provisional, and its COM owner/acquisition clauses are withdrawn.
+  Generic interface/vtable metadata remains unresolved.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md) is
   deferred until an integrated compiler path needs it and its full-file
   size/resource policy is defined; revision-76 support remains provisional.
