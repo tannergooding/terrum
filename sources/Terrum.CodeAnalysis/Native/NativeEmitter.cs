@@ -80,7 +80,10 @@ public static class NativeEmitter
                 }
                 bindings.Add(new NativeImportBinding(function.Name,
                     directImport.LibraryName, directImport.ExportName));
-                system32ImportPaths.Add(functionIndex, System32ImportPath(directImport.LibraryName));
+                if (!allowApplicationDirectory)
+                {
+                    system32ImportPaths.Add(functionIndex, System32ImportPath(directImport.LibraryName));
+                }
                 continue;
             }
             if (catalog is null || function.NativeImportKey is not string key

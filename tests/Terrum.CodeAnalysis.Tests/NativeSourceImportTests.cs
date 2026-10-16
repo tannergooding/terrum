@@ -19,10 +19,7 @@ public sealed partial class NativeSourceImportTests
 {
     private const string ImportKey = "test.source-import.counter";
     private const string DelayImportKey = "test.source-import.delay";
-    private const string SignedFixtureKey = "test.application.native-import-abi.NativeFfiSigned";
-    private const string UnsignedFixtureKey = "test.application.native-import-abi.NativeFfiUnsigned";
     private const string Utf16ZFixtureKey = "test.application.native-import-abi.NativeFfiUtf16Z";
-    private const string TextProbeFixtureKey = "test.application.native-import-abi.NativeFfiTextProbe";
 
     [Test]
     public void SourceImportRequiresItsExactCatalogSignatureAndCompilerAttribute()
@@ -118,10 +115,8 @@ public sealed partial class NativeSourceImportTests
     }
 
     [Test]
-    public void AuthoredUnsafeFunctionsCanForwardTypedNativeStringPointers()
+    public void Utf16ZLiteralCannotBeForwardedToAnUnannotatedUnsafeFunction()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test-native-utf16z-forward.v1",
-            [CreateUtf16ZImportDefinition()]);
         var source = """
             unsafe void Consume(ptr<char16> value) { }
 
@@ -130,16 +125,9 @@ public sealed partial class NativeSourceImportTests
                 return 0;
             }
             """;
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-
-        var safeCall = source.Replace("unsafe { Consume(utf16z(\"native\")); }",
-            "Consume(utf16z(\"native\"));", StringComparison.Ordinal);
-        var safeCompilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(safeCall)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.That(safeCompilation.Program, Is.Null);
-        Assert.That(safeCompilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3011"), Is.True);
     }
 
     [Test]
@@ -159,59 +147,43 @@ public sealed partial class NativeSourceImportTests
     }
 
     [Test]
-    public void Utf16ZRequiresAValidLiteralAndCataloguedNoEscapeArgument()
+    public void Utf16ZRequiresAValidLiteralAndExplicitNoEscapeArgument()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test-native-utf16z-v1",
-            [CreateUtf16ZImportDefinition()]);
+        var declaration = """
+            [Terrum.Interop.NativeImport("fixture.dll", "NativeFfiUtf16Z")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(6, Read, NoEscape, 0)]
+            [NoThrow]
+            extern unsafe int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
+                ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
+            """;
         var sources = new[] {
-            $$"""
-                [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
-                [NoThrow]
-                extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
-                    ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
+            declaration + """
                 int32 Main() {
-                    return NativeFfiUtf16Z(utf16z("bad\0text"), 1, 2,
-                        utf16z("second"), 3, utf16z("third"));
-                }
-                """,
-            $$"""
-                [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
-                [NoThrow]
-                extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
-                    ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
-                int32 Main() {
-                    return NativeFfiUtf16Z(utf16z("first" + "suffix"), 1, 2,
-                        utf16z("second"), 3, utf16z("third"));
-                }
-                """,
-            $$"""
-                [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
-                [NoThrow]
-                extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
-                    ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
-                int32 Main() {
-                    return NativeFfiUtf16Z("first", 1, 2,
-                        utf16z("second"), 3, utf16z("third"));
-                }
-                """,
-            $$"""
-                [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
-                [NoThrow]
-                extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
-                    ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
-                int32 Main() {
-                    InlineArray<char16, 2> text = [char16(65), char16(0)];
                     unsafe {
-                        return NativeFfiUtf16Z(&text[0], 1, 2,
+                        return NativeFfiUtf16Z(utf16z("bad\0text"), 1, 2,
                             utf16z("second"), 3, utf16z("third"));
                     }
                 }
                 """,
-            $$"""
-                [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
-                [NoThrow]
-                extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
-                    ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
+            declaration + """
+                int32 Main() {
+                    unsafe {
+                        return NativeFfiUtf16Z(utf16z("first" + "suffix"), 1, 2,
+                            utf16z("second"), 3, utf16z("third"));
+                    }
+                }
+                """,
+            declaration + """
+                int32 Main() {
+                    unsafe {
+                        return NativeFfiUtf16Z("first", 1, 2,
+                            utf16z("second"), 3, utf16z("third"));
+                    }
+                }
+                """,
+            declaration + """
                 int32 Main() {
                     ptr<char16> value = utf16z("first");
                     return 0;
@@ -221,11 +193,24 @@ public sealed partial class NativeSourceImportTests
 
         foreach (var source in sources)
         {
-            var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
-                BoundRuntimePolicy.FailFast);
+            var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
             Assert.That(compilation.Program, Is.Null);
             Assert.That(compilation.Diagnostics, Is.Not.Empty);
         }
+
+        var addressSource = declaration + """
+            int32 Main() {
+                InlineArray<char16, 2> text = [char16(65), char16(0)];
+                unsafe {
+                    return NativeFfiUtf16Z(&text[0], 1, 2,
+                        utf16z("second"), 3, utf16z("third"));
+                }
+            }
+            """;
+        var addressCompilation = Compilation.Create(
+            SyntaxTree.Parse(addressSource), BoundRuntimePolicy.FailFast);
+        Assert.That(addressCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, addressCompilation.Diagnostics));
 
         var withoutNoEscape = new NativeImportDefinition(Utf16ZFixtureKey, "native-import-abi-probe.dll",
             "NativeFfiUtf16Z", [PrimitiveType.NativeUtf16ZPointer], PrimitiveType.Int32,
@@ -288,26 +273,22 @@ public sealed partial class NativeSourceImportTests
     [Test]
     public void Utf16ZLiteralIndexIsRecheckedBeforeNativeEmission()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test-native-utf16z-v1",
-            [CreateUtf16ZImportDefinition()]);
-        var source = $$"""
-            [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
+        var source = """
+            [Terrum.Interop.NativeImport("fixture.dll", "NativeFfiUtf16Z")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [NoThrow]
-            extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
-                ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
+            extern unsafe int32 NativeFfiUtf16Z(ptr<char16> text);
             int32 Main() {
                 unsafe {
-                    return NativeFfiUtf16Z(utf16z("first"), 1, 2,
-                        utf16z("second"), 3, utf16z("third"));
+                    return NativeFfiUtf16Z(utf16z("first"));
                 }
             }
             """;
-        var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
-            BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
 
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImportsForTesting(
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithNativeImports(
             program with { NativeUtf16ZLiterals = [] }, NativeRuntimePolicy.FailFast))!;
     }
 
@@ -350,7 +331,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(program.NativeImportCatalog, Is.Null);
         Assert.That(program.Functions.Count(static function => function.IsExternal), Is.EqualTo(2));
 
-        var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast);
+        var image = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program,
             [new NativeImportBinding("CurrentThreadId", "kernel32.dll", "GetCurrentThreadId")],
             NativeRuntimePolicy.FailFast))!;
@@ -434,37 +415,30 @@ public sealed partial class NativeSourceImportTests
             };
             _ = await RunAsync(layoutProbeBuild, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
 
-            var catalog = NativeImportCatalog.CreateForTesting("test-native-import-abi-v1", [
-                new NativeImportDefinition(SignedFixtureKey, "native-import-abi-probe.dll", "NativeFfiSigned",
-                    [PrimitiveType.Int32, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
-                        PrimitiveType.Int32, PrimitiveType.UInt32],
-                    PrimitiveType.Int64, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory),
-                new NativeImportDefinition(UnsignedFixtureKey, "native-import-abi-probe.dll", "NativeFfiUnsigned",
-                    [PrimitiveType.UInt64, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
-                        PrimitiveType.UInt32],
-                    PrimitiveType.UInt64, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory),
-                CreateUtf16ZImportDefinition(),
-                CreateTextProbeImportDefinition(),
-            ]);
             var source = $$"""
-                [Terrum.Interop.NativeImport("{{SignedFixtureKey}}")]
+                [Terrum.Interop.NativeImport("native-import-abi-probe.dll", "NativeFfiSigned")]
                 [NoThrow]
-                extern int64 NativeFfiSigned(int32 first, uint32 second, int64 third, uint64 fourth,
+                extern unsafe int64 NativeFfiSigned(int32 first, uint32 second, int64 third, uint64 fourth,
                     int32 fifth, uint32 sixth);
 
-                [Terrum.Interop.NativeImport("{{UnsignedFixtureKey}}")]
+                [Terrum.Interop.NativeImport("native-import-abi-probe.dll", "NativeFfiUnsigned")]
                 [NoThrow]
-                extern uint64 NativeFfiUnsigned(uint64 first, uint32 second, int64 third, uint64 fourth,
+                extern unsafe uint64 NativeFfiUnsigned(uint64 first, uint32 second, int64 third, uint64 fourth,
                     uint32 fifth);
 
-                [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
+                [Terrum.Interop.NativeImport("native-import-abi-probe.dll", "NativeFfiUtf16Z")]
+                [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+                [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
+                [Terrum.Interop.NativeParameter(6, Read, NoEscape, 0)]
                 [NoThrow]
-                extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
+                extern unsafe int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
                     ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
 
-                [Terrum.Interop.NativeImport("{{TextProbeFixtureKey}}")]
+                [Terrum.Interop.NativeImport("native-import-abi-probe.dll", "NativeFfiTextProbe")]
+                [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+                [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
                 [NoThrow]
-                extern int32 NativeFfiTextProbe(ptr<char16> text, ptr<char16> caption,
+                extern unsafe int32 NativeFfiTextProbe(ptr<char16> text, ptr<char16> caption,
                     uint32 flags);
 
                 int32 Main() {
@@ -488,8 +462,7 @@ public sealed partial class NativeSourceImportTests
                     return 0;
                 }
                 """;
-            var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
-                BoundRuntimePolicy.FailFast);
+            var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
             var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
             var image = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
@@ -586,32 +559,6 @@ public sealed partial class NativeSourceImportTests
         }
         throw new DirectoryNotFoundException("Could not locate the native-import ABI fixture.");
     }
-
-    private static NativeImportDefinition CreateUtf16ZImportDefinition() =>
-        new(Utf16ZFixtureKey, "native-import-abi-probe.dll", "NativeFfiUtf16Z",
-            [PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32, PrimitiveType.UInt64,
-                PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32, PrimitiveType.NativeUtf16ZPointer],
-            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
-            ParameterContracts = [
-                NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-                NativeImportParameterContract.Value,
-                NativeImportParameterContract.Value,
-                NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-                NativeImportParameterContract.Value,
-                NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-            ],
-        };
-
-    private static NativeImportDefinition CreateTextProbeImportDefinition() =>
-        new(TextProbeFixtureKey, "native-import-abi-probe.dll", "NativeFfiTextProbe",
-            [PrimitiveType.NativeUtf16ZPointer, PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32],
-            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
-            ParameterContracts = [
-                NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-                NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-                NativeImportParameterContract.Value,
-            ],
-        };
 
     private static async Task<string> RunAsync(ProcessStartInfo start, TimeSpan timeout)
     {
