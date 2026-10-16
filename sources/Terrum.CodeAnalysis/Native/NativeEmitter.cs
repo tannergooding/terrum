@@ -671,9 +671,9 @@ internal sealed partial class PeCompiler
     private readonly int[] _frames;
     private readonly int[][] _slots;
     private readonly int[] _spillBases;
-    private readonly int[] _outBases;
+    private readonly int[][] _outSlots;
     private readonly int[] _returnSlots;
-    private readonly int[] _edgeCopyBases;
+    private readonly int[][] _edgeCopySlots;
     private readonly int[][] _liveSlots;
     private readonly int[][] _initializationFlags;
     private readonly int[][] _constructedFieldSlots;
@@ -714,7 +714,6 @@ internal sealed partial class PeCompiler
     private int _entryFilter;
     private int _frame;
     private int _spillBase;
-    private int _outBase;
     private int _returnSlot;
     private int _currentFunction;
     private bool _emittingFunclet;
@@ -751,9 +750,14 @@ internal sealed partial class PeCompiler
         _frames = new int[program.Functions.Length];
         _slots = new int[program.Functions.Length][];
         _spillBases = new int[program.Functions.Length];
-        _outBases = new int[program.Functions.Length];
+        _outSlots = new int[program.Functions.Length][];
         _returnSlots = new int[program.Functions.Length];
-        _edgeCopyBases = new int[program.Functions.Length];
+        _edgeCopySlots = new int[program.Functions.Length][];
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            _outSlots[index] = [];
+            _edgeCopySlots[index] = [];
+        }
         _liveSlots = new int[program.Functions.Length][];
         _initializationFlags = new int[program.Functions.Length][];
         _managedRootFrames = new int[program.Functions.Length];
@@ -983,14 +987,13 @@ internal sealed partial class PeCompiler
 
     private void PrepareFrames()
     {
-        var hasIndirectCleanup = false;
+        var maximumIndirectCleanupSize = 0;
         for (var type = 0; type < _program.Structures.Length; type++)
         {
-            if (_program.Structures[type].CleanupMethod is not null
-                && IsIndirect((PrimitiveType)(100 + type)))
+            var structureType = (PrimitiveType)(100 + type);
+            if (_program.Structures[type].CleanupMethod is not null && IsIndirect(structureType))
             {
-                hasIndirectCleanup = true;
-                break;
+                maximumIndirectCleanupSize = Math.Max(maximumIndirectCleanupSize, ScratchSize(structureType));
             }
         }
         for (var i = 0; i < _program.Functions.Length; i++)
@@ -1005,9 +1008,9 @@ internal sealed partial class PeCompiler
             var needsReturnSnapshot = false;
             var spillSlots = StatementSpills(function.Body, ref maximumArguments, ref needsReturnSnapshot,
                 _checkedExceptions && _managedNodes);
-            if (function.IndexedBody is TrRmScalarGraph indexed)
+            if (function.IndexedBody is TrRmScalarGraph indexedBody)
             {
-                foreach (var block in indexed.Blocks)
+                foreach (var block in indexedBody.Blocks)
                 {
                     foreach (var operation in block.Operations)
                     {
@@ -1022,14 +1025,6 @@ internal sealed partial class PeCompiler
             if (function.Intrinsic == BoundIntrinsic.NativeVTableCall)
             {
                 maximumArguments = Math.Max(maximumArguments, function.ParameterCount);
-            }
-            var outParameters = 0;
-            foreach (var variable in function.Variables)
-            {
-                if (variable.IsOut)
-                {
-                    outParameters++;
-                }
             }
             var outgoingSize = 32 + (8 * Math.Max(0, maximumArguments - 4));
             var at = (outgoingSize + 15) & ~15;
@@ -1059,18 +1054,57 @@ internal sealed partial class PeCompiler
                 at = (at + 7) & ~7;
             }
             _slots[i] = slots;
-            _spillBases[i] = (at + 15) & ~15;
-            _outBases[i] = _spillBases[i] + (16 * spillSlots);
-            _edgeCopyBases[i] = _outBases[i] + (16 * outParameters);
-            var edgeParameters = 0;
-            if (function.IndexedBody is not null)
+            _spillBases[i] = AlignOffset(at, 16);
+            at = checked(_spillBases[i] + (16 * spillSlots));
+            var outputSlots = new int[function.Variables.Length];
+            Array.Fill(outputSlots, -1);
+            for (var variable = 0; variable < function.Variables.Length; variable++)
             {
-                foreach (var block in function.IndexedBody.Blocks)
+                if (!function.Variables[variable].IsOut)
+                {
+                    continue;
+                }
+                var type = function.Variables[variable].Type;
+                at = AlignOffset(at, ScratchAlignment(type));
+                outputSlots[variable] = at;
+                at = checked(at + ScratchSize(type));
+            }
+            _outSlots[i] = outputSlots;
+            at = AlignOffset(at, 16);
+            var edgeParameters = 0;
+            if (function.IndexedBody is TrRmScalarGraph indexed)
+            {
+                foreach (var block in indexed.Blocks)
                 {
                     edgeParameters = Math.Max(edgeParameters, block.Parameters.Length);
                 }
             }
-            _returnSlots[i] = _edgeCopyBases[i] + (16 * edgeParameters);
+            var edgeCopySizes = new int[edgeParameters];
+            var edgeCopyAlignments = new int[edgeParameters];
+            Array.Fill(edgeCopyAlignments, 8);
+            if (function.IndexedBody is TrRmScalarGraph edgeGraph)
+            {
+                foreach (var block in edgeGraph.Blocks)
+                {
+                    for (var parameter = 0; parameter < block.Parameters.Length; parameter++)
+                    {
+                        var type = edgeGraph.Types[block.Parameters[parameter] - 1];
+                        edgeCopySizes[parameter] = Math.Max(edgeCopySizes[parameter], ScratchSize(type));
+                        edgeCopyAlignments[parameter] = Math.Max(edgeCopyAlignments[parameter],
+                            ScratchAlignment(type));
+                    }
+                }
+            }
+            var edgeCopySlots = new int[edgeParameters];
+            for (var parameter = 0; parameter < edgeParameters; parameter++)
+            {
+                at = AlignOffset(at, edgeCopyAlignments[parameter]);
+                edgeCopySlots[parameter] = at;
+                at = checked(at + edgeCopySizes[parameter]);
+            }
+            _edgeCopySlots[i] = edgeCopySlots;
+            at = AlignOffset(at, 16);
+            _returnSlots[i] = at;
             var hasOutputParameters = false;
             var parameterOffset = function.IsConstructor ? 1 : 0;
             for (var parameter = parameterOffset;
@@ -1084,19 +1118,26 @@ internal sealed partial class PeCompiler
             var required = _returnSlots[i] + (IsIndirect(function.ReturnType) || snapshotsOutputReturn ? 8L : 0L);
             if (needsReturnSnapshot)
             {
-                required = ((required + 15) & ~15L) + 16;
+                var returnSnapshot = AlignOffset(_returnSlots[i]
+                    + (IsIndirect(function.ReturnType) ? 8 : 0), 16);
+                required = Math.Max(required, returnSnapshot + (long)ScratchSize(function.ReturnType));
             }
             var live = new int[function.Variables.Length];
             Array.Fill(live, -1);
             var hasUnique = false;
+            var replacementSize = 8;
             for (var variable = 0; variable < function.Variables.Length; variable++)
             {
-                if (IsUnique(function.Variables[variable].Type)
-                    && !(variable == 0 && function.DeclaringStruct is not null && !function.IsStatic))
+                var type = function.Variables[variable].Type;
+                if (IsUnique(type))
                 {
-                    live[variable] = checked((int)required);
-                    required += 8;
                     hasUnique = true;
+                    replacementSize = Math.Max(replacementSize, ScratchSize(type));
+                    if (!(variable == 0 && function.DeclaringStruct is not null && !function.IsStatic))
+                    {
+                        live[variable] = checked((int)required);
+                        required += 8;
+                    }
                 }
             }
             _liveSlots[i] = live;
@@ -1129,13 +1170,13 @@ internal sealed partial class PeCompiler
             _replacementSlots[i] = checked((int)((required + 15) & ~15L));
             if (hasUnique)
             {
-                required = _replacementSlots[i] + 16L;
+                required = _replacementSlots[i] + (long)replacementSize;
             }
             _cleanupArgumentSlots[i] = -1;
-            if (hasIndirectCleanup)
+            if (maximumIndirectCleanupSize != 0)
             {
                 _cleanupArgumentSlots[i] = checked((int)((required + 15) & ~15L));
-                required = _cleanupArgumentSlots[i] + 16L;
+                required = _cleanupArgumentSlots[i] + (long)maximumIndirectCleanupSize;
             }
             required = PrepareManagedRoots(i, function, spillSlots, needsReturnSnapshot, required);
             required += 8; // Saved RBP lives above the addressable frame slots.
@@ -1166,7 +1207,6 @@ internal sealed partial class PeCompiler
             _currentFunction = i;
             _frame = _frames[i];
             _spillBase = _spillBases[i];
-            _outBase = _outBases[i];
             _returnSlot = _returnSlots[i];
             _cleanups.Clear();
             _normalExits.Clear();
@@ -1354,7 +1394,6 @@ internal sealed partial class PeCompiler
             _currentFunction = function;
             _frame = _frames[function];
             _spillBase = _spillBases[function];
-            _outBase = _outBases[function];
             _returnSlot = _returnSlots[function];
             var start = _code.Position;
             _code.Byte(0x55); // push rbp
@@ -1960,12 +1999,12 @@ internal sealed partial class PeCompiler
     private int Spill(int index) => _spillBase + (index * 16);
     private int OutSlot(int index)
     {
-        var ordinal = 0;
-        for (var i = 0; i < index; i++)
+        var slots = _outSlots[_currentFunction];
+        if ((uint)index >= (uint)slots.Length || slots[index] < 0)
         {
-            ordinal += _program.Functions[_currentFunction].Variables[i].IsOut ? 1 : 0;
+            throw new InvalidOperationException("Native output parameter has no staging slot.");
         }
-        return _outBase + (16 * ordinal);
+        return slots[index];
     }
 
     private bool IsImplicitReferenceArgument(BoundCall call, int argumentIndex)
@@ -2089,6 +2128,11 @@ internal sealed partial class PeCompiler
             || NativeFunctionPointerTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
+    private int ScratchSize(PrimitiveType type) => Math.Max(8, Size(type));
+    private int ScratchAlignment(PrimitiveType type) =>
+        Math.Max(8, ValueLayout.Alignment(type, _program.Structures));
+    private static int AlignOffset(int offset, int alignment) =>
+        checked((offset + alignment - 1) & ~(alignment - 1));
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
         || IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
     private bool IsUnique(PrimitiveType type) =>
@@ -2614,7 +2658,7 @@ internal sealed partial class PeCompiler
             {
                 var type = graph.Types[edge.Arguments[i] - 1];
                 var source = Slot(edge.Arguments[i] - 1);
-                var staged = _edgeCopyBases[_currentFunction] + (16 * i);
+                var staged = _edgeCopySlots[_currentFunction][i];
                 if (IsIndirect(type))
                 {
                     _code.Address(source);
@@ -2630,7 +2674,7 @@ internal sealed partial class PeCompiler
             {
                 var type = graph.Types[parameters[i] - 1];
                 var destination = Slot(parameters[i] - 1);
-                var staged = _edgeCopyBases[_currentFunction] + (16 * i);
+                var staged = _edgeCopySlots[_currentFunction][i];
                 if (IsIndirect(type))
                 {
                     _code.Address(staged);

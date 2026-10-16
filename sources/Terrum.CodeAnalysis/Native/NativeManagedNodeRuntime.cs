@@ -26,18 +26,13 @@ internal sealed partial class PeCompiler
             return at;
         }
         var roots = _managedRootFlags[functionIndex];
-        var outOrdinal = 0;
         for (var i = 0; i < function.Variables.Length; i++)
         {
             var variable = function.Variables[i];
             if (ManagedClassTypes.IsManaged(variable.Type))
             {
                 _ = roots.TryAdd(variable.IsOut
-                    ? _outBases[functionIndex] + (16 * outOrdinal) : _slots[functionIndex][i], 0);
-            }
-            if (variable.IsOut)
-            {
-                outOrdinal++;
+                    ? _outSlots[functionIndex][i] : _slots[functionIndex][i], 0);
             }
         }
         // Large calls can otherwise spend more than the page-safe frame limit on

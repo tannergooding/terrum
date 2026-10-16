@@ -4,6 +4,7 @@ using System;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
@@ -119,6 +120,90 @@ public sealed class AggregateAbiTests
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         Assert.That(program.Structures[0].Size, Is.EqualTo(size));
         await ExecuteBothAsync(program, 42).ConfigureAwait(true);
+    }
+
+    [TestCase(24)]
+    [TestCase(32)]
+    [TestCase(64)]
+    [TestCase(128)]
+    public async Task LargeAggregateScratchSupportsOutputsAndCleanupReturnsAsync(int size)
+    {
+        var fieldCount = size / sizeof(long);
+        var lastField = fieldCount - 1;
+        var source = new StringBuilder("[Blittable] [Layout(LayoutKind.Sequential)] struct Bytes {");
+        for (var index = 0; index < fieldCount; index++)
+        {
+            _ = source.Append("public int64 F").Append(index).Append(';');
+        }
+        _ = source.Append("public Bytes() {");
+        for (var index = 0; index < fieldCount; index++)
+        {
+            _ = source.Append('F').Append(index).Append(index == lastField ? " = 42;" : " = 0;");
+        }
+        _ = source.Append("} } [NoThrow] void Touch() {}")
+            .Append("Bytes ReturnThroughFinally() { try { return new Bytes(); } finally { Touch(); } }")
+            .Append("Bytes Fill(out Bytes output) { output = new Bytes(); return ReturnThroughFinally(); }")
+            .Append("int32 Main() { Bytes result = Fill(out var output);")
+            .Append("if (result.F").Append(lastField).Append(" != 42 || output.F").Append(lastField)
+            .Append(" != 42) { return -1; } return 42; }");
+        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(program.Structures[0].Size, Is.EqualTo(size));
+        await ExecuteBothAsync(program, 42).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task LargeUniqueReplacementAndCleanupUseFullAggregateScratchAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            unique struct Owner {
+                public int64 First;
+                public int64 Second;
+                public int64 Third;
+                public int64 Fourth;
+                public Owner(int64 value) {
+                    First = value;
+                    Second = value + 1;
+                    Third = value + 2;
+                    Fourth = value + 3;
+                }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Fourth == 4) { Host.Trace[0] = Host.Trace[0] ^ 4; }
+                    else if (Fourth == 43) { Host.Trace[0] = Host.Trace[0] ^ 43; }
+                    else { Host.Trace[0] = -100; }
+                }
+                [NoThrow] public int64 Read() { return Fourth; }
+            }
+            int32 Main() {
+                {
+                    mut Owner owner = new Owner(1);
+                    owner = new Owner(40);
+                    if (owner.Read() != 43) { return -1; }
+                }
+                return Host.Trace[0];
+            }
+            """), [new HostBuffer("Trace", PrimitiveType.Int32, [0], true)]);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        Assert.That(program.Structures.Single(static structure => structure.Name == "Owner").Size, Is.EqualTo(32));
+        await ExecuteAotAsync(program, 47).ConfigureAwait(true);
+    }
+
+    private static async Task ExecuteAotAsync(BoundProgram program, int expected)
+    {
+        var executable = Path.Combine(AppContext.BaseDirectory, $"aggregate-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(executable,
+                NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
+            await RunAsync(executable, [], expected).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
+        }
     }
 
     private static async Task ExecuteBothAsync(BoundProgram program, int expected)
