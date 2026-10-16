@@ -103,99 +103,6 @@ internal static class BoundTreeTraversal
                 case BoundRequire require:
                     pending.Push((require.Condition, depth));
                     break;
-                case BoundCall call:
-                    if (call.Arguments.IsDefault)
-                    {
-                        return false;
-                    }
-                    foreach (var argument in call.Arguments)
-                    {
-                        pending.Push((argument, depth));
-                    }
-                    break;
-                case BoundIndirectCall call:
-                    if (call.Arguments.IsDefault)
-                    {
-                        return false;
-                    }
-                    pending.Push((call.Target, depth));
-                    foreach (var argument in call.Arguments)
-                    {
-                        pending.Push((argument, depth));
-                    }
-                    break;
-                case BoundOptionalLift optional:
-                    pending.Push((optional.Value, depth));
-                    break;
-                case BoundCoalesce coalesce:
-                    pending.Push((coalesce.Optional, depth));
-                    pending.Push((coalesce.Fallback, depth));
-                    break;
-                case BoundReadonlyProjection projection:
-                    pending.Push((projection.Value, depth));
-                    break;
-                case BoundIsNull isNull:
-                    pending.Push((isNull.Value, depth));
-                    break;
-                case BoundIsSome isSome:
-                    pending.Push((isSome.Value, depth));
-                    break;
-                case BoundIsVariablePattern pattern:
-                    pending.Push((pattern.Value, depth));
-                    break;
-                case BoundViewRead view:
-                    pending.Push((view.Index, depth));
-                    break;
-                case BoundSpanLength span:
-                    pending.Push((span.View, depth));
-                    break;
-                case BoundSpanRead span:
-                    pending.Push((span.View, depth));
-                    pending.Push((span.Index, depth));
-                    break;
-                case BoundSpanAdvance span:
-                    pending.Push((span.View, depth));
-                    break;
-                case BoundFieldLoan loan:
-                    pending.Push((loan.Place, depth));
-                    break;
-                case BoundMutableFieldLoan loan:
-                    pending.Push((loan.Place, depth));
-                    break;
-                case BoundUpdate update:
-                    pending.Push((update.Place, depth));
-                    break;
-                case BoundCompoundAssignment compound:
-                    pending.Push((compound.Place, depth));
-                    pending.Push((compound.Right, depth));
-                    break;
-                case BoundNominalUpdate update:
-                    pending.Push((update.Place, depth));
-                    break;
-                case BoundUnsafeExpression unsafeExpression:
-                    pending.Push((unsafeExpression.Expression, depth));
-                    break;
-                case BoundBufferRead buffer:
-                    pending.Push((buffer.Index, depth));
-                    break;
-                case BoundFieldRead field:
-                    pending.Push((field.Receiver, depth));
-                    break;
-                case BoundUnary unary:
-                    pending.Push((unary.Operand, depth));
-                    break;
-                case BoundCast cast:
-                    pending.Push((cast.Operand, depth));
-                    break;
-                case BoundBinary binary:
-                    pending.Push((binary.Left, depth));
-                    pending.Push((binary.Right, depth));
-                    break;
-                case BoundConditional conditional:
-                    pending.Push((conditional.Condition, depth));
-                    pending.Push((conditional.WhenTrue, depth));
-                    pending.Push((conditional.WhenFalse, depth));
-                    break;
                 case BoundExpression expression:
                     if (!expression.HasValidNestedExpressions)
                     {
@@ -206,6 +113,8 @@ internal static class BoundTreeTraversal
                         pending.Push((child, depth));
                     }
                     break;
+                default:
+                    return false;
             }
         }
         return true;
@@ -344,66 +253,8 @@ internal static class BoundTreeTraversal
         };
 
     private static BoundExpression RewriteExpressions(BoundExpression expression,
-        Func<BoundExpression, BoundExpression> rewrite)
-    {
-        var rewritten = expression switch {
-            BoundCall call => call with {
-                Arguments = [.. call.Arguments.Select(item => RewriteExpressions(item, rewrite))],
-            },
-            BoundIndirectCall call => call with {
-                Target = RewriteExpressions(call.Target, rewrite),
-                Arguments = [.. call.Arguments.Select(item => RewriteExpressions(item, rewrite))],
-            },
-            BoundOptionalLift optional => optional with { Value = RewriteExpressions(optional.Value, rewrite) },
-            BoundCoalesce coalesce => coalesce with {
-                Optional = RewriteExpressions(coalesce.Optional, rewrite),
-                Fallback = RewriteExpressions(coalesce.Fallback, rewrite),
-            },
-            BoundReadonlyProjection projection => projection with {
-                Value = RewriteExpressions(projection.Value, rewrite),
-            },
-            BoundIsNull isNull => isNull with { Value = RewriteExpressions(isNull.Value, rewrite) },
-            BoundIsSome isSome => isSome with { Value = RewriteExpressions(isSome.Value, rewrite) },
-            BoundIsVariablePattern pattern => pattern with { Value = RewriteExpressions(pattern.Value, rewrite) },
-            BoundViewRead view => view with { Index = RewriteExpressions(view.Index, rewrite) },
-            BoundSpanLength span => span with { View = RewriteExpressions(span.View, rewrite) },
-            BoundSpanRead span => span with {
-                View = RewriteExpressions(span.View, rewrite),
-                Index = RewriteExpressions(span.Index, rewrite),
-            },
-            BoundSpanAdvance span => span with { View = RewriteExpressions(span.View, rewrite) },
-            BoundFieldLoan loan => loan with {
-                Place = (BoundFieldRead)RewriteExpressions(loan.Place, rewrite),
-            },
-            BoundMutableFieldLoan loan => loan with {
-                Place = (BoundFieldRead)RewriteExpressions(loan.Place, rewrite),
-            },
-            BoundUnary unary => unary with { Operand = RewriteExpressions(unary.Operand, rewrite) },
-            BoundCast cast => cast with { Operand = RewriteExpressions(cast.Operand, rewrite) },
-            BoundUnsafeExpression unsafeExpression => unsafeExpression with {
-                Expression = RewriteExpressions(unsafeExpression.Expression, rewrite),
-            },
-            BoundFieldRead field => field with { Receiver = RewriteExpressions(field.Receiver, rewrite) },
-            BoundUpdate update => update with { Place = RewriteExpressions(update.Place, rewrite) },
-            BoundCompoundAssignment compound => compound with {
-                Place = RewriteExpressions(compound.Place, rewrite),
-                Right = RewriteExpressions(compound.Right, rewrite),
-            },
-            BoundNominalUpdate update => update with { Place = RewriteExpressions(update.Place, rewrite) },
-            BoundBinary binary => binary with {
-                Left = RewriteExpressions(binary.Left, rewrite),
-                Right = RewriteExpressions(binary.Right, rewrite),
-            },
-            BoundBufferRead buffer => buffer with { Index = RewriteExpressions(buffer.Index, rewrite) },
-            BoundConditional conditional => conditional with {
-                Condition = RewriteExpressions(conditional.Condition, rewrite),
-                WhenTrue = RewriteExpressions(conditional.WhenTrue, rewrite),
-                WhenFalse = RewriteExpressions(conditional.WhenFalse, rewrite),
-            },
-            _ => expression.RewriteNestedExpressions(item => RewriteExpressions(item, rewrite)),
-        };
-        return rewrite(rewritten);
-    }
+        Func<BoundExpression, BoundExpression> rewrite) =>
+        rewrite(expression.RewriteNestedExpressions(item => RewriteExpressions(item, rewrite)));
 
     private static BoundStatement RewriteCalls(BoundStatement statement, Func<BoundCall, BoundCall> rewrite) =>
         statement switch {
@@ -464,59 +315,9 @@ internal static class BoundTreeTraversal
             _ => statement,
         };
 
-    private static BoundExpression RewriteCalls(BoundExpression expression, Func<BoundCall, BoundCall> rewrite) =>
-        expression switch {
-            BoundCall call => rewrite(call with {
-                Arguments = [.. call.Arguments.Select(item => RewriteCalls(item, rewrite))],
-            }),
-            BoundIndirectCall call => call with {
-                Target = RewriteCalls(call.Target, rewrite),
-                Arguments = [.. call.Arguments.Select(item => RewriteCalls(item, rewrite))],
-            },
-            BoundOptionalLift optional => optional with { Value = RewriteCalls(optional.Value, rewrite) },
-            BoundCoalesce coalesce => coalesce with {
-                Optional = RewriteCalls(coalesce.Optional, rewrite),
-                Fallback = RewriteCalls(coalesce.Fallback, rewrite),
-            },
-            BoundReadonlyProjection projection => projection with {
-                Value = RewriteCalls(projection.Value, rewrite),
-            },
-            BoundIsNull isNull => isNull with { Value = RewriteCalls(isNull.Value, rewrite) },
-            BoundIsSome isSome => isSome with { Value = RewriteCalls(isSome.Value, rewrite) },
-            BoundIsVariablePattern pattern => pattern with { Value = RewriteCalls(pattern.Value, rewrite) },
-            BoundViewRead view => view with { Index = RewriteCalls(view.Index, rewrite) },
-            BoundSpanLength span => span with { View = RewriteCalls(span.View, rewrite) },
-            BoundSpanRead span => span with {
-                View = RewriteCalls(span.View, rewrite),
-                Index = RewriteCalls(span.Index, rewrite),
-            },
-            BoundSpanAdvance span => span with { View = RewriteCalls(span.View, rewrite) },
-            BoundFieldLoan loan => loan with { Place = (BoundFieldRead)RewriteCalls(loan.Place, rewrite) },
-            BoundMutableFieldLoan loan => loan with {
-                Place = (BoundFieldRead)RewriteCalls(loan.Place, rewrite),
-            },
-            BoundUnary unary => unary with { Operand = RewriteCalls(unary.Operand, rewrite) },
-            BoundCast cast => cast with { Operand = RewriteCalls(cast.Operand, rewrite) },
-            BoundUnsafeExpression unsafeExpression => unsafeExpression with {
-                Expression = RewriteCalls(unsafeExpression.Expression, rewrite),
-            },
-            BoundFieldRead field => field with { Receiver = RewriteCalls(field.Receiver, rewrite) },
-            BoundUpdate update => update with { Place = RewriteCalls(update.Place, rewrite) },
-            BoundCompoundAssignment compound => compound with {
-                Place = RewriteCalls(compound.Place, rewrite),
-                Right = RewriteCalls(compound.Right, rewrite),
-            },
-            BoundNominalUpdate update => update with { Place = RewriteCalls(update.Place, rewrite) },
-            BoundBinary binary => binary with {
-                Left = RewriteCalls(binary.Left, rewrite),
-                Right = RewriteCalls(binary.Right, rewrite),
-            },
-            BoundBufferRead buffer => buffer with { Index = RewriteCalls(buffer.Index, rewrite) },
-            BoundConditional conditional => conditional with {
-                Condition = RewriteCalls(conditional.Condition, rewrite),
-                WhenTrue = RewriteCalls(conditional.WhenTrue, rewrite),
-                WhenFalse = RewriteCalls(conditional.WhenFalse, rewrite),
-            },
-            _ => expression.RewriteNestedExpressions(item => RewriteCalls(item, rewrite)),
-        };
+    private static BoundExpression RewriteCalls(BoundExpression expression, Func<BoundCall, BoundCall> rewrite)
+    {
+        var rewritten = expression.RewriteNestedExpressions(item => RewriteCalls(item, rewrite));
+        return rewritten is BoundCall call ? rewrite(call) : rewritten;
+    }
 }

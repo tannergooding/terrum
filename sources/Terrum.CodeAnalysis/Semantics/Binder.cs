@@ -4524,6 +4524,8 @@ internal sealed partial class Binder
                             || !TryFindVariable(NameText(operandNode), out var pointerVariable)
                             || _nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].PointeeType
                                 != _variables[pointerVariable].Type
+                            || !DirectNativeImportContract.IsInputPointee(
+                                _variables[pointerVariable].Type, _structs)
                             || (_nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].IsWritable
                                 && !_variables[pointerVariable].IsMutable))
                         {

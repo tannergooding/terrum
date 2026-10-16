@@ -281,6 +281,205 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerCannotEscapeThroughIndirectIdentityCallback()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow] [Terrum.Interop.NativeCallable]
+            unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
+            unsafe ptr<int32> Escape() {
+                int32 value = 1;
+                unsafe {
+                    fnptr<NativeAbi, ptr<int32>, ptr<int32>> identity = &Identity;
+                    return identity(&value);
+                }
+            }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void NativePointerCannotEscapeThroughExternalIdentityImport()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Identity")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern ptr<int32> Identity(ptr<int32> pointer);
+            unsafe ptr<int32> Escape() {
+                int32 value = 1;
+                unsafe { return Identity(&value); }
+            }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void NativePointerCannotEscapeThroughExternalIdentityImportFromLocalPointer()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Identity")]
+            extern ptr<int32> Identity(ptr<int32> pointer);
+            unsafe ptr<int32> Escape() {
+                int32 value = 1;
+                unsafe {
+                    ptr<int32> pointer = &value;
+                    return Identity(pointer);
+                }
+            }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void ExternalIdentityImportPreservesLiveLocalBacking()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "Identity")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern ptr<int32> Identity(ptr<int32> pointer);
+            int32 Main() {
+                int32 value = 42;
+                unsafe {
+                    ptr<int32> result = Identity(&value);
+                    return *result;
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void VerifierFindsUnsafePointerInsideRewrittenCallArguments()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
+            int32 Main() {
+                int32 value = 1;
+                unsafe {
+                    ptr<int32> result = Identity(&value);
+                }
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var main = program.Functions[program.EntryPoint];
+        var unsafeBlock = main.Body.Statements.OfType<BoundUnsafe>().Single();
+        var result = (BoundLocal)unsafeBlock.Body.Statements.Single();
+        var call = (BoundCall)result.Initializer;
+        var unsafeIndex = main.Body.Statements.IndexOf(unsafeBlock);
+        var movedCall = main.Body with {
+            Statements = main.Body.Statements.SetItem(unsafeIndex,
+                new BoundExpressionStatement(call, call.Span)),
+        };
+        var forged = program with {
+            Functions = program.Functions.SetItem(program.EntryPoint,
+                main with { Body = movedCall }),
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
+        Assert.That(exception!.Data.Values.Cast<object>(), Does.Contain("NativePointer"));
+    }
+
+    [Test]
+    public void VerifierRejectsForgedAddressOfNonBlittableLocal()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct OpaquePayload {
+                public int32 Value;
+                public OpaquePayload(int32 value) { Value = value; }
+            }
+            unsafe int32 AcceptOpaque(ptr<OpaquePayload> value) { return 0; }
+            int32 Main() {
+                int32 scalar = 1;
+                OpaquePayload opaque = new OpaquePayload(2);
+                unsafe {
+                    ptr<int32> scalarAddress = &scalar;
+                    ptr<OpaquePayload> opaqueAddress = null;
+                }
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var main = program.Functions[program.EntryPoint];
+        var unsafeBlock = main.Body.Statements.OfType<BoundUnsafe>().Single();
+        var scalarAddress = (BoundNativePointerAddress)unsafeBlock.Body.Statements
+            .OfType<BoundLocal>()
+            .Single(local => main.Variables[local.Variable].Name == "scalarAddress")
+            .Initializer;
+        var opaqueLocal = main.Body.Statements.OfType<BoundLocal>()
+            .Single(local => main.Variables[local.Variable].Name == "opaque");
+        var opaquePointerLocal = unsafeBlock.Body.Statements.OfType<BoundLocal>()
+            .Single(local => main.Variables[local.Variable].Name == "opaqueAddress");
+        var forgedAddress = scalarAddress with {
+            Variable = opaqueLocal.Variable,
+            Type = main.Variables[opaquePointerLocal.Variable].Type,
+        };
+        var unsafeStatements = unsafeBlock.Body.Statements.SetItem(
+            unsafeBlock.Body.Statements.IndexOf(opaquePointerLocal),
+            opaquePointerLocal with { Initializer = forgedAddress });
+        var forgedUnsafeBlock = unsafeBlock with {
+            Body = unsafeBlock.Body with { Statements = unsafeStatements },
+        };
+        var forged = program with {
+            Functions = program.Functions.SetItem(program.EntryPoint,
+                main with {
+                    Body = main.Body with {
+                        Statements = main.Body.Statements.SetItem(
+                            main.Body.Statements.IndexOf(unsafeBlock), forgedUnsafeBlock),
+                    },
+                }),
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
+        Assert.That(exception!.Data.Values.Cast<object>(), Does.Contain("NativePointer"));
+    }
+
+    [Test]
+    public void IndirectIdentityCallbackPreservesLiveLocalBacking()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow] [Terrum.Interop.NativeCallable]
+            unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
+            int32 Main() {
+                int32 value = 42;
+                unsafe {
+                    fnptr<NativeAbi, ptr<int32>, ptr<int32>> identity = &Identity;
+                    ptr<int32> result = identity(&value);
+                    return *result;
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void NativePointerCannotPublishFunctionLocalBackingThroughInitParameter()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""

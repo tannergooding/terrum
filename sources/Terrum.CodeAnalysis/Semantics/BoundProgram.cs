@@ -649,7 +649,8 @@ public sealed record BoundNativeFixedArrayInitialization(BoundNativeFixedArrayLa
     ImmutableArray<BoundExpression> Elements, TextSpan Span)
     : BoundExpression(Layout.CarrierType, Span)
 {
-    internal override bool HasValidNestedExpressions => !Elements.IsDefault;
+    internal override bool HasValidNestedExpressions =>
+        !Elements.IsDefault && Elements.All(static element => element is not null);
     internal override ImmutableArray<BoundExpression> NestedExpressions => Elements.IsDefault ? [] : Elements;
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => Elements.IsDefault ? this
@@ -710,27 +711,62 @@ public sealed record BoundNativeStorageAddress(
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>Widens a known non-null handle without changing its pointer bits.</summary>
-public sealed record BoundOptionalLift(BoundExpression Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundOptionalLift(BoundExpression Value, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
+}
 
 /// <summary>Reads one initialized optional value and evaluates its fallback only when absent.</summary>
 public sealed record BoundCoalesce(BoundExpression Optional, BoundExpression Fallback,
-    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Optional, Fallback];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Optional = rewrite(Optional),
+            Fallback = rewrite(Fallback),
+        };
+}
 
 /// <summary>Projects a writable managed handle to readonly without changing its pointer bits.</summary>
-public sealed record BoundReadonlyProjection(BoundExpression Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundReadonlyProjection(BoundExpression Value, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
+}
 
 /// <summary>Tests an optional handle for absence.</summary>
-public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
+public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
+}
 
 /// <summary>Tests an optional handle and snapshots its non-null value into a scoped variable on success.</summary>
-public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
+public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
+}
 
 /// <summary>Tests whether a named local or parameter currently contains an initialized value.</summary>
 public sealed record BoundIsInitialized(int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
 
 /// <summary>Tests optional-handle presence, including named-storage initialization, and captures the match.</summary>
 public sealed record BoundIsVariablePattern(BoundExpression Value, int Variable, bool IncludeNull, TextSpan Span)
-    : BoundExpression(PrimitiveType.Bool, Span);
+    : BoundExpression(PrimitiveType.Bool, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Value = rewrite(Value) };
+}
 
 /// <summary>A read of an initialized slot.</summary>
 /// <param name="Variable">The slot index.</param>
@@ -754,7 +790,13 @@ public sealed record BoundViewLength(int Variable, TextSpan Span) : BoundExpress
 public sealed record BoundBufferLength(int Buffer, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);
 
 /// <summary>Reads a checked element from an active lexical native buffer view.</summary>
-public sealed record BoundViewRead(int Variable, BoundExpression Index, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);
+public sealed record BoundViewRead(int Variable, BoundExpression Index, TextSpan Span)
+    : BoundExpression(PrimitiveType.Int32, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
+}
 
 /// <summary>Validates a named TokenSnapshot's initialized records before publishing its readonly descriptor.</summary>
 public sealed record BoundSnapshotSpan(int Variable, int SourceBuffer, TextSpan Span)
@@ -762,42 +804,99 @@ public sealed record BoundSnapshotSpan(int Variable, int SourceBuffer, TextSpan 
 
 /// <summary>Reads a descriptor's unsigned native-width count using the compilation target's integer carrier.</summary>
 public sealed record BoundSpanLength(BoundExpression View, TextSpan Span)
-    : BoundExpression(TokenSpanContract.IndexCarrier, Span);
+    : BoundExpression(TokenSpanContract.IndexCarrier, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [View];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { View = rewrite(View) };
+}
 
 /// <summary>Checks an unsigned native-width index and copies one complete token record.</summary>
 public sealed record BoundSpanRead(BoundExpression View, BoundExpression Index, PrimitiveType Type, TextSpan Span)
-    : BoundExpression(Type, Span);
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [View, Index];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            View = rewrite(View),
+            Index = rewrite(Index),
+        };
+}
 
 /// <summary>The cursor-only nonempty remaining-view operation; all backing dependencies are preserved.</summary>
 public sealed record BoundSpanAdvance(BoundExpression View, TextSpan Span)
-    : BoundExpression(PrimitiveType.TokenSpan, Span);
+    : BoundExpression(PrimitiveType.TokenSpan, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [View];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { View = rewrite(View) };
+}
 
 /// <summary>A synchronous readonly loan of an initialized owning field place.</summary>
-public sealed record BoundFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Place];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Place = (BoundFieldRead)rewrite(Place),
+        };
+}
 
 /// <summary>A reserved, nonescaping exclusive loan of a mutable field in an initialized struct place.</summary>
-public sealed record BoundMutableFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundMutableFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Place];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Place = (BoundFieldRead)rewrite(Place),
+        };
+}
 
 /// <summary>A checked unary operation.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Operand">The input.</param>
 /// <param name="Type">The result type.</param>
 /// <param name="Span">The source range.</param>
-public sealed record BoundUnary(TokenKind Operator, BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundUnary(TokenKind Operator, BoundExpression Operand, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Operand];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Operand = rewrite(Operand) };
+}
 
 /// <summary>Reads a writable integer place once and commits a checked replacement before returning its selected value.</summary>
 public sealed record BoundUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
-    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Place];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Place = rewrite(Place) };
+}
 
 /// <summary>Snapshots a writable integer place before evaluating the RHS and commits only a successful result.</summary>
 public sealed record BoundCompoundAssignment(TokenKind Operator, BoundExpression Place, BoundExpression Right,
-    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Place, Right];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Place = rewrite(Place),
+            Right = rewrite(Right),
+        };
+}
 
 /// <summary>Calls a static Copy-struct operator on a saved place value, then commits its exact-type result.</summary>
 public sealed record BoundNominalUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
     int Function, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
     internal bool IsUnsafeAuthorized { get; init; }
+
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Place];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Place = rewrite(Place) };
 }
 
 /// <summary>A checked binary or short-circuit boolean operation.</summary>
@@ -807,11 +906,28 @@ public sealed record BoundNominalUpdate(TokenKind Operator, BoundExpression Plac
 /// <param name="Type">The result type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundBinary(TokenKind Operator, BoundExpression Left, BoundExpression Right,
-    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Left, Right];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Left = rewrite(Left),
+            Right = rewrite(Right),
+        };
+}
 
 /// <summary>Evaluates the condition once and only the selected result arm.</summary>
 public sealed record BoundConditional(BoundExpression Condition, BoundExpression WhenTrue,
-    BoundExpression WhenFalse, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    BoundExpression WhenFalse, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Condition, WhenTrue, WhenFalse];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Condition = rewrite(Condition),
+            WhenTrue = rewrite(WhenTrue),
+            WhenFalse = rewrite(WhenFalse),
+        };
+}
 
 /// <summary>A statically resolved direct call.</summary>
 /// <param name="Function">The callee index.</param>
@@ -851,6 +967,14 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
     }
 
     internal bool IsUnsafeAuthorized { get; init; }
+
+    internal override bool HasValidNestedExpressions =>
+        !Arguments.IsDefault && Arguments.All(static argument => argument is not null);
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Arguments.IsDefault ? [] : Arguments;
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Arguments.IsDefault ? this
+        : this with { Arguments = [.. Arguments.Select(rewrite)] };
 }
 
 /// <summary>A checked call through a concrete native function-pointer signature.</summary>
@@ -859,7 +983,8 @@ public sealed record BoundIndirectCall(BoundExpression Target, ImmutableArray<Bo
 {
     internal bool IsUnsafeAuthorized { get; init; }
 
-    internal override bool HasValidNestedExpressions => !Arguments.IsDefault;
+    internal override bool HasValidNestedExpressions =>
+        !Arguments.IsDefault && Target is not null && Arguments.All(static argument => argument is not null);
     internal override ImmutableArray<BoundExpression> NestedExpressions => Arguments.IsDefault
         ? [Target] : [Target, .. Arguments];
     internal override BoundExpression RewriteNestedExpressions(
@@ -871,17 +996,32 @@ public sealed record BoundIndirectCall(BoundExpression Target, ImmutableArray<Bo
 }
 
 /// <summary>A checked conversion between supported scalar types.</summary>
-public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Operand];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Operand = rewrite(Operand) };
+}
 
 /// <summary>A lexical unsafe scope limited to one expression.</summary>
 public sealed record BoundUnsafeExpression(BoundExpression Expression, TextSpan Span)
-    : BoundExpression(Expression.Type, Span);
+    : BoundExpression(Expression.Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Expression];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Expression = rewrite(Expression) };
+}
 
 /// <summary>Reads a field from a copied struct value.</summary>
 public sealed record BoundFieldRead(BoundExpression Receiver, int Field, PrimitiveType Type, TextSpan Span)
     : BoundExpression(Type, Span)
 {
     internal bool IsUnsafeAuthorized { get; init; }
+
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Receiver];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Receiver = rewrite(Receiver) };
 }
 
 /// <summary>A caller-owned output slot passed through private callee scratch storage.</summary>
@@ -896,4 +1036,8 @@ public sealed record BoundBufferRead(int Buffer, BoundExpression Index, Primitiv
 {
     /// <summary>Whether <see cref="Index"/> stores an end-relative offset instead of an absolute index.</summary>
     internal bool IsEndRelativeOffset { get; init; }
+
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
 }

@@ -277,6 +277,13 @@ public static partial class SemanticVerifier
                     }
                     AddNativePointerSource(facts, destination, address.Variable);
                     break;
+                case BoundNativeStorageAddress address:
+                    if ((uint)address.Variable >= (uint)function.Variables.Length)
+                    {
+                        throw InvalidEffect(address.Span, "NativePointer");
+                    }
+                    AddNativePointerSource(facts, destination, address.Variable);
+                    break;
                 case BoundRead read when CarriesNativePointer(read.Type, program):
                     if ((uint)read.Variable >= (uint)function.Variables.Length
                         || function.Variables[read.Variable].Type != read.Type)
@@ -302,15 +309,33 @@ public static partial class SemanticVerifier
                 case BoundUnsafeExpression unsafeExpression:
                     NativePointerSource(destination, unsafeExpression.Expression, depth + 1);
                     break;
-                case BoundCall call when CarriesNativePointer(call.Type, program)
-                    && (uint)call.Function < (uint)program.Functions.Length
-                    && !program.Functions[call.Function].IsExternal
-                    && program.Functions[call.Function].Body is not null:
+                case BoundCall call when CarriesNativePointer(call.Type, program):
+                    if (call.Arguments.IsDefault
+                        || (uint)call.Function >= (uint)program.Functions.Length)
+                    {
+                        throw Invalid(call.Span);
+                    }
                     var callee = program.Functions[call.Function];
-                    ValidateSpanCall(call, callee);
+                    if (!callee.IsExternal && callee.Body is not null)
+                    {
+                        ValidateSpanCall(call, callee);
+                    }
                     foreach (var argument in call.Arguments)
                     {
-                        if (CarriesNativePointer(argument.Type, program))
+                        if (CarriesNativePointer(argument, program))
+                        {
+                            NativePointerSource(destination, argument, depth + 1);
+                        }
+                    }
+                    break;
+                case BoundIndirectCall call when CarriesNativePointer(call.Type, program):
+                    if (call.Arguments.IsDefault)
+                    {
+                        throw Invalid(call.Span);
+                    }
+                    foreach (var argument in call.Arguments)
+                    {
+                        if (CarriesNativePointer(argument, program))
                         {
                             NativePointerSource(destination, argument, depth + 1);
                         }
@@ -630,6 +655,9 @@ public static partial class SemanticVerifier
         return false;
     }
 
+    private static bool CarriesNativePointer(BoundExpression expression, BoundProgram program) =>
+        expression is BoundNativeStorageAddress || CarriesNativePointer(expression.Type, program);
+
     private static IReadOnlySet<int> NativePointerBackingOf(BoundExpression expression,
         BackingDependencies facts, BoundProgram program, ref int remaining, int depth)
     {
@@ -643,6 +671,9 @@ public static partial class SemanticVerifier
             case BoundNativePointerAddress address when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
                 return new HashSet<int> { address.Variable };
             case BoundNativeFixedArrayPointerAddress address
+                when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
+                return new HashSet<int> { address.Variable };
+            case BoundNativeStorageAddress address
                 when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
                 return new HashSet<int> { address.Variable };
             case BoundRead read when (uint)read.Variable < (uint)facts.NativePointerSources.Length:
@@ -665,22 +696,42 @@ public static partial class SemanticVerifier
                 return NativePointerBackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
             case BoundUnsafeExpression unsafeExpression:
                 return NativePointerBackingOf(unsafeExpression.Expression, facts, program, ref remaining, depth + 1);
-            case BoundCall call when CarriesNativePointer(call.Type, program)
-                && (uint)call.Function < (uint)program.Functions.Length
-                && !program.Functions[call.Function].IsExternal
-                && program.Functions[call.Function].Body is not null:
+            case BoundCall call when CarriesNativePointer(call.Type, program):
+                if (call.Arguments.IsDefault
+                    || (uint)call.Function >= (uint)program.Functions.Length)
+                {
+                    throw Invalid(call.Span);
+                }
                 var callee = program.Functions[call.Function];
-                ValidateSpanCall(call, callee);
+                if (!callee.IsExternal && callee.Body is not null)
+                {
+                    ValidateSpanCall(call, callee);
+                }
                 var callBacking = new HashSet<int>();
                 foreach (var argument in call.Arguments)
                 {
-                    if (CarriesNativePointer(argument.Type, program))
+                    if (CarriesNativePointer(argument, program))
                     {
                         callBacking.UnionWith(NativePointerBackingOf(argument, facts, program,
                             ref remaining, depth + 1));
                     }
                 }
                 return callBacking;
+            case BoundIndirectCall call when CarriesNativePointer(call.Type, program):
+                if (call.Arguments.IsDefault)
+                {
+                    throw Invalid(call.Span);
+                }
+                var indirectCallBacking = new HashSet<int>();
+                foreach (var argument in call.Arguments)
+                {
+                    if (CarriesNativePointer(argument, program))
+                    {
+                        indirectCallBacking.UnionWith(NativePointerBackingOf(argument, facts,
+                            program, ref remaining, depth + 1));
+                    }
+                }
+                return indirectCallBacking;
             case BoundConditional conditional when CarriesNativePointer(conditional.Type, program):
                 var branchBacking = new HashSet<int>(NativePointerBackingOf(conditional.WhenTrue,
                     facts, program, ref remaining, depth + 1));

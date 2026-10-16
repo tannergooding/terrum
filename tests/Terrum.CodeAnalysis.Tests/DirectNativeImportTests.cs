@@ -572,6 +572,40 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeImportTransportsOpaquePointerBitsButRejectsNonBlittableLocalAddress()
+    {
+        const string declarations = """
+            struct OpaquePayload {
+                public int32 Value;
+                public OpaquePayload(int32 value) { Value = value; }
+            }
+            [Terrum.Interop.NativeImport("example.dll", "ConsumeOpaque")]
+            extern int32 ConsumeOpaque(ptr<OpaquePayload> value);
+            """;
+        var transported = Compilation.Create(SyntaxTree.Parse(declarations + """
+            unsafe int32 ForwardOpaque(ptr<OpaquePayload> value) {
+                unsafe { return ConsumeOpaque(value); }
+            }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(transported.HasErrors, Is.False,
+            string.Join(Environment.NewLine, transported.Diagnostics));
+
+        var exposed = Compilation.Create(SyntaxTree.Parse(declarations + """
+            unsafe int32 ExposeOpaque() {
+                OpaquePayload value = new OpaquePayload(1);
+                unsafe { return ConsumeOpaque(&value); }
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(exposed.Program, Is.Null);
+        Assert.That(exposed.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, exposed.Diagnostics));
+    }
+
+    [Test]
     public void UnsafeSourceFunctionsCanRelayOpaquePointersWithExplicitAuthorization()
     {
         var accepted = Compilation.CreateLibrary(SyntaxTree.Parse("""

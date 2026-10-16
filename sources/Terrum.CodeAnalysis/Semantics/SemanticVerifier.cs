@@ -1923,10 +1923,24 @@ public static partial class SemanticVerifier
 
     private static void VerifyNativePointerUnsafeScopes(BoundProgram program)
     {
+        static void Push(Stack<(object Node, bool IsUnsafe, int Depth)> pending, object? node,
+            bool isUnsafe, int depth)
+        {
+            if (node is null)
+            {
+                throw Invalid();
+            }
+            pending.Push((node, isUnsafe, depth));
+        }
+
         foreach (var function in program.Functions)
         {
+            if (function is null || function.Body is null)
+            {
+                throw Invalid(function?.Span ?? default);
+            }
             var pending = new Stack<(object Node, bool IsUnsafe, int Depth)>();
-            pending.Push((function.Body, false, 0));
+            Push(pending, function.Body, false, 0);
             var remaining = MaximumAnalysisVisits;
             while (pending.TryPop(out var item))
             {
@@ -1935,16 +1949,20 @@ public static partial class SemanticVerifier
                 switch (item.Node)
                 {
                     case BoundBlock block:
+                        if (block.Statements.IsDefault)
+                        {
+                            throw Invalid(block.Span);
+                        }
                         foreach (var statement in block.Statements)
                         {
-                            pending.Push((statement, item.IsUnsafe, depth));
+                            Push(pending, statement, item.IsUnsafe, depth);
                         }
                         break;
                     case BoundUnsafe unsafeBlock:
-                        pending.Push((unsafeBlock.Body, true, depth));
+                        Push(pending, unsafeBlock.Body, true, depth);
                         break;
                     case BoundUnsafeExpression unsafeExpression:
-                        pending.Push((unsafeExpression.Expression, true, depth));
+                        Push(pending, unsafeExpression.Expression, true, depth);
                         break;
                     case BoundNativePointerAddress address when !item.IsUnsafe || !address.IsUnsafeAuthorized:
                         throw InvalidEffect(address.Span, "NativePointer");
@@ -1956,72 +1974,72 @@ public static partial class SemanticVerifier
                     case BoundNativePointerWrite write when !item.IsUnsafe || !write.IsUnsafeAuthorized:
                         throw InvalidEffect(write.Span, "NativePointer");
                     case BoundLocal local:
-                        pending.Push((local.Initializer, item.IsUnsafe, depth));
+                        Push(pending, local.Initializer, item.IsUnsafe, depth);
                         break;
                     case BoundAssignment assignment:
-                        pending.Push((assignment.Value, item.IsUnsafe, depth));
+                        Push(pending, assignment.Value, item.IsUnsafe, depth);
                         break;
                     case BoundOptionalAssignment assignment:
-                        pending.Push((assignment.Place, item.IsUnsafe, depth));
-                        pending.Push((assignment.Value, item.IsUnsafe, depth));
+                        Push(pending, assignment.Place, item.IsUnsafe, depth);
+                        Push(pending, assignment.Value, item.IsUnsafe, depth);
                         break;
                     case BoundFieldAssignment assignment:
-                        pending.Push((assignment.Value, item.IsUnsafe, depth));
+                        Push(pending, assignment.Value, item.IsUnsafe, depth);
                         break;
                     case BoundBufferAssignment assignment:
-                        pending.Push((assignment.Index, item.IsUnsafe, depth));
-                        pending.Push((assignment.Value, item.IsUnsafe, depth));
+                        Push(pending, assignment.Index, item.IsUnsafe, depth);
+                        Push(pending, assignment.Value, item.IsUnsafe, depth);
                         break;
                     case BoundViewSet view:
-                        pending.Push((view.Index, item.IsUnsafe, depth));
-                        pending.Push((view.Value, item.IsUnsafe, depth));
+                        Push(pending, view.Index, item.IsUnsafe, depth);
+                        Push(pending, view.Value, item.IsUnsafe, depth);
                         break;
                     case BoundExpressionStatement statement:
-                        pending.Push((statement.Expression, item.IsUnsafe, depth));
+                        Push(pending, statement.Expression, item.IsUnsafe, depth);
                         break;
                     case BoundIf conditional:
-                        pending.Push((conditional.Condition, item.IsUnsafe, depth));
-                        pending.Push((conditional.Then, item.IsUnsafe, depth));
+                        Push(pending, conditional.Condition, item.IsUnsafe, depth);
+                        Push(pending, conditional.Then, item.IsUnsafe, depth);
                         if (conditional.Else is not null)
                         {
-                            pending.Push((conditional.Else, item.IsUnsafe, depth));
+                            Push(pending, conditional.Else, item.IsUnsafe, depth);
                         }
                         break;
                     case BoundWhile loop:
-                        pending.Push((loop.Condition, item.IsUnsafe, depth));
-                        pending.Push((loop.Body, item.IsUnsafe, depth));
+                        Push(pending, loop.Condition, item.IsUnsafe, depth);
+                        Push(pending, loop.Body, item.IsUnsafe, depth);
                         if (loop.Iterator is not null)
                         {
-                            pending.Push((loop.Iterator, item.IsUnsafe, depth));
+                            Push(pending, loop.Iterator, item.IsUnsafe, depth);
                         }
                         break;
                     case BoundTryFinally cleanup:
-                        pending.Push((cleanup.Body, item.IsUnsafe, depth));
-                        pending.Push((cleanup.Finally, item.IsUnsafe, depth));
+                        Push(pending, cleanup.Body, item.IsUnsafe, depth);
+                        Push(pending, cleanup.Finally, item.IsUnsafe, depth);
                         break;
                     case BoundTryCatch recovery:
-                        pending.Push((recovery.Body, item.IsUnsafe, depth));
-                        pending.Push((recovery.Catch, item.IsUnsafe, depth));
+                        Push(pending, recovery.Body, item.IsUnsafe, depth);
+                        Push(pending, recovery.Catch, item.IsUnsafe, depth);
                         if (recovery.Finally is not null)
                         {
-                            pending.Push((recovery.Finally, item.IsUnsafe, depth));
+                            Push(pending, recovery.Finally, item.IsUnsafe, depth);
                         }
                         break;
                     case BoundViewScope view:
-                        pending.Push((view.Owner, item.IsUnsafe, depth));
-                        pending.Push((view.Start, item.IsUnsafe, depth));
-                        pending.Push((view.Length, item.IsUnsafe, depth));
-                        pending.Push((view.Body, item.IsUnsafe, depth));
+                        Push(pending, view.Owner, item.IsUnsafe, depth);
+                        Push(pending, view.Start, item.IsUnsafe, depth);
+                        Push(pending, view.Length, item.IsUnsafe, depth);
+                        Push(pending, view.Body, item.IsUnsafe, depth);
                         if (view.RangeEnd is not null)
                         {
-                            pending.Push((view.RangeEnd, item.IsUnsafe, depth));
+                            Push(pending, view.RangeEnd, item.IsUnsafe, depth);
                         }
                         break;
                     case BoundRequire require:
-                        pending.Push((require.Condition, item.IsUnsafe, depth));
+                        Push(pending, require.Condition, item.IsUnsafe, depth);
                         break;
                     case BoundReturn { Value: BoundExpression value }:
-                        pending.Push((value, item.IsUnsafe, depth));
+                        Push(pending, value, item.IsUnsafe, depth);
                         break;
                     case BoundExpression expression:
                         if (!expression.HasValidNestedExpressions)
@@ -2030,10 +2048,12 @@ public static partial class SemanticVerifier
                         }
                         foreach (var nested in expression.NestedExpressions)
                         {
-                            pending.Push((nested, item.IsUnsafe, depth));
+                            Push(pending, nested, item.IsUnsafe, depth);
                         }
                         break;
-                    case BoundStatement:
+                    case BoundReturn:
+                    case BoundVacantLocal or BoundLifetimeEnd or BoundOwnerDeclaration or BoundDrop
+                        or BoundDropSpan or BoundDropConstructedFields or BoundBreak or BoundContinue:
                         break;
                     default:
                         throw Invalid();
@@ -3486,6 +3506,7 @@ public static partial class SemanticVerifier
                 var pointerDefinition = program.NativePointerTypes[NativePointerTypes.Index(address.Type)];
                 var addressedVariable = function.Variables[address.Variable];
                 if (pointerDefinition.PointeeType != addressedVariable.Type
+                    || !DirectNativeImportContract.IsInputPointee(addressedVariable.Type, program.Structures)
                     || (pointerDefinition.IsWritable && !addressedVariable.IsMutable))
                 {
                     throw InvalidEffect(address.Span, "NativePointer");
