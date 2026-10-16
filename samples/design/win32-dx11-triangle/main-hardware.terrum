@@ -70,8 +70,12 @@ bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
             }
         }
     }
-    code = unsafe(new ShaderBlobOwner(rawCode));
-    return result >= 0;
+    if (result >= 0) {
+        code = unsafe(new ShaderBlobOwner(rawCode));
+        return true;
+    }
+    code = unsafe(new ShaderBlobOwner(null));
+    return false;
 }
 
 [Blittable] [Layout(Sequential)]
@@ -179,10 +183,16 @@ unsafe bool CreateD3D11DeviceAndSwapChain(
             null, 1, null, 0, &featureLevel, 1, 7, &description,
             &rawSwapChain, &rawDevice, &selectedFeatureLevel, &rawContext);
     }
-    swapChain = unsafe(new SampleSwapChainOwner(rawSwapChain));
-    device = unsafe(new SampleDeviceOwner(rawDevice));
-    immediateContext = unsafe(new SampleContextOwner(rawContext));
-    return status >= 0;
+    if (status >= 0) {
+        swapChain = unsafe(new SampleSwapChainOwner(rawSwapChain));
+        device = unsafe(new SampleDeviceOwner(rawDevice));
+        immediateContext = unsafe(new SampleContextOwner(rawContext));
+        return true;
+    }
+    swapChain = unsafe(new SampleSwapChainOwner(null));
+    device = unsafe(new SampleDeviceOwner(null));
+    immediateContext = unsafe(new SampleContextOwner(null));
+    return false;
 }
 
 [NoThrow]

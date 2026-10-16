@@ -192,8 +192,12 @@ public unique struct SampleSwapChainOwner {
         unsafe {
             status = GetBufferRaw(Pointer, 0, &interfaceId, &pointer);
         }
-        backBuffer = unsafe(new BackBufferOwner(pointer));
-        return status >= 0;
+        if (status >= 0) {
+            backBuffer = unsafe(new BackBufferOwner(pointer));
+            return true;
+        }
+        backBuffer = unsafe(new BackBufferOwner(null));
+        return false;
     }
 
     [NoThrow]
@@ -235,8 +239,12 @@ public unique struct SampleDeviceOwner {
         unsafe {
             status = CreateRenderTargetViewRaw(Pointer, resource, null, &pointer);
         }
-        view = unsafe(new RenderTargetViewOwner(pointer));
-        return status >= 0;
+        if (status >= 0) {
+            view = unsafe(new RenderTargetViewOwner(pointer));
+            return true;
+        }
+        view = unsafe(new RenderTargetViewOwner(null));
+        return false;
     }
 
     [NoThrow]
@@ -248,8 +256,12 @@ public unique struct SampleDeviceOwner {
             status = CreateVertexShaderRaw(
                 Pointer, bytecode, bytecodeSize, null, &pointer);
         }
-        shader = unsafe(new VertexShaderOwner(pointer));
-        return status >= 0;
+        if (status >= 0) {
+            shader = unsafe(new VertexShaderOwner(pointer));
+            return true;
+        }
+        shader = unsafe(new VertexShaderOwner(null));
+        return false;
     }
 
     [NoThrow]
@@ -261,8 +273,12 @@ public unique struct SampleDeviceOwner {
             status = CreatePixelShaderRaw(
                 Pointer, bytecode, bytecodeSize, null, &pointer);
         }
-        shader = unsafe(new PixelShaderOwner(pointer));
-        return status >= 0;
+        if (status >= 0) {
+            shader = unsafe(new PixelShaderOwner(pointer));
+            return true;
+        }
+        shader = unsafe(new PixelShaderOwner(null));
+        return false;
     }
 }
 
