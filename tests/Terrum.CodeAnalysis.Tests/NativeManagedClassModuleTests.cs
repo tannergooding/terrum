@@ -350,6 +350,9 @@ public sealed partial class NativeManagedClassModuleTests
         factoryMarker[0] = (byte)BoundIntrinsic.ClassTryCreate;
         BinaryPrimitives.WriteInt32LittleEndian(factoryMarker.AsSpan(2), factory.ClassConstructor);
         malformed = (byte[])contract.Clone();
+        malformed[Find(contract, factoryMarker)] = byte.MaxValue;
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed))!;
+        malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(Find(contract, factoryMarker) + 2, 4), 999);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed))!;
         var forged = program with {

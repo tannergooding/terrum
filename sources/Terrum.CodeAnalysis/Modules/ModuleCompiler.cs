@@ -4770,10 +4770,11 @@ public static partial class ModuleCompiler
         var intrinsic = (BoundIntrinsic)reader.ReadByte();
         var classConstructor = GetBool(reader);
         var classFactoryConstructor = reader.ReadInt32();
-        if (intrinsic is >= BoundIntrinsic.NodeTryCreate
-            and not BoundIntrinsic.NativeVTableCall)
+        if (intrinsic > BoundIntrinsic.ClassTryCreate
+            && (intrinsic != BoundIntrinsic.NativeVTableCall
+                || reader is not ModuleReader { FormatVersion: >= NativeVTableVersion }))
         {
-            throw new ModuleFormatException("Managed nodes have no persisted module runtime.");
+            throw new ModuleFormatException("Module contains an unsupported intrinsic.");
         }
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         PrimitiveType? nativeFunctionPointerType = null;
