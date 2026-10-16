@@ -436,9 +436,6 @@ internal sealed partial class Binder
             }
         }
         DeclareClassFactories();
-        if (_nativeImportCatalog is NativeImportCatalog nativeImportCatalog)
-        {
-        }
         foreach (var template in _templates.Values)
         {
             if (_functions.ContainsKey(template.Name))
