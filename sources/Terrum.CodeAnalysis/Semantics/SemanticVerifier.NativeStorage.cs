@@ -17,14 +17,12 @@ public static partial class SemanticVerifier
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
             || function.Variables[variable].Type != layout.CarrierType
             || function.Variables[variable].NativeFixedArrayLayout != layout
-            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures, program.NativeImportCatalog)
+            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
             || (function.Variables[variable].IsMutable
-                && !NativeFixedArrayContract.AllowsMutableLocal(layout, program.Structures,
-                    program.NativeImportCatalog))
+                && !NativeFixedArrayContract.AllowsMutableLocal(layout))
             || initialization.Elements.IsDefault
             || (initialization.Elements.IsEmpty
-                ? !NativeFixedArrayContract.AllowsEmptyInitialization(layout, program.Structures,
-                    program.NativeImportCatalog)
+                ? !NativeFixedArrayContract.AllowsEmptyInitialization(layout)
                 : initialization.Elements.Length != layout.ElementCount))
         {
             throw InvalidEffect(initialization.Span, "NativeImport");
@@ -54,15 +52,13 @@ public static partial class SemanticVerifier
             || function.Variables[variable].Type != carrierType
             || function.Variables[variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
             || layout.CarrierType != carrierType
-            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures, program.NativeImportCatalog)
+            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
             || (!isReadonly && (!function.Variables[variable].IsMutable
-                || !NativeFixedArrayContract.AllowsMutableLocal(layout,
-                    program.Structures, program.NativeImportCatalog)))
+                || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
             || index is null
             || (index.Type != PrimitiveType.Int32
                 && !(index.Type == PrimitiveType.UInt32
-                    && NativeFixedArrayContract.AllowsUInt32Indices(
-                        layout, program.Structures, program.NativeImportCatalog)))
+                    && NativeFixedArrayContract.AllowsUInt32Indices(layout)))
             || function.IsNoThrow
                 && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
                 && index is not BoundConstant

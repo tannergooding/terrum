@@ -379,7 +379,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             var isSupportedFixedArrayElement = NativeFixedArrayContract.IsSupportedElementType(
-                (PrimitiveType)(100 + index), program.Structures, program.NativeImportCatalog);
+                (PrimitiveType)(100 + index), program.Structures);
             if (structure.Size > ValueLayout.MaximumSize
                 && structure.BlittableTargetRequirement == 0
                 && !isSupportedFixedArrayElement)
@@ -455,10 +455,8 @@ public static partial class SemanticVerifier
                                 || variable.NativeFixedArrayLayout is not BoundNativeFixedArrayLayout fixedArrayLayout
                                 || fixedArrayLayout.CarrierType != variable.Type
                                 || (variable.IsMutable
-                                    && !NativeFixedArrayContract.AllowsMutableLocal(fixedArrayLayout,
-                                        program.Structures, program.NativeImportCatalog))
-                                || !NativeFixedArrayContract.MatchesLayout(fixedArrayLayout, program.Structures,
-                                    program.NativeImportCatalog)
+                                    && !NativeFixedArrayContract.AllowsMutableLocal(fixedArrayLayout))
+                                || !NativeFixedArrayContract.MatchesLayout(fixedArrayLayout, program.Structures)
                                 || !NativeFixedArrayContract.MatchesProgram(program)))
                                 || (!NativeFixedArrayContract.IsCarrier(variable.Type)
                                     && variable.NativeFixedArrayLayout is not null)

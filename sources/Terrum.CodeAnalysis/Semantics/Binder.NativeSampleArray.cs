@@ -41,7 +41,7 @@ internal sealed partial class Binder
         var resolvedElement = BindType(elementNode, allowVoid: false);
         if (int.TryParse(extent, NumberStyles.None, CultureInfo.InvariantCulture, out var resolvedCount)
             && NativeFixedArrayContract.TryGetLayout(PrimitiveType.NativeFixedArray, resolvedElement,
-                resolvedCount, _structs, _nativeImportCatalog, out _))
+                resolvedCount, _structs, out _))
         {
             arrayType = PrimitiveType.NativeFixedArray;
             elementType = resolvedElement;
@@ -58,7 +58,7 @@ internal sealed partial class Binder
         PrimitiveType elementType, int elementCount)
     {
         if (!NativeFixedArrayContract.TryGetLayout(arrayType, elementType, elementCount, _structs,
-            _nativeImportCatalog, out var layout))
+            out var layout))
         {
             Report("TRM3030", "The fixed-array carrier has no valid layout.", node.Span);
             return ErrorExpression(node.Span);
@@ -75,7 +75,7 @@ internal sealed partial class Binder
         if (elements.Length == 0)
         {
             if (node.Children.Length == 2
-                && NativeFixedArrayContract.AllowsEmptyInitialization(layout, _structs, _nativeImportCatalog))
+                && NativeFixedArrayContract.AllowsEmptyInitialization(layout))
             {
                 return new BoundNativeFixedArrayInitialization(layout, [], node.Span);
             }
@@ -132,7 +132,7 @@ internal sealed partial class Binder
         var pointer = _nativePointerTypes[NativePointerTypes.Index(pointerType)];
         if (pointer.PointeeType != layout.ElementType
             || pointer.IsWritable && (!_variables[variable].IsMutable
-                || !NativeFixedArrayContract.AllowsMutableLocal(layout, _structs, _nativeImportCatalog)))
+                || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
         {
             Report("TRM3030", "The fixed-array element does not match the native pointer access mode.", span);
             return ErrorExpression(span);
@@ -155,7 +155,7 @@ internal sealed partial class Binder
 
     private BoundExpression BindNativeFixedArrayIndex(SyntaxNode node, BoundNativeFixedArrayLayout layout)
     {
-        var expectedType = NativeFixedArrayContract.AllowsUInt32Indices(layout, _structs, _nativeImportCatalog)
+        var expectedType = NativeFixedArrayContract.AllowsUInt32Indices(layout)
             && KnownType(node) == PrimitiveType.UInt32
             ? PrimitiveType.UInt32 : PrimitiveType.Int32;
         return BindExpression(node, expectedType);

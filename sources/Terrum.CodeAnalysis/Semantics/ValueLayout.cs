@@ -34,10 +34,6 @@ internal static class ValueLayout
 
     // Callers have established that all nested layouts are acyclic and complete.
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
-        => Alignment(type, structures, null);
-
-    internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
-        NativeImportCatalog? catalog)
     {
         if (NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
         {
@@ -61,7 +57,7 @@ internal static class ValueLayout
         var alignment = 1;
         foreach (var field in structure.Fields)
         {
-            alignment = Math.Max(alignment, Alignment(field.Type, structures, catalog));
+            alignment = Math.Max(alignment, Alignment(field.Type, structures));
         }
         return alignment;
     }

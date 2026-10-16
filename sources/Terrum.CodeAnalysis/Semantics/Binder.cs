@@ -1258,13 +1258,13 @@ internal sealed partial class Binder
     {
         if (!IsStruct(type))
         {
-            return ValueLayout.Alignment(type, _structs, _nativeImportCatalog);
+            return ValueLayout.Alignment(type, _structs);
         }
         if (_structureAlignments.TryGetValue(type, out var alignment))
         {
             return alignment;
         }
-        alignment = ValueLayout.Alignment(type, _structs, _nativeImportCatalog);
+        alignment = ValueLayout.Alignment(type, _structs);
         if (_laidOut.Contains((int)type - 100))
         {
             _structureAlignments.Add(type, alignment);
@@ -3366,8 +3366,7 @@ internal sealed partial class Binder
                         fixedArrayType, fixedElementType, fixedElementCount);
                     if (fixedArrayInitializer is BoundNativeFixedArrayInitialization fixedArray)
                     {
-                        if (isMutable && !NativeFixedArrayContract.AllowsMutableLocal(fixedArray.Layout,
-                            _structs, _nativeImportCatalog))
+                        if (isMutable && !NativeFixedArrayContract.AllowsMutableLocal(fixedArray.Layout))
                         {
                             Report("TRM3030", "The selected fixed-array layout does not permit mutable locals.",
                                 node.Span);
@@ -3532,7 +3531,7 @@ internal sealed partial class Binder
                     && _variables[fixedArray].NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout)
                 {
                     if (!_variables[fixedArray].IsMutable
-                        || !NativeFixedArrayContract.AllowsElementWrites(layout, _structs, _nativeImportCatalog))
+                        || !NativeFixedArrayContract.AllowsElementWrites(layout))
                     {
                         Report("TRM3008", "The selected fixed-array local does not permit element writes.",
                             target.Span);
@@ -3540,8 +3539,7 @@ internal sealed partial class Binder
                     var index = BindNativeFixedArrayIndex((SyntaxNode)target.Children[2], layout);
                     if (index.Type != PrimitiveType.Int32
                         && !(index.Type == PrimitiveType.UInt32
-                            && NativeFixedArrayContract.AllowsUInt32Indices(
-                                layout, _structs, _nativeImportCatalog)))
+                            && NativeFixedArrayContract.AllowsUInt32Indices(layout)))
                     {
                         Report("TRM3030", "The selected fixed-array layout does not permit this index type.",
                             index.Span);
@@ -6437,7 +6435,7 @@ internal sealed partial class Binder
             return false;
         }
 
-        return NativeFixedArrayContract.MatchesLayout(layout, _structs, _nativeImportCatalog);
+        return NativeFixedArrayContract.MatchesLayout(layout, _structs);
     }
 
     private BoundExpression BindNativeFixedArrayElement(SyntaxNode node)

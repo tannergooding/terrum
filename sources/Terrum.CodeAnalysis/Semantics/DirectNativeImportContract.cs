@@ -241,8 +241,7 @@ internal static class DirectNativeImportContract
         {
             return caller.Variables[address.Variable].NativeFixedArrayLayout
                     is BoundNativeFixedArrayLayout layout
-                && NativeFixedArrayContract.MatchesLayout(layout, program.Structures,
-                    program.NativeImportCatalog)
+                && NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
                 && address.ElementType == layout.ElementType
                 && (parameter.PointeeType == PrimitiveType.Void
                     || parameter.PointeeType == layout.ElementType)
@@ -253,8 +252,7 @@ internal static class DirectNativeImportContract
                 && (parameter.PointeeType != PrimitiveType.Void
                     || DirectNativeImportContract.IsInputPointee(layout.ElementType, program.Structures))
                 && (parameter.Access == NativeParameterAccess.Read
-                    || NativeFixedArrayContract.AllowsMutableLocal(layout, program.Structures,
-                        program.NativeImportCatalog));
+                    || NativeFixedArrayContract.AllowsMutableLocal(layout));
         }
 
         var elementExtent = ValueLayout.Size(address.ElementType, program.Structures);

@@ -19,23 +19,22 @@ internal static class NativeFixedArrayContract
         SupportsRuntimePolicy(program.RuntimePolicy);
 
     internal static bool IsSupportedElementType(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
-        IsSupportedElement(type, structures, catalog, new HashSet<int>());
+        IReadOnlyList<BoundStruct> structures) =>
+        IsSupportedElement(type, structures, new HashSet<int>());
 
     internal static bool TryGetLayout(PrimitiveType carrierType, PrimitiveType elementType, int elementCount,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog,
-        out BoundNativeFixedArrayLayout layout)
+        IReadOnlyList<BoundStruct> structures, out BoundNativeFixedArrayLayout layout)
     {
         if (IsCarrier(carrierType) && elementCount > 0)
         {
-            var isSupportedElement = IsSupportedElementType(elementType, structures, catalog);
+            var isSupportedElement = IsSupportedElementType(elementType, structures);
             if (!isSupportedElement)
             {
                 layout = default;
                 return false;
             }
             var elementStride = ValueLayout.Size(elementType, structures);
-            var alignment = ValueLayout.Alignment(elementType, structures, catalog);
+            var alignment = ValueLayout.Alignment(elementType, structures);
             if (elementStride <= 0 || alignment <= 0 || elementStride % alignment != 0
                 || elementCount > MaximumByteExtent / elementStride)
             {
@@ -52,7 +51,7 @@ internal static class NativeFixedArrayContract
     }
 
     private static bool IsSupportedElement(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog, HashSet<int> visiting)
+        IReadOnlyList<BoundStruct> structures, HashSet<int> visiting)
     {
         if (type is PrimitiveType.Bool or PrimitiveType.Char16
             or PrimitiveType.Int32 or PrimitiveType.UInt32
@@ -80,13 +79,13 @@ internal static class NativeFixedArrayContract
             foreach (var field in structure.Fields)
             {
                 if (field.RequiresUnsafeCaller
-                    || !IsSupportedElement(field.Type, structures, catalog, visiting))
+                    || !IsSupportedElement(field.Type, structures, visiting))
                 {
                     valid = false;
                     break;
                 }
                 var fieldSize = ValueLayout.Size(field.Type, structures);
-                var fieldAlignment = ValueLayout.Alignment(field.Type, structures, catalog);
+                var fieldAlignment = ValueLayout.Alignment(field.Type, structures);
                 if (fieldSize <= 0 || fieldAlignment <= 0
                     || fieldAlignment > ValueLayout.MaximumStructureSize)
                 {
@@ -111,25 +110,21 @@ internal static class NativeFixedArrayContract
     }
 
     internal static bool MatchesLayout(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
+        IReadOnlyList<BoundStruct> structures) =>
         TryGetLayout(layout.CarrierType, layout.ElementType, layout.ElementCount,
-            structures, catalog, out var expected)
+            structures, out var expected)
             && layout == expected;
 
-    internal static bool AllowsEmptyInitialization(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
+    internal static bool AllowsEmptyInitialization(BoundNativeFixedArrayLayout layout) =>
         IsScalar(layout.ElementType);
 
-    internal static bool AllowsMutableLocal(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
+    internal static bool AllowsMutableLocal(BoundNativeFixedArrayLayout layout) =>
         IsCarrier(layout.CarrierType);
 
-    internal static bool AllowsElementWrites(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
+    internal static bool AllowsElementWrites(BoundNativeFixedArrayLayout layout) =>
         IsCarrier(layout.CarrierType);
 
-    internal static bool AllowsUInt32Indices(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
+    internal static bool AllowsUInt32Indices(BoundNativeFixedArrayLayout layout) =>
         IsCarrier(layout.CarrierType);
 
     private static bool IsScalar(PrimitiveType type) =>

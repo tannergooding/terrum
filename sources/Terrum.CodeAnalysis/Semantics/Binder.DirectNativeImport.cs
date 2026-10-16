@@ -151,7 +151,7 @@ internal sealed partial class Binder
         if (target.Kind == SyntaxKind.IndexExpression
             && TryFindNativeFixedArrayLocal((SyntaxNode)target.Children[0], out var arrayVariable)
             && _variables[arrayVariable].NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
-            && NativeFixedArrayContract.MatchesLayout(layout, _structs, _nativeImportCatalog))
+            && NativeFixedArrayContract.MatchesLayout(layout, _structs))
         {
             var index = BindNativeFixedArrayIndex((SyntaxNode)target.Children[2], layout);
             if ((pointeeType != PrimitiveType.Void && pointeeType != layout.ElementType)
@@ -161,8 +161,7 @@ internal sealed partial class Binder
                 || _unresolvedVacantLocals.Contains(arrayVariable)
                 || access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
                     && (!_variables[arrayVariable].IsMutable
-                        || !NativeFixedArrayContract.AllowsMutableLocal(
-                            layout, _structs, _nativeImportCatalog)))
+                        || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
             {
                 Report("TRM3030",
                     "A NativeParameter address requires a matching initialized fixed array and access mode.",
