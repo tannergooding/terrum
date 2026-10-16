@@ -50,12 +50,17 @@ public sealed class NativeGraphJitTests
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         const NativeRuntimePolicy Policy = NativeRuntimePolicy.FailFast;
-        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "public int32 ProviderValue() { return 42; }"), (BoundRuntimePolicy)Policy);
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 ProviderCallback(int32 value) { return value; }
+
+            public int32 ProviderValue() { return 42; }
+            """), (BoundRuntimePolicy)Policy);
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
         var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
-            ["ProviderValue"], "GraphJitProvider", Policy);
+            ["ProviderCallback", "ProviderValue"], "GraphJitProvider", Policy);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
             [NoThrow]
@@ -72,6 +77,8 @@ public sealed class NativeGraphJitTests
                 unsafe {
                     if (GetCurrentThreadId() == 0) { return -1; }
                     if (CompareStringOrdinal(&first, 1, &second, 1, 0) != 2) { return -2; }
+                    fnptr<NativeAbi, int32, int32> callback = &ProviderCallback;
+                    if (callback(42) != 42) { return -3; }
                 }
                 return ProviderValue();
             }
