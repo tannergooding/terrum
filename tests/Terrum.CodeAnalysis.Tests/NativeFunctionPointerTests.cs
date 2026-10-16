@@ -161,6 +161,15 @@ public sealed class NativeFunctionPointerTests
         NativeModuleCompiler.ValidateConsumerSet(nativeConsumer, nativeProducers);
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(nativeConsumer, nativeProducers,
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.Zero);
+        var nativeAddressConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(addressConsumerSource), nativeReference);
+        Assert.That(nativeAddressConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, nativeAddressConsumerCompilation.Diagnostics));
+        var nativeAddressConsumer = NativeModuleCompiler.CreateConsumerSet(
+            nativeAddressConsumerCompilation.Program!, nativeProducers, NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.ValidateConsumerSet(nativeAddressConsumer, nativeProducers);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(nativeAddressConsumer, nativeProducers,
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.Zero);
     }
 
     [Test]

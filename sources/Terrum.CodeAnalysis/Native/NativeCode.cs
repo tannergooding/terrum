@@ -39,7 +39,7 @@ public sealed record NativeCode(byte[] Code, int EntryPoint, ImmutableArray<Nati
     /// <summary>Code displacements targeting locations in Data.</summary>
     public ImmutableArray<NativeDataFixup> DataFixups { get; init; } = [];
 
-    /// <summary>RIP-relative call displacements targeting named native imports; executable images only.</summary>
+    /// <summary>RIP-relative code displacements targeting named native imports; executable images only.</summary>
     internal ImmutableArray<NativeImportFixup> NativeImports { get; init; } = [];
 }
 

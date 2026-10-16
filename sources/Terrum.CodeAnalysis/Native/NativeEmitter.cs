@@ -681,6 +681,8 @@ internal sealed partial class PeCompiler
     private readonly int[] _cleanupArgumentSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, int Target)> _functionAddressFixups = [];
+    private readonly HashSet<int> _externalFunctionAddresses = [];
+    private readonly Dictionary<int, int> _externalFunctionAddressStarts = [];
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<(int Offset, int Target)> _cleanupCalls = [];
     private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
@@ -870,10 +872,6 @@ internal sealed partial class PeCompiler
         {
             _code.PatchRelative(offset, _starts[target]);
         }
-        foreach (var (offset, target) in _functionAddressFixups)
-        {
-            _code.PatchRelative(offset, _starts[target]);
-        }
         foreach (var (offset, target) in _runtimeCalls)
         {
             _code.PatchRelative(offset, _failureStarts[target]);
@@ -890,6 +888,14 @@ internal sealed partial class PeCompiler
             EmitExceptionFilter(storeReason: false);
             _entryFilter = _code.Position;
             EmitExceptionFilter(storeReason: true);
+        }
+        EmitExternalFunctionAddressThunks();
+        foreach (var (offset, target) in _functionAddressFixups)
+        {
+            var targetStart = _program.Functions[target].IsExternal
+                ? _externalFunctionAddressStarts[target]
+                : _starts[target];
+            _code.PatchRelative(offset, targetStart);
         }
         if (_code.Position > MaximumText)
         {
@@ -958,6 +964,21 @@ internal sealed partial class PeCompiler
             ManagedRuntimeOffset = _managedRuntimeOffset,
             HostDataLength = _hostDataLength,
         };
+    }
+
+    private void EmitExternalFunctionAddressThunks()
+    {
+        foreach (var function in _externalFunctionAddresses.OrderBy(static function => function))
+        {
+            if (_nativeImports is null || !_nativeImports.TryGetValue(function, out var import))
+            {
+                throw new InvalidOperationException(
+                    "External native function address has no verified native import binding.");
+            }
+            _externalFunctionAddressStarts.Add(function, _code.Position);
+            _nativeImportFixups.Add(new NativeImportFixup(
+                _code.ImportJump(), import.DllName, import.ExportName, function));
+        }
     }
 
     private void PrepareFrames()
@@ -3572,6 +3593,10 @@ internal sealed partial class PeCompiler
                 var functionAddress = _code.Position;
                 _code.Int32(0);
                 _functionAddressFixups.Add((functionAddress, address.Function));
+                if (_program.Functions[address.Function].IsExternal)
+                {
+                    _ = _externalFunctionAddresses.Add(address.Function);
+                }
                 break;
             case BoundConstant constant:
                 if (constant.Type == PrimitiveType.NativeUtf16ZPointer)
