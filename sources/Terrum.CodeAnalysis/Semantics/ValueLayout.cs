@@ -23,7 +23,6 @@ internal static class ValueLayout
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
         PrimitiveType.TokenSpan => TokenSpanContract.DescriptorSize,
         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                or PrimitiveType.NativeCallbackAddress
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
                     => NativeTargetProfile.PointerSize,
                 _ when NativeFunctionPointerTypes.IsType(type) => NativeTargetProfile.PointerSize,
@@ -52,7 +51,6 @@ internal static class ValueLayout
         if ((int)type < 100)
         {
             if (type is PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                or PrimitiveType.NativeCallbackAddress
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer)
             {
                 return NativeTargetProfile.PointerSize;

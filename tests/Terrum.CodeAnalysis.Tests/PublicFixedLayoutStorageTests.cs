@@ -136,7 +136,7 @@ public sealed class PublicFixedLayoutStorageTests
     [TestCase("managed")]
     [TestCase("owner")]
     [TestCase("view")]
-    [TestCase("native-function-pointer")]
+    [TestCase("reserved-native-callback-address")]
     [TestCase("native-carrier")]
     [TestCase("unknown-type")]
     [TestCase("negative-type")]
@@ -160,7 +160,11 @@ public sealed class PublicFixedLayoutStorageTests
             "managed" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.ManagedNode }) },
             "owner" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.OwnedInt32Buffer }) },
             "view" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.ReadonlyInt32BufferView }) },
-            "native-function-pointer" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeCallbackAddress }) },
+            "reserved-native-callback-address" => packet with {
+                Fields = packet.Fields.SetItem(1, packet.Fields[1] with {
+                    Type = PrimitiveType.ReservedNativeCallbackAddress,
+                }),
+            },
             "native-carrier" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeFixedArray }) },
             "unknown-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)999 }) },
             "negative-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)int.MinValue }) },

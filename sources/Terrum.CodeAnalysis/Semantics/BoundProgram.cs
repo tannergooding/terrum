@@ -52,8 +52,8 @@ public enum PrimitiveType
     TokenSpan,
     /// <summary>A compiler-owned UTF-16-NUL image address, restricted to reviewed no-escape imports.</summary>
     NativeUtf16ZPointer,
-    /// <summary>A native callback address restricted by its selected signature and lifetime contract.</summary>
-    NativeCallbackAddress = 19,
+    /// <summary>Reserved ordinal for the retired catalog-selected callback carrier.</summary>
+    ReservedNativeCallbackAddress = 19,
     /// <summary>Inline storage whose closed geometry is carried by selected native fixed-array metadata.</summary>
     NativeFixedArray,
     /// <summary>A compiler-owned ASCII UTF-8-NUL image address for reviewed no-escape imports.</summary>
@@ -614,10 +614,6 @@ public abstract record BoundExpression(PrimitiveType Type, TextSpan Span)
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
-
-/// <summary>A verified address of a static function used as a native callback.</summary>
-public sealed record BoundNativeCallbackAddress(int Function, TextSpan Span)
-    : BoundExpression(PrimitiveType.NativeCallbackAddress, Span);
 
 /// <summary>A verified address of a static function with a concrete native ABI signature.</summary>
 public sealed record BoundNativeFunctionAddress(int Function, PrimitiveType Type, TextSpan Span)

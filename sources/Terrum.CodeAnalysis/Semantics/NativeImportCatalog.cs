@@ -18,7 +18,6 @@ public sealed class NativeImportCatalog
         "windows-x64-native-imports-v10", []);
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;
-    private readonly ImmutableHashSet<string> _callbackTypeNames;
     private readonly ImmutableArray<NativeFixedArrayStorageLayoutDefinition> _fixedArrayStorageLayouts;
     private readonly ImmutableArray<NativeStorageRecordLayoutDefinition> _storageRecordLayouts;
     private readonly ImmutableArray<NativeAggregateStorageLayoutDefinition> _aggregateStorageLayouts;
@@ -27,15 +26,13 @@ public sealed class NativeImportCatalog
         Justification = "Unsupported native parameter types cannot acquire an import contract.")]
     private static bool ValidParameterContracts(NativeImportDefinition import)
     {
-        if (!NativeStorageParameterContract.IsValid(import)
-            || !NativeCallbackParameterContract.IsValid(import))
+        if (!NativeStorageParameterContract.IsValid(import))
         {
             return false;
         }
 
         var hasRestrictedContract = import.ParameterTypes.Contains(PrimitiveType.NativeUtf16ZPointer)
             || import.ParameterTypes.Contains(PrimitiveType.NativeUtf8ZPointer)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeCallbackAddress)
             || import.ParameterTypes.Contains(PrimitiveType.NativeStorageAddress);
         if (!hasRestrictedContract)
         {
@@ -48,14 +45,6 @@ public sealed class NativeImportCatalog
         for (var index = 0; index < import.ParameterTypes.Length; index++)
         {
             var type = import.ParameterTypes[index];
-            if (type == PrimitiveType.NativeCallbackAddress)
-            {
-                if (!NativeCallbackParameterContract.TryGetParameter(import, index, out _))
-                {
-                    return false;
-                }
-                continue;
-            }
             var expected = type switch {
                 PrimitiveType.NativeUtf16ZPointer =>
                     NativeStorageParameterContract.TryGetParameter(import, index, out var utf16Storage)
@@ -169,7 +158,6 @@ public sealed class NativeImportCatalog
                     or PrimitiveType.Char16
                     or PrimitiveType.NativeUtf16ZPointer
                     or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeCallbackAddress
                     or PrimitiveType.NativeStorageAddress))
                 || !import.RequiresUnsafeCaller
                 || import.ResultContract != NativeImportResultContract.Value
@@ -184,21 +172,9 @@ public sealed class NativeImportCatalog
             }
             builder.Add(import.Key, import);
         }
-        var callbackTypeNames = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
-        foreach (var import in builder.Values)
-        {
-            foreach (var callbackParameter in import.CallbackParameters)
-            {
-                if (callbackParameter is not null)
-                {
-                    _ = callbackTypeNames.Add(callbackParameter.SourceTypeName);
-                }
-            }
-        }
         Identity = identity;
         IsForTesting = isForTesting;
         _imports = builder.ToImmutable();
-        _callbackTypeNames = callbackTypeNames.ToImmutable();
         _fixedArrayStorageLayouts = storageLayouts;
         _storageRecordLayouts = storageRecordLayouts;
         _aggregateStorageLayouts = aggregateLayouts;
@@ -334,27 +310,6 @@ public sealed class NativeImportCatalog
     internal bool TryGetImport(string key, out NativeImportDefinition? definition)
         => _imports.TryGetValue(key, out definition);
 
-    internal ImmutableHashSet<string> CallbackTypeNames => _callbackTypeNames;
-
-    internal bool IsCallbackTypeName(string typeName) => _callbackTypeNames.Contains(typeName);
-
-    internal bool MatchesCallbackFunction(PrimitiveType callbackType, BoundFunction function)
-    {
-        foreach (var import in _imports.Values)
-        {
-            foreach (var parameter in import.CallbackParameters)
-            {
-                if (parameter is not null && parameter.Signature.CallbackType == callbackType
-                    && NativeCallbackContract.MatchesFunction(function, parameter.Signature))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
     internal bool SupportsParameterType(PrimitiveType type) =>
         _imports.Values.Any(import => import.ParameterTypes.Contains(type));
 
@@ -386,9 +341,7 @@ public sealed class NativeImportCatalog
                         != NativeImportParameterContract.ReadonlyUtf16ZNoEscape)
                 || (definition.ParameterTypes[parameter] == PrimitiveType.NativeUtf8ZPointer
                     && definition.ParameterContracts[parameter]
-                        != NativeImportParameterContract.ReadonlyUtf8ZNoEscape)
-                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeCallbackAddress
-                    && !NativeCallbackParameterContract.TryGetParameter(definition, parameter, out _)))
+                        != NativeImportParameterContract.ReadonlyUtf8ZNoEscape))
             {
                 return false;
             }
@@ -414,7 +367,6 @@ internal sealed record NativeImportDefinition(string Key, string DllName, string
     bool RequiresUnsafeCaller, bool DoesNotReturn, NativeImportDeploymentPolicy DeploymentPolicy)
 {
     internal ImmutableArray<NativeImportParameterContract> ParameterContracts { get; init; } = [];
-    internal ImmutableArray<NativeCallbackParameterDefinition> CallbackParameters { get; init; } = [];
     internal ImmutableArray<NativeStorageParameterDefinition> StorageParameters { get; init; } = [];
     internal ImmutableArray<NativeAggregateStorageParameterDefinition> AggregateStorageParameters { get; init; } = [];
     internal ImmutableArray<NativeStorageRecordParameterDefinition> StorageRecordParameters { get; init; } = [];
@@ -431,8 +383,8 @@ internal enum NativeImportParameterContract
     Value,
     ReadonlyUtf16ZNoEscape,
     ReadonlyUtf8ZNoEscape,
-    /// <summary>Invokes synchronously without registering or retaining the callback.</summary>
-    NativeCallback = 11,
+    /// <summary>Reserved ordinal for the retired catalog-selected callback contract.</summary>
+    ReservedNativeCallback = 11,
     ReadonlyNativeStorageNoEscape,
     WritableNativeStorageNoEscape,
 }

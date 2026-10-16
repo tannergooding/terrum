@@ -297,9 +297,6 @@ internal sealed partial class Binder
                         || qualified == NativeStorageParameterContract.AddressTypeName
                         || _nativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                             layout.TypeName == qualified || layout.TypeName == name) == true
-                        || _nativeImportCatalog?.IsCallbackTypeName(qualified) == true
-                        || (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
-                            && qualified is ("nint" or "nuint"))
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -338,15 +335,6 @@ internal sealed partial class Binder
         if (_usesManagedNode)
         {
             _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
-        }
-        if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true)
-        {
-            foreach (var typeName in _nativeImportCatalog.CallbackTypeNames)
-            {
-                _ = _structNames.TryAdd(typeName, PrimitiveType.NativeCallbackAddress);
-            }
-            _ = _structNames.TryAdd("nint", PrimitiveType.Int64);
-            _ = _structNames.TryAdd("nuint", PrimitiveType.UInt64);
         }
         DeclareAliases();
         foreach (var index in _structDeclarations.Keys)
@@ -901,7 +889,6 @@ internal sealed partial class Binder
 
     private static bool IsNativeImportParameterType(PrimitiveType type) =>
         IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-            or PrimitiveType.NativeCallbackAddress
             or PrimitiveType.NativeStorageAddress;
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
@@ -1436,7 +1423,6 @@ internal sealed partial class Binder
                 var qualifiedName = Qualify(name.Name);
                 if (TryPrimitiveType(name.Name, out _)
                     || qualifiedName == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
-                    || _nativeImportCatalog?.IsCallbackTypeName(qualifiedName) == true
                     || qualifiedName is NativeBufferIntrinsics.TypeName
                         or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
                     || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
@@ -4789,30 +4775,9 @@ internal sealed partial class Binder
                             };
                         }
                     }
-                    else if (expected == PrimitiveType.NativeCallbackAddress
-                        && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
-                        && operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
-                        && !TryFindVariable(functionName, out _)
-                        && TryFindFunction(functionName, out var callback))
-                    {
-                        var signature = _signatures[callback];
-                        var ownerSeparator = signature.Name.LastIndexOf('.');
-                        var declaringType = signature.StructName is null || ownerSeparator < 0
-                            ? null : signature.Name[..ownerSeparator];
-                        var currentType = _currentStruct is null ? null : Qualify(_currentStruct);
-                        if (signature.IsPrivate && declaringType != currentType)
-                        {
-                            Report("TRM3011", "Private callback is inaccessible.", node.Span);
-                            expression = ErrorExpression(node.Span);
-                        }
-                        else
-                        {
-                            expression = new BoundNativeCallbackAddress(callback, node.Span);
-                        }
-                    }
                     else
                     {
-                        Report("TRM3030", "A function address is permitted only for a catalogued native callback parameter.",
+                        Report("TRM3030", "A function address requires a concrete native function pointer type.",
                             node.Span);
                         expression = ErrorExpression(node.Span);
                     }
@@ -6517,7 +6482,7 @@ internal sealed partial class Binder
                     {
                         return functionPointerType;
                     }
-                    return PrimitiveType.NativeCallbackAddress;
+                    return null;
                 }
                 if (operation == TokenKind.Star && operand is PrimitiveType pointerType
                     && NativePointerTypeContract.IsValidType(pointerType, [.. _nativePointerTypes]))
@@ -6773,7 +6738,6 @@ internal sealed partial class Binder
         PrimitiveType.NativeRawPointer => "ptr<void>",
         _ when NativePointerTypes.IsType(type) => NativePointerTypeName(type),
         _ when NativeFunctionPointerTypes.IsType(type) => NativeFunctionPointerTypeName(type),
-        PrimitiveType.NativeCallbackAddress => NativeCallbackContract.TypeName,
         PrimitiveType.NativeStorageAddress => NativeStorageParameterContract.AddressTypeName,
         PrimitiveType.NativeStorageRecord => "catalogued native storage record",
         PrimitiveType.ManagedNode => "ManagedNode",

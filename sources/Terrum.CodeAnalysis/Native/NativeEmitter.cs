@@ -2093,7 +2093,6 @@ internal sealed partial class PeCompiler
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
             or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-            or PrimitiveType.NativeCallbackAddress
             or PrimitiveType.NativeRawPointer
             or PrimitiveType.NativeStorageAddress
             || NativePointerTypes.IsType(type)
@@ -3594,12 +3593,6 @@ internal sealed partial class PeCompiler
             case BoundNativeStorageRecordInitialization:
                 throw new ArgumentException("Native storage record initialization is local-only.",
                     nameof(expression));
-            case BoundNativeCallbackAddress callback:
-                _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+callback]
-                var callbackAddress = _code.Position;
-                _code.Int32(0);
-                _functionAddressFixups.Add((callbackAddress, callback.Function));
-                break;
             case BoundNativeFunctionAddress address:
                 _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+function]
                 var functionAddress = _code.Position;

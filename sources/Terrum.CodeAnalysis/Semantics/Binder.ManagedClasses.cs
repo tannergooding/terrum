@@ -29,11 +29,8 @@ internal sealed partial class Binder
         }
         var qualified = Qualify(name.Name);
         if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
-            || _nativeImportCatalog?.IsCallbackTypeName(qualified) == true
             || _nativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                 layout.TypeName == qualified || layout.TypeName == name.Text) == true
-            || (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
-                && (qualified is "nint" or "nuint"))
             || _classes.Count >= SemanticVerifier.MaximumVariables
             || !_classNames.TryAdd(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count))
             || _structNames.ContainsKey(qualified)

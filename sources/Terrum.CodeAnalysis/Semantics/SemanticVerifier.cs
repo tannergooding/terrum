@@ -252,7 +252,6 @@ public static partial class SemanticVerifier
                 || @class.Name == NativeStorageParameterContract.AddressTypeName
                 || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                     layout.TypeName == @class.Name) == true
-                || program.NativeImportCatalog?.IsCallbackTypeName(@class.Name) == true
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
@@ -266,7 +265,6 @@ public static partial class SemanticVerifier
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        or PrimitiveType.NativeCallbackAddress
                         or PrimitiveType.MutableInt32BufferView
                     || NativeFixedArrayContract.IsCarrier(field.Type)
                     || IsUnique(program, field.Type))
@@ -322,7 +320,6 @@ public static partial class SemanticVerifier
                 || structure.Name == NativeStorageParameterContract.AddressTypeName
                 || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                     layout.TypeName == structure.Name) == true
-                || program.NativeImportCatalog?.IsCallbackTypeName(structure.Name) == true
                 || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
@@ -337,7 +334,6 @@ public static partial class SemanticVerifier
             foreach (var field in structure.Fields)
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
-                    || field.Type is PrimitiveType.NativeCallbackAddress
                     || NativeFixedArrayContract.IsCarrier(field.Type)
                     || IsRestrictedNativeDescriptor(field.Type))
                 {
@@ -446,7 +442,7 @@ public static partial class SemanticVerifier
                 || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 || (function.ReturnType == PrimitiveType.NativeRawPointer
                     && !function.RequiresUnsafeCaller)
-                || function.ReturnType is PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeStorageAddress
+                || function.ReturnType == PrimitiveType.NativeStorageAddress
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
                 || IsRestrictedNativeDescriptor(function.ReturnType)
                 || !ValidType(function.ReturnType, allowVoid: true, program)
@@ -503,8 +499,6 @@ public static partial class SemanticVerifier
                                         && variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0))
                                     && !NativeStorageParameterContract.IsReadonlyStringParameter(
                                         function, variableIndex, variable.Type, program))
-                        || (variable.Type == PrimitiveType.NativeCallbackAddress
-                            && (!function.IsExternal || variableIndex >= function.ParameterCount))
                         || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
@@ -1109,8 +1103,7 @@ public static partial class SemanticVerifier
                     Expression(write.Index, scope, depth + 1);
                     Expression(write.Value, scope, depth + 1);
                     break;
-                case BoundConstant or BoundNull or BoundNativeCallbackAddress
-                    or BoundNativeFunctionAddress
+                case BoundConstant or BoundNull or BoundNativeFunctionAddress
                     or BoundRead or BoundMove or BoundReceiverLoan
                     or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength or BoundBufferLength:
                     break;
@@ -1679,8 +1672,7 @@ public static partial class SemanticVerifier
                 case BoundBufferRead buffer:
                     Expression(buffer.Index, depth + 1, acquiringRoot);
                     break;
-                case BoundConstant or BoundNull or BoundNativeCallbackAddress
-                    or BoundNativeFunctionAddress
+                case BoundConstant or BoundNull or BoundNativeFunctionAddress
                     or BoundNativePointerAddress
                     or BoundRead or BoundBufferLength:
                     break;
@@ -2141,12 +2133,10 @@ public static partial class SemanticVerifier
                 || program.Functions.Any(static function => function.DirectNativeImport is null
                     && (function.ReturnType is
                         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        || function.ReturnType == PrimitiveType.NativeCallbackAddress
                         || NativeFixedArrayContract.IsCarrier(function.ReturnType)
                         || IsRestrictedNativeDescriptor(function.ReturnType)
                         || function.Variables.Any(static variable => variable.Type is
                             PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                            or PrimitiveType.NativeCallbackAddress
                             || IsRestrictedNativeDescriptor(variable.Type)
                             || variable.NativeStorageRecordLayout is not null
                             || variable.NativeStorageRecordFacts is not null
@@ -2205,12 +2195,10 @@ public static partial class SemanticVerifier
                 && program.Functions.Any(static function => function.DirectNativeImport is not null)
             || program.Functions.Any(static function => function.ReturnType is
                 PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                || function.ReturnType == PrimitiveType.NativeCallbackAddress
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
                 || IsRestrictedNativeDescriptor(function.ReturnType)
                 || function.Variables.Any(variable => variable.Type is
                     PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeCallbackAddress
                     || IsRestrictedNativeDescriptor(variable.Type)
                     || variable.NativeStorageRecordLayout is not null
                     || variable.NativeStorageRecordFacts is not null
@@ -2219,13 +2207,11 @@ public static partial class SemanticVerifier
             || (!program.Structures.IsDefaultOrEmpty && program.Structures.Any(
                 static structure => structure.Fields.Any(
                     static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        or PrimitiveType.NativeCallbackAddress
                         || NativeFixedArrayContract.IsCarrier(field.Type)
                         || IsRestrictedNativeDescriptor(field.Type))))
             || (!program.Classes.IsDefaultOrEmpty && program.Classes.Any(
             static @class => @class.Fields.Any(
                 static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeCallbackAddress
                         || NativeFixedArrayContract.IsCarrier(field.Type)
                             || IsRestrictedNativeDescriptor(field.Type))))
             || !program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
@@ -3608,8 +3594,6 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 break;
-            case BoundNativeCallbackAddress:
-                throw InvalidEffect(expression.Span, "NativeImport");
             case BoundNativeFunctionAddress address:
                 if (!address.IsUnsafeAuthorized
                     || (uint)address.Function >= (uint)program.Functions.Length
@@ -4617,34 +4601,9 @@ public static partial class SemanticVerifier
                                     initialized, fieldMasks, declarations, function, program,
                                     ref remaining, depth + 1);
                             }
-                            else if (target.Variables[parameterSlot].Type == PrimitiveType.NativeCallbackAddress)
-                            {
-                                if (argument is not BoundNativeCallbackAddress callback
-                                    || parameterIndex < 0
-                                    || !target.IsExternal
-                                    || target.NativeImportKey is not string callbackKey
-                                    || program.NativeImportCatalog is not NativeImportCatalog callbackCatalog
-                                    || !callbackCatalog.TryGetImport(callbackKey, out var callbackDefinition)
-                                    || callbackDefinition is null
-                                    || !NativeCallbackParameterContract.TryGetParameter(
-                                        callbackDefinition, parameterIndex, out var callbackParameter)
-                                    || callbackParameter is null
-                                    || callback.Function < 0 || callback.Function >= program.Functions.Length
-                                    || (program.Functions[callback.Function].IsPrivate
-                                        && program.Functions[callback.Function].DeclaringStruct
-                                            != function.DeclaringStruct)
-                                    || !NativeCallbackContract.MatchesFunction(
-                                        program.Functions[callback.Function], callbackParameter.Signature)
-                                    )
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                            }
-                            else if (argument is BoundNativeCallbackAddress
-                                || argument is BoundNativeStorageAddress && !isAllowedStorageAddress
+                            else if (argument is BoundNativeStorageAddress && !isAllowedStorageAddress
                                 || IsRestrictedNativeDescriptor(argument.Type)
-                                    && !isAllowedStorageAddress
-                                || argument.Type == PrimitiveType.NativeCallbackAddress)
+                                    && !isAllowedStorageAddress)
                             {
                                 throw InvalidEffect(argument.Span, "NativeImport");
                             }
@@ -4751,8 +4710,7 @@ public static partial class SemanticVerifier
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                                if (argument is not (BoundNativeCallbackAddress
-                                    or BoundNativeStorageAddress))
+                                if (argument is not BoundNativeStorageAddress)
                                 {
                                     if (IsUnique(program, argument.Type)
                                         && argument is not (BoundMove or BoundCall))
@@ -4993,7 +4951,6 @@ public static partial class SemanticVerifier
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer or PrimitiveType.TokenSpan
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode or PrimitiveType.NativeUtf16ZPointer
             or PrimitiveType.NativeUtf8ZPointer
-            or PrimitiveType.NativeCallbackAddress
             or PrimitiveType.NativeStorageAddress
             or PrimitiveType.NativeRawPointer
             || NativeFixedArrayContract.IsCarrier(type)
@@ -5636,7 +5593,7 @@ public static partial class SemanticVerifier
             BoundSpanAdvance advance => FlowFacts(advance.View, flowFacts, ref remaining),
             BoundSnapshotSpan => 0,
             BoundViewLength or BoundBufferLength or BoundConstant or BoundNull
-                or BoundNativeCallbackAddress or BoundRead or BoundReceiverLoan
+                or BoundRead or BoundReceiverLoan
                 or BoundMutableReceiverLoan or BoundMutableFieldLoan or BoundFieldLoan => 0,
             _ => AllFlowFacts,
         };
