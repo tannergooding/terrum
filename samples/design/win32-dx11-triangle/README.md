@@ -41,13 +41,14 @@ compiler features that have been retired.
 
 ## Compiler boundary
 
-The compiler lowers native imports, storage records, COM ownership, and vtable
-calls through generic contracts. `GetClientRect` is authored as a named native
-import with a source-defined Blittable rectangle and writable pointer
-contract. Other Windows and DX11 imports, COM signatures, and layouts remain
-data in the selected Windows x64 catalog; the compiler no longer has DX11
-primitives, intrinsics, source gates, verifier cases, or emitter branches. The
-Windows FFI, COM, and ownership proposals remain **UNAPPROVED**; this sample
-is implementation evidence, not acceptance of those contracts.
+The compiler lowers named native imports, committed layouts, and ABI-level
+vtable calls through generic contracts. It has no Win32 or DX11 API identities
+and no COM ownership or acquisition policy. `GetClientRect` is declared in
+[`win32-api.terrum`](win32-api.terrum) as `int32(ptr<void>, ptr<ClientRectangle>)`;
+the other Windows imports and the DX11 layouts, slots, signatures, and
+ordinary unique/Cleanup wrappers are authored in the API source files.
 
-The [helper API sketch](interop.api.terrum) is not an input to these builds.
+The [helper API sketch](interop.api.terrum) is a superseded, non-build-input
+prototype; its `NativeComInterface` and `ComOwner<T>` surface is unsupported.
+The Windows FFI and vtable source/metadata contracts remain **UNAPPROVED**.
+This sample is implementation evidence, not acceptance of those contracts.

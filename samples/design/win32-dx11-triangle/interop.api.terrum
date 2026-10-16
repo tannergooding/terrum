@@ -1,4 +1,4 @@
-// API signatures; implementations omitted. See README.md for contracts.
+// Superseded API-signature prototype; not a build input or supported COM contract.
 using Terrum;
 using Terrum.Interop.DirectX;
 using Terrum.Interop.Windows;
