@@ -254,11 +254,13 @@ The maintained DX11 sample authors its Win32 imports, ABI layouts, callbacks,
 message loop, and resource cleanup in Terrum source. The compiler's remaining
 native mechanisms are generic direct imports, pointers, function pointers,
 fixed layouts, and numeric-slot vtable calls; vtable calls do not infer an
-interface identity, ownership, or provider behavior. DX11 generalization is
-not yet accepted: WARP/hardware execution remains unqualified, and earlier
-COM-specific DX11 prototype tests remain excluded from the active project
-pending conversion or retirement. These are explicit evidence gaps, not
-reasons to restore sample-specific compiler policy.
+interface identity, ownership, or provider behavior. The active suite covers
+both maintained entrypoint builds and the generic import, pointer, callable,
+and vtable mechanisms. Legacy DX11/COM prototype tests remain excluded because
+they depend on retired compiler-owned contracts; they are not acceptance
+evidence. DX11 generalization is not yet accepted: WARP/hardware execution
+remains unqualified and requires its documented opt-in. These are explicit
+evidence gaps, not reasons to restore sample-specific compiler policy.
 
 ## Syntax and CLI
 
