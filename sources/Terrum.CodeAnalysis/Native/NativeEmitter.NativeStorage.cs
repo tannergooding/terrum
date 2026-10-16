@@ -122,41 +122,6 @@ internal sealed partial class PeCompiler
         }
     }
 
-    private void EmitNativeStorageRecord(int variable, BoundNativeStorageRecordInitialization record)
-    {
-        var destination = Slot(variable);
-        _code.Bytes(0x31, 0xC0);
-        for (var offset = 0; offset < record.Layout.ByteExtent;)
-        {
-            var remaining = record.Layout.ByteExtent - offset;
-            var width = remaining >= sizeof(ulong) ? sizeof(ulong)
-                : remaining >= sizeof(uint) ? sizeof(uint)
-                : remaining >= sizeof(ushort) ? sizeof(ushort) : sizeof(byte);
-            _code.StoreField(destination + offset, width);
-            offset += width;
-        }
-
-        var valueIndex = 0;
-        for (var fieldIndex = 0; fieldIndex < record.Layout.Fields.Length; fieldIndex++)
-        {
-            var field = record.Layout.Fields[fieldIndex];
-            if (record.Layout.BackingPointerFieldIndex == fieldIndex)
-            {
-                if (record.DataSource is not BoundNativeStorageAddress source)
-                {
-                    throw new InvalidOperationException("The verified storage record has no backing address.");
-                }
-                _code.Address(Slot(source.Variable));
-                _code.Store64(destination + field.Offset);
-                continue;
-            }
-
-            var value = record.Fields[valueIndex++];
-            Expression(value, 0);
-            StoreValue(destination + field.Offset, field.Type);
-        }
-    }
-
     private void EmitNativeFixedArrayElement(BoundNativeFixedArrayElement element, int spill)
     {
         EmitNativeArrayElementAddress(element.Variable, element.Index, spill,

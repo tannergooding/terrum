@@ -26,7 +26,6 @@ internal static class ValueLayout
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
                     => NativeTargetProfile.PointerSize,
                 _ when NativeFunctionPointerTypes.IsType(type) => NativeTargetProfile.PointerSize,
-            PrimitiveType.NativeStorageRecord => MaximumStructureSize,
         PrimitiveType.Void => 0,
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
             && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
@@ -52,10 +51,6 @@ internal static class ValueLayout
         {
             if (type is PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer)
-            {
-                return NativeTargetProfile.PointerSize;
-            }
-            if (type == PrimitiveType.NativeStorageRecord)
             {
                 return NativeTargetProfile.PointerSize;
             }

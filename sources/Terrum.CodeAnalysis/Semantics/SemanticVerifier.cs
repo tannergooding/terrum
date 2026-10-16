@@ -250,8 +250,6 @@ public static partial class SemanticVerifier
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
                 || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
                 || @class.Name == NativeStorageParameterContract.AddressTypeName
-                || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
-                    layout.TypeName == @class.Name) == true
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
@@ -268,10 +266,6 @@ public static partial class SemanticVerifier
                         or PrimitiveType.MutableInt32BufferView
                     || NativeFixedArrayContract.IsCarrier(field.Type)
                     || IsUnique(program, field.Type))
-                {
-                    throw Invalid();
-                }
-                if (IsRestrictedNativeDescriptor(field.Type))
                 {
                     throw Invalid();
                 }
@@ -318,8 +312,6 @@ public static partial class SemanticVerifier
                 || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
                     or NativeManagedNodeIntrinsics.HeapName
                 || structure.Name == NativeStorageParameterContract.AddressTypeName
-                || program.NativeImportCatalog?.StorageRecordLayouts.Any(layout =>
-                    layout.TypeName == structure.Name) == true
                 || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
@@ -334,8 +326,7 @@ public static partial class SemanticVerifier
             foreach (var field in structure.Fields)
             {
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
-                    || NativeFixedArrayContract.IsCarrier(field.Type)
-                    || IsRestrictedNativeDescriptor(field.Type))
+                    || NativeFixedArrayContract.IsCarrier(field.Type))
                 {
                     throw Invalid();
                 }
@@ -444,7 +435,6 @@ public static partial class SemanticVerifier
                     && !function.RequiresUnsafeCaller)
                 || function.ReturnType == PrimitiveType.NativeStorageAddress
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
-                || IsRestrictedNativeDescriptor(function.ReturnType)
                 || !ValidType(function.ReturnType, allowVoid: true, program)
                 || function.Variables.IsDefault
                 || function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
@@ -462,17 +452,6 @@ public static partial class SemanticVerifier
                 {
                     var variable = function.Variables[variableIndex];
                     if (variable is null || string.IsNullOrEmpty(variable.Name)
-                        || (variable.Type == PrimitiveType.NativeStorageRecord
-                            ? function.IsExternal || function.IndexedBody is not null
-                                || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                                || variable.IsMutable || variable.IsOut || variable.IsInit
-                                || variable.IsInitializationLocal
-                                || variable.NativeStorageRecordLayout is not NativeStorageRecordLayoutDefinition recordLayout
-                                || variable.NativeStorageRecordFacts is null
-                                || !NativeStorageParameterContract.SupportsStorageRecordType(
-                                    recordLayout, program.NativeImportCatalog, isReadonly: true)
-                            : variable.NativeStorageRecordLayout is not null
-                                || variable.NativeStorageRecordFacts is not null)
                         || (variable.Type == PrimitiveType.NativeStorageAddress
                             && !NativeStorageParameterContract.IsStorageAddressParameter(function,
                                 variableIndex, program.NativeImportCatalog)
@@ -1017,17 +996,6 @@ public static partial class SemanticVerifier
                 case BoundNativeStorageAddress address:
                     Expression(address.Index, scope, depth + 1);
                     break;
-                case BoundNativeStorageRecordInitialization record:
-                    Expression(record.DataSource, scope, depth + 1);
-                    if (record.Fields.IsDefault)
-                    {
-                        throw Invalid();
-                    }
-                    foreach (var field in record.Fields)
-                    {
-                        Expression(field, scope, depth + 1);
-                    }
-                    break;
                 case BoundNativePointerRead pointerRead:
                     Expression(pointerRead.Pointer, scope, depth + 1);
                     break;
@@ -1452,7 +1420,7 @@ public static partial class SemanticVerifier
         var backing = new int[roots.Length];
         var declared = new HashSet<int>();
         var nativeLocals = function.Variables.Any(static variable =>
-            NativeFixedArrayContract.IsCarrier(variable.Type) || variable.Type == PrimitiveType.NativeStorageRecord)
+            NativeFixedArrayContract.IsCarrier(variable.Type))
             ? new HashSet<int>() : null;
         var remaining = MaximumAnalysisVisits;
 
@@ -1541,14 +1509,6 @@ public static partial class SemanticVerifier
                     }
                     break;
                 case BoundNativeStorageAddress address:
-                    if (address.Variable >= 0 && address.Variable < function.Variables.Length
-                        && function.Variables[address.Variable].NativeStorageRecordFacts
-                            is NativeStorageRecordFacts facts
-                        && (nativeLocals?.Contains(address.Variable) != true
-                            || !nativeLocals.Contains(facts.Loan.BackingVariable)))
-                    {
-                        throw InvalidEffect(address.Span, "NativeImport");
-                    }
                     Expression(address.Index, depth + 1, acquiringRoot);
                     break;
                 case BoundNativeFixedArrayInitialization fixedArray:
@@ -1559,22 +1519,6 @@ public static partial class SemanticVerifier
                     foreach (var element in fixedArray.Elements)
                     {
                         Expression(element, depth + 1, acquiringRoot);
-                    }
-                    break;
-                case BoundNativeStorageRecordInitialization storageRecord:
-                    var recordBackingVariable = storageRecord.DataSource switch {
-                        BoundNativeStorageAddress source => source.Variable,
-                        _ => -1,
-                    };
-                    if (recordBackingVariable < 0 || nativeLocals?.Contains(recordBackingVariable) != true
-                        || storageRecord.Fields.IsDefault)
-                    {
-                        throw InvalidEffect(storageRecord.Span, "NativeImport");
-                    }
-                    Expression(storageRecord.DataSource, depth + 1, acquiringRoot);
-                    foreach (var field in storageRecord.Fields)
-                    {
-                        Expression(field, depth + 1, acquiringRoot);
                     }
                     break;
                 case BoundRead localRead when localRead.Type is PrimitiveType.ReadonlyInt32BufferView
@@ -1772,8 +1716,7 @@ public static partial class SemanticVerifier
                     }
                     Expression(local.Initializer, depth + 1);
                     if (nativeLocals is not null
-                        && (NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type)
-                            || function.Variables[local.Variable].Type == PrimitiveType.NativeStorageRecord))
+                        && NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type))
                     {
                         _ = nativeLocals.Add(local.Variable);
                     }
@@ -2134,12 +2077,8 @@ public static partial class SemanticVerifier
                     && (function.ReturnType is
                         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                         || NativeFixedArrayContract.IsCarrier(function.ReturnType)
-                        || IsRestrictedNativeDescriptor(function.ReturnType)
                         || function.Variables.Any(static variable => variable.Type is
                             PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                            || IsRestrictedNativeDescriptor(variable.Type)
-                            || variable.NativeStorageRecordLayout is not null
-                            || variable.NativeStorageRecordFacts is not null
                             || NativeFixedArrayContract.IsCarrier(variable.Type)
                             || variable.NativeFixedArrayLayout is not null)))
                 || !NativeStringZPoolContract.IsValid(
@@ -2196,24 +2135,18 @@ public static partial class SemanticVerifier
             || program.Functions.Any(static function => function.ReturnType is
                 PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
-                || IsRestrictedNativeDescriptor(function.ReturnType)
                 || function.Variables.Any(variable => variable.Type is
                     PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    || IsRestrictedNativeDescriptor(variable.Type)
-                    || variable.NativeStorageRecordLayout is not null
-                    || variable.NativeStorageRecordFacts is not null
                     || NativeFixedArrayContract.IsCarrier(variable.Type)
                     || variable.NativeFixedArrayLayout is not null))
             || (!program.Structures.IsDefaultOrEmpty && program.Structures.Any(
                 static structure => structure.Fields.Any(
                     static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        || NativeFixedArrayContract.IsCarrier(field.Type)
-                        || IsRestrictedNativeDescriptor(field.Type))))
+                        || NativeFixedArrayContract.IsCarrier(field.Type))))
             || (!program.Classes.IsDefaultOrEmpty && program.Classes.Any(
-            static @class => @class.Fields.Any(
+                static @class => @class.Fields.Any(
                 static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        || NativeFixedArrayContract.IsCarrier(field.Type)
-                            || IsRestrictedNativeDescriptor(field.Type))))
+                            || NativeFixedArrayContract.IsCarrier(field.Type))))
             || !program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
         {
             throw new NotSupportedException($"Source native imports are not supported by {target}.");
@@ -2293,11 +2226,6 @@ public static partial class SemanticVerifier
                 if (NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type))
                 {
                     VerifyNativeFixedArrayInitialization(local.Initializer, local.Variable, initialized,
-                        fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
-                }
-                else if (function.Variables[local.Variable].Type == PrimitiveType.NativeStorageRecord)
-                {
-                    VerifyNativeStorageRecordInitialization(local.Initializer, local.Variable, initialized,
                         fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 }
                 else
@@ -3663,10 +3591,7 @@ public static partial class SemanticVerifier
             case BoundNativeFixedArrayInitialization:
                 throw InvalidEffect(expression.Span, "NativeImport");
             case BoundNativeStorageAddress:
-            case BoundNativeStorageRecordInitialization:
             case BoundRead read when NativeFixedArrayContract.IsCarrier(read.Type):
-                throw InvalidEffect(expression.Span, "NativeImport");
-            case BoundRead read when IsRestrictedNativeDescriptor(read.Type):
                 throw InvalidEffect(expression.Span, "NativeImport");
             case BoundNativeFixedArrayElement fixedArrayElement:
                 VerifyNativeFixedArrayElement(fixedArrayElement, initialized, fieldMasks, declarations,
@@ -4353,14 +4278,6 @@ public static partial class SemanticVerifier
                 var loanOfInitializedField = false;
                 var reservedReceiver = -1;
                 var stagedDependencyCount = initialized.Dependencies?.Staged.Count ?? 0;
-                NativeImportDefinition? storageRecordImport = null;
-                if (target.IsExternal && target.NativeImportKey is string storageRecordImportKey
-                    && program.NativeImportCatalog is NativeImportCatalog storageRecordCatalog
-                    && storageRecordCatalog.TryGetImport(storageRecordImportKey, out var selectedStorageRecordImport))
-                {
-                    storageRecordImport = selectedStorageRecordImport;
-                }
-                var storageRecordLoans = new Dictionary<string, NativeStorageLoan>(StringComparer.Ordinal);
                 try
                 {
                     for (var i = 0; i < call.Arguments.Length; i++)
@@ -4403,12 +4320,6 @@ public static partial class SemanticVerifier
                             && nativeVTableParameter is not null
                             && DirectNativeImportContract.MatchesAddress(
                                 nativeVTableParameterAddress, nativeVTableParameter, function, program);
-                        NativeStorageRecordParameterDefinition? storageRecordParameter = null;
-                        if (storageRecordImport is not null)
-                        {
-                            _ = NativeStorageRecordContract.TryGetParameter(storageRecordImport,
-                                parameterIndex, out storageRecordParameter);
-                        }
                         var implicitReferenceTemporary = call.ImplicitReferenceTemporary(i);
                         if (implicitReferenceTemporary < -1)
                         {
@@ -4486,10 +4397,6 @@ public static partial class SemanticVerifier
                                     directOutputAddress, directNativeOutput, function, program);
                             isAllowedStorageAddress |= isDirectNativeParameterAddress;
                             isAllowedStorageAddress |= isNativeVTableParameterAddress;
-                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress recordAddress
-                                && storageRecordParameter is not null
-                                && NativeStorageRecordContract.MatchesAddress(recordAddress,
-                                    storageRecordParameter, program.NativeImportCatalog);
                             NativeAggregateStorageParameterDefinition? aggregateStorageParameter = null;
                             if (target.IsExternal && target.NativeImportKey is string aggregateImportKey
                                 && program.NativeImportCatalog is NativeImportCatalog aggregateCatalog
@@ -4567,28 +4474,6 @@ public static partial class SemanticVerifier
                                     initialized, fieldMasks, declarations, function, program,
                                     ref remaining, depth + 1, failures);
                             }
-                            else if (storageRecordParameter is not null)
-                            {
-                                if (argument is not BoundNativeStorageAddress address
-                                    || !NativeStorageRecordContract.MatchesAddress(address,
-                                        storageRecordParameter, program.NativeImportCatalog))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                var facts = VerifyNativeStorageRecordAddress(address, storageRecordParameter,
-                                    initialized, fieldMasks, declarations, function, program,
-                                    ref remaining, depth + 1, failures);
-                                if (storageRecordParameter.LoanGroup is string loanGroup
-                                    && storageRecordLoans.TryGetValue(loanGroup, out var previousLoan)
-                                    && previousLoan != facts.Loan)
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                if (storageRecordParameter.LoanGroup is string group)
-                                {
-                                    storageRecordLoans[group] = facts.Loan;
-                                }
-                            }
                             else if (aggregateStorageParameter is not null)
                             {
                                 if (argument is not BoundNativeStorageAddress address
@@ -4601,9 +4486,7 @@ public static partial class SemanticVerifier
                                     initialized, fieldMasks, declarations, function, program,
                                     ref remaining, depth + 1);
                             }
-                            else if (argument is BoundNativeStorageAddress && !isAllowedStorageAddress
-                                || IsRestrictedNativeDescriptor(argument.Type)
-                                    && !isAllowedStorageAddress)
+                            else if (argument is BoundNativeStorageAddress && !isAllowedStorageAddress)
                             {
                                 throw InvalidEffect(argument.Span, "NativeImport");
                             }
@@ -4752,11 +4635,6 @@ public static partial class SemanticVerifier
                             dependencies.Staged.Add(BackingOf(argument, dependencies, program, ref remaining, depth + 1));
                         }
                     }
-                    if (storageRecordImport is not null)
-                    {
-                        VerifyNativeStorageRecordLoanGroups(call,
-                            storageRecordImport.StorageRecordParameters, storageRecordLoans);
-                    }
                     if (loanRoot >= 0 && !initialized[loanRoot]
                         && !(loanOfInitializedField && function.IsConstructor && loanRoot == 0))
                     {
@@ -4841,9 +4719,6 @@ public static partial class SemanticVerifier
 
     private static bool IsNativeUtfZPointer(PrimitiveType type) =>
         type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer;
-
-    private static bool IsRestrictedNativeDescriptor(PrimitiveType type) =>
-        type == PrimitiveType.NativeStorageRecord;
 
     private static bool HasValidNativeStringArgument(BoundExpression argument, PrimitiveType parameterType,
         int parameterIndex, BoundFunction target, BoundProgram program)
@@ -4954,7 +4829,6 @@ public static partial class SemanticVerifier
             or PrimitiveType.NativeStorageAddress
             or PrimitiveType.NativeRawPointer
             || NativeFixedArrayContract.IsCarrier(type)
-            || IsRestrictedNativeDescriptor(type)
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
             || NativePointerTypeContract.IsValidType(type, program.NativePointerTypes)
@@ -5455,13 +5329,6 @@ public static partial class SemanticVerifier
                 VacateNestedOutputs(write.Index, state, ref remaining);
                 VacateNestedOutputs(write.Value, state, ref remaining);
                 break;
-            case BoundNativeStorageRecordInitialization record:
-                VacateNestedOutputs(record.DataSource, state, ref remaining);
-                foreach (var field in record.Fields)
-                {
-                    VacateNestedOutputs(field, state, ref remaining);
-                }
-                break;
             case BoundIsInitialized:
                 break;
             case BoundIsSome pattern:
@@ -5579,8 +5446,6 @@ public static partial class SemanticVerifier
             BoundNativePointerWrite pointerWrite => AddFlowFact(
                 FlowFacts(pointerWrite.Pointer, flowFacts, ref remaining),
                 pointerWrite.Value, flowFacts, ref remaining),
-            BoundNativeStorageRecordInitialization record => AddFlowFact(
-                FlowFacts(record.Fields, flowFacts, ref remaining), record.DataSource, flowFacts, ref remaining),
             BoundIsSome test => (byte)(OutcomeEffectFact | FlowFacts(test.Value, flowFacts, ref remaining)),
             BoundIsVariablePattern or BoundIsInitialized => AllFlowFacts,
             BoundOutArgument or BoundMove => OutcomeEffectFact,

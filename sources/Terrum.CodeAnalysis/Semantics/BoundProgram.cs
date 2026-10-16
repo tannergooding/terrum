@@ -62,8 +62,8 @@ public enum PrimitiveType
     ReservedNativeAddress = 28,
     /// <summary>A catalogued, no-escape address of a checked plain aggregate value.</summary>
     NativeStorageAddress,
-    /// <summary>A catalogued immutable native storage record whose layout is local to its selected profile.</summary>
-    NativeStorageRecord,
+    /// <summary>Reserved ordinal for the retired catalog-selected native storage record.</summary>
+    ReservedNativeStorageRecord = 30,
     /// <summary>An unmanaged opaque <c>ptr&lt;void&gt;</c> value with no pinning or ownership guarantee.</summary>
     NativeRawPointer,
 }
@@ -423,10 +423,6 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
 {
     internal BoundNativeFixedArrayLayout? NativeFixedArrayLayout { get; init; }
 
-    internal NativeStorageRecordLayoutDefinition? NativeStorageRecordLayout { get; init; }
-
-    internal NativeStorageRecordFacts? NativeStorageRecordFacts { get; init; }
-
     /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
     public bool IsOut { get; init; }
 
@@ -718,29 +714,6 @@ public sealed record BoundNativeStorageAddress(
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
-}
-
-internal sealed record NativeStorageLoan(int BackingVariable, PrimitiveType CarrierType,
-    PrimitiveType ElementType, bool IsReadonly, int ByteExtent);
-
-/// <summary>A catalogued local record with a readonly dependency on bounded native storage.</summary>
-internal sealed record BoundNativeStorageRecordInitialization(
-    NativeStorageRecordLayoutDefinition Layout,
-    BoundExpression DataSource,
-    ImmutableArray<BoundExpression> Fields,
-    TextSpan Span) : BoundExpression(PrimitiveType.NativeStorageRecord, Span)
-{
-    internal NativeStorageLoan? Loan { get; init; }
-
-    internal override bool HasValidNestedExpressions => !Fields.IsDefault;
-    internal override ImmutableArray<BoundExpression> NestedExpressions =>
-        Fields.IsDefault ? [DataSource] : [DataSource, .. Fields];
-    internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => Fields.IsDefault ? this
-        : this with {
-            DataSource = rewrite(DataSource),
-            Fields = [.. Fields.Select(rewrite)],
-        };
 }
 
 internal sealed record NativeAggregateStorageParameterDefinition(

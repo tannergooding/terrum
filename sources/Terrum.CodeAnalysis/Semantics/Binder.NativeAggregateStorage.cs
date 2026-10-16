@@ -43,18 +43,6 @@ internal sealed partial class Binder
         }
 
         var type = _variables[variable].Type;
-        if (type == PrimitiveType.NativeStorageRecord
-            && _variables[variable].NativeStorageRecordLayout is NativeStorageRecordLayoutDefinition recordLayout
-            && _variables[variable].NativeStorageRecordFacts is not null
-            && NativeStorageParameterContract.SupportsStorageRecordType(
-                recordLayout, _nativeImportCatalog, isReadonly: !_variables[variable].IsMutable)
-            && !_variables[variable].IsMutable)
-        {
-            return new BoundNativeStorageAddress(variable,
-                new BoundConstant(0, PrimitiveType.Int32, span), PrimitiveType.NativeStorageRecord,
-                PrimitiveType.NativeStorageRecord, PrimitiveType.NativeStorageAddress, 1,
-                recordLayout.ByteExtent, recordLayout.ByteExtent, IsReadonly: true, Span: span);
-        }
         if (!NativeStorageParameterContract.SupportsAggregateType(_nativeImportCatalog,
                 type, _structs, !_variables[variable].IsMutable))
         {

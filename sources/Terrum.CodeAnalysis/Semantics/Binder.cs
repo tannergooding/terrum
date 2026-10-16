@@ -294,8 +294,6 @@ internal sealed partial class Binder
                     }
                     if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                         || qualified == NativeStorageParameterContract.AddressTypeName
-                        || _nativeImportCatalog?.StorageRecordLayouts.Any(layout =>
-                            layout.TypeName == qualified || layout.TypeName == name) == true
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -2663,18 +2661,6 @@ internal sealed partial class Binder
                 node.Span);
             return PrimitiveType.Int32;
         }
-        if (NativeStorageRecordContract.TryGetLayout(name, _nativeImportCatalog, out _))
-        {
-            if (typeArgumentNodes.Length == 0 && !writable && !optional
-                && node.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
-            {
-                return PrimitiveType.NativeStorageRecord;
-            }
-
-            Report("TRM3030", "A catalogued native storage record is an immutable local-only type.",
-                node.Span);
-            return PrimitiveType.Int32;
-        }
         if (name == "ptr")
         {
             if (typeArgumentNodes.Length != 1 || optional
@@ -3425,11 +3411,6 @@ internal sealed partial class Binder
                     return new BoundExpressionStatement(sampleArrayInitializer, node.Span);
                 }
                 var declaredType = typeElement is SyntaxNode typeNode ? BindType(typeNode, allowVoid: false) : (PrimitiveType?)null;
-                var declaredStorageRecordLayout = declaredType == PrimitiveType.NativeStorageRecord
-                    && typeElement is SyntaxNode storageRecordTypeNode
-                    && NativeStorageRecordContract.TryGetLayout(TypeNameIdentifier(storageRecordTypeNode),
-                        _nativeImportCatalog, out var selectedStorageRecordLayout)
-                    ? selectedStorageRecordLayout : null;
                 if (declaredType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                 {
                     return BindViewScope(name, isMutable, initializerNode, node.Span, declaredType.Value);
@@ -3442,21 +3423,6 @@ internal sealed partial class Binder
                 }
                 var initializer = BindExpression(initializerNode, declaredType);
 
-                if (declaredType == PrimitiveType.NativeStorageRecord
-                    && (isMutable || declaredStorageRecordLayout is null
-                        || initializer is not BoundNativeStorageRecordInitialization recordInitializer
-                        || recordInitializer.Layout != declaredStorageRecordLayout))
-                {
-                    Report("TRM3030", "A catalogued native storage record requires its matching readonly initializer.",
-                        node.Span);
-                }
-                if (initializer is BoundNativeStorageRecordInitialization { } initializedStorageRecord
-                    && (declaredType != PrimitiveType.NativeStorageRecord || isMutable
-                        || initializedStorageRecord.Layout != declaredStorageRecordLayout))
-                {
-                    Report("TRM3030", "Native storage records are immutable, explicitly typed, initialized locals.",
-                        node.Span);
-                }
                 if (declaredType is null && initializer.Type == PrimitiveType.Void)
                 {
                     Report("TRM3005", "Cannot infer a variable's type from a void expression.", initializerNode.Span);
@@ -3464,14 +3430,6 @@ internal sealed partial class Binder
 
                 // Locals enter scope only after their initializer, including in nested blocks.
                 var slot = AddVariable(name.Name, declaredType ?? initializer.Type, isMutable, name.Span);
-                if (initializer is BoundNativeStorageRecordInitialization storageRecordInitializer)
-                {
-                    _variables[slot] = _variables[slot] with {
-                        NativeStorageRecordLayout = storageRecordInitializer.Layout,
-                        NativeStorageRecordFacts = NativeStorageRecordContract.Facts(
-                            storageRecordInitializer, _nativeImportCatalog),
-                    };
-                }
                 return new BoundLocal(slot, initializer, node.Span);
             }
 
@@ -3487,10 +3445,6 @@ internal sealed partial class Binder
                 if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                 {
                     Report("TRM3023", "Native buffer views require an initialized lexical owner loan.", node.Span);
-                }
-                if (type == PrimitiveType.NativeStorageRecord)
-                {
-                    Report("TRM3030", "A catalogued native storage record requires an initializer.", node.Span);
                 }
                 if (TokenSpanContract.IsDependent(type, _structs))
                 {
@@ -5227,10 +5181,6 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Name, out function))
             {
-                if (expected == PrimitiveType.NativeStorageRecord)
-                {
-                    return BindNativeStorageRecordInitializer(node, expected);
-                }
                 if (expected == PrimitiveType.NativeUtf16ZPointer
                     && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf16ZPointer) == true
                     && name.Name == "utf16z")
@@ -5242,10 +5192,6 @@ internal sealed partial class Binder
                     && name.Name == "utf8z")
                 {
                     return BindNativeUtf8ZLiteral(node, expected);
-                }
-                if (expected == PrimitiveType.NativeStorageRecord)
-                {
-                    return BindNativeStorageRecordInitializer(node, expected);
                 }
                 if (FindGenericTemplate(name.Name) is not null)
                 {
@@ -6714,7 +6660,6 @@ internal sealed partial class Binder
         _ when NativePointerTypes.IsType(type) => NativePointerTypeName(type),
         _ when NativeFunctionPointerTypes.IsType(type) => NativeFunctionPointerTypeName(type),
         PrimitiveType.NativeStorageAddress => NativeStorageParameterContract.AddressTypeName,
-        PrimitiveType.NativeStorageRecord => "catalogued native storage record",
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",

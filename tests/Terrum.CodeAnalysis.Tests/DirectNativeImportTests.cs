@@ -133,6 +133,29 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void RetiredNativeStorageRecordOrdinalIsRejectedAsAValueType()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Identity(int32 value) { return value; }
+            int32 Main() { return Identity(42); }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var identity = program.Functions.Single(static function => function.Name == "Identity");
+        var identityIndex = program.Functions.IndexOf(identity);
+        var variables = identity.Variables.SetItem(0,
+            identity.Variables[0] with { Type = PrimitiveType.ReservedNativeStorageRecord });
+        var forgedProgram = program with {
+            Functions = program.Functions.SetItem(identityIndex, identity with { Variables = variables }),
+        };
+
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.EmitWithNativeImports(forgedProgram, NativeRuntimePolicy.FailFast))!;
+    }
+
+    [Test]
     public void RawPointerNullAndEqualityUseOrdinaryPointerValues()
     {
         Assume.That(OperatingSystem.IsWindows()

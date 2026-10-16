@@ -1050,7 +1050,6 @@ internal sealed partial class PeCompiler
                 }
                 slots[variable] = at;
                 at += function.Variables[variable].NativeFixedArrayLayout?.ByteExtent
-                    ?? function.Variables[variable].NativeStorageRecordLayout?.ByteExtent
                     ?? ((IsIndirect(function.Variables[variable].Type)
                             && IsStruct(function.Variables[variable].Type))
                     ? Size(function.Variables[variable].Type) : (IsIndirect(function.Variables[variable].Type)
@@ -1601,8 +1600,6 @@ internal sealed partial class PeCompiler
             case BoundNativePointerWrite pointerWrite:
                 return Math.Max(2, Math.Max(1 + ExpressionSpills(pointerWrite.Pointer, ref maximumArguments),
                     1 + ExpressionSpills(pointerWrite.Value, ref maximumArguments)));
-            case BoundNativeStorageRecordInitialization:
-                return 0;
             case BoundUnary unary:
                 return ExpressionSpills(unary.Operand, ref maximumArguments);
             case BoundUpdate update:
@@ -1936,13 +1933,6 @@ internal sealed partial class PeCompiler
                 case BoundNativePointerWrite pointerWrite:
                     VisitExpression(pointerWrite.Pointer);
                     VisitExpression(pointerWrite.Value);
-                    break;
-                case BoundNativeStorageRecordInitialization record:
-                    VisitExpression(record.DataSource);
-                    foreach (var field in record.Fields)
-                    {
-                        VisitExpression(field);
-                    }
                     break;
                 case BoundConditional conditional:
                     VisitExpression(conditional.Condition);
@@ -2856,10 +2846,6 @@ internal sealed partial class PeCompiler
                         }
                     }
                 }
-                else if (local.Initializer is BoundNativeStorageRecordInitialization record)
-                {
-                    EmitNativeStorageRecord(local.Variable, record);
-                }
                 else
                 {
                     Expression(local.Initializer, 0);
@@ -3590,9 +3576,6 @@ internal sealed partial class PeCompiler
             case BoundNativePointerWrite pointerWrite:
                 EmitNativePointerWrite(pointerWrite, spill);
                 break;
-            case BoundNativeStorageRecordInitialization:
-                throw new ArgumentException("Native storage record initialization is local-only.",
-                    nameof(expression));
             case BoundNativeFunctionAddress address:
                 _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+function]
                 var functionAddress = _code.Position;

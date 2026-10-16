@@ -12,8 +12,7 @@ internal static class NativeStorageParameterContract
 
     internal static bool IsValid(NativeImportDefinition import)
     {
-        if (import.StorageParameters.IsDefault || import.AggregateStorageParameters.IsDefault
-            || import.StorageRecordParameters.IsDefault)
+        if (import.StorageParameters.IsDefault || import.AggregateStorageParameters.IsDefault)
         {
             return false;
         }
@@ -24,9 +23,8 @@ internal static class NativeStorageParameterContract
                 or NativeImportParameterContract.WritableNativeStorageNoEscape);
         var hasAggregateAddress = !import.ParameterTypes.IsDefault
             && import.ParameterTypes.Contains(PrimitiveType.NativeStorageAddress);
-        var hasStorageRecord = !import.StorageRecordParameters.IsEmpty;
         if (import.StorageParameters.IsDefaultOrEmpty && import.AggregateStorageParameters.IsDefaultOrEmpty
-            && !hasStorageRecord && !hasStorageContract && !hasAggregateAddress)
+            && !hasStorageContract && !hasAggregateAddress)
         {
             return true;
         }
@@ -102,16 +100,6 @@ internal static class NativeStorageParameterContract
                 return false;
             }
 
-            hasStorageParameter[parameter.ParameterIndex] = true;
-        }
-
-        foreach (var parameter in import.StorageRecordParameters)
-        {
-            if (!NativeStorageRecordContract.IsValidParameter(parameter, import)
-                || hasStorageParameter[parameter.ParameterIndex])
-            {
-                return false;
-            }
             hasStorageParameter[parameter.ParameterIndex] = true;
         }
 
@@ -239,11 +227,6 @@ internal static class NativeStorageParameterContract
                 ? NativeImportParameterContract.ReadonlyNativeStorageNoEscape
                 : NativeImportParameterContract.WritableNativeStorageNoEscape;
         }
-        if (NativeStorageRecordContract.TryGetParameter(import, parameterIndex, out var storageRecordParameter)
-            && storageRecordParameter is not null)
-        {
-            return NativeImportParameterContract.ReadonlyNativeStorageNoEscape;
-        }
         return NativeImportParameterContract.Value;
     }
 
@@ -338,10 +321,6 @@ internal static class NativeStorageParameterContract
                 && (parameter.IsReadonly || !isReadonly)));
     }
 
-    internal static bool SupportsStorageRecordType(NativeStorageRecordLayoutDefinition layout,
-        NativeImportCatalog? catalog, bool isReadonly) =>
-        isReadonly && NativeStorageRecordContract.MatchesLayout(layout, catalog);
-
     internal static bool IsStorageAddressParameter(BoundFunction function, int parameterIndex,
         NativeImportCatalog? catalog) =>
         function.IsExternal && parameterIndex >= 0 && parameterIndex < function.ParameterCount
@@ -350,8 +329,7 @@ internal static class NativeStorageParameterContract
             && parameterIndex < import.ParameterTypes.Length
             && import.ParameterTypes[parameterIndex] == PrimitiveType.NativeStorageAddress
             && (TryGetParameter(import, parameterIndex, out _)
-                || TryGetAggregateParameter(import, parameterIndex, out _)
-                || NativeStorageRecordContract.TryGetParameter(import, parameterIndex, out _));
+                || TryGetAggregateParameter(import, parameterIndex, out _));
 }
 
 internal static class NativeImportBoundParameterMappingContract
@@ -437,30 +415,6 @@ internal sealed record NativeStorageParameterDefinition(int ParameterIndex, Prim
 {
     internal ImmutableArray<NativeFixedArrayFieldLayoutDefinition> ElementFields { get; init; } = [];
 }
-
-internal sealed record NativeStorageRecordParameterDefinition(
-    int ParameterIndex,
-    string TypeName,
-    bool IsReadonly,
-    string? LoanGroup = null);
-
-internal sealed record NativeStorageRecordLayoutDefinition(
-    string TypeName,
-    string InitializerName,
-    int ByteExtent,
-    int Alignment,
-    ImmutableArray<NativeStorageRecordFieldDefinition> Fields,
-    int? BackingPointerFieldIndex = null,
-    int? BackingExtentFieldIndex = null);
-
-internal sealed record NativeStorageRecordFieldDefinition(
-    string Name,
-    PrimitiveType Type,
-    int Offset,
-    int Size,
-    long? RequiredValue = null,
-    long? MinimumValue = null,
-    long? MaximumValue = null);
 
 internal sealed record NativeFixedArrayStorageLayoutDefinition(string ElementTypeName, int ElementCount,
     int ElementStride, int ElementAlignment, int ByteExtent)
