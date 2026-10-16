@@ -165,7 +165,11 @@ matching `utf8z`/`utf16z` literals require read-only, no-escape, zero-extent
 metadata and do not require a selected API catalog. When a call forms an
 address with `&local` or the first element of a fixed array, the backing must be initialized
 and match the pointee type; `Write` and `ReadWrite` require mutable backing.
-Raw pointer values remain caller-authored unsafe inputs. This input metadata
+Raw pointer values remain caller-authored unsafe inputs. Caller-unsafe source
+functions may return opaque `ptr<void>` values through private semantic
+modules. This preserves caller-unsafety and address bits only; it conveys no
+provenance, backing, ownership, or lifetime, and source-body pointer results
+remain outside the current TRRM executable prototype. This input metadata
 round-trips through private semantic-module revision 80, native packages,
 consumer sets, and graph-JIT roots. The experimental TRRM direct-import path
 also round-trips scalar, opaque-pointer, and `ptr<void>` pointees, plus
