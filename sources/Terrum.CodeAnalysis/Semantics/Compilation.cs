@@ -126,6 +126,10 @@ public sealed class Compilation
         }
         foreach (var field in structure.Fields)
         {
+            if (NativePointerTypes.IsType(field.Type) || NativeFunctionPointerTypes.IsType(field.Type))
+            {
+                continue;
+            }
             var index = (int)field.Type - 100;
             if (index >= structureCount)
             {
@@ -146,7 +150,8 @@ public sealed class Compilation
             slot < function.ParameterCount + (function.IsConstructor ? 1 : 0); slot++)
         {
             var type = function.Variables[slot].Type;
-            if (ManagedClassTypes.IsManaged(type))
+            if (ManagedClassTypes.IsManaged(type) || NativePointerTypes.IsType(type)
+                || NativeFunctionPointerTypes.IsType(type))
             {
                 continue;
             }
@@ -250,6 +255,13 @@ public sealed class Compilation
                             {
                                 return true;
                             }
+                            foreach (var argument in call.Arguments)
+                            {
+                                expressions.Push(argument);
+                            }
+                            break;
+                        case BoundIndirectCall call:
+                            expressions.Push(call.Target);
                             foreach (var argument in call.Arguments)
                             {
                                 expressions.Push(argument);

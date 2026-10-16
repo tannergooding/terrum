@@ -56,7 +56,7 @@ predicate-refinement catalog for runtime values, so it does not fulfill the
 accepted v1 proof-floor scope.
 
 Current profile markers are syntax language version 46, semantic-module base
-revision 76 with private feature revisions through 81, and native profiles
+revision 76 with private feature revisions through 83, and native profiles
 native-10 through native-20. These markers describe supported implementations,
 not approval of the remaining language contracts. The exact source, layout,
 metadata, ABI, and runtime contracts are in the
@@ -133,7 +133,14 @@ enable native imports. The `MessageBoxW` sample is authored using the same
 direct import form as any other native function; its unattended CLI test
 checks the emitted import without invoking the modal API. This remains
 provisional implementation support, not canonical TRRM approval or a
-cross-platform FFI contract.
+cross-platform FFI contract. Source-level typed and nested `ptr<T>` signatures
+and unsafe pointer address/read/write nodes persist through private semantic
+module revision 83. Typed pointer formation can take the address of an element
+in an initialized fixed-array local; native lowering retains its checked
+element bounds. Fixed-array expressions, including those pointer addresses,
+remain unsupported by private semantic modules. Standard TRRM does not encode
+these pointer tables or nodes; that private support does not extend the
+standard format.
 
 A separate prototype under the unapproved
 [TRRM native interop proposal](proposals/trrm-native-interop-metadata.md)
@@ -141,7 +148,7 @@ supports two-string `Terrum.Interop.NativeImport` declarations with
 `Terrum.Interop.NativeOutput` for result-correlated writable scalar pointers
 and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. Direct imports
 also admit supported scalar results and opaque `ptr<void>` results; typed
-pointer results remain rejected until their pointee identity is preserved.
+pointer tables remain rejected by this standard TRRM prototype.
 The default output condition is nonzero; `NativeOutput(ordinal, NonNegative)`
 provisionally expresses signed nonnegative status results such as HRESULT
 success. The latter
@@ -208,62 +215,42 @@ transport. Standard TRRM explicitly rejects this feature until its declaration,
 type, and body records are reviewed; the source forms and private revision are
 not normative grammar or interchange assignments.
 
-Source-authored `NativeComInterface`, `NativeComMethod`, `NativeComOwner`,
-`NativeParameter`, and `NativeComAcquisition` metadata is also provisionally
-bound and verified for in-compilation Windows x64 vtable calls, fixed-interface
-owner acquisition, and cleanup. The metadata is an authored trust contract;
-it does not prove a foreign provider returned the declared interface. Focused
-synthetic tests cover a direct native import and a COM-method output
-acquisition, including mismatched interface, source ordinal, source method,
-and failure-disposition rejection. A source-authored owner is also inferred as
-a borrowed COM method parameter only for an exact single-interface pointer
-with read-only, no-escape, extent-one metadata; writable or escaping parameters
-do not gain owner-loan treatment. This source-level path does not establish
-foreign COM runtime behavior. Source-authored `NativeParameter` storage-address
-arguments also admit no-escape, extent-one Windows x64 Blittable aggregate
-pointees; read and read-write accesses require full initialization. This does
-not approve or newly qualify a serialized metadata profile. Source-authored
-`NativeComHiddenParameter` can supply fixed unsigned constants, null pointers,
-and interface IDs; when a method also has a typed output, its hidden interface
-ID must match that output. These hidden-parameter facts remain source-only and
-have no newly assigned TRRM clause. Provisional TRRM
-producer/consumer support now
-round-trips source-authored interface IIDs/base edges, vtable slots/effects,
-and `NativeParameter` facts through TypeDef/MethodDef rows and Contract clauses
-7, 8, and 10 under Feature ID 3/revision 1. The consumer reconstructs those
-facts into the generic COM catalog for source binding. An active regression
-uses that reference with a consumer-authored fixed-interface owner/acquisition
-wrapper, passes an initialized local through a readonly no-escape
-`NativeParameter`, and emits a vtable call; a mismatched pointee and malformed
-slot are rejected. Source-authored methods may use sparse explicit slots;
-omitted positions remain opaque, and a derived interface cannot overlap the
-inherited vtable extent. A synthetic sparse-slot interface hierarchy exercises
-source binding and the provisional round trip. The provider
-artifact does not yet persist/reconstruct `NativeComOwner` or
-`NativeComAcquisition` clauses 9 and 11, so those ownership wrappers cannot yet
-be supplied by a separate TRRM dependency. These wire assignments remain
-implementation experiments, not canonical TRRM assignments, and no foreign
-COM runtime behavior is established. The executable Body profile remains
-root-free scalar and excludes owning calls and cleanup; clause 11's current
-structural rule requires an acquisition Body. That boundary is preserved, so
-dependency-provided acquisition wrappers remain unsupported rather than
-silently treating inspectable Body forms as executable.
+The source-only prototype also supports a generic numeric-slot vtable call
+declaration with an explicit receiver and ordinary Windows x64 argument
+positions. It forwards scalar, pointer, function-pointer and output arguments
+without inferring interface identity, ownership, or provider behavior.
+Supervised native execution covers mixed register/stack arguments, floating
+arguments and results, and output publication. The provisional
+`NativeVTableMethod` spelling is not normative. Private semantic-module
+revision 84 persists and revalidates the slot and parameter contract; exported
+methods are exposed to consumers as ordinary caller-unsafe external functions.
+Native module packages use the same producer/consumer path. Standard TRRM
+continues to reject these declarations until its metadata contract is reviewed.
 
-The source-only prototype also provisionally supports
-`NativeComParameterAdaptation` for validated pointer-preserving base-interface,
-single-element owner-pointer-array, and COM-object buffer-content adaptations.
-These attributes are implementation experiments, not canonical TRRM contracts.
+The earlier COM-specific source metadata path has been retired.
+`Terrum.Interop.NativeCom*` attributes and `NativeComInterface` produce
+`TRM3030`; compiler-owned interface identity, owner/acquisition,
+reference-count, hidden-parameter, argument-adaptation, and mapped-buffer
+behavior is not supported. The provisional TRRM COM feature and contract kinds
+7-9 and 11 are no longer recognized. No canonical COM metadata records have
+been assigned.
+
+`NativeParameter` remains a generic pointer access/retention/extent annotation
+for native declarations, and `NativeOutput` can describe result-correlated
+output validity. These annotations do not prove foreign-provider behavior or
+confer ownership. Writable `ptr<T>` values remain ABI-shaped pointer values;
+without an output contract the compiler does not infer that the pointee becomes
+initialized.
 
 The maintained DX11 sample authors its Win32 imports, ABI layouts, callbacks,
-message loop, and resource cleanup in Terrum source. The compiler has no
-DX11-, HWND-, module-path-, or window-message-specific policy; its remaining
+message loop, and resource cleanup in Terrum source. The compiler's remaining
 native mechanisms are generic direct imports, pointers, function pointers,
-fixed layouts, COM metadata, and ownership/effect verification. DX11
-generalization is not yet accepted: source-authored COM owner/acquisition
-metadata is not yet provided through standard TRRM dependencies, native COM
-runtime behavior remains unqualified, and earlier unconverted DX11/Win32
-prototype tests remain excluded from the active project. Those are explicit
-acceptance gaps, not evidence that the compiler should regain sample policy.
+fixed layouts, and numeric-slot vtable calls; vtable calls do not infer an
+interface identity, ownership, or provider behavior. DX11 generalization is
+not yet accepted: WARP/hardware execution remains unqualified, and earlier
+COM-specific DX11 prototype tests remain excluded from the active project
+pending conversion or retirement. These are explicit evidence gaps, not
+reasons to restore sample-specific compiler policy.
 
 ## Syntax and CLI
 

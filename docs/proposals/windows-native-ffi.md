@@ -395,21 +395,15 @@ despite application-directory, current-directory and `PATH` shadow files.
 The PE's `System32` policy remains a reviewed deployment assertion, not an
 enforced search path, and does not authorize other DLLs.
 
-**Progress:** The test-only `HWND.NoOwner` source marker binds only as the
-direct owner argument and lowers to native zero. Its independent C fixture
-now returns a distinct failure value for nonzero owners, so the ABI check
-cannot mistake an invalid owner for the expected `IDOK` result. A separate
-nonmodal static-import probe passed on the Windows 11 x64 development host
-(build 26300), despite application-directory, current-directory and `PATH`
-shadow DLLs. The production catalog now includes the exact `MessageBoxW`
-signature under the directed desktop target scope, and
-`terrumc build-native-import` emits a runnable sample while ordinary `build`
-remains unchanged. The opt-in smoke image was launched and returned success,
-which the sample does only after `MessageBoxW` returns `IDOK`. The user
-confirmed the expected text and caption appeared and dismissed the dialog with
-OK, closing this observable gate on the current host. The representation and
-import remain provisional under this unapproved proposal; this does not
-establish general FFI or the DX11 sample.
+**Current status:** This proposal remains unapproved. An earlier single-key
+catalog prototype included a sample-specific `HWND.NoOwner` gate and a
+`MessageBoxW` smoke test; that compiler-owned API policy has since been
+retired. The production Windows x64 import catalog is empty. Current
+provisional source-authored direct imports and their generic pointer metadata
+are described separately in the
+[TRRM native interop proposal](trrm-native-interop-metadata.md), and are not
+approval of this proposal's catalog or handle forms. The earlier host-specific
+smoke-test result is historical evidence, not current compiler support.
 
 See Microsoft's [`MessageBoxW` contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-messageboxw)
 and [DLL search order](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)

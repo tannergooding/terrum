@@ -105,6 +105,34 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeImportAcceptsGenericFunctionPointerParametersWithoutCallbackPolicy()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "InvokeCallback")]
+            public unsafe extern int32 InvokeCallback(
+                fnptr<NativeAbi, int32, int32> callback, int32 value);
+
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            int32 Echo(int32 value) { return value; }
+
+            int32 Main() {
+                unsafe { return InvokeCallback(&Echo, 42); }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.NativeImportCatalog, Is.Null);
+        var import = compilation.Program.Functions.Single(static function =>
+            function.Name == "InvokeCallback");
+        Assert.That(import.Variables[0].Type, Is.Not.EqualTo(PrimitiveType.NativeRawPointer));
+        Assert.That(import.DirectNativeImport, Is.Not.Null);
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program, NativeRuntimePolicy.FailFast)), Does.Contain("InvokeCallback"));
+    }
+
+    [Test]
     public void RawPointerNullAndEqualityUseOrdinaryPointerValues()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -203,16 +231,21 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void DirectNativeImportRejectsTypedPointerResultsWithoutPointeeMetadata()
+    public void DirectNativeImportPreservesTypedPointerResults()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireValue")]
             public extern ptr<int32> AcquireValue();
             """));
 
-        Assert.That(compilation.Program, Is.Null);
-        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
-            diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        var function = program.Functions.Single(static candidate => candidate.Name == "AcquireValue");
+        Assert.That(function.RequiresUnsafeCaller, Is.True);
+        Assert.That(program.NativePointerTypes, Has.Length.EqualTo(1));
+        Assert.That(program.NativePointerTypes[0].PointeeType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(function.ReturnType, Is.EqualTo(NativePointerTypes.Type(0)));
     }
 
     [Test]
@@ -577,7 +610,7 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void DirectNativePointerInputRequiresAndUsesNativeParameterMetadata()
+    public void DirectNativePointerInputUsesOptionalNativeParameterMetadata()
     {
         const string Source = """
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
@@ -611,10 +644,13 @@ public sealed class DirectNativeImportTests
             Does.Contain("ReadValue"));
 
         var missingMetadata = Compilation.Create(SyntaxTree.Parse(Source.Replace(
-            "[Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]" + Environment.NewLine,
+            "[Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]",
             "", StringComparison.Ordinal)));
-        Assert.That(missingMetadata.Program, Is.Null);
-        Assert.That(missingMetadata.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(missingMetadata.HasErrors, Is.False,
+            string.Join(Environment.NewLine, missingMetadata.Diagnostics));
+        var rawImport = missingMetadata.Program!.Functions.Single(static function =>
+            function.Name == "ReadValue").DirectNativeImport!;
+        Assert.That(rawImport.Parameters, Is.Empty);
         var unauthorizedWrite = Compilation.Create(SyntaxTree.Parse(Source.Replace(
             "Read, NoEscape", "Write, NoEscape", StringComparison.Ordinal)));
         Assert.That(unauthorizedWrite.Program, Is.Null);
@@ -1292,7 +1328,7 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void DirectPointerParameterMustDeclareItsOutputValidity()
+    public void DirectWritablePointerParameterDoesNotInventOutputValidity()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
@@ -1300,8 +1336,15 @@ public sealed class DirectNativeImportTests
             int32 Main() { return 0; }
             """));
 
-        Assert.That(compilation.Program, Is.Null);
-        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        var function = program.Functions.Single(static candidate => candidate.Name == "ReadValue");
+        Assert.That(function.RequiresUnsafeCaller, Is.True);
+        Assert.That(function.DirectNativeImport!.Outputs, Is.Empty);
+        Assert.That(program.NativePointerTypes, Has.Length.EqualTo(1));
+        Assert.That(program.NativePointerTypes[0].PointeeType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(program.NativePointerTypes[0].IsWritable, Is.True);
     }
 
     [Test]

@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Native;
@@ -9,7 +10,7 @@ namespace Terrum.CodeAnalysis.Native;
 // Reject-by-default admission for the unapproved, internal test-only source ABI.
 internal static class NativeSourceGrantExperiment
 {
-    internal static bool[] Classify(BoundProgram program)
+    internal static bool CanClassify(BoundProgram program)
     {
         if (!program.RequiresSourceGrant || program.IsInvocationSourceBound
             || program.InvocationProfileId is not null || program.EntryPoint != -1
@@ -19,6 +20,27 @@ internal static class NativeSourceGrantExperiment
             } || program.Buffers[0].Values.Length > 16_384
             || !program.Structures.IsEmpty || !program.Classes.IsEmpty)
         {
+            return false;
+        }
+
+        foreach (var function in program.Functions)
+        {
+            if (function.IsExternal || function.IndexedBody is not null
+                || function.Intrinsic != BoundIntrinsic.None || function.DeclaringStruct is not null
+                || function.IsConstructor || !Scalar(function.ReturnType)
+                || function.Variables.Any(static variable => !Scalar(variable.Type) || variable.IsOut))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool[] Classify(BoundProgram program)
+    {
+        if (!CanClassify(program))
+        {
             throw Unsupported();
         }
 
@@ -27,19 +49,6 @@ internal static class NativeSourceGrantExperiment
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
-            if (function.IsExternal || function.IndexedBody is not null
-                || function.Intrinsic != BoundIntrinsic.None || function.DeclaringStruct is not null
-                || function.IsConstructor || !Scalar(function.ReturnType))
-            {
-                throw Unsupported();
-            }
-            foreach (var variable in function.Variables)
-            {
-                if (!Scalar(variable.Type) || variable.IsOut)
-                {
-                    throw Unsupported();
-                }
-            }
             calls[index] = [];
             VisitStatement(function.Body, index);
         }

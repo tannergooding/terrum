@@ -61,27 +61,43 @@ public sealed class PublicFixedLayoutStorageTests
     }
 
     [Test]
-    public void NativeHandleFieldsRetainTheirRepresentationAcrossPrivateModules()
+    public void OpaquePointerFieldsRetainTheirRepresentationAcrossPrivateModules()
     {
         var program = CompileLibrary("""
             [Blittable] [Layout(LayoutKind.Sequential)]
-            public struct HandlePair {
-                public Terrum.Interop.Windows.HWND Window;
-                public Terrum.Interop.Windows.HINSTANCE Module;
+            public struct PointerPair {
+                public ptr<void> First;
+                public ptr<void> Second;
             }
-            public int32 RoundTrip(HandlePair value) { return 42; }
+            public int32 RoundTrip(PointerPair value) { return 42; }
             """);
         Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo([8]));
         Assert.That(program.Structures[0].Fields.Select(static field => field.Type),
-            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+            Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.NativeRawPointer]));
         Assert.That(program.Structures[0].Fields.Select(static field => field.Offset), Is.EqualTo([0, 8]));
         SemanticVerifier.VerifyLibrary(program);
 
         var artifact = ModuleCompiler.CreateProducer(program, ["RoundTrip"]);
         var retained = ModuleCompiler.CreateReference(artifact);
         Assert.That(retained.Structures.Single().Fields.Select(static field => field.Type),
-            Is.EqualTo([PrimitiveType.NativeWindowHandle, PrimitiveType.NativeModuleHandle]));
+            Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.NativeRawPointer]));
         Assert.That(retained.Structures.Single().Size, Is.EqualTo(16));
+    }
+
+    [Test]
+    public void TypedCharacterPointerFieldsRetainTheirNativeAddressLayout()
+    {
+        var program = CompileLibrary("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct CharacterPointer {
+                public ptr<char16> Value;
+            }
+            public int32 RoundTrip(CharacterPointer value) { return 42; }
+            """);
+
+        Assert.That(FixedLayoutStorage.Validate(program.Structures), Is.EqualTo([8]));
+        Assert.That(program.Structures[0].Fields.Single().Offset, Is.Zero);
+        SemanticVerifier.VerifyLibrary(program);
     }
 
     [TestCase("char16 Prefix; int64 Value; char16 Tail;",24,8,new[] { 0, 8, 16 })]

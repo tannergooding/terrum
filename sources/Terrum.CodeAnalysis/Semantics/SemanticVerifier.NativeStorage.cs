@@ -21,9 +21,6 @@ public static partial class SemanticVerifier
             || (function.Variables[variable].IsMutable
                 && !NativeFixedArrayContract.AllowsMutableLocal(layout, program.Structures,
                     program.NativeImportCatalog))
-            || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
-                && !NativeFixedArrayContract.AllowsCheckedRuntimeAccess(
-                    layout, program.Structures, program.NativeImportCatalog))
             || initialization.Elements.IsDefault
             || (initialization.Elements.IsEmpty
                 ? !NativeFixedArrayContract.AllowsEmptyInitialization(layout, program.Structures,
@@ -95,15 +92,14 @@ public static partial class SemanticVerifier
             || (!isReadonly && (!function.Variables[variable].IsMutable
                 || !NativeFixedArrayContract.AllowsMutableLocal(layout,
                     program.Structures, program.NativeImportCatalog)))
-            || (program.RuntimePolicy != BoundRuntimePolicy.FailFast
-                && !NativeFixedArrayContract.AllowsCheckedRuntimeAccess(
-                    layout, program.Structures, program.NativeImportCatalog))
             || index is null
             || (index.Type != PrimitiveType.Int32
                 && !(index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(
                         layout, program.Structures, program.NativeImportCatalog)))
-            || function.IsNoThrow && index is not BoundConstant
+            || function.IsNoThrow
+                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+                && index is not BoundConstant
             || (requiredStartIndex is int required
                 && index is BoundConstant { Type: PrimitiveType.Int32, Value: var actual }
                 && actual != required)

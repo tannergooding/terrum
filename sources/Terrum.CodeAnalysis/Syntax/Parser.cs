@@ -343,31 +343,11 @@ internal sealed class Parser
                         attribute.Add(Expect(TokenKind.Identifier));
                     }
                 }
-                else if (attributeName == "Terrum.Interop.NativeComAcquisition")
+                else if (attributeName == "Terrum.Interop.NativeVTableMethod")
                 {
                     attribute.Add(Expect(TokenKind.NumericLiteral));
-                    while (Current.Kind == TokenKind.Comma)
-                    {
-                        attribute.Add(Take());
-                        attribute.Add(Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral
-                            or TokenKind.Identifier ? Take() : Expect(TokenKind.Identifier));
-                    }
                 }
-                else if (attributeName == "Terrum.Interop.NativeComInterface")
-                {
-                    attribute.Add(Expect(TokenKind.StringLiteral));
-                }
-                else if (attributeName == "Terrum.Interop.NativeComMethod")
-                {
-                    attribute.Add(Expect(TokenKind.NumericLiteral));
-                    while (Current.Kind == TokenKind.Comma)
-                    {
-                        attribute.Add(Take());
-                        attribute.Add(Expect(TokenKind.Identifier));
-                    }
-                }
-                else if (attributeName is "Terrum.Interop.NativeParameter"
-                    or "Terrum.Interop.NativeComHiddenParameter")
+                else if (attributeName == "Terrum.Interop.NativeParameter")
                 {
                     while (Current.Kind != TokenKind.CloseParen
                         && Current.Kind != TokenKind.EndOfFile)
@@ -1067,16 +1047,26 @@ internal sealed class Parser
         return Node(SyntaxKind.VariableDeclaration, children);
     }
 
-    private bool IsVacantLocalStart() => Current.Kind == TokenKind.Identifier
-        && Current.Text == "init"
-        && (Peek(1).Kind == TokenKind.VarKeyword || LooksLikeLocal(1));
+    private bool IsVacantLocalStart()
+    {
+        if (Current.Kind != TokenKind.Identifier || Current.Text != "init")
+        {
+            return false;
+        }
+
+        var offset = Peek(1).Kind == TokenKind.MutKeyword ? 2 : 1;
+        return Peek(offset).Kind == TokenKind.VarKeyword || LooksLikeLocal(offset);
+    }
 
     private SyntaxNode ParseVacantLocal(bool semicolon = true)
     {
-        var children = new List<SyntaxElement> {
-            Take(), Current.Kind == TokenKind.VarKeyword ? Take() : ParseType(),
-            Expect(TokenKind.Identifier),
-        };
+        var children = new List<SyntaxElement> { Take() };
+        if (Current.Kind == TokenKind.MutKeyword)
+        {
+            children.Add(Take());
+        }
+        children.Add(Current.Kind == TokenKind.VarKeyword ? Take() : ParseType());
+        children.Add(Expect(TokenKind.Identifier));
         if (semicolon)
         {
             children.Add(Expect(TokenKind.Semicolon));

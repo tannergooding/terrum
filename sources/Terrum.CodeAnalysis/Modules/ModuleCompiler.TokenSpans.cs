@@ -19,9 +19,19 @@ public static partial class ModuleCompiler
     {
         if (reader is not ModuleReader { FormatVersion:
             PrivateSpanVersion or DirectNativeImportVersion or DirectNativeParameterVersion
-                or PrivateSpanFixedLayoutVersion })
+                or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion or NativePointerVersion
+                or NativeVTableVersion })
         {
-            throw new ModuleFormatException("Private span IR requires semantic-module revision 77, 79, 80, or 81.");
+            throw new ModuleFormatException(
+                "Private span IR requires a private-span semantic-module revision.");
+        }
+    }
+
+    private static void RequireNativePointerRevision(BinaryReader reader)
+    {
+        if (reader is not ModuleReader { FormatVersion: >= NativePointerVersion })
+        {
+            throw new ModuleFormatException("Typed native pointers require semantic-module revision 83.");
         }
     }
 
@@ -52,6 +62,8 @@ public static partial class ModuleCompiler
         }
         var program = new BoundProgram(functions.ToImmutable(), -1) {
             Structures = module.Structures,
+            NativeFunctionPointerSignatures = module.NativeFunctionPointerSignatures,
+            NativePointerTypes = module.NativePointerTypes,
             RequiresSourceGrant = module.RequiresSourceGrant,
         };
         var hasSpans = TokenSpanContract.HasMetadata(program);
@@ -65,7 +77,8 @@ public static partial class ModuleCompiler
             return;
         }
         if (module.FormatVersion is not (PrivateSpanVersion or DirectNativeImportVersion
-                or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion)
+                or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
+                or NativePointerVersion or NativeVTableVersion)
             || module.FormatVersion == PrivateSpanVersion && !module.RequiresSourceGrant
             || hasSpans && !module.RequiresSourceGrant
             || module.Functions.Any(static item => item.Import

@@ -59,6 +59,69 @@ internal sealed partial class PeCompiler
         }
     }
 
+    private void EmitNativePointerAddress(BoundNativePointerAddress address)
+    {
+        var variable = _program.Functions[_currentFunction].Variables[address.Variable];
+        if (variable.IsImplicitRef)
+        {
+            _code.Load64(Slot(address.Variable));
+        }
+        else
+        {
+            _code.Address(variable.IsOut ? OutSlot(address.Variable) : Slot(address.Variable));
+        }
+    }
+
+    private void EmitNativePointerRead(BoundNativePointerRead read, int spill)
+    {
+        Expression(read.Pointer, spill);
+        if (!IsIndirect(read.Type))
+        {
+            _code.LoadPointerField(0, Size(read.Type));
+        }
+    }
+
+    private void EmitNativePointerWrite(BoundNativePointerWrite write, int spill)
+    {
+        Expression(write.Pointer, spill + 1);
+        _code.Store64(Spill(spill));
+        Expression(write.Value, spill + 1);
+        if (IsIndirect(write.Value.Type))
+        {
+            _code.Load64(Spill(spill), destinationRegister: true);
+            _code.CopyMemory(Size(write.Value.Type));
+            return;
+        }
+
+        var width = Size(write.Value.Type);
+        if (width == sizeof(ulong))
+        {
+            _code.Bytes(0x48, 0x89, 0xC1);
+        }
+        else
+        {
+            _code.Bytes(0x89, 0xC1);
+        }
+        _code.Load64(Spill(spill), destinationRegister: true);
+        switch (width)
+        {
+            case 1:
+                _code.Bytes(0x88, 0x0A);
+                break;
+            case 2:
+                _code.Bytes(0x66, 0x89, 0x0A);
+                break;
+            case 4:
+                _code.Bytes(0x89, 0x0A);
+                break;
+            case 8:
+                _code.Bytes(0x48, 0x89, 0x0A);
+                break;
+            default:
+                throw new InvalidOperationException("A native pointer write has an unsupported value width.");
+        }
+    }
+
     private void EmitNativeStorageRecord(int variable, BoundNativeStorageRecordInitialization record)
     {
         var destination = Slot(variable);
@@ -120,6 +183,10 @@ internal sealed partial class PeCompiler
                 throw new InvalidOperationException("A fixed-array element has an unsupported native width.");
         }
     }
+
+    private void EmitNativeFixedArrayPointerAddress(BoundNativeFixedArrayPointerAddress address, int spill) =>
+        EmitNativeArrayElementAddress(address.Variable, address.Index, spill,
+            address.Layout.ElementCount, address.Layout.ElementStride);
 
     private void EmitNativeFixedArrayWrite(BoundNativeFixedArrayWrite write, int spill)
     {

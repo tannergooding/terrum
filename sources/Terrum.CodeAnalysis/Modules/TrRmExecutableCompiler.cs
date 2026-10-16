@@ -38,21 +38,16 @@ public static partial class TrRmExecutableCompiler
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
     {
         ArgumentNullException.ThrowIfNull(program);
-        var nativeComCatalog = program.NativeImportCatalog;
-        var nativeComInterfaces = nativeComCatalog?.ComInterfaces ?? [];
-        var nativeComMethods = nativeComCatalog?.ComMethods ?? [];
         if (program.Functions.Any(static function =>
-            function.IsExternal && function.DirectNativeImport is null
-                && function.NativeComMethod is null))
+                function.NativeVTableMethod is not null
+                || function.Intrinsic == BoundIntrinsic.NativeVTableCall))
         {
-            throw Unsupported("Only direct native imports and source-authored COM methods are supported as external declarations.");
+            throw Unsupported("Executable TRRM does not persist native vtable method contracts.");
         }
-        if (!nativeComInterfaces.IsEmpty
-            && (nativeComCatalog?.Identity != "source-native-com.v1"
-                || !nativeComCatalog.ComOwners.IsEmpty
-                || !nativeComCatalog.ComSignatureTypes.IsEmpty))
+        if (program.Functions.Any(static function =>
+            function.IsExternal && function.DirectNativeImport is null))
         {
-            throw Unsupported("TRRM COM persistence requires source-authored interfaces and currently excludes owners and custom signature types.");
+            throw Unsupported("Only direct native imports are supported as external declarations.");
         }
 
         if (string.IsNullOrEmpty(moduleIdentity))
@@ -76,6 +71,10 @@ public static partial class TrRmExecutableCompiler
         if (!program.NativeFunctionPointerSignatures.IsEmpty)
         {
             throw Unsupported("Executable TRRM does not persist native function-pointer signatures.");
+        }
+        if (!program.NativePointerTypes.IsEmpty)
+        {
+            throw Unsupported("Executable TRRM does not persist typed native pointer tables.");
         }
         var blittableStructureIndexes = CollectNativeBlittableStructureIndexes(program);
         if (program.RuntimePolicy != BoundRuntimePolicy.FailFast
@@ -109,22 +108,14 @@ public static partial class TrRmExecutableCompiler
         var outputFeatures = new bool[program.Functions.Length];
         var hasFloatingTypes = false;
         var parameterCount = 0;
-        foreach (var method in nativeComMethods)
-        {
-            if (!NativeComCatalog.TryParseSignature(method.Signature, out _, out var signatureParameters)
-                || signatureParameters.Length == 0)
-            {
-                throw Unsupported($"Native COM method '{method.Identity}' has an invalid signature.");
-            }
-            parameterCount = checked(parameterCount + signatureParameters.Length - 1);
-        }
         var effectCount = 0;
         var exportCount = 0;
         var nativeImportCount = 0;
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
-            if (function.IsExternal && !DirectNativeImportContract.IsValid(function, program.Structures))
+            if (function.IsExternal && !DirectNativeImportContract.IsValid(function, program.Structures,
+                program.NativeFunctionPointerSignatures, program.NativePointerTypes))
             {
                 throw Unsupported($"Function '{function.Name}' has an invalid direct native import contract.");
             }
@@ -154,8 +145,6 @@ public static partial class TrRmExecutableCompiler
         {
             (moduleIdentity, 1),
         };
-        var interfaceRows = nativeComInterfaces
-            .OrderBy(static definition => definition.NominalIdentity, StringComparer.Ordinal).ToArray();
         var structureTypeDefRows = new Dictionary<int, int>(blittableStructureIndexes.Length);
         var structureNamespaceRows = new int[blittableStructureIndexes.Length];
         var structureNameRows = new int[blittableStructureIndexes.Length];
@@ -183,35 +172,16 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var interfaceTypeRows = new Dictionary<string, int>(interfaceRows.Length, StringComparer.Ordinal);
-        var interfaceNamespaceRows = new int[interfaceRows.Length];
-        var interfaceNameRows = new int[interfaceRows.Length];
-        for (var index = 0; index < interfaceRows.Length; index++)
-        {
-            var identity = interfaceRows[index].NominalIdentity;
-            var separator = identity.LastIndexOf('.');
-            var typeNamespace = separator < 0 ? "" : identity[..separator];
-            var typeName = separator < 0 ? identity : identity[(separator + 1)..];
-            var typeDefRow = blittableStructureIndexes.Length + index + 1;
-            if (typeName.Length == 0 || !interfaceTypeRows.TryAdd(identity, typeDefRow))
-            {
-                throw Unsupported($"Native COM interface identity '{identity}' cannot be represented in TRRM.");
-            }
-            interfaceNamespaceRows[index] = names.Count + 1;
-            names.Add((typeNamespace, 1));
-            interfaceNameRows[index] = names.Count + 1;
-            names.Add((typeName, 1));
-        }
         var nameRows = new int[program.Functions.Length];
         var nativeLibraryRows = new int[program.Functions.Length];
         var nativeExportRows = new int[program.Functions.Length];
         var seen = new HashSet<string>(program.Functions.Length, StringComparer.Ordinal);
-        var bodies = new List<ReadOnlyMemory<byte>>(program.Functions.Length + nativeComMethods.Length);
-        var signatures = new List<TrRmMethodSigRow>(program.Functions.Length + nativeComMethods.Length);
+        var bodies = new List<ReadOnlyMemory<byte>>(program.Functions.Length);
+        var signatures = new List<TrRmMethodSigRow>(program.Functions.Length);
         var parameters = new List<TrRmParamRow>(parameterCount);
-        var methods = new List<TrRmMethodDefRow>(program.Functions.Length + nativeComMethods.Length);
+        var methods = new List<TrRmMethodDefRow>(program.Functions.Length);
         var contracts = new List<TrRmContractRow>(
-            effectCount + nativeImportCount + interfaceRows.Length + blittableStructureIndexes.Length);
+            effectCount + nativeImportCount + blittableStructureIndexes.Length);
         var structureContractFirst = new int[blittableStructureIndexes.Length];
         for (var index = 0; index < blittableStructureIndexes.Length; index++)
         {
@@ -219,34 +189,12 @@ public static partial class TrRmExecutableCompiler
             contracts.Add(new TrRmContractRow(0x1300_0000u | (uint)(index + 1), 12,
                 NativeBlittableLayoutPayload(FixedLayoutStorage.WindowsX64TargetRequirement)));
         }
-        var interfaceContractFirst = new int[interfaceRows.Length];
-        for (var index = 0; index < interfaceRows.Length; index++)
-        {
-            var definition = interfaceRows[index];
-            var baseTypeRow = definition.ImmediateBaseIdentity is string baseIdentity
-                ? interfaceTypeRows.TryGetValue(baseIdentity, out var baseRow) ? baseRow
-                    : throw Unsupported($"Native COM interface '{definition.NominalIdentity}' has an unrepresented base.")
-                : 0;
-            interfaceContractFirst[index] = contracts.Count + 1;
-            var typeDefRow = interfaceTypeRows[definition.NominalIdentity];
-            contracts.Add(new TrRmContractRow(0x1300_0000u | (uint)typeDefRow, 7,
-                NativeComInterfacePayload(definition.SdkIid, baseTypeRow)));
-        }
         var exports = new List<TrRmExportRow>(exportCount);
         var typeRowsList = (hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows).ToList();
         var nativeOutputTypeRows = new Dictionary<PrimitiveType, int>();
         var nativeParameterTypeRows = new Dictionary<PrimitiveType, int>();
         var blittableParameterTypeRows = new Dictionary<PrimitiveType, int>();
         var typeDefTypeSpecRows = new Dictionary<int, int>();
-        var interfacePointerTypeRows = new Dictionary<string, int>(interfaceRows.Length,
-            StringComparer.Ordinal);
-        foreach (var (identity, typeRow) in interfaceTypeRows)
-        {
-            var typeDefReference = TypeDefTypeSpecRow(typeRowsList, typeDefTypeSpecRows, typeRow);
-            var pointerType = typeRowsList.Count + 1;
-            typeRowsList.Add(TrRmTypeSpecTableWriter.IndexedFamily(0x8C, (uint)typeDefReference));
-            interfacePointerTypeRows.Add(identity, pointerType);
-        }
         var structureFieldFirst = new int[blittableStructureIndexes.Length];
         var fieldRows = new List<TrRmFieldDefRow>();
         var layoutRows = new List<TrRmLayoutRow>(blittableStructureIndexes.Length);
@@ -393,70 +341,6 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        foreach (var method in nativeComMethods
-            .OrderBy(static method => method.DeclaringInterfaceIdentity, StringComparer.Ordinal)
-            .ThenBy(static method => method.Slot))
-        {
-            if (method.OwnerInterfaceIdentity != method.DeclaringInterfaceIdentity
-                || method.OutputParameterIndex >= 0
-                || method.BoundMethodName is not string methodName
-                || !interfaceTypeRows.TryGetValue(method.DeclaringInterfaceIdentity, out var ownerTypeRow)
-                || !NativeComCatalog.TryParseSignature(method.Signature,
-                    out var returnIdentity, out var signatureParameters)
-                || signatureParameters.Length == 0
-                || signatureParameters[0] != method.DeclaringInterfaceIdentity + "*"
-                || !interfacePointerTypeRows.TryGetValue(method.DeclaringInterfaceIdentity,
-                    out var receiverTypeSpec)
-                || !TryGetComPrimitiveType(returnIdentity, out var returnType))
-            {
-                throw Unsupported($"Native COM method '{method.Identity}' has an unsupported TRRM signature.");
-            }
-
-            var methodRow = methods.Count + 1;
-            var methodNameRow = names.Count + 1;
-            names.Add((methodName, 1));
-            var firstParameter = signatureParameters.Length == 1 ? 0 : parameters.Count + 1;
-            for (var parameterIndex = 1; parameterIndex < signatureParameters.Length; parameterIndex++)
-            {
-                if (!TryCreateComTypeSpecRow(signatureParameters[parameterIndex],
-                    interfaceTypeRows, typeRowsList, out var parameterTypeSpec))
-                {
-                    throw Unsupported($"Native COM method '{method.Identity}' has an unsupported parameter type.");
-                }
-                parameters.Add(new TrRmParamRow(methodRow, parameterIndex - 1,
-                    parameterTypeSpec, 0));
-            }
-            signatures.Add(new TrRmMethodSigRow(TypeRow(returnType), receiverTypeSpec,
-                firstParameter, signatureParameters.Length - 1, 0, 0));
-
-            var effectMask = (method.IsNoThrow ? 1u : 0u) | 4u;
-            var contractFirst = contracts.Count + 1;
-            contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 1,
-                s_effectPayloads[effectMask]));
-            contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 8,
-                NativeComMethodPayload((uint)method.Slot, (uint)method.Effects)));
-            foreach (var parameter in method.NativeParameters)
-            {
-                if (parameter.ParameterIndex <= 0
-                    || parameter.ParameterIndex >= signatureParameters.Length
-                    || parameter.Access is < NativeParameterAccess.Read
-                        or > NativeParameterAccess.ReadWrite
-                    || parameter.Retention is < NativeParameterRetention.NoEscape
-                        or > NativeParameterRetention.MayEscape
-                    || !signatureParameters[parameter.ParameterIndex].EndsWith("*",
-                        StringComparison.Ordinal))
-                {
-                    throw Unsupported($"Native COM method '{method.Identity}' has invalid parameter metadata.");
-                }
-                contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 10,
-                    NativeParameterPayload(parameter.ParameterIndex - 1,
-                        (byte)((byte)parameter.Access + 1), (byte)parameter.Retention,
-                        (uint)parameter.Extent)));
-            }
-            methods.Add(new TrRmMethodDefRow(ownerTypeRow, methodNameRow, signatures.Count,
-                2, contractFirst, contracts.Count - contractFirst + 1, 0));
-        }
-
         var stringsBytes = names.Any(static name => name.Text.Length == 0)
             ? TrRmStringTableWriter.EncodeTextRows(names)
             : TrRmStringTableWriter.EncodeNames(names);
@@ -471,10 +355,6 @@ public static partial class TrRmExecutableCompiler
         {
             featureRows.Add(TrRmFeatureRow.WindowsNamedNativeImports);
         }
-        if (interfaceRows.Length != 0)
-        {
-            featureRows.Add(TrRmFeatureRow.NativeComContracts);
-        }
         if (!blittableStructureIndexes.IsEmpty)
         {
             featureRows.Add(TrRmFeatureRow.NativeBlittableLayouts);
@@ -482,7 +362,7 @@ public static partial class TrRmExecutableCompiler
         var featureCount = featureRows.Count;
         var featureBytes = featureCount == 0
             ? [] : TrRmFeatureTableWriter.Encode(featureRows);
-        var typeDefCount = blittableStructureIndexes.Length + interfaceRows.Length;
+        var typeDefCount = blittableStructureIndexes.Length;
         var moduleBytes = TrRmModuleTableWriter.Encode(
             [new TrRmModuleRow(1, 1, 0, program.EntryPoint + 1, 1, 1, 1, 1,
                 featureCount == 0 ? 0 : 1, featureCount)],
@@ -506,12 +386,6 @@ public static partial class TrRmExecutableCompiler
                 structureNameRows[type], visibility | 4u | (layoutKind << 4),
                 structureFieldFirst[type], structure.Fields.Length, 0, 0, type + 1,
                 structureContractFirst[type], 1);
-        }
-        for (var type = 0; type < interfaceRows.Length; type++)
-        {
-            typeDefRows[blittableStructureIndexes.Length + type] =
-                new TrRmTypeDefRow(interfaceNamespaceRows[type], interfaceNameRows[type],
-                    0x0E, 0, 0, 0, 0, 0, interfaceContractFirst[type], 1);
         }
         var typeDefBytes = typeDefRows.Length == 0 ? []
             : TrRmTypeDefTableWriter.Encode(typeDefRows, strings, modules, fieldRows.Count,
@@ -671,7 +545,6 @@ public static partial class TrRmExecutableCompiler
         var (firstFeature, requiredFeatureCount) = modules.GetFeatureRange(1);
         uint scalarInitOutputRuleRevision = 0;
         uint nativeImportRuleRevision = 0;
-        uint nativeComRuleRevision = 0;
         uint nativeBlittableLayoutRuleRevision = 0;
         for (var feature = firstFeature; feature < firstFeature + requiredFeatureCount; feature++)
         {
@@ -684,10 +557,6 @@ public static partial class TrRmExecutableCompiler
             {
                 nativeImportRuleRevision = required.MinimumRuleRevision;
             }
-            else if (required.FeatureId == TrRmFeatureTableReader.NativeComContractsFeatureId)
-            {
-                nativeComRuleRevision = required.MinimumRuleRevision;
-            }
             else if (required.FeatureId == TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId)
             {
                 nativeBlittableLayoutRuleRevision = required.MinimumRuleRevision;
@@ -696,15 +565,6 @@ public static partial class TrRmExecutableCompiler
         if ((nativeImports.Count != 0) != (nativeImportRuleRevision != 0))
         {
             throw Invalid("The Windows named native import feature does not match its table.");
-        }
-        var hasNativeComInterfaces = false;
-        for (var typeRow = 1; typeRow <= typeDefCount; typeRow++)
-        {
-            hasNativeComInterfaces |= contractTable.GetNativeComInterface(typeRow) is not null;
-        }
-        if (hasNativeComInterfaces != (nativeComRuleRevision != 0))
-        {
-            throw Invalid("The native COM feature does not match its interface contracts.");
         }
         var hasNativeBlittableLayouts = false;
         for (var typeRow = 1; typeRow <= typeDefCount; typeRow++)
@@ -747,22 +607,6 @@ public static partial class TrRmExecutableCompiler
             var name = defs.GetName(row);
             var signature = defs.GetSignature(row);
             var isNativeImport = nativeImports.HasImportForMethod(row);
-            var isNativeComMethod = contractTable.GetNativeComMethod(row) is not null;
-            if (isNativeComMethod)
-            {
-                if (isNativeImport || defs.GetOwnerType(row) == 0 || defs.GetBodyRow(row) != 0
-                    || sigs.GetReceiverTypeSpec(signature) == 0
-                    || flags != 2)
-                {
-                    throw Invalid($"Unsupported COM method declaration for method {row}.");
-                }
-                if (!usedSignatures[signature])
-                {
-                    usedSignatures[signature] = true;
-                    usedSignatureCount++;
-                }
-                continue;
-            }
             if (defs.GetOwnerType(row) != 0
                 || isNativeImport == (defs.GetBodyRow(row) != 0)
                 || sigs.GetReceiverTypeSpec(signature) != 0
@@ -1009,8 +853,6 @@ public static partial class TrRmExecutableCompiler
                 IndexedBody = indexed,
             };
         }
-        var nativeComCatalog = LoadNativeComCatalog(typeDefs, contractTable,
-            defs, sigs, parameters, types);
         if (entry >= 0)
         {
             var executableEntry = functions[functionIndexByMethodRow[entry + 1]];
@@ -1026,8 +868,6 @@ public static partial class TrRmExecutableCompiler
         {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             Structures = structures,
-            NativeImportCatalog = nativeComCatalog,
-            NativeImportCatalogId = nativeComCatalog?.Identity,
         };
         try
         {
@@ -1052,13 +892,11 @@ public static partial class TrRmExecutableCompiler
     {
         ArgumentNullException.ThrowIfNull(providerArtifact);
         var program = Load(providerArtifact);
-        var hasNativeComContracts = program.NativeImportCatalog?.SupportsNativeComContracts == true;
         if (program.EntryPoint != -1
             || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
             || program.Functions.Any(static function =>
                 !function.IsPrivate && !function.IsInternal
-                    && (!function.IsExternal || function.DirectNativeImport is null
-                        && function.NativeComMethod is null)))
+                    && (!function.IsExternal || function.DirectNativeImport is null)))
         {
             throw Unsupported("A TRRM native import reference requires a library of public external declarations.");
         }
@@ -1092,9 +930,9 @@ public static partial class TrRmExecutableCompiler
             .Where(static function => !function.IsPrivate && !function.IsInternal)
             .Select(function => RemapNativeImportStructureTypes(function, structureMap))
             .ToImmutableArray();
-        if (functions.IsEmpty && !hasNativeComContracts)
+        if (functions.IsEmpty)
         {
-            throw Unsupported("A TRRM reference requires at least one public declaration or COM interface.");
+            throw Unsupported("A TRRM reference requires at least one public declaration.");
         }
 
         return new CompilationReference(structures.ToImmutable(), functions, program.RuntimePolicy,
@@ -1559,22 +1397,6 @@ public static partial class TrRmExecutableCompiler
         return payload;
     }
 
-    private static ReadOnlyMemory<byte> NativeComInterfacePayload(Guid iid, int baseTypeDefRow)
-    {
-        var payload = new byte[20];
-        _ = iid.TryWriteBytes(payload.AsSpan(0, 16), bigEndian: true, out _);
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(16), (uint)baseTypeDefRow);
-        return payload;
-    }
-
-    private static ReadOnlyMemory<byte> NativeComMethodPayload(uint slot, uint effects)
-    {
-        var payload = new byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(payload, slot);
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4), effects);
-        return payload;
-    }
-
     private static ReadOnlyMemory<byte> NativeParameterPayload(int ordinal, byte access,
         byte retention, uint extent)
     {
@@ -1584,248 +1406,6 @@ public static partial class TrRmExecutableCompiler
         payload[5] = retention;
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8), extent);
         return payload;
-    }
-
-    private static bool TryGetComPrimitiveType(string identity, out PrimitiveType type)
-    {
-        type = identity switch {
-            "void" => PrimitiveType.Void,
-            "bool" => PrimitiveType.Bool,
-            "char16" => PrimitiveType.Char16,
-            "int32" or "HRESULT" or "INT" => PrimitiveType.Int32,
-            "uint32" or "UINT" or "ULONG" => PrimitiveType.UInt32,
-            "int64" => PrimitiveType.Int64,
-            "uint64" or "SIZE_T" => PrimitiveType.UInt64,
-            "float32" or "float" or "FLOAT" => PrimitiveType.Float32,
-            "float64" or "double" or "DOUBLE" => PrimitiveType.Float64,
-            _ => PrimitiveType.Void,
-        };
-        return identity is "void" or "bool" or "char16" or "int32" or "HRESULT" or "INT"
-            or "uint32" or "UINT" or "ULONG" or "int64" or "uint64" or "SIZE_T"
-            or "float32" or "float" or "FLOAT" or "float64" or "double" or "DOUBLE";
-    }
-
-    private static bool TryCreateComTypeSpecRow(string identity,
-        IReadOnlyDictionary<string, int> interfaceTypeRows,
-        List<ReadOnlyMemory<byte>> typeRows, out int typeSpecRow)
-    {
-        identity = identity.Trim();
-        if (identity.EndsWith("*", StringComparison.Ordinal))
-        {
-            if (!TryCreateComTypeSpecRow(identity[..^1], interfaceTypeRows, typeRows,
-                out var elementTypeSpec))
-            {
-                typeSpecRow = 0;
-                return false;
-            }
-            typeSpecRow = typeRows.Count + 1;
-            var elementRow = typeRows[elementTypeSpec - 1].Span;
-            typeRows.Add(elementRow.Length == 3 && elementRow[0] == 0x01 && elementRow[1] == 0
-                    ? TrRmTypeSpecTableWriter.InlineFamily(0x8C, elementRow[2])
-                    : TrRmTypeSpecTableWriter.IndexedFamily(0x8C, (uint)elementTypeSpec));
-            return true;
-        }
-        if (TryGetComPrimitiveType(identity, out var primitiveType))
-        {
-            typeSpecRow = TypeRow(primitiveType);
-            return true;
-        }
-        if (interfaceTypeRows.TryGetValue(identity, out var typeDefRow))
-        {
-            typeSpecRow = typeRows.Count + 1;
-            typeRows.Add(TrRmTypeSpecTableWriter.Reference(0x02, (uint)typeDefRow));
-            return true;
-        }
-        typeSpecRow = 0;
-        return false;
-    }
-
-    private static NativeImportCatalog? LoadNativeComCatalog(TrRmTypeDefTableReader typeDefs,
-        TrRmContractTableReader contracts, TrRmMethodDefTableReader methods,
-        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader typeSpecs)
-    {
-        var identityRows = new Dictionary<int, string>();
-        var interfaceRows = new List<int>();
-        for (var row = 1; row <= typeDefs.Count; row++)
-        {
-            if (contracts.GetNativeComInterface(row) is not TrRmNativeComInterfaceContract)
-            {
-                continue;
-            }
-            var typeNamespace = typeDefs.GetNamespace(row);
-            var identity = typeNamespace.Length == 0
-                ? typeDefs.GetName(row) : typeNamespace + "." + typeDefs.GetName(row);
-            identityRows.Add(row, identity);
-            interfaceRows.Add(row);
-        }
-        if (interfaceRows.Count == 0)
-        {
-            return null;
-        }
-
-        var methodsByInterface = new Dictionary<int, List<NativeComMethodDefinition>>();
-        var allMethods = ImmutableArray.CreateBuilder<NativeComMethodDefinition>();
-        var interfaceContracts = new Dictionary<int, TrRmNativeComInterfaceContract>();
-        foreach (var row in interfaceRows)
-        {
-            interfaceContracts.Add(row, contracts.GetNativeComInterface(row)
-                ?? throw Invalid("A native COM interface TypeDef lost its contract."));
-        }
-        for (var methodRow = 1; methodRow <= methods.Count; methodRow++)
-        {
-            if (contracts.GetNativeComMethod(methodRow) is not TrRmNativeComMethodContract comMethod)
-            {
-                continue;
-            }
-            var ownerType = methods.GetOwnerType(methodRow);
-            if (!identityRows.TryGetValue(ownerType, out var interfaceIdentity)
-                || comMethod.VTableSlot > (uint)(int.MaxValue / NativeTargetProfile.PointerSize)
-                || !contracts.GetNativeOutputs(methodRow).IsDefaultOrEmpty)
-            {
-                throw Invalid("Unsupported TRRM native COM method owner, slot, or output contract.");
-            }
-            var signatureRow = methods.GetSignature(methodRow);
-            var (parameterFirst, parameterCount) = signatures.GetParamRange(signatureRow);
-            var receiverType = ReadComSignatureType(typeSpecs,
-                signatures.GetReceiverTypeSpec(signatureRow), typeDefs);
-            if (receiverType != interfaceIdentity + "*")
-            {
-                throw Invalid("A native COM MethodSig receiver differs from its declaring interface.");
-            }
-            var returnType = ReadComSignatureType(typeSpecs,
-                signatures.GetResultTypeSpec(signatureRow), typeDefs);
-            var effectMask = contracts.GetEffectsMask(methodRow);
-            var effects = (NativeComEffects)comMethod.Effects;
-            if (effects.HasFlag(NativeComEffects.SignedHResult) && returnType == "int32")
-            {
-                returnType = "HRESULT";
-            }
-            var nativeParameters = ImmutableArray.CreateBuilder<NativeParameterDefinition>();
-            var nativeParameterContracts = contracts.GetNativeParameters(methodRow);
-            if (nativeParameterContracts.IsDefault)
-            {
-                nativeParameterContracts = [];
-            }
-            foreach (var parameter in nativeParameterContracts)
-            {
-                if (parameter.ParameterOrdinal >= parameterCount || parameter.Extent > int.MaxValue)
-                {
-                    throw Invalid("A native COM NativeParameter is outside its signature.");
-                }
-                nativeParameters.Add(new NativeParameterDefinition(
-                    parameter.ParameterOrdinal + 1,
-                    (NativeParameterAccess)(parameter.Access - 1),
-                    (NativeParameterRetention)parameter.Retention,
-                    (int)parameter.Extent));
-            }
-            var parameterTypes = new string[parameterCount + 1];
-            parameterTypes[0] = receiverType;
-            for (var parameterIndex = 0; parameterIndex < parameterCount; parameterIndex++)
-            {
-                if (parameters.GetMode(parameterFirst + parameterIndex) != 0)
-                {
-                    throw Invalid("TRRM COM method parameter modes require explicit NativeParameter metadata.");
-                }
-                parameterTypes[parameterIndex + 1] = ReadComSignatureType(typeSpecs,
-                    parameters.GetTypeSpec(parameterFirst + parameterIndex), typeDefs);
-            }
-            var signature = returnType + "(" + string.Join(",", parameterTypes) + ")";
-            if (!NativeComCatalog.TryCreateAbi(signature, [], out var abi))
-            {
-                throw Invalid("A native COM method signature has no supported reconstructed ABI.");
-            }
-            var methodName = methods.GetName(methodRow);
-            var methodIdentity = interfaceIdentity + "::" + methodName;
-            var definition = new NativeComMethodDefinition(methodIdentity,
-                interfaceIdentity, interfaceIdentity, (int)comMethod.VTableSlot,
-                signature, abi, effects, IsCallable: true) {
-                VTableMethodIdentity = methodIdentity,
-                BoundMethodName = methodName,
-                IsNoThrow = (effectMask & 1) != 0,
-                RequiresNativeParameterMetadata = true,
-                NativeParameters = nativeParameters.ToImmutable(),
-                BorrowedOwnerParameters = [],
-                HiddenParameters = [],
-                StorageRecordParameters = [],
-            };
-            if (!methodsByInterface.TryGetValue(ownerType, out var declaredMethods))
-            {
-                declaredMethods = [];
-                methodsByInterface.Add(ownerType, declaredMethods);
-            }
-            declaredMethods.Add(definition);
-            allMethods.Add(definition);
-        }
-
-        var interfacesByRow = new Dictionary<int, NativeComInterfaceDefinition>();
-        var visiting = new HashSet<int>();
-        NativeComInterfaceDefinition BuildInterface(int row)
-        {
-            if (interfacesByRow.TryGetValue(row, out var existing))
-            {
-                return existing;
-            }
-            if (!visiting.Add(row))
-            {
-                throw Invalid("TRRM native COM interface ancestry is cyclic.");
-            }
-            var contract = interfaceContracts[row];
-            NativeComInterfaceDefinition? baseDefinition = null;
-            string? baseIdentity = null;
-            if (contract.BaseTypeDefRow != 0)
-            {
-                baseDefinition = BuildInterface(contract.BaseTypeDefRow);
-                baseIdentity = baseDefinition.NominalIdentity;
-            }
-            var declaredMethods = methodsByInterface.TryGetValue(row, out var declared)
-                ? declared.OrderBy(static method => method.Slot).ToImmutableArray()
-                : ImmutableArray<NativeComMethodDefinition>.Empty;
-            var declaredMethodIdentities = declaredMethods.Length != 0
-                ? declaredMethods.Select(static method => method.VTableMethodIdentity).ToImmutableArray()
-                : ImmutableArray<string>.Empty;
-            var flattenedMethods = (baseDefinition?.FlattenedMethods ?? [])
-                .AddRange(declaredMethodIdentities);
-            var flattenedMethodSlots = (baseDefinition?.GetFlattenedMethodSlots() ?? [])
-                .AddRange(declaredMethods.Select(static method => method.Slot));
-            var definition = new NativeComInterfaceDefinition(identityRows[row], contract.Iid,
-                baseIdentity, flattenedMethods, declaredMethodIdentities) {
-                FlattenedMethodSlots = flattenedMethodSlots,
-            };
-            visiting.Remove(row);
-            interfacesByRow.Add(row, definition);
-            return definition;
-        }
-
-        foreach (var row in interfaceRows)
-        {
-            _ = BuildInterface(row);
-        }
-
-        var interfaces = ImmutableArray.CreateBuilder<NativeComInterfaceDefinition>(interfaceRows.Count);
-        var baseEdges = ImmutableArray.CreateBuilder<(string Source, string Target)>();
-        foreach (var row in interfaceRows)
-        {
-            var definition = interfacesByRow[row];
-            if (definition.ImmediateBaseIdentity is string baseIdentity)
-            {
-                baseEdges.Add((definition.NominalIdentity, baseIdentity));
-            }
-            interfaces.Add(definition);
-        }
-
-        try
-        {
-            return new NativeImportCatalog("trrm-native-com.v1", [], comInterfaces: interfaces.ToImmutable(),
-                comOwners: [], comMethods: allMethods.ToImmutable(),
-                comBaseEdges: baseEdges.ToImmutable(),
-                comSignatureTypes: []);
-        }
-        catch (ArgumentException exception)
-        {
-            throw new InvalidDataException(
-                "Invalid reconstructed TRRM native COM interfaces.", exception);
-        }
     }
 
     private static ImmutableArray<BoundStruct> LoadBlittableStructures(
@@ -1978,65 +1558,6 @@ public static partial class TrRmExecutableCompiler
         }
 
         throw Invalid("Invalid native parameter pointee TypeSpec.");
-    }
-
-    private static string ReadComSignatureType(TrRmTypeSpecTableReader typeSpecs, int row,
-        TrRmTypeDefTableReader typeDefs)
-    {
-        var typeSpec = typeSpecs.GetRow(row);
-        if (typeSpec[0] == 0x01)
-        {
-            var code = typeSpec[2];
-            if (typeSpec.Length == 3)
-            {
-                return code switch {
-                    0 => "void",
-                    1 => "bool",
-                    3 => "uint16",
-                    8 => "int32",
-                    0x0D => "uint32",
-                    9 => "int64",
-                    0x0E => "uint64",
-                    0x14 => "float",
-                    0x15 => "double",
-                    _ => throw Invalid("Unsupported native COM scalar TypeSpec."),
-                };
-            }
-            if (typeSpec.Length == 4 && code == 0x8C)
-            {
-                var innerType = typeSpec[3] switch {
-                    0 => "void",
-                    1 => "bool",
-                    3 => "uint16",
-                    8 => "int32",
-                    0x0D => "uint32",
-                    9 => "int64",
-                    0x0E => "uint64",
-                    0x14 => "float",
-                    0x15 => "double",
-                    _ => throw Invalid("Unsupported inline native COM pointer TypeSpec."),
-                };
-                return innerType + "*";
-            }
-        }
-        else if (typeSpec[0] == 0x02)
-        {
-            var typeRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(typeSpec[2..]));
-            return TrRmTypeIdentity(typeDefs, typeRow);
-        }
-        else if (typeSpec[0] == 0x0C && typeSpec[2] == 0x8C)
-        {
-            var elementRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(typeSpec[3..]));
-            return ReadComSignatureType(typeSpecs, elementRow, typeDefs) + "*";
-        }
-        throw Invalid("Unsupported native COM signature TypeSpec.");
-    }
-
-    private static string TrRmTypeIdentity(TrRmTypeDefTableReader typeDefs, int row)
-    {
-        var typeNamespace = typeDefs.GetNamespace(row);
-        return typeNamespace.Length == 0 ? typeDefs.GetName(row)
-            : typeNamespace + "." + typeDefs.GetName(row);
     }
 
     private static PrimitiveType BodyTypeFromRow(TrRmTypeSpecTableReader types, int row)

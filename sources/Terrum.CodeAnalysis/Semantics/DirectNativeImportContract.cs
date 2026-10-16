@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Immutable;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -38,8 +39,13 @@ internal static class DirectNativeImportContract
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
-    internal static bool IsValueParameter(PrimitiveType type) =>
-        IsScalar(type);
+    internal static bool IsValueParameter(PrimitiveType type,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes = default) =>
+        IsScalar(type) || type is PrimitiveType.NativeRawPointer or PrimitiveType.NativeUtf16ZPointer
+            or PrimitiveType.NativeUtf8ZPointer
+            || NativePointerTypeContract.IsValidType(type, pointerTypes)
+            || NativeFunctionPointerContract.IsValidType(type, functionPointerSignatures);
 
     internal static bool IsStringPointerArgument(BoundExpression argument,
         DirectNativeParameter parameter, BoundProgram program) =>
@@ -61,11 +67,15 @@ internal static class DirectNativeImportContract
         });
 
     internal static bool IsOutputPointee(PrimitiveType type) =>
-        IsScalar(type) || type == PrimitiveType.NativeRawPointer;
+        IsScalar(type) || type is PrimitiveType.NativeRawPointer or PrimitiveType.NativeUtf16ZPointer
+            or PrimitiveType.NativeUtf8ZPointer || NativePointerTypes.IsType(type)
+            || NativeFunctionPointerTypes.IsType(type);
 
     internal static bool IsInputPointee(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
     {
-        if (type is PrimitiveType.Void or PrimitiveType.NativeRawPointer || IsScalar(type))
+        if (type is PrimitiveType.Void or PrimitiveType.NativeRawPointer
+                or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+            || IsScalar(type) || NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
         {
             return true;
         }
@@ -80,7 +90,9 @@ internal static class DirectNativeImportContract
             && (structures[index].IsSequential || structures[index].IsTransparent);
     }
 
-    internal static bool IsValid(BoundFunction function, IReadOnlyList<BoundStruct> structures)
+    internal static bool IsValid(BoundFunction function, IReadOnlyList<BoundStruct> structures,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes = default)
     {
         if (function.DirectNativeImport is not DirectNativeImport import
             || !function.IsExternal || function.NativeImportKey is not null
@@ -89,8 +101,8 @@ internal static class DirectNativeImportContract
             || import.Outputs.IsDefault || import.Parameters.IsDefault
             || function.Variables.IsDefault || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length
-            || function.ReturnType is not (PrimitiveType.Void or PrimitiveType.NativeRawPointer)
-                && !IsScalar(function.ReturnType)
+            || function.ReturnType != PrimitiveType.Void
+                && !IsValueParameter(function.ReturnType, functionPointerSignatures, pointerTypes)
             || import.Outputs.Length > function.ParameterCount)
         {
             return false;
@@ -102,6 +114,8 @@ internal static class DirectNativeImportContract
         {
             if (output is null || output.ParameterIndex < 0 || output.ParameterIndex >= function.ParameterCount
                 || outputs[output.ParameterIndex] || !IsOutputPointee(output.PointeeType)
+                || NativePointerTypes.IsType(output.PointeeType)
+                    && !NativePointerTypeContract.IsValidType(output.PointeeType, pointerTypes)
                 || !IsValidResultCondition(function.ReturnType, output.ResultCondition)
                 || output.FailureDisposition != 1
                 || function.Variables[output.ParameterIndex] is not BoundVariable outputParameter
@@ -120,12 +134,15 @@ internal static class DirectNativeImportContract
                 || parameter.ParameterIndex >= function.ParameterCount
                 || nativeParameters[parameter.ParameterIndex] || outputs[parameter.ParameterIndex]
                 || !IsInputPointee(parameter.PointeeType, structures)
+                || NativePointerTypes.IsType(parameter.PointeeType)
+                    && !NativePointerTypeContract.IsValidType(parameter.PointeeType, pointerTypes)
                 || parameter.Access is not (NativeParameterAccess.Read
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention != NativeParameterRetention.NoEscape
+                || parameter.Extent < 0
                 || (parameter.PointeeType == PrimitiveType.Void
                     ? parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0
-                    : parameter.Extent is not (0 or 1))
+                    : false)
                 || function.Variables[parameter.ParameterIndex] is not BoundVariable pointerParameter
                 || pointerParameter.Type != PrimitiveType.NativeRawPointer
                 || pointerParameter.IsOut || pointerParameter.IsInit)
@@ -151,12 +168,13 @@ internal static class DirectNativeImportContract
             }
             else if (parameterType == PrimitiveType.NativeRawPointer)
             {
-                if (!nativeParameters[index] || parameter.IsOut || parameter.IsInit)
+                if (outputs[index] || parameter.IsOut || parameter.IsInit)
                 {
                     return false;
                 }
             }
-            else if (!IsValueParameter(parameterType) || outputs[index] || parameter.IsOut || parameter.IsInit)
+            else if (!IsValueParameter(parameterType, functionPointerSignatures, pointerTypes)
+                || outputs[index] || parameter.IsOut || parameter.IsInit)
             {
                 return false;
             }
@@ -231,6 +249,7 @@ internal static class DirectNativeImportContract
                 && address.ElementCount == layout.ElementCount
                 && address.ElementStride == layout.ElementStride
                 && address.ByteExtent == layout.ByteExtent
+                && (parameter.Extent == 0 || address.ElementCount >= parameter.Extent)
                 && (parameter.PointeeType != PrimitiveType.Void
                     || DirectNativeImportContract.IsInputPointee(layout.ElementType, program.Structures))
                 && (parameter.Access == NativeParameterAccess.Read
@@ -244,6 +263,7 @@ internal static class DirectNativeImportContract
                 ? DirectNativeImportContract.IsInputPointee(address.ElementType, program.Structures)
                 : address.ElementType == parameter.PointeeType)
             && address.ElementCount == 1
+            && parameter.Extent <= 1
             && address.ElementStride == elementExtent
             && address.ByteExtent == elementExtent;
     }

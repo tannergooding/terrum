@@ -45,6 +45,9 @@ public static partial class ModuleCompiler
             typeCount = checked(typeCount + reference.Structures.Length);
             functionCount = checked(functionCount + reference.Functions.Length);
         }
+        var nativeFunctionPointerSignatures =
+            MergeNativeFunctionPointerSignatures(references, out var functionPointerMappings,
+                out var nativePointerMappings);
         var types = ImmutableArray.CreateBuilder<BoundStruct>(typeCount);
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(functionCount);
         var names = new HashSet<string>(checked(typeCount + functionCount), StringComparer.Ordinal);
@@ -61,39 +64,57 @@ public static partial class ModuleCompiler
         }
         var destinationTypes = IndexTypes(types);
         var typeIndex = 0;
-        foreach (var reference in references)
+        for (var referenceIndex = 0; referenceIndex < references.Count; referenceIndex++)
         {
+            var reference = references[referenceIndex];
             foreach (var structure in reference.Structures)
             {
-                types[typeIndex++] = RemapStructure(structure, reference.Structures, types, destinationTypes);
+                types[typeIndex++] = RemapNativeFunctionPointerTypes(
+                    RemapNativePointerTypes(
+                        RemapStructure(structure, reference.Structures, types, destinationTypes),
+                        nativePointerMappings[referenceIndex]),
+                    functionPointerMappings[referenceIndex]);
             }
         }
         var allTypes = types.MoveToImmutable();
-        foreach (var reference in references)
+        for (var referenceIndex = 0; referenceIndex < references.Count; referenceIndex++)
         {
+            var reference = references[referenceIndex];
             foreach (var function in reference.Functions)
             {
                 if (!names.Add(function.Name))
                 {
                     throw new ModuleContractException($"Ambiguous provider export '{function.Name}'.");
                 }
-                functions.Add(RemapFunction(function, reference.Structures, allTypes,
-                    destinationTypes: destinationTypes));
+                functions.Add(RemapNativeFunctionPointerTypes(
+                    RemapNativePointerTypes(
+                        RemapFunction(function, reference.Structures, allTypes, destinationTypes: destinationTypes),
+                        nativePointerMappings[referenceIndex]),
+                    functionPointerMappings[referenceIndex]));
             }
         }
-        return new CompilationReference(allTypes, functions.MoveToImmutable(), references[0].RuntimePolicy);
+        var nativePointerTypes = MergeNativePointerTypeDefinitions(references, allTypes,
+            nativePointerMappings, functionPointerMappings);
+        return new CompilationReference(allTypes, functions.MoveToImmutable(), references[0].RuntimePolicy,
+            nativeFunctionPointerSignatures: nativeFunctionPointerSignatures,
+            nativePointerTypes: nativePointerTypes);
     }
     private static CompilationReference SetReference(Module module)
     {
         var declarations = ImportDeclarations(module);
-        var required = RequiredStructures(declarations, module.Structures);
+        var required = RequiredStructures(declarations, module.Structures,
+            nativePointerTypes: module.NativePointerTypes,
+            nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures);
         var structures = SelectStructures(module.Structures, required);
         var remapped = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Length);
         foreach (var declaration in declarations)
         {
             remapped.Add(RemapFunction(declaration, module.Structures, structures));
         }
-        return new CompilationReference(structures, remapped.MoveToImmutable(), module.RuntimePolicy);
+        return new CompilationReference(structures, remapped.MoveToImmutable(), module.RuntimePolicy,
+            nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures,
+            nativePointerTypes: RemapNativePointerTypeDefinitions(module.NativePointerTypes,
+                module.Structures, structures));
     }
 
     private static Module[] ReadSet(IReadOnlyList<byte[]> producers)
@@ -131,6 +152,12 @@ public static partial class ModuleCompiler
         bool allowManagedParticipant = false)
     {
         ArgumentNullException.ThrowIfNull(program);
+        _ = MapNativeFunctionPointerTypes(
+            program.NativeFunctionPointerSignatures, reference.NativeFunctionPointerSignatures,
+            program.Structures, reference.Structures, program.NativePointerTypes, reference.NativePointerTypes);
+        _ = MapNativePointerTypes(program.NativePointerTypes, program.Structures,
+            program.NativeFunctionPointerSignatures, reference.NativePointerTypes, reference.Structures,
+            reference.NativeFunctionPointerSignatures);
         SemanticVerifier.RejectSourceNativeImports(program, "semantic module sets",
             allowDirectNativeImports: true);
         if (reference.RequiresSourceGrant)
@@ -164,14 +191,17 @@ public static partial class ModuleCompiler
             {
                 if (function.DirectNativeImport is not null)
                 {
-                    if (!DirectNativeImportContract.IsValid(function, program.Structures)
+                    if (!DirectNativeImportContract.IsValid(function, program.Structures,
+                        program.NativeFunctionPointerSignatures, program.NativePointerTypes)
                         || reference.Functions.Any(export => export.Name == function.Name))
                     {
                         throw new ModuleContractException(
                             $"Direct native import '{function.Name}' is invalid or ambiguous.");
                     }
                     declarations.Add(new ModuleFunction(function.Name,
-                        Contract(function, program.Structures), function, false) {
+                        Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
+                            program.NativePointerTypes),
+                        function, false) {
                         HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
                     });
                     continue;
@@ -187,8 +217,11 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Incompatible or missing provider declaration '{function.Name}'.");
                 }
-                var contract = Contract(function, program.Structures);
-                if (!CompatibleContract(contract, Contract(export, reference.Structures)))
+                var contract = Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes);
+                if (!CompatibleContract(contract,
+                    Contract(export, reference.Structures, reference.NativeFunctionPointerSignatures,
+                        reference.NativePointerTypes)))
                 {
                     throw new ModuleContractException($"Incompatible or missing provider declaration '{function.Name}'.");
                 }
@@ -203,14 +236,20 @@ public static partial class ModuleCompiler
             }
             else
             {
-                declarations.Add(new ModuleFunction(function.Name, Contract(function, program.Structures), function, false) {
+                declarations.Add(new ModuleFunction(function.Name,
+                    Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
+                        program.NativePointerTypes), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
                 });
             }
         }
         var declarationArray = declarations.MoveToImmutable();
-        var required = RequiredStructures(program.Functions, program.Structures);
+        var required = RequiredStructures(program.Functions, program.Structures,
+            nativePointerTypes: program.NativePointerTypes,
+            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
         var structures = SelectStructures(program.Structures, required);
+        var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
+            program.Structures, structures);
         var referenceStructures = IndexStructures(reference.Structures);
         var imported = ImmutableArray.CreateBuilder<string>(structures.Length);
         foreach (var structure in structures)
@@ -218,7 +257,9 @@ public static partial class ModuleCompiler
             if (referenceStructures.TryGetValue(structure.Name, out var match))
             {
                 if (structure.IsPrivate || structure.IsInternal
-                    || !SameStructure(structure, match, structures, reference.Structures))
+                    || !SameStructure(structure, match, structures, reference.Structures,
+                        program.NativeFunctionPointerSignatures, reference.NativeFunctionPointerSignatures,
+                        nativePointerTypes, reference.NativePointerTypes))
                 {
                     throw new ModuleContractException($"Incompatible imported value layout '{structure.Name}'.");
                 }
@@ -242,6 +283,8 @@ public static partial class ModuleCompiler
         var module = new Module(true, program.EntryPoint, structures, functions.MoveToImmutable()) {
             Classes = classes.MoveToImmutable(),
             ImportedStructures = imported.ToImmutable(),
+            NativeFunctionPointerSignatures = program.NativeFunctionPointerSignatures,
+            NativePointerTypes = nativePointerTypes,
             RuntimePolicy = program.RuntimePolicy,
         };
         var result = Write(module, program);
@@ -269,6 +312,12 @@ public static partial class ModuleCompiler
 
     private static BoundProgram RestoreConsumerAgainstReference(Module consumer, CompilationReference reference)
     {
+        var providerFunctionPointerMapping = MapNativeFunctionPointerTypes(
+            consumer.NativeFunctionPointerSignatures, reference.NativeFunctionPointerSignatures,
+            consumer.Structures, reference.Structures, consumer.NativePointerTypes, reference.NativePointerTypes);
+        var providerNativePointerMapping = MapNativePointerTypes(consumer.NativePointerTypes,
+            consumer.Structures, consumer.NativeFunctionPointerSignatures, reference.NativePointerTypes,
+            reference.Structures, reference.NativeFunctionPointerSignatures);
         if (consumer.RuntimePolicy != reference.RuntimePolicy)
         {
             throw new ModuleContractException("Consumer and provider runtime policies differ.");
@@ -294,7 +343,8 @@ public static partial class ModuleCompiler
                 ? ImmutableDictionary<string, BoundFunction>.Empty
                 : reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
             if (!exports.TryGetValue(imported.Name, out var actual)
-                || !CompatibleContract(imported.Contract, Contract(actual, reference.Structures))
+                || !CompatibleContract(imported.Contract, Contract(actual, reference.Structures,
+                    reference.NativeFunctionPointerSignatures, reference.NativePointerTypes))
                 || imported.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, reference.Structures))
             {
                 throw new ModuleContractException($"Incompatible or missing provider contract for '{imported.Name}'.");
@@ -321,7 +371,9 @@ public static partial class ModuleCompiler
         {
             if (providerStructures is not null && providerStructures.TryGetValue(expected.Name, out var actual)
                 && (!importedNames.Contains(expected.Name)
-                || !SameStructure(expected, actual, consumer.Structures, reference.Structures)))
+                || !SameStructure(expected, actual, consumer.Structures, reference.Structures,
+                    consumer.NativeFunctionPointerSignatures, reference.NativeFunctionPointerSignatures,
+                    consumer.NativePointerTypes, reference.NativePointerTypes)))
             {
                 throw new ModuleContractException($"Incompatible provider value layout '{expected.Name}'.");
             }
@@ -341,13 +393,19 @@ public static partial class ModuleCompiler
         foreach (var item in consumer.Functions)
         {
             functions.Add(item.Import
-                ? RemapFunction(RecordedImportPromises(item.Contract, providerFunctions[item.Name]),
-                    reference.Structures, consumer.Structures)
+                ? RemapNativePointerTypes(
+                    RemapNativeFunctionPointerTypes(
+                        RemapFunction(RecordedImportPromises(item.Contract, providerFunctions[item.Name]),
+                        reference.Structures, consumer.Structures),
+                        providerFunctionPointerMapping),
+                    providerNativePointerMapping)
                 : item.Function ?? throw new ModuleFormatException("Missing consumer body."));
         }
         var program = new BoundProgram(functions.MoveToImmutable(), consumer.EntryPoint) {
             Structures = consumer.Structures,
             Classes = consumer.Classes,
+            NativeFunctionPointerSignatures = consumer.NativeFunctionPointerSignatures,
+            NativePointerTypes = consumer.NativePointerTypes,
             RuntimePolicy = consumer.RuntimePolicy,
         };
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))

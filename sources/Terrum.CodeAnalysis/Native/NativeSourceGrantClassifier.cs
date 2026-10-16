@@ -9,14 +9,17 @@ namespace Terrum.CodeAnalysis.Native;
 
 internal static class NativeSourceGrantClassifier
 {
-    internal static bool[] Classify(BoundProgram program)
-    {
-        if (!program.RequiresSourceGrant || program.IsInvocationSourceBound
-            || program.InvocationProfileId is not null || program.EntryPoint != -1
-            || program.Buffers.Length != 1 || program.Buffers[0] is not HostBuffer {
+    internal static bool CanClassify(BoundProgram program) =>
+        program.RequiresSourceGrant && !program.IsInvocationSourceBound
+            && program.InvocationProfileId is null && program.EntryPoint == -1
+            && program.Buffers.Length == 1 && program.Buffers[0] is HostBuffer {
                 Name: "Source", ElementType: PrimitiveType.Char16, IsWritable: false,
                 IsInvocationScoped: true, InvocationProfileId: null, Values.IsEmpty: true,
-            } || !program.Classes.IsEmpty || NativeEmitter.UsesManagedNodes(program))
+            } && program.Classes.IsEmpty && !NativeEmitter.UsesManagedNodes(program);
+
+    internal static bool[] Classify(BoundProgram program)
+    {
+        if (!CanClassify(program))
         {
             throw Unsupported();
         }
@@ -56,6 +59,10 @@ internal static class NativeSourceGrantClassifier
                                     AddCleanupCall(output.Type);
                                 }
                             }
+                            PushExpressions(call.Arguments);
+                            break;
+                        case BoundIndirectCall call:
+                            expressions.Push(call.Target);
                             PushExpressions(call.Arguments);
                             break;
                         case BoundNominalUpdate update:
@@ -140,7 +147,7 @@ internal static class NativeSourceGrantClassifier
                             break;
                         case BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
                             or BoundMutableReceiverLoan or BoundViewLength or BoundOutArgument
-                            or BoundIsInitialized:
+                            or BoundIsInitialized or BoundNativeFunctionAddress:
                             break;
                         default:
                             throw Unsupported();
@@ -440,6 +447,10 @@ internal static class NativeSourceGrantClassifier
                             break;
                         case BoundCall call:
                             ValidateWorkspaceCall(call);
+                            PushExpressions(call.Arguments);
+                            break;
+                        case BoundIndirectCall call:
+                            expressions.Push(call.Target);
                             PushExpressions(call.Arguments);
                             break;
                         case BoundSpanLength length when IsBufferView(length.View.Type):

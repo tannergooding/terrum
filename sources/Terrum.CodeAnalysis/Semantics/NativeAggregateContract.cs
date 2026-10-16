@@ -108,52 +108,6 @@ internal static class NativeAggregateContract
     internal static bool IsPlainValueAggregate(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
         IsPlainValueAggregate(type, structures, new HashSet<int>());
 
-    internal static bool IsOwnedWindowHandleFieldArgument(BoundExpression argument,
-        BoundFunction target, int parameter, BoundFunction caller, BoundProgram program)
-    {
-        var hasWindowHandleProvenance = argument is BoundNativeNoOwner
-            || NativeHandleOwnerContract.IsOwnedWindowArgument(argument, caller, program)
-            || argument is BoundRead {
-                Type: PrimitiveType.NativeWindowHandle,
-                Variable: var windowVariable,
-            } && NativeWindowCreationContract.IsCreatedWindowLocal(caller, windowVariable, program);
-        if (!target.IsConstructor || target.DeclaringStruct is not string aggregateName
-            || (uint)parameter >= (uint)target.Variables.Length
-            || target.Variables[parameter] is not {
-                Type: PrimitiveType.NativeWindowHandle,
-                IsOut: false,
-                IsInit: false,
-            }
-            || target.Body is not BoundBlock body || body.Statements.IsDefault
-            || !hasWindowHandleProvenance
-            || !TryResolveSourceType(aggregateName, program.Structures, out var aggregateType)
-            || program.NativeImportCatalog is not NativeImportCatalog catalog
-            || !catalog.SupportsAggregateStorageLayout(aggregateType, program.Structures))
-        {
-            return false;
-        }
-
-        var assignments = body.Statements.OfType<BoundFieldAssignment>()
-            .Where(assignment => assignment.Variable == 0
-                && assignment.Value is BoundRead {
-                    Variable: var sourceVariable,
-                    Type: PrimitiveType.NativeWindowHandle,
-                } && sourceVariable == parameter)
-            .ToArray();
-        if (assignments.Length != 1
-            || (uint)assignments[0].Field >= (uint)program.Structures[(int)aggregateType - 100].Fields.Length
-            || program.Structures[(int)aggregateType - 100].Fields[assignments[0].Field].Type
-                != PrimitiveType.NativeWindowHandle)
-        {
-            return false;
-        }
-
-        return catalog.AggregateStorageLayouts.Any(layout =>
-            MatchesStorageLayout(aggregateType, program.Structures, catalog, layout)
-            && layout.Fields[assignments[0].Field].TypeName
-                == nameof(PrimitiveType.NativeWindowHandle));
-    }
-
     private static bool IsPlainValueAggregate(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         HashSet<int> visiting)
     {
@@ -176,6 +130,7 @@ internal static class NativeAggregateContract
         type is PrimitiveType.Bool or PrimitiveType.Char16
             or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64
-            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.NativeWindowHandle
+            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type)
         || IsPlainValueAggregate(type, structures, visiting);
 }

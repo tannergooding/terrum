@@ -12,7 +12,7 @@ public sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
-    public async Task BuildNativeImportOptsIntoCataloguedMessageBoxWithoutExecutingItAsync(string runtimePolicy)
+    public async Task BuildNativeImportCompilesDirectMessageBoxWithoutExecutingItAsync(string runtimePolicy)
     {
         var sample = Path.Combine(RepositoryRoot(), "samples", "native", "message-box.terrum");
         var standardOutput = Path.Combine(Path.GetTempPath(),
@@ -46,14 +46,8 @@ public sealed partial class CliTests
         }
         finally
         {
-            if (File.Exists(standardOutput))
-            {
-                File.Delete(standardOutput);
-            }
-            if (File.Exists(nativeImportOutput))
-            {
-                File.Delete(nativeImportOutput);
-            }
+            await TestFileCleanup.DeleteWithRetryAsync(standardOutput).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(nativeImportOutput).ConfigureAwait(true);
         }
     }
 
@@ -62,11 +56,13 @@ public sealed partial class CliTests
     public async Task BuildNativeImportCompilesGenericDx11EntryPointAsync(string sourceName)
     {
         var sample = Path.Combine(RepositoryRoot(), "samples", "design", "win32-dx11-triangle", sourceName);
+        var interop = Path.Combine(Path.GetDirectoryName(sample)!, "dx11-api.terrum");
+        var windowsInterop = Path.Combine(Path.GetDirectoryName(sample)!, "win32-api.terrum");
         var output = Path.Combine(Path.GetTempPath(), $"terrum-dx11-{Guid.NewGuid():N}.exe");
         try
         {
-            var (exitCode, result, error) = await RunAsync([], "build-native-import", sample,
-                "-o", output, "--runtime", "checked-exceptions", "--json");
+            var (exitCode, result, error) = await RunAsync([], "build-native-import", sample, "--source", interop,
+                "--source", windowsInterop, "-o", output, "--runtime", "checked-exceptions", "--json");
             Assert.That(exitCode, Is.EqualTo(0), result + error);
             Assert.That(error, Is.Empty);
             using var json = JsonDocument.Parse(result);

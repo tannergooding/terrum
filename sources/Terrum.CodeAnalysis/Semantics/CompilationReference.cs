@@ -9,7 +9,9 @@ public sealed class CompilationReference
 {
     internal CompilationReference(ImmutableArray<BoundStruct> structures, ImmutableArray<BoundFunction> functions,
         BoundRuntimePolicy runtimePolicy, bool requiresSourceGrant = false, string? invocationProfileId = null,
-        NativeImportCatalog? nativeImportCatalog = null)
+        NativeImportCatalog? nativeImportCatalog = null,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
     {
         Structures = structures;
         Functions = functions;
@@ -17,6 +19,9 @@ public sealed class CompilationReference
         RequiresSourceGrant = requiresSourceGrant;
         InvocationProfileId = invocationProfileId;
         NativeImportCatalog = nativeImportCatalog;
+        NativeFunctionPointerSignatures = nativeFunctionPointerSignatures.IsDefault
+            ? [] : nativeFunctionPointerSignatures;
+        NativePointerTypes = nativePointerTypes.IsDefault ? [] : nativePointerTypes;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -35,4 +40,8 @@ public sealed class CompilationReference
     public string? InvocationProfileId { get; }
 
     internal NativeImportCatalog? NativeImportCatalog { get; }
+
+    internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; }
+
+    internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; }
 }

@@ -11,7 +11,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeCallbackCatalogTests
 {
     private const string ImportKey = "test.generic-callback.invoke";
-    private const string WindowImportKey = "test.generic-callback.invoke-window";
+    private const string OtherImportKey = "test.generic-callback.invoke-other";
 
     private static NativeImportDefinition CreateImport() =>
         new(ImportKey, "callback-fixture.dll", "Invoke", [PrimitiveType.NativeCallbackAddress],
@@ -30,15 +30,17 @@ public sealed class NativeCallbackCatalogTests
     private static NativeImportCatalog CreateCatalog() =>
         NativeImportCatalog.CreateForTesting("test.generic-callback.v1", [CreateImport()]);
 
-    private static NativeImportDefinition CreateWindowImport(
-        string sourceTypeName = NativeWindowProcedureContract.TypeName) =>
-        new(WindowImportKey, "callback-fixture.dll", "InvokeWindow",
+    private static NativeImportDefinition CreateOtherImport() =>
+        new(OtherImportKey, "callback-fixture.dll", "InvokeOther",
             [PrimitiveType.NativeCallbackAddress], PrimitiveType.Int64, IsNoThrow: true,
             RequiresUnsafeCaller: true, DoesNotReturn: false,
             NativeImportDeploymentPolicy.ApplicationDirectory) {
             ParameterContracts = [NativeImportParameterContract.NativeCallback],
             CallbackParameters = [
-                new(0, sourceTypeName, NativeWindowProcedureContract.CallbackSignature,
+                new(0, NativeCallbackContract.TypeName,
+                    new(PrimitiveType.NativeCallbackAddress, PrimitiveType.Int64,
+                        [PrimitiveType.NativeRawPointer, PrimitiveType.UInt32, PrimitiveType.UInt64,
+                            PrimitiveType.Int64]),
                     NativeCallbackLifetime.SynchronousNoEscape),
             ],
         };
@@ -119,29 +121,6 @@ public sealed class NativeCallbackCatalogTests
     }
 
     [Test]
-    public void WindowProcedureAliasRequiresItsCataloguedSignature()
-    {
-        var source = $$"""
-            [Terrum.Interop.NativeImport("{{ImportKey}}")]
-            [NoThrow]
-            extern uint32 InvokeCallback(Terrum.Interop.Windows.WNDPROC callback);
-            int32 Main() { return 0; }
-            """;
-        var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], CreateCatalog(),
-            BoundRuntimePolicy.FailFast);
-
-        Assert.That(compilation.Program, Is.Null);
-        Assert.That(compilation.Diagnostics, Is.Not.Empty);
-    }
-
-    [Test]
-    public void CallbackCatalogSupportsWindowHandlesOnlyWhenCallbackSignatureUsesThem()
-    {
-        Assert.That(CreateCatalog().SupportsParameterType(PrimitiveType.NativeWindowHandle), Is.False);
-        Assert.That(NativeImportCatalog.WindowsX64.SupportsParameterType(PrimitiveType.NativeWindowHandle), Is.True);
-    }
-
-    [Test]
     public void CallbackSignatureIsSelectedFromEachImportParameter()
     {
         var source = $$"""
@@ -149,27 +128,27 @@ public sealed class NativeCallbackCatalogTests
             [NoThrow]
             extern uint32 InvokeCallback(Terrum.Interop.NativeCallback callback);
 
-            [Terrum.Interop.NativeImport("{{WindowImportKey}}")]
+            [Terrum.Interop.NativeImport("{{OtherImportKey}}")]
             [NoThrow]
-            extern int64 InvokeWindow(Terrum.Interop.NativeCallback callback);
+            extern int64 InvokeOther(Terrum.Interop.NativeCallback callback);
 
             [NoThrow]
             unsafe uint32 Callback(uint32 value) { return value; }
 
             [NoThrow]
-            unsafe int64 WindowCallback(Terrum.Interop.Windows.HWND window, uint32 message,
-                nuint wParam, nint lParam) { return lParam; }
+            unsafe int64 OtherCallback(ptr<void> context, uint32 message,
+                uint64 wParam, int64 lParam) { return lParam; }
 
             int32 Main() {
                 unsafe {
                     InvokeCallback(&Callback);
-                    InvokeWindow(&WindowCallback);
+                    InvokeOther(&OtherCallback);
                 }
                 return 0;
             }
             """;
         var catalog = NativeImportCatalog.CreateForTesting("test.generic-callback.multiple.v1",
-                [CreateImport(), CreateWindowImport(NativeCallbackContract.TypeName)]);
+                [CreateImport(), CreateOtherImport()]);
         var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)], catalog,
             BoundRuntimePolicy.FailFast);
 
@@ -178,7 +157,7 @@ public sealed class NativeCallbackCatalogTests
         Assert.That(NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var mismatchedSource = source.Replace("InvokeCallback(&Callback);",
-            "InvokeCallback(&WindowCallback);", StringComparison.Ordinal);
+            "InvokeCallback(&OtherCallback);", StringComparison.Ordinal);
         var mismatched = Compilation.CreateWithNativeImports([SyntaxTree.Parse(mismatchedSource)], catalog,
             BoundRuntimePolicy.FailFast);
         Assert.That(mismatched.Program, Is.Null);

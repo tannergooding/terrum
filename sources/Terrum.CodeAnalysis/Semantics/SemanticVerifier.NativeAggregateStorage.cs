@@ -25,21 +25,4 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyNativeValueOutputAddress(BoundNativeStorageAddress address,
-        NativeComParameterAdaptation adaptation, InitializationState initialized,
-        HashSet<int> declarations, BoundFunction function, BoundProgram program,
-        ref int remaining, int depth)
-    {
-        Count(ref remaining, depth);
-        var variable = address.Variable;
-        if (!NativeStorageParameterContract.MatchesValueOutputAddress(address, adaptation, program)
-            || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
-            || variable >= function.Variables.Length
-            || !declarations.Contains(variable) || !initialized[variable]
-            || !function.Variables[variable].IsMutable
-            || function.Variables[variable].Type != address.CarrierType)
-        {
-            throw InvalidEffect(address.Span, "NativeImport");
-        }
-    }
 }

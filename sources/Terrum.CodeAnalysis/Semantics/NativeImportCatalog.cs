@@ -8,117 +8,24 @@ using System.Linq;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
-/// <summary>A compiler-owned catalog of reviewed Windows x64 native imports.</summary>
+/// <summary>A native import and ABI-contract catalog.</summary>
 public sealed class NativeImportCatalog
 {
-    internal const string NativeNullPointerTypeName = "Terrum.Interop.Windows.NativeNullPointer";
-
     private static readonly NativeImportAttributeDefinition s_attributeDefinition =
         new("Terrum.Interop.NativeImport", ArgumentCount: 1, RequiresStringLiteral: true, IsRepeatable: false);
 
     private static readonly NativeImportCatalog s_windowsX64 = new(
-        NativeWindowClassContract.CatalogIdentity,
-        [
-            new NativeImportDefinition(
-                "windows-x64.system32.kernel32.ExitProcess",
-                "kernel32.dll",
-                "ExitProcess",
-                [PrimitiveType.UInt32],
-                PrimitiveType.Void,
-                IsNoThrow: true,
-                RequiresUnsafeCaller: true,
-                DoesNotReturn: true,
-                DeploymentPolicy: NativeImportDeploymentPolicy.System32),
-            new NativeImportDefinition(
-                "windows-x64.system32.kernel32.GetCurrentThreadId",
-                "kernel32.dll",
-                "GetCurrentThreadId",
-                [],
-                PrimitiveType.UInt32,
-                IsNoThrow: true,
-                RequiresUnsafeCaller: true,
-                DoesNotReturn: false,
-                DeploymentPolicy: NativeImportDeploymentPolicy.System32),
-            new NativeImportDefinition(
-                "windows-x64.system32.kernel32.Sleep",
-                "kernel32.dll",
-                "Sleep",
-                [PrimitiveType.UInt32],
-                PrimitiveType.Void,
-                IsNoThrow: true,
-                RequiresUnsafeCaller: true,
-                DoesNotReturn: false,
-                DeploymentPolicy: NativeImportDeploymentPolicy.System32),
-            new NativeImportDefinition(
-                "windows-x64.system32.user32.MessageBoxW",
-                "user32.dll",
-                "MessageBoxW",
-                [PrimitiveType.NativeWindowHandle, PrimitiveType.NativeUtf16ZPointer,
-                    PrimitiveType.NativeUtf16ZPointer, PrimitiveType.UInt32],
-                PrimitiveType.Int32,
-                IsNoThrow: true,
-                RequiresUnsafeCaller: true,
-                DoesNotReturn: false,
-                DeploymentPolicy: NativeImportDeploymentPolicy.System32) {
-                ParameterContracts = [
-                    NativeImportParameterContract.NoOwnerWindowHandle,
-                    NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-                    NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-                    NativeImportParameterContract.Value,
-                ],
-            },
-            new NativeImportDefinition(
-                "windows-x64.system32.user32.CallWindowProcW",
-                "user32.dll",
-                "CallWindowProcW",
-                [PrimitiveType.NativeCallbackAddress, PrimitiveType.NativeWindowHandle,
-                    PrimitiveType.UInt32, PrimitiveType.UInt64, PrimitiveType.Int64],
-                PrimitiveType.Int64,
-                IsNoThrow: true,
-                RequiresUnsafeCaller: true,
-                DoesNotReturn: false,
-                DeploymentPolicy: NativeImportDeploymentPolicy.System32) {
-                ParameterContracts = [
-                    NativeImportParameterContract.NativeCallback,
-                    NativeImportParameterContract.NoOwnerWindowHandle,
-                    NativeImportParameterContract.Value,
-                    NativeImportParameterContract.Value,
-                    NativeImportParameterContract.Value,
-                ],
-                CallbackParameters = [
-                    new(0, NativeWindowProcedureContract.TypeName,
-                        NativeWindowProcedureContract.CallbackSignature,
-                        NativeCallbackLifetime.SynchronousNoEscape),
-                ],
-            },
-            .. NativeWindowCreationContract.Imports,
-            .. NativeWindowClassContract.Imports,
-            .. NativeWindowMessageContract.Imports,
-            NativeDx11ComCatalog.CreateDeviceAndSwapChainImport,
-            NativeDx11ComCatalog.CompileShaderFromFileImport,
-            .. NativeWindowsModulePathContract.Imports,
-        ], comInterfaces: NativeDx11ComCatalog.Interfaces,
-        comOwners: NativeDx11ComCatalog.Owners, comMethods: NativeDx11ComCatalog.Methods,
-        comBaseEdges: NativeDx11ComCatalog.PermittedBaseEdges,
-        comSignatureTypes: NativeDx11ComCatalog.SignatureTypes,
-        fixedArrayStorageLayouts: [
-            .. NativeDx11ComCatalog.FixedArrayStorageLayouts,
-            NativeWindowsModulePathContract.StorageLayout,
-        ], nativeStorageRecordLayouts: NativeDx11ComCatalog.StorageRecordLayouts,
-        aggregateStorageLayouts: NativeDx11ComCatalog.AggregateStorageLayouts);
+        "windows-x64-native-imports-v10", []);
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;
     private readonly ImmutableHashSet<string> _callbackTypeNames;
-    private readonly ImmutableDictionary<string, NativeComInterfaceDefinition> _comInterfaces;
-    private readonly ImmutableDictionary<string, NativeComOwnerDefinition> _comOwners;
-    private readonly ImmutableDictionary<string, NativeComMethodDefinition> _comMethods;
     private readonly ImmutableArray<NativeFixedArrayStorageLayoutDefinition> _fixedArrayStorageLayouts;
     private readonly ImmutableArray<NativeStorageRecordLayoutDefinition> _storageRecordLayouts;
     private readonly ImmutableArray<NativeAggregateStorageLayoutDefinition> _aggregateStorageLayouts;
 
     [SuppressMessage("Style", "IDE0072:Populate switch",
         Justification = "Unsupported native parameter types cannot acquire an import contract.")]
-    private static bool ValidParameterContracts(NativeImportDefinition import, bool isForTesting)
+    private static bool ValidParameterContracts(NativeImportDefinition import)
     {
         if (!NativeStorageParameterContract.IsValid(import)
             || !NativeCallbackParameterContract.IsValid(import))
@@ -126,34 +33,10 @@ public sealed class NativeImportCatalog
             return false;
         }
 
-        if (NativeWindowsModulePathContract.IsReservedImport(import))
-        {
-            return !isForTesting && NativeWindowsModulePathContract.MatchesImport(import);
-        }
-        if (NativeWindowMessageContract.IsReservedImport(import))
-        {
-            return !isForTesting && NativeWindowMessageContract.MatchesImport(import);
-        }
-        if (NativeWindowClassContract.IsReservedImport(import))
-        {
-            return !isForTesting && NativeWindowClassContract.MatchesImport(import);
-        }
-        if (NativeWindowCreationContract.IsReservedImport(import))
-        {
-            return !isForTesting && NativeWindowCreationContract.MatchesImport(import);
-        }
         var hasRestrictedContract = import.ParameterTypes.Contains(PrimitiveType.NativeUtf16ZPointer)
             || import.ParameterTypes.Contains(PrimitiveType.NativeUtf8ZPointer)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeWindowHandle)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeNullPointer)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeModuleHandle)
             || import.ParameterTypes.Contains(PrimitiveType.NativeCallbackAddress)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeWindowClassExAddress)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeWindowMessageAddress)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeStorageAddress)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeComInterfaceOutputAddress)
-            || (!import.ParameterContracts.IsDefault && import.ParameterContracts.Contains(
-                NativeImportParameterContract.OwnedNativeComInterfaceOutput));
+            || import.ParameterTypes.Contains(PrimitiveType.NativeStorageAddress);
         if (!hasRestrictedContract)
         {
             return import.ParameterContracts.IsDefaultOrEmpty;
@@ -173,16 +56,6 @@ public sealed class NativeImportCatalog
                 }
                 continue;
             }
-            if (type == PrimitiveType.NativeComInterfaceOutputAddress
-                || import.ParameterContracts[index] == NativeImportParameterContract.OwnedNativeComInterfaceOutput)
-            {
-                if (type != PrimitiveType.NativeComInterfaceOutputAddress
-                    || import.ParameterContracts[index] != NativeImportParameterContract.OwnedNativeComInterfaceOutput)
-                {
-                    return false;
-                }
-                continue;
-            }
             var expected = type switch {
                 PrimitiveType.NativeUtf16ZPointer =>
                     NativeStorageParameterContract.TryGetParameter(import, index, out var utf16Storage)
@@ -190,16 +63,6 @@ public sealed class NativeImportCatalog
                         ? NativeStorageParameterContract.ExpectedParameterContract(import, index)
                         : NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
                 PrimitiveType.NativeUtf8ZPointer => NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
-                PrimitiveType.NativeWindowHandle =>
-                    NativeWindowMessageContract.ExpectedHandleParameterContract(import, index)
-                        ?? NativeWindowCreationContract.ExpectedHandleParameterContract(import, index)
-                        ?? NativeImportParameterContract.NoOwnerWindowHandle,
-                PrimitiveType.NativeNullPointer => NativeImportParameterContract.NullPointerOnly,
-                PrimitiveType.NativeModuleHandle => NativeImportParameterContract.CurrentModuleHandleNoEscape,
-                PrimitiveType.NativeWindowClassExAddress =>
-                    NativeImportParameterContract.RegisteredWindowClassDescriptorNoEscape,
-                PrimitiveType.NativeWindowMessageAddress =>
-                    NativeWindowMessageContract.ExpectedMessageAddressParameterContract(import, index),
                 PrimitiveType.NativeStorageAddress =>
                     NativeStorageParameterContract.ExpectedParameterContract(import, index),
                 _ => NativeImportParameterContract.Value,
@@ -214,38 +77,16 @@ public sealed class NativeImportCatalog
 
     internal NativeImportCatalog(string identity, ImmutableArray<NativeImportDefinition> imports,
         bool isForTesting = false,
-        ImmutableArray<NativeComInterfaceDefinition> comInterfaces = default,
-        ImmutableArray<NativeComOwnerDefinition> comOwners = default,
-        ImmutableArray<NativeComMethodDefinition> comMethods = default,
-        ImmutableArray<(string Source, string Target)> comBaseEdges = default,
-        ImmutableArray<NativeComSignatureTypeDefinition> comSignatureTypes = default,
         ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default,
         ImmutableArray<NativeStorageRecordLayoutDefinition> nativeStorageRecordLayouts = default,
         ImmutableArray<NativeAggregateStorageLayoutDefinition> aggregateStorageLayouts = default)
     {
-        var hasComMetadata = !comInterfaces.IsDefault || !comOwners.IsDefault
-            || !comMethods.IsDefault || !comBaseEdges.IsDefault || !comSignatureTypes.IsDefault;
-        if (string.IsNullOrWhiteSpace(identity) || imports.IsDefault
-            || (imports.IsEmpty && !isForTesting && !hasComMetadata))
+        if (string.IsNullOrWhiteSpace(identity) || imports.IsDefault)
         {
-            throw new ArgumentException(
-                "A native contract catalog requires an identity and at least one import or COM interface.",
+            throw new ArgumentException("A native contract catalog requires an identity and import data.",
                 nameof(identity));
         }
 
-        if (hasComMetadata && (comInterfaces.IsDefault || comOwners.IsDefault
-                || comMethods.IsDefault || comBaseEdges.IsDefault))
-        {
-            throw new ArgumentException("The native COM metadata is incomplete or inconsistent.",
-                nameof(comInterfaces));
-        }
-        var signatureTypes = comSignatureTypes.IsDefault ? [] : comSignatureTypes;
-        if (hasComMetadata && !NativeComCatalog.IsValid(
-            comInterfaces, comOwners, comMethods, comBaseEdges, imports, signatureTypes, out var failureReason))
-        {
-            throw new ArgumentException($"The native COM metadata is invalid: {failureReason}",
-                nameof(comInterfaces));
-        }
         var storageLayouts = fixedArrayStorageLayouts.IsDefault ? [] : fixedArrayStorageLayouts;
         if (storageLayouts.Any(static layout => layout is null
                 || string.IsNullOrWhiteSpace(layout.ElementTypeName)
@@ -314,30 +155,6 @@ public sealed class NativeImportCatalog
                     nameof(imports));
             }
         }
-        if (hasComMetadata && comMethods.Any(method => !method.StorageRecordParameters.IsDefaultOrEmpty
-                && (method.StorageRecordParameters.Select(static parameter => parameter?.ParameterIndex)
-                        .Distinct().Count() != method.StorageRecordParameters.Length
-                    || method.StorageRecordParameters.Any(parameter =>
-                        !NativeStorageRecordContract.IsValidComParameter(parameter, method, storageRecordLayouts))
-                    || method.StorageRecordParameters.Where(static parameter => parameter?.LoanGroup is not null)
-                        .GroupBy(static parameter => parameter!.LoanGroup, StringComparer.Ordinal)
-                        .Any(static group => group.Count() < 2))))
-        {
-            throw new ArgumentException("A COM storage-record parameter has no compatible selected layout.",
-                nameof(comMethods));
-        }
-        if (!hasComMetadata && imports.Any(static import => import is not null
-            && ((!import.ParameterTypes.IsDefault
-                    && import.ParameterTypes.Contains(PrimitiveType.NativeComInterfaceOutputAddress))
-                || !import.ParameterContracts.IsDefault
-                    && import.ParameterContracts.Contains(
-                        NativeImportParameterContract.OwnedNativeComInterfaceOutput)
-                || !import.ComOutputs.IsDefaultOrEmpty)))
-        {
-            throw new ArgumentException("Native COM output metadata requires matching COM catalog metadata.",
-                nameof(imports));
-        }
-
         var builder = ImmutableDictionary.CreateBuilder<string, NativeImportDefinition>(StringComparer.Ordinal);
         foreach (var import in imports)
         {
@@ -346,44 +163,17 @@ public sealed class NativeImportCatalog
                 || string.IsNullOrEmpty(import.ExportName) || import.ParameterTypes.IsDefault
                 || import.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.Char16
-                    or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeModuleHandle)
+                    or PrimitiveType.Char16)
                 || import.ParameterTypes.Any(static type => type is not (PrimitiveType.Int32
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.Char16 or PrimitiveType.NativeModuleHandle
-                    or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeWindowHandle
+                    or PrimitiveType.Char16
+                    or PrimitiveType.NativeUtf16ZPointer
                     or PrimitiveType.NativeUtf8ZPointer
                     or PrimitiveType.NativeCallbackAddress
-                    or PrimitiveType.NativeNullPointer
-                    or PrimitiveType.NativeWindowClassExAddress
-                    or PrimitiveType.NativeWindowMessageAddress
-                    or PrimitiveType.NativeComInterfaceOutputAddress
                     or PrimitiveType.NativeStorageAddress))
-                || (NativeWindowsModulePathContract.IsReservedImport(import)
-                    && (isForTesting
-                        || identity != NativeWindowClassContract.CatalogIdentity
-                        || !NativeWindowsModulePathContract.MatchesImport(import)))
-                || (NativeWindowCreationContract.IsReservedImport(import)
-                    && (isForTesting || identity != NativeWindowCreationContract.CatalogIdentity
-                        || !NativeWindowCreationContract.MatchesImport(import)))
-                || (NativeWindowClassContract.IsReservedImport(import)
-                    && (isForTesting || identity != NativeWindowClassContract.CatalogIdentity
-                        || !NativeWindowClassContract.MatchesImport(import)))
-                || (NativeWindowMessageContract.IsReservedImport(import)
-                    && (isForTesting || identity != NativeWindowMessageContract.CatalogIdentity
-                        || !NativeWindowMessageContract.MatchesImport(import)))
-                || (import.ResultContract != NativeImportResultContract.Value
-                    && !(!isForTesting && identity == NativeWindowCreationContract.CatalogIdentity
-                        && (NativeWindowCreationContract.MatchesImport(import)
-                            || NativeWindowClassContract.MatchesImport(import))))
                 || !import.RequiresUnsafeCaller
-                || ((import.Key == NativeWindowLifetimeContract.ImportKey
-                        || NativeWindowLifetimeContract.MatchesIdentity(import)
-                        || (!import.CallbackParameters.IsDefaultOrEmpty
-                            && import.CallbackParameters.Any(static parameter => parameter is not null
-                                && parameter.Lifetime == NativeCallbackLifetime.RetainedUntilCallReturns)))
-                    && (!isForTesting || !NativeWindowLifetimeContract.MatchesImport(import)))
-                || !ValidParameterContracts(import, isForTesting)
+                || import.ResultContract != NativeImportResultContract.Value
+                || !ValidParameterContracts(import)
                 || import.DeploymentPolicy is not (NativeImportDeploymentPolicy.System32
                     or NativeImportDeploymentPolicy.ApplicationDirectory)
                 || builder.ContainsKey(import.Key))
@@ -409,37 +199,12 @@ public sealed class NativeImportCatalog
         IsForTesting = isForTesting;
         _imports = builder.ToImmutable();
         _callbackTypeNames = callbackTypeNames.ToImmutable();
-        _comInterfaces = (comInterfaces.IsDefault ? [] : comInterfaces)
-            .ToImmutableDictionary(static definition => definition.NominalIdentity, StringComparer.Ordinal);
-        _comOwners = (comOwners.IsDefault ? [] : comOwners)
-            .ToImmutableDictionary(static definition => definition.BoundOwnerName, StringComparer.Ordinal);
-        _comMethods = (comMethods.IsDefault ? [] : comMethods)
-            .ToImmutableDictionary(static definition => definition.Identity, StringComparer.Ordinal);
-        ComInterfaces = comInterfaces.IsDefault ? [] : comInterfaces;
-        ComOwners = comOwners.IsDefault ? [] : comOwners;
-        ComMethods = comMethods.IsDefault ? [] : comMethods;
-        ComBaseEdges = comBaseEdges.IsDefault ? [] : comBaseEdges;
-        ComSignatureTypes = signatureTypes;
         _fixedArrayStorageLayouts = storageLayouts;
         _storageRecordLayouts = storageRecordLayouts;
         _aggregateStorageLayouts = aggregateLayouts;
-        if ((Identity == NativeWindowCreationContract.CatalogIdentity
-                || _imports.Values.Any(NativeWindowCreationContract.IsReservedImport))
-            && !NativeWindowCreationContract.MatchesCatalog(this))
-        {
-            throw new ArgumentException("The Windows window-creation slice requires its exact direct imports.",
-                nameof(imports));
-        }
-        if ((Identity == NativeWindowMessageContract.CatalogIdentity
-                || _imports.Values.Any(NativeWindowMessageContract.IsReservedImport))
-            && !NativeWindowMessageContract.MatchesCatalog(this))
-        {
-            throw new ArgumentException("The Windows message-loop slice requires its exact direct imports.",
-                nameof(imports));
-        }
     }
 
-    /// <summary>Gets the immutable reviewed Windows x64 system-import catalog.</summary>
+    /// <summary>Gets an empty catalog for Windows x64 native source imports.</summary>
     public static NativeImportCatalog WindowsX64 => s_windowsX64;
 
     /// <summary>Gets the versioned identity of this catalog.</summary>
@@ -448,18 +213,6 @@ public sealed class NativeImportCatalog
     internal bool IsForTesting { get; }
 
     internal ImmutableArray<NativeImportDefinition> ImportDefinitions => [.. _imports.Values];
-
-    internal ImmutableArray<NativeComInterfaceDefinition> ComInterfaces { get; }
-
-    internal ImmutableArray<NativeComOwnerDefinition> ComOwners { get; }
-
-    internal ImmutableArray<NativeComMethodDefinition> ComMethods { get; }
-
-    internal bool SupportsNativeComContracts => !ComInterfaces.IsEmpty;
-
-    internal ImmutableArray<(string Source, string Target)> ComBaseEdges { get; }
-
-    internal ImmutableArray<NativeComSignatureTypeDefinition> ComSignatureTypes { get; }
 
     internal ImmutableArray<NativeFixedArrayStorageLayoutDefinition> FixedArrayStorageLayouts =>
         _fixedArrayStorageLayouts;
@@ -576,31 +329,10 @@ public sealed class NativeImportCatalog
                 && parameter.ElementStride == elementStride
                 && parameter.ElementAlignment == elementAlignment));
 
-    internal bool SupportsWindowClassInitialization =>
-        NativeWindowClassContract.MatchesCatalog(this);
-
-    internal bool SupportsWindowMessageLoop =>
-        NativeWindowMessageContract.MatchesCatalog(this);
-
     internal int ImportCount => _imports.Count;
 
     internal bool TryGetImport(string key, out NativeImportDefinition? definition)
         => _imports.TryGetValue(key, out definition);
-
-    internal static bool IsNullPointerParameter(NativeImportDefinition import, int parameter) =>
-        (uint)parameter < (uint)import.ParameterTypes.Length
-        && import.ParameterTypes[parameter] == PrimitiveType.NativeNullPointer
-        && !import.ParameterContracts.IsDefaultOrEmpty
-        && parameter < import.ParameterContracts.Length
-        && import.ParameterContracts[parameter] == NativeImportParameterContract.NullPointerOnly;
-
-    internal static bool IsNullPointerArgument(BoundExpression argument, BoundFunction target,
-        int parameter, BoundProgram program) =>
-        target.IsExternal && target.NativeImportKey is string key
-        && program.NativeImportCatalog is NativeImportCatalog catalog
-        && catalog.TryGetImport(key, out var import) && import is not null
-        && IsNullPointerParameter(import, parameter)
-        && argument is BoundConstant { Type: PrimitiveType.NativeNullPointer, Value: 0 };
 
     internal ImmutableHashSet<string> CallbackTypeNames => _callbackTypeNames;
 
@@ -623,36 +355,12 @@ public sealed class NativeImportCatalog
         return false;
     }
 
-    internal bool TryGetComInterface(string identity, out NativeComInterfaceDefinition? definition)
-        => _comInterfaces.TryGetValue(identity, out definition);
-
-    internal bool TryGetComOwner(string boundOwnerName, out NativeComOwnerDefinition? definition)
-        => _comOwners.TryGetValue(boundOwnerName, out definition);
-
-    internal bool TryGetComMethod(string identity, out NativeComMethodDefinition? definition)
-        => _comMethods.TryGetValue(identity, out definition);
-
-    internal bool IsComAssignable(string sourceIdentity, string targetIdentity) =>
-        NativeComCatalog.IsAssignable(sourceIdentity, targetIdentity, _comInterfaces);
-
-    internal bool IsComBaseEdgePermitted(string sourceIdentity, string targetIdentity) =>
-        NativeComCatalog.IsPermittedBaseEdge(sourceIdentity, targetIdentity, ComInterfaces, ComBaseEdges);
-
     internal bool SupportsParameterType(PrimitiveType type) =>
-        _imports.Values.Any(import => import.ParameterTypes.Contains(type))
-            || (type == PrimitiveType.NativeWindowHandle
-                && _imports.Values.Any(static import =>
-                    !import.CallbackParameters.IsDefaultOrEmpty
-                    && import.CallbackParameters.Any(static parameter => parameter is not null
-                        && parameter.Signature.ParameterTypes.Contains(PrimitiveType.NativeWindowHandle))));
+        _imports.Values.Any(import => import.ParameterTypes.Contains(type));
 
     internal bool MatchesFunction(BoundFunction function, NativeImportDefinition definition,
         ImmutableArray<BoundStruct> structures = default)
     {
-        if (NativeWindowsModulePathContract.IsReservedImport(definition))
-        {
-            return NativeWindowsModulePathContract.MatchesImportFunction(function, definition);
-        }
         if (!function.IsExternal || function.NativeImportKey != definition.Key
             || function.IsConstructor || function.IsClassConstructor
             || function.IsOperator || function.IsCleanup || function.PropertyName is not null
@@ -671,11 +379,7 @@ public sealed class NativeImportCatalog
         for (var parameter = 0; parameter < function.ParameterCount; parameter++)
         {
             var variable = function.Variables[parameter];
-            var isComOutput = definition.ParameterTypes[parameter]
-                == PrimitiveType.NativeComInterfaceOutputAddress;
-            if ((isComOutput
-                    ? !MatchesComOutput(variable, definition, parameter, structures)
-                    : variable.Type != definition.ParameterTypes[parameter] || variable.IsOut)
+            if (variable.Type != definition.ParameterTypes[parameter] || variable.IsOut
                 || variable.IsInit || variable.IsMutable
                 || (definition.ParameterTypes[parameter] == PrimitiveType.NativeUtf16ZPointer
                     && definition.ParameterContracts[parameter]
@@ -683,24 +387,6 @@ public sealed class NativeImportCatalog
                 || (definition.ParameterTypes[parameter] == PrimitiveType.NativeUtf8ZPointer
                     && definition.ParameterContracts[parameter]
                         != NativeImportParameterContract.ReadonlyUtf8ZNoEscape)
-                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeWindowHandle
-                    && definition.ParameterContracts[parameter]
-                        != (NativeWindowMessageContract.ExpectedHandleParameterContract(definition, parameter)
-                            ?? NativeWindowCreationContract.ExpectedHandleParameterContract(definition, parameter)
-                            ?? NativeImportParameterContract.NoOwnerWindowHandle))
-                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeNullPointer
-                    && !IsNullPointerParameter(definition, parameter))
-                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeModuleHandle
-                    && ((!NativeWindowClassContract.IsCurrentModuleHandleParameter(definition, parameter)
-                            && !NativeWindowCreationContract.IsCurrentModuleHandleParameter(definition, parameter))
-                        || definition.ParameterContracts[parameter]
-                            != NativeImportParameterContract.CurrentModuleHandleNoEscape))
-                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeWindowClassExAddress
-                    && (definition.Key != NativeWindowClassContract.RegisterClassExKey
-                        || definition.ParameterContracts[parameter]
-                            != NativeImportParameterContract.RegisteredWindowClassDescriptorNoEscape))
-                || (definition.ParameterTypes[parameter] == PrimitiveType.NativeWindowMessageAddress
-                    && !NativeWindowMessageContract.MatchesMessageAddressParameter(definition, parameter))
                 || (definition.ParameterTypes[parameter] == PrimitiveType.NativeCallbackAddress
                     && !NativeCallbackParameterContract.TryGetParameter(definition, parameter, out _)))
             {
@@ -711,53 +397,13 @@ public sealed class NativeImportCatalog
         return true;
     }
 
-    private bool MatchesComOutput(BoundVariable variable, NativeImportDefinition definition,
-        int parameter, ImmutableArray<BoundStruct> structures)
-    {
-        if (!variable.IsOut || variable.IsInit || variable.IsMutable || structures.IsDefault
-            || definition.ParameterContracts.IsDefault
-            || parameter >= definition.ParameterContracts.Length
-            || definition.ParameterContracts[parameter]
-                != NativeImportParameterContract.OwnedNativeComInterfaceOutput)
-        {
-            return false;
-        }
-
-        var program = new BoundProgram([], -1) {
-            Structures = structures,
-            NativeImportCatalog = this,
-        };
-        NativeComOwnerDefinition? owner;
-        try
-        {
-            owner = NativeComCallContract.Owner(variable.Type, program);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        return owner is not null
-            && owner.AcquisitionKind == NativeComOwnerAcquisitionKind.NativeImportOutput
-            && owner.AcquisitionIdentity == definition.Key
-            && (owner.OutputParameterIndex == parameter
-                || owner.AdditionalOutputParameterIndexes.Contains(parameter))
-            && definition.ComOutputs.Any(output => output.ParameterIndex == parameter
-                && output.InterfaceIdentity == owner.InterfaceIdentity
-                && output.Effects.HasFlag(NativeComEffects.AcquiresReference));
-    }
-
     internal static NativeImportCatalog CreateForTesting(string identity,
         ImmutableArray<NativeImportDefinition> imports,
-        ImmutableArray<NativeComInterfaceDefinition> comInterfaces = default,
-        ImmutableArray<NativeComOwnerDefinition> comOwners = default,
-        ImmutableArray<NativeComMethodDefinition> comMethods = default,
-        ImmutableArray<(string Source, string Target)> comBaseEdges = default,
-        ImmutableArray<NativeComSignatureTypeDefinition> comSignatureTypes = default,
         ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default,
         ImmutableArray<NativeStorageRecordLayoutDefinition> storageRecordLayouts = default,
         ImmutableArray<NativeAggregateStorageLayoutDefinition> aggregateStorageLayouts = default) =>
-        new(identity, imports, isForTesting: true, comInterfaces, comOwners, comMethods, comBaseEdges,
-            comSignatureTypes, fixedArrayStorageLayouts, storageRecordLayouts, aggregateStorageLayouts);
+        new(identity, imports, isForTesting: true, fixedArrayStorageLayouts,
+            storageRecordLayouts, aggregateStorageLayouts);
 }
 
 internal sealed record NativeImportAttributeDefinition(string FullyQualifiedName, int ArgumentCount,
@@ -772,15 +418,12 @@ internal sealed record NativeImportDefinition(string Key, string DllName, string
     internal ImmutableArray<NativeStorageParameterDefinition> StorageParameters { get; init; } = [];
     internal ImmutableArray<NativeAggregateStorageParameterDefinition> AggregateStorageParameters { get; init; } = [];
     internal ImmutableArray<NativeStorageRecordParameterDefinition> StorageRecordParameters { get; init; } = [];
-    internal ImmutableArray<NativeComOutputDefinition> ComOutputs { get; init; } = [];
     internal NativeImportResultContract ResultContract { get; init; }
 }
 
 internal enum NativeImportResultContract
 {
     Value,
-    CreatedWindowHandle,
-    CurrentModuleHandle,
 }
 
 internal enum NativeImportParameterContract
@@ -788,37 +431,10 @@ internal enum NativeImportParameterContract
     Value,
     ReadonlyUtf16ZNoEscape,
     ReadonlyUtf8ZNoEscape,
-    NoOwnerWindowHandle,
-    NullPointerOnly,
-    CreatedWindowHandleNoEscape,
-    CurrentModuleHandleNoEscape,
-    RegisteredWindowClassDescriptorNoEscape,
-    WritableWindowMessageNoEscape,
-    ReadonlyWindowMessageNoEscape,
-    WindowProcedureBorrowedHandle,
     /// <summary>Invokes synchronously without registering or retaining the callback.</summary>
-    NativeCallback,
+    NativeCallback = 11,
     ReadonlyNativeStorageNoEscape,
     WritableNativeStorageNoEscape,
-    OwnedNativeComInterfaceOutput,
-    NoOwnerOrCreatedWindowHandleNoEscape,
-}
-
-internal static class NativeWindowHandleContract
-{
-    internal const string TypeName = "Terrum.Interop.Windows.HWND";
-    internal const string NoOwnerMemberName = "NoOwner";
-}
-
-internal static class NativeWindowProcedureContract
-{
-    internal const string TypeName = "Terrum.Interop.Windows.WNDPROC";
-    internal static NativeCallbackSignatureDefinition CallbackSignature { get; } = new(
-        PrimitiveType.NativeCallbackAddress, PrimitiveType.Int64,
-        [PrimitiveType.NativeWindowHandle, PrimitiveType.UInt32, PrimitiveType.UInt64, PrimitiveType.Int64]);
-
-    internal static bool MatchesFunction(BoundFunction function) =>
-        NativeCallbackContract.MatchesFunction(function, CallbackSignature);
 }
 
 internal static class NativeUtf16ZContract

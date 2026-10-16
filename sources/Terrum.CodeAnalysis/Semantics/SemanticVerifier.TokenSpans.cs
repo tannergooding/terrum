@@ -229,8 +229,6 @@ public static partial class SemanticVerifier
                     Source(destination, conditional.WhenTrue, depth + 1);
                     Source(destination, conditional.WhenFalse, depth + 1);
                     break;
-                case BoundNativeNoOwner:
-                    break;
                 default:
                     throw InvalidEffect(expression.Span, "Ownership");
             }

@@ -125,61 +125,26 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
-    public void NativeComInterfaceRequiresUniqueIidAndValidBase()
+    public void RetiredNativeVTableContractKindsAreRejected()
     {
-        Create(Section(NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"))),
-            recordCount: 1, declaredCount: 1,
-            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
-            typeFlags: 12);
         Assert.Throws<InvalidDataException>(() => Create(
-            Section(NativeComInterface(Guid.Empty)), recordCount: 1, declaredCount: 1,
+            Section(Contract(0x1300_0001, 7, new byte[20])), recordCount: 1, declaredCount: 1,
             typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
             typeFlags: 12));
         Assert.Throws<InvalidDataException>(() => Create(
-            Section(NativeComInterface(Guid.NewGuid(), 2)), recordCount: 1, declaredCount: 1,
-            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
-            typeFlags: 12));
-        Assert.Throws<InvalidDataException>(() => Create(
-            Section(NativeComInterface(Guid.NewGuid())), recordCount: 1, declaredCount: 1,
-            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0));
-    }
-
-    [Test]
-    public void NativeComMethodRequiresUnsafeOwnerInterfaceAndRepresentableSlot()
-    {
-        var interfaceContract = NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"));
-        var methodContract = NativeComMethod(slot: 0, effects: 0);
-        Create(Section(interfaceContract, Effects(4), methodContract),
-            recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12);
-        Assert.Throws<InvalidDataException>(() => Create(
-            Section(interfaceContract, Effects(0), methodContract),
-            recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12));
-        Create(Section(interfaceContract, Effects(4), NativeComMethod(slot: 5, effects: 0)),
-            recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12);
-        Assert.Throws<InvalidDataException>(() => Create(
-            Section(interfaceContract, Effects(4), NativeComMethod(
-                slot: (uint)(int.MaxValue / NativeTargetProfile.PointerSize + 1), effects: 0)),
-            recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 1, typeFlags: 12));
-        Assert.Throws<InvalidDataException>(() => Create(
-            Section(interfaceContract, Effects(4), methodContract),
-            recordCount: 3, declaredCount: 3, typeFirst: 1, typeCount: 1,
-            methodFirst: 2, methodCount: 2, methodOwnerType: 0, typeFlags: 12));
+            Section(Contract(0x1600_0001, 8, new byte[8])), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            methodOwnerType: 1));
     }
 
     [Test]
     public void RemovedNativeComOwnerAndAcquisitionClausesAreRejected()
     {
         Assert.Throws<InvalidDataException>(() => Create(Section(
-                NativeComInterface(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff")),
-                NativeComOwner(1, 2), Cleanup(2), Effects()),
-            recordCount: 4, declaredCount: 4,
-            typeFirst: 1, typeCount: 1, methodFirst: 4, methodCount: 1,
-            typeFlags: 12, typeRows: 2, secondTypeFirst: 2, secondTypeCount: 2,
-            methodOwnerType: 2));
+                Contract(0x1300_0001, 9, new byte[4])),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
+            typeFlags: 12));
 
         var acquisition = Contract(0x1600_0001, 11, new byte[20]);
         Assert.Throws<InvalidDataException>(() => Create(Section(acquisition),
@@ -340,29 +305,6 @@ public sealed class TrRmContractTableReaderTests
         var data = new byte[4];
         Write(data, 0, mask);
         return Contract(0x1600_0001, 1, data);
-    }
-
-    private static byte[] NativeComInterface(Guid iid, uint baseTypeDefRow = 0)
-    {
-        var data = new byte[20];
-        _ = iid.TryWriteBytes(data.AsSpan(0, 16), bigEndian: true, out _);
-        Write(data, 16, baseTypeDefRow);
-        return Contract(0x1300_0001, 7, data);
-    }
-
-    private static byte[] NativeComMethod(uint slot, uint effects)
-    {
-        var data = new byte[8];
-        Write(data, 0, slot);
-        Write(data, 4, effects);
-        return Contract(0x1600_0001, 8, data);
-    }
-
-    private static byte[] NativeComOwner(uint interfaceTypeDefRow, uint ownerTypeDefRow = 1)
-    {
-        var data = new byte[4];
-        Write(data, 0, interfaceTypeDefRow);
-        return Contract(0x1300_0000u | ownerTypeDefRow, 9, data);
     }
 
     private static byte[] NativeParameter(uint ordinal, byte access, byte retention, uint extent)

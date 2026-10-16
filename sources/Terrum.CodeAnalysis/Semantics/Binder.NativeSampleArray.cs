@@ -29,7 +29,7 @@ internal sealed partial class Binder
                 SyntaxTokenElement { Token.Kind: TokenKind.Greater },
             ])
         {
-            Report("TRM3030", "InlineArray requires a native fixed-array layout admitted by the active catalog.",
+            Report("TRM3030", "InlineArray requires a selected native target profile.",
                 node.Span);
             return false;
         }
@@ -46,7 +46,8 @@ internal sealed partial class Binder
             return true;
         }
 
-        Report("TRM3030", "InlineArray must match an exact selected native fixed-array layout.", node.Span);
+        Report("TRM3030", "InlineArray must have a valid fixed-array layout under the selected target.",
+            node.Span);
         return false;
     }
 
@@ -56,7 +57,7 @@ internal sealed partial class Binder
         if (!NativeFixedArrayContract.TryGetLayout(arrayType, elementType, elementCount, _structs,
             _nativeImportCatalog, out var layout))
         {
-            Report("TRM3030", "The selected native fixed-array carrier has no admitted layout.", node.Span);
+            Report("TRM3030", "The fixed-array carrier has no valid layout.", node.Span);
             return ErrorExpression(node.Span);
         }
         var count = layout.ElementCount;
@@ -140,6 +141,41 @@ internal sealed partial class Binder
         return new BoundNativeStorageAddress(variable, index, layout.CarrierType, layout.ElementType,
             PrimitiveType.NativeUtf16ZPointer, layout.ElementCount, layout.ElementStride,
             layout.ByteExtent, IsReadonly: true, Span: span);
+    }
+
+    private BoundExpression BindNativeFixedArrayPointerAddress(SyntaxNode node,
+        PrimitiveType pointerType, TextSpan span)
+    {
+        if (node.Kind != SyntaxKind.IndexExpression
+            || !TryFindNativeFixedArrayLocal((SyntaxNode)node.Children[0], out var variable)
+            || _variables[variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout)
+        {
+            Report("TRM3030", "A native pointer address requires an admitted fixed-array element.", span);
+            return ErrorExpression(span);
+        }
+
+        var pointer = _nativePointerTypes[NativePointerTypes.Index(pointerType)];
+        if (pointer.PointeeType != layout.ElementType
+            || pointer.IsWritable && (!_variables[variable].IsMutable
+                || !NativeFixedArrayContract.AllowsMutableLocal(layout, _structs, _nativeImportCatalog)))
+        {
+            Report("TRM3030", "The fixed-array element does not match the native pointer access mode.", span);
+            return ErrorExpression(span);
+        }
+
+        var index = BindNativeFixedArrayIndex((SyntaxNode)node.Children[2], layout);
+        if (index is BoundConstant constant && (constant.Value < 0 || constant.Value >= layout.ElementCount))
+        {
+            Report("TRM3030", $"Fixed-array element index must be in [0, {layout.ElementCount}).", index.Span);
+        }
+        if (_unsafeDepth == 0)
+        {
+            Report("TRM3028", "Taking a native pointer address requires an explicit unsafe context.", span);
+        }
+
+        return new BoundNativeFixedArrayPointerAddress(variable, layout, index, pointerType, span) {
+            IsUnsafeAuthorized = _unsafeDepth != 0,
+        };
     }
 
     private BoundExpression BindNativeFixedArrayIndex(SyntaxNode node, BoundNativeFixedArrayLayout layout)

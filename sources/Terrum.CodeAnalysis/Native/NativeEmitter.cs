@@ -72,7 +72,8 @@ public static class NativeEmitter
             }
             if (function.DirectNativeImport is DirectNativeImport directImport)
             {
-                if (!DirectNativeImportContract.IsValid(function, program.Structures))
+                if (!DirectNativeImportContract.IsValid(function, program.Structures,
+                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
                 {
                     throw new ArgumentException("A direct native import does not retain its verified contract.",
                         nameof(program));
@@ -99,7 +100,7 @@ public static class NativeEmitter
             }
         }
 
-        if (bindings.Count == 0 && catalog?.SupportsCataloguedFixedArrayStorage != true)
+        if (bindings.Count == 0 && !HasNativeFixedArrayStorage(program))
         {
             throw new ArgumentException("The program contains no supported native imports.",
                 nameof(program));
@@ -185,7 +186,8 @@ public static class NativeEmitter
                 continue;
             }
             if (function.DirectNativeImport is not DirectNativeImport import
-                || !DirectNativeImportContract.IsValid(function, program.Structures))
+                || !DirectNativeImportContract.IsValid(function, program.Structures,
+                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
             {
                 throw new NotSupportedException(
                     "Direct-native JIT requires every external declaration to retain its direct import contract.");
@@ -242,10 +244,11 @@ public static class NativeEmitter
     private static Dictionary<int, NativeImportBinding> SelectImports(BoundProgram program,
         IReadOnlyList<NativeImportBinding> bindings, CancellationToken cancellationToken)
     {
-        if (bindings.Count > 1024 || (bindings.Count < 1
-            && program.NativeImportCatalog?.SupportsCataloguedFixedArrayStorage != true))
+        if (bindings.Count > 1024 || (bindings.Count == 0 && !HasNativeFixedArrayStorage(program)))
         {
-            throw new ArgumentException("Native consumers require 1 to 1024 explicit import bindings.", nameof(bindings));
+            throw new ArgumentException(
+                "Native consumers require 1 to 1024 explicit import bindings unless the program uses fixed-array storage.",
+                nameof(bindings));
         }
         var externals = new Dictionary<string, int>(bindings.Count, StringComparer.Ordinal);
         for (var index = 0; index < program.Functions.Length; index++)
@@ -278,6 +281,10 @@ public static class NativeEmitter
         }
         return selected;
     }
+
+    private static bool HasNativeFixedArrayStorage(BoundProgram program) =>
+        program.Functions.Any(static function =>
+            function.Variables.Any(static variable => variable.NativeFixedArrayLayout is not null));
 
     private static ImmutableArray<NativeImportBinding> UsedImports(NativeCode code,
         Dictionary<int, NativeImportBinding>? bindings)
@@ -432,7 +439,8 @@ public static class NativeEmitter
                 continue;
             }
             if (function.DirectNativeImport is not DirectNativeImport import
-                || !DirectNativeImportContract.IsValid(function, program.Structures))
+                || !DirectNativeImportContract.IsValid(function, program.Structures,
+                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
             {
                 throw new NotSupportedException(
                     "Native library packages currently require direct imports for every external declaration.");
@@ -457,7 +465,8 @@ public static class NativeEmitter
         {
             if (!directFunctions.TryGetValue(binding.FunctionName, out var function)
                 || function.DirectNativeImport is not DirectNativeImport import
-                || !DirectNativeImportContract.IsValid(function, program.Structures)
+                || !DirectNativeImportContract.IsValid(function, program.Structures,
+                    program.NativeFunctionPointerSignatures, program.NativePointerTypes)
                 || !StringComparer.OrdinalIgnoreCase.Equals(import.LibraryName, binding.DllName)
                 || import.ExportName != binding.ExportName)
             {
@@ -606,6 +615,10 @@ public static class NativeEmitter
             if (ManagedClassTypes.IsManaged(type) || TokenSpanContract.IsDependent(type, program.Structures))
             {
                 isPublic = false;
+            }
+            else if (NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
+            {
+                isPublic = true;
             }
             else if ((int)type < 100)
             {
@@ -1006,47 +1019,9 @@ internal sealed partial class PeCompiler
             {
                 maximumArguments = Math.Max(maximumArguments, function.ParameterCount);
             }
-            if (function.Intrinsic == BoundIntrinsic.NativeComVTableCall
-                && function.NativeComMethod is NativeComMethodDefinition comMethod
-                && NativeComCatalog.TryParseSignature(comMethod.Signature, out _, out var comParameters))
+            if (function.Intrinsic == BoundIntrinsic.NativeVTableCall)
             {
-                maximumArguments = Math.Max(maximumArguments, comParameters.Length);
-                var requiredSpills = comMethod.OutputParameterIndex >= 0 ? 1 : 0;
-                if (!function.NativeComHiddenParameters.IsDefaultOrEmpty)
-                {
-                    foreach (var parameter in function.NativeComHiddenParameters)
-                    {
-                        if (parameter.Kind == NativeComHiddenParameterKind.InterfaceIdAddress)
-                        {
-                            requiredSpills++;
-                        }
-                    }
-                }
-                if (!comMethod.ParameterAdaptations.IsDefaultOrEmpty)
-                {
-                    requiredSpills += comMethod.ParameterAdaptations.Count(
-                        static adaptation => adaptation.Kind
-                            == NativeComParameterAdaptationKind.SingleElementOwnerPointerArray);
-                    foreach (var adaptation in comMethod.ParameterAdaptations)
-                    {
-                        if (adaptation.Kind != NativeComParameterAdaptationKind.ValueArrayAddress)
-                        {
-                            continue;
-                        }
-                        if (!NativeComCatalog.TryGetValueArrayElementCount(adaptation.TargetType,
-                                out var elementCount)
-                            || _program.NativeImportCatalog is not NativeImportCatalog comCatalog
-                            || !NativeComCallContract.TryResolveBoundType(adaptation.SourceType,
-                                comCatalog, _program, allowVoid: false, out var elementType))
-                        {
-                            throw new InvalidOperationException(
-                                "A COM value-array adaptation has an invalid storage layout.");
-                        }
-                        var byteCount = checked(elementCount * Size(elementType));
-                        requiredSpills += (byteCount + 15) / 16;
-                    }
-                }
-                spillSlots = Math.Max(spillSlots, requiredSpills);
+                maximumArguments = Math.Max(maximumArguments, function.ParameterCount);
             }
             var outParameters = 0;
             foreach (var variable in function.Variables)
@@ -1076,10 +1051,8 @@ internal sealed partial class PeCompiler
                 slots[variable] = at;
                 at += function.Variables[variable].NativeFixedArrayLayout?.ByteExtent
                     ?? function.Variables[variable].NativeStorageRecordLayout?.ByteExtent
-                    ?? ((function.Variables[variable].Type is PrimitiveType.NativeWindowClassEx
-                            or PrimitiveType.NativeWindowMessage
-                        || (IsIndirect(function.Variables[variable].Type)
-                            && IsStruct(function.Variables[variable].Type)))
+                    ?? ((IsIndirect(function.Variables[variable].Type)
+                            && IsStruct(function.Variables[variable].Type))
                     ? Size(function.Variables[variable].Type) : (IsIndirect(function.Variables[variable].Type)
                     || function.Variables[variable].Type is PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView)
@@ -1204,6 +1177,11 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
             _code.UseFramePointer = true;
             var sourceHidden = _sourceDependent?[i] == true ? 2 : 0;
+            if (sourceHidden != 0 && function.NativeFunctionPointerType is not null)
+            {
+                throw new NotSupportedException(
+                    "A native-callable function cannot require an invocation-scoped source grant.");
+            }
             if (sourceHidden != 0)
             {
                 // RCX/RDX are volatile; preserve the complete context before emitting any calls.
@@ -1256,9 +1234,18 @@ internal sealed partial class PeCompiler
                 var type = function.Variables[slot].Type;
                 if (abiArgument < 4)
                 {
-                    _code.StoreRegister(abiArgument, Slot(slot),
-                        IsStruct(type) || IsWide(type) || function.Variables[slot].IsOut
-                            || function.Variables[slot].IsImplicitRef);
+                    if (function.NativeFunctionPointerType is not null
+                        && type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                    {
+                        _code.StoreFloatingRegister(abiArgument, Slot(slot),
+                            type == PrimitiveType.Float64);
+                    }
+                    else
+                    {
+                        _code.StoreRegister(abiArgument, Slot(slot),
+                            IsStruct(type) || IsWide(type) || function.Variables[slot].IsOut
+                                || function.Variables[slot].IsImplicitRef);
+                    }
                 }
                 else
                 {
@@ -1310,21 +1297,9 @@ internal sealed partial class PeCompiler
                 {
                     EmitManagedClassFactory(function);
                 }
-                else if (function.Intrinsic == BoundIntrinsic.NativeComVTableCall)
+                else if (function.Intrinsic == BoundIntrinsic.NativeVTableCall)
                 {
-                    EmitNativeComMethodFunction(function);
-                }
-                else if (function.Intrinsic == BoundIntrinsic.NativeComOwnerClose)
-                {
-                    EmitNativeComOwnerClose(function);
-                }
-                else if (function.Intrinsic == BoundIntrinsic.NativeComOwnerTryClone)
-                {
-                    EmitNativeComOwnerTryClone(function);
-                }
-                else if (NativeWindowMessageContract.IsAccessorFunction(function))
-                {
-                    EmitNativeWindowMessageAccessor(function);
+                    EmitNativeVTableMethodFunction(function);
                 }
                 else if (function.Intrinsic >= BoundIntrinsic.NodeTryCreate)
                 {
@@ -1612,22 +1587,21 @@ internal sealed partial class PeCompiler
                 return fixedArraySpills;
             case BoundNativeFixedArrayElement fixedArrayElement:
                 return ExpressionSpills(fixedArrayElement.Index, ref maximumArguments);
+            case BoundNativeFixedArrayPointerAddress pointerAddress:
+                return ExpressionSpills(pointerAddress.Index, ref maximumArguments);
             case BoundNativeFixedArrayWrite fixedArrayWrite:
                 return Math.Max(2, Math.Max(1 + ExpressionSpills(fixedArrayWrite.Index, ref maximumArguments),
                     1 + ExpressionSpills(fixedArrayWrite.Value, ref maximumArguments)));
             case BoundNativeStorageAddress address:
                 return ExpressionSpills(address.Index, ref maximumArguments);
+            case BoundNativePointerAddress:
+                return 0;
+            case BoundNativePointerRead pointerRead:
+                return ExpressionSpills(pointerRead.Pointer, ref maximumArguments);
+            case BoundNativePointerWrite pointerWrite:
+                return Math.Max(2, Math.Max(1 + ExpressionSpills(pointerWrite.Pointer, ref maximumArguments),
+                    1 + ExpressionSpills(pointerWrite.Value, ref maximumArguments)));
             case BoundNativeStorageRecordInitialization:
-                return 0;
-            case BoundNativeMappedByteRead mappedByte:
-                return ExpressionSpills(mappedByte.Index, ref maximumArguments);
-            case BoundNativeWindowClassExInitialization windowClass:
-                return Math.Max(ExpressionSpills(windowClass.Instance, ref maximumArguments),
-                    ExpressionSpills(windowClass.ClassName, ref maximumArguments));
-            case BoundNativeWindowClassExAddress:
-                return 0;
-            case BoundNativeWindowMessageInitialization:
-            case BoundNativeWindowMessageAddress:
                 return 0;
             case BoundUnary unary:
                 return ExpressionSpills(unary.Operand, ref maximumArguments);
@@ -1677,8 +1651,6 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundIsVariablePattern pattern:
                 return ExpressionSpills(pattern.Value, ref maximumArguments);
-            case BoundNativeWindowHandleIsNoOwner handleTest:
-                return ExpressionSpills(handleTest.Handle, ref maximumArguments);
             case BoundIsInitialized:
                 return 0;
             case BoundFieldRead field:
@@ -1726,6 +1698,18 @@ internal sealed partial class PeCompiler
                     }
                 }
                 return maximum;
+            case BoundIndirectCall call:
+                maximumArguments = Math.Max(maximumArguments, call.Arguments.Length);
+                var indirectCallSpills = call.Arguments.Length + 1;
+                var maximumIndirectCallSpills = indirectCallSpills;
+                maximumIndirectCallSpills = Math.Max(maximumIndirectCallSpills,
+                    indirectCallSpills + ExpressionSpills(call.Target, ref maximumArguments));
+                foreach (var argument in call.Arguments)
+                {
+                    maximumIndirectCallSpills = Math.Max(maximumIndirectCallSpills,
+                        indirectCallSpills + ExpressionSpills(argument, ref maximumArguments));
+                }
+                return maximumIndirectCallSpills;
             default:
                 return 0;
         }
@@ -1923,9 +1907,6 @@ internal sealed partial class PeCompiler
                     VisitExpression(binary.Left);
                     VisitExpression(binary.Right);
                     break;
-                case BoundNativeWindowHandleIsNoOwner handleTest:
-                    VisitExpression(handleTest.Handle);
-                    break;
                 case BoundNativeFixedArrayInitialization fixedArray:
                     foreach (var element in fixedArray.Elements)
                     {
@@ -1935,6 +1916,10 @@ internal sealed partial class PeCompiler
                 case BoundNativeFixedArrayElement fixedArrayElement:
                     VisitExpression(fixedArrayElement.Index);
                     break;
+                case BoundNativeFixedArrayPointerAddress pointerAddress:
+                    _ = variables.Add(pointerAddress.Variable);
+                    VisitExpression(pointerAddress.Index);
+                    break;
                 case BoundNativeFixedArrayWrite fixedArrayWrite:
                     VisitExpression(fixedArrayWrite.Index);
                     VisitExpression(fixedArrayWrite.Value);
@@ -1942,21 +1927,22 @@ internal sealed partial class PeCompiler
                 case BoundNativeStorageAddress address:
                     VisitExpression(address.Index);
                     break;
+                case BoundNativePointerAddress address:
+                    _ = variables.Add(address.Variable);
+                    break;
+                case BoundNativePointerRead pointerRead:
+                    VisitExpression(pointerRead.Pointer);
+                    break;
+                case BoundNativePointerWrite pointerWrite:
+                    VisitExpression(pointerWrite.Pointer);
+                    VisitExpression(pointerWrite.Value);
+                    break;
                 case BoundNativeStorageRecordInitialization record:
                     VisitExpression(record.DataSource);
                     foreach (var field in record.Fields)
                     {
                         VisitExpression(field);
                     }
-                    break;
-                case BoundNativeWindowClassExInitialization windowClass:
-                    VisitExpression(windowClass.Instance);
-                    VisitExpression(windowClass.ClassName);
-                    break;
-                case BoundNativeWindowClassExAddress:
-                    break;
-                case BoundNativeWindowMessageInitialization:
-                case BoundNativeWindowMessageAddress:
                     break;
                 case BoundConditional conditional:
                     VisitExpression(conditional.Condition);
@@ -2107,14 +2093,11 @@ internal sealed partial class PeCompiler
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
             or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-            or PrimitiveType.NativeWindowHandle
             or PrimitiveType.NativeCallbackAddress
-            or PrimitiveType.NativeNullPointer
             or PrimitiveType.NativeRawPointer
-            or PrimitiveType.NativeModuleHandle or PrimitiveType.NativeStorageAddress
-            or PrimitiveType.NativeWindowClassExAddress
-            or PrimitiveType.NativeWindowMessageAddress
-            or PrimitiveType.NativeComInterfaceOutputAddress
+            or PrimitiveType.NativeStorageAddress
+            || NativePointerTypes.IsType(type)
+            || NativeFunctionPointerTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
@@ -2878,14 +2861,6 @@ internal sealed partial class PeCompiler
                 {
                     EmitNativeStorageRecord(local.Variable, record);
                 }
-                else if (local.Initializer is BoundNativeWindowClassExInitialization windowClass)
-                {
-                    EmitNativeWindowClassEx(local.Variable, windowClass);
-                }
-                else if (local.Initializer is BoundNativeWindowMessageInitialization)
-                {
-                    EmitNativeWindowMessage(local.Variable);
-                }
                 else
                 {
                     Expression(local.Initializer, 0);
@@ -3320,6 +3295,11 @@ internal sealed partial class PeCompiler
                     _code.Byte(0x90); // call-site continuation must not start at an unwind epilog
                 }
                 UnregisterManagedRoots(_currentFunction);
+                if (currentFunction.NativeFunctionPointerType is not null
+                    && currentFunction.ReturnType is PrimitiveType.Float32 or PrimitiveType.Float64)
+                {
+                    _code.MoveFloatingReturnFromAccumulator(currentFunction.ReturnType == PrimitiveType.Float64);
+                }
                 Epilog();
                 break;
             case BoundTryFinally cleanup:
@@ -3593,42 +3573,38 @@ internal sealed partial class PeCompiler
             case BoundNativeFixedArrayElement fixedArrayElement:
                 EmitNativeFixedArrayElement(fixedArrayElement, spill);
                 break;
+            case BoundNativeFixedArrayPointerAddress pointerAddress:
+                EmitNativeFixedArrayPointerAddress(pointerAddress, spill);
+                break;
             case BoundNativeFixedArrayWrite fixedArrayWrite:
                 EmitNativeFixedArrayWrite(fixedArrayWrite, spill);
                 break;
             case BoundNativeStorageAddress address:
                 EmitNativeStorageAddress(address, spill);
                 break;
+            case BoundNativePointerAddress address:
+                EmitNativePointerAddress(address);
+                break;
+            case BoundNativePointerRead pointerRead:
+                EmitNativePointerRead(pointerRead, spill);
+                break;
+            case BoundNativePointerWrite pointerWrite:
+                EmitNativePointerWrite(pointerWrite, spill);
+                break;
             case BoundNativeStorageRecordInitialization:
                 throw new ArgumentException("Native storage record initialization is local-only.",
                     nameof(expression));
-            case BoundNativeMappedByteRead mappedByte:
-                EmitNativeMappedByteRead(mappedByte, spill);
-                break;
-            case BoundNativeWindowClassExAddress address:
-                _code.Address(Slot(address.Variable));
-                break;
-            case BoundNativeWindowMessageAddress address:
-                _code.Address(Slot(address.Variable));
-                break;
-            case BoundNativeWindowClassExInitialization:
-                throw new ArgumentException("WNDCLASSEXW initialization is local-only.", nameof(expression));
-            case BoundNativeWindowMessageInitialization:
-                throw new ArgumentException("MSG initialization is local-only.", nameof(expression));
-            case BoundNativeNoOwner:
-                _code.Bytes(0x31, 0xC0); // xor eax,eax
-                break;
             case BoundNativeCallbackAddress callback:
                 _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+callback]
                 var callbackAddress = _code.Position;
                 _code.Int32(0);
                 _functionAddressFixups.Add((callbackAddress, callback.Function));
                 break;
-            case BoundNativeWindowHandleIsNoOwner handleTest:
-                Expression(handleTest.Handle, spill);
-                _code.Bytes(0x48, 0x85, 0xC0); // test rax,rax
-                _code.Bytes(0x0F, handleTest.IsNegated ? (byte)0x95 : (byte)0x94, 0xC0); // setne/sete al
-                _code.Bytes(0x0F, 0xB6, 0xC0); // movzx eax,al
+            case BoundNativeFunctionAddress address:
+                _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+function]
+                var functionAddress = _code.Position;
+                _code.Int32(0);
+                _functionAddressFixups.Add((functionAddress, address.Function));
                 break;
             case BoundConstant constant:
                 if (constant.Type == PrimitiveType.NativeUtf16ZPointer)
@@ -4179,6 +4155,44 @@ internal sealed partial class PeCompiler
             case BoundUnsafeExpression unsafeExpression:
                 Expression(unsafeExpression.Expression, spill);
                 break;
+            case BoundIndirectCall call:
+                var argumentBase = spill + 1;
+                var argumentExpressionSpill = argumentBase + call.Arguments.Length;
+                Expression(call.Target, argumentExpressionSpill);
+                StoreValue(Spill(spill), call.Target.Type);
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    Expression(call.Arguments[i], argumentExpressionSpill);
+                    StoreValue(Spill(argumentBase + i), call.Arguments[i].Type);
+                }
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    var argumentType = call.Arguments[i].Type;
+                    LoadValue(Spill(argumentBase + i), argumentType);
+                    if (i < 4)
+                    {
+                        if (argumentType is PrimitiveType.Float32 or PrimitiveType.Float64)
+                        {
+                            _code.MoveFloatingArgument(i, argumentType == PrimitiveType.Float64);
+                        }
+                        else
+                        {
+                            _code.MoveArgument(i, IsWide(argumentType));
+                        }
+                    }
+                    else
+                    {
+                        _code.StoreOutgoing64(32 + (8 * (i - 4)));
+                    }
+                }
+                _code.Load64(Spill(spill));
+                _code.Bytes(0x49, 0x89, 0xC3); // mov r11,rax
+                _code.Bytes(0x41, 0xFF, 0xD3); // call r11
+                if (call.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                {
+                    _code.MoveFloatingReturnToAccumulator(call.Type == PrimitiveType.Float64);
+                }
+                break;
             case BoundCall call:
                 var argumentsBase = spill + CallResultSpills(call);
                 var argumentSpills = new int[call.Arguments.Length];
@@ -4314,6 +4328,8 @@ internal sealed partial class PeCompiler
                 var hiddenReturn = IsIndirect(call.Type) ? 1 : 0;
                 var sourceHidden = _sourceDependent?[call.Function] == true ? 2 : 0;
                 var hidden = hiddenReturn + sourceHidden;
+                var nativeAbi = _program.Functions[call.Function].IsExternal
+                    || _program.Functions[call.Function].NativeFunctionPointerType is not null;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
                     var argumentIndex = call.ArgumentIndex(i);
@@ -4342,11 +4358,19 @@ internal sealed partial class PeCompiler
                     {
                         LoadValue(Spill(argumentSpills[argumentIndex]), call.Arguments[argumentIndex].Type);
                     }
-                    _code.MoveArgument(i + hidden,
-                        IsImplicitReferenceArgument(call, argumentIndex)
-                            || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
-                            or BoundFieldLoan or BoundMutableFieldLoan
-                            || IsStruct(call.Arguments[argumentIndex].Type) || IsWide(call.Arguments[argumentIndex].Type));
+                    var argumentType = call.Arguments[argumentIndex].Type;
+                    var isAddress = IsImplicitReferenceArgument(call, argumentIndex)
+                        || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan
+                            or BoundMutableReceiverLoan or BoundFieldLoan or BoundMutableFieldLoan;
+                    if (nativeAbi && !isAddress
+                        && argumentType is PrimitiveType.Float32 or PrimitiveType.Float64)
+                    {
+                        _code.MoveFloatingArgument(i + hidden, argumentType == PrimitiveType.Float64);
+                    }
+                    else
+                    {
+                        _code.MoveArgument(i + hidden, isAddress || IsStruct(argumentType) || IsWide(argumentType));
+                    }
                 }
                 if (sourceHidden != 0)
                 {
@@ -4361,6 +4385,10 @@ internal sealed partial class PeCompiler
                     _code.MoveArgument(0, true);
                 }
                 EmitTargetCall(call.Function);
+                if (nativeAbi && call.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                {
+                    _code.MoveFloatingReturnToAccumulator(call.Type == PrimitiveType.Float64);
+                }
                 if (hiddenReturn != 0)
                 {
                     _code.Address(Spill(spill));
@@ -4372,7 +4400,6 @@ internal sealed partial class PeCompiler
                 }
                 if (hasOut)
                 {
-                    var nativeComOutputs = NativeImportComOutputs(call);
                     var conditionalOutputs = call.Type == PrimitiveType.Bool;
                     var skip = -1;
                     if (conditionalOutputs)
@@ -4388,7 +4415,6 @@ internal sealed partial class PeCompiler
                     {
                         if (call.Arguments[i] is BoundOutArgument output)
                         {
-                            var nativeComOutput = NativeImportComOutput(nativeComOutputs, call, i);
                             var scratch = Spill(auxiliarySpills[i]);
                             var destination = _program.Functions[_currentFunction].Variables[output.Variable].IsOut
                                 ? OutSlot(output.Variable) : Slot(output.Variable);
@@ -4396,7 +4422,7 @@ internal sealed partial class PeCompiler
                             {
                                 _code.Address(scratch);
                                 CopyToFrame(destination, Size(output.Type));
-                                if (IsUnique(output.Type) && nativeComOutput is null)
+                                if (IsUnique(output.Type))
                                 {
                                     _code.Set(_liveSlots[_currentFunction][output.Variable]);
                                 }
@@ -4416,28 +4442,12 @@ internal sealed partial class PeCompiler
                             {
                                 SetManagedRoot(destination, active: true);
                             }
-                            if (IsUnique(output.Type) && nativeComOutput is null)
+                            if (IsUnique(output.Type))
                             {
                                 _code.Set(_liveSlots[_currentFunction][output.Variable]);
                             }
                             SetInitializationFlag(output.Variable, initialized: true);
                         }
-                    }
-                    for (var i = 0; i < call.Arguments.Length; i++)
-                    {
-                        if (call.Arguments[i] is BoundOutArgument output
-                            && NativeImportComOutput(nativeComOutputs, call, i) is NativeComOutputDefinition nativeComOutput
-                            && IsUnique(output.Type))
-                        {
-                            EmitNativeImportComOutputOwnership(output.Variable, output.Type, nativeComOutput,
-                                Spill(spill));
-                        }
-                    }
-                    if (call.Type == PrimitiveType.Int32
-                        && nativeComOutputs.Any(static output =>
-                            output.Effects.HasFlag(NativeComEffects.SignedHResult)))
-                    {
-                        EmitNativeImportComOutputSuccessValidation(call, nativeComOutputs, Spill(spill));
                     }
                     if (conditionalOutputs)
                     {
@@ -5659,6 +5669,20 @@ internal sealed class MachineCode
         }
         Int32(offset);
     }
+    internal void StoreFloatingRegister(int argument, int offset, bool wide)
+    {
+        if (argument is < 0 or > 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(argument));
+        }
+        Byte(0x66);
+        if (wide)
+        {
+            Byte(0x48);
+        }
+        Bytes(0x0F, wide ? (byte)0xD6 : (byte)0x7E, (byte)(0x85 + (argument << 3)));
+        Int32(offset);
+    }
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Stack arguments are handled by the caller; only the first four use registers.")]
     internal void MoveArgument(int argument, bool wide)
     {
@@ -5708,6 +5732,15 @@ internal sealed class MachineCode
             Byte(0x48);
         }
         Bytes(0x0F, 0x7E, 0xC0);
+    }
+    internal void MoveFloatingReturnFromAccumulator(bool wide)
+    {
+        Byte(0x66);
+        if (wide)
+        {
+            Byte(0x48);
+        }
+        Bytes(0x0F, 0x6E, 0xC0);
     }
     internal byte[] ToArray() => [.. _bytes];
 }

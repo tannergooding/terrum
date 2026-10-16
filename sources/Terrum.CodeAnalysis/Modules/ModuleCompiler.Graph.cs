@@ -79,6 +79,9 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Graph type origin tables differ from selected providers.");
         }
+        var nativeFunctionPointerSignatures =
+            MergeNativeFunctionPointerSignatures(references, out var functionPointerMappings,
+                out var nativePointerMappings);
         var functionCount = 0;
         for (var provider = 0; provider < references.Count; provider++)
         {
@@ -95,8 +98,12 @@ public static partial class ModuleCompiler
         }
         var types = ImmutableArray.CreateBuilder<BoundStruct>();
         var functionNames = new HashSet<string>(functionCount, StringComparer.Ordinal);
-        var originals = new Dictionary<string, (BoundStruct Type, ImmutableArray<BoundStruct> Table, string? Origin)>(
-            StringComparer.Ordinal);
+        var originals = new Dictionary<string, (BoundStruct Type, ImmutableArray<BoundStruct> Table,
+            string? Origin, ImmutableArray<PrimitiveType> FunctionPointerMapping,
+            ImmutableArray<PrimitiveType> NativePointerMapping,
+            ImmutableArray<NativePointerTypeDefinition> NativePointerTypes,
+            ImmutableArray<NativeFunctionPointerSignatureDefinition> FunctionPointerSignatures)>(
+                StringComparer.Ordinal);
         for (var provider = 0; provider < references.Count; provider++)
         {
             var reference = references[provider];
@@ -106,13 +113,17 @@ public static partial class ModuleCompiler
                 if (originals.TryGetValue(structure.Name, out var existing))
                 {
                     if (origin is null || existing.Origin is null || origin != existing.Origin
-                        || !SameStructure(structure, existing.Type, reference.Structures, existing.Table))
+                        || !SameStructure(structure, existing.Type, reference.Structures, existing.Table,
+                            reference.NativeFunctionPointerSignatures, existing.FunctionPointerSignatures,
+                            reference.NativePointerTypes, existing.NativePointerTypes))
                     {
                         throw new ModuleContractException($"Ambiguous graph type '{structure.Name}'.");
                     }
                     continue;
                 }
-                originals.Add(structure.Name, (structure, reference.Structures, origin));
+                originals.Add(structure.Name, (structure, reference.Structures, origin,
+                    functionPointerMappings[provider], nativePointerMappings[provider],
+                    reference.NativePointerTypes, reference.NativeFunctionPointerSignatures));
                 types.Add(structure);
             }
         }
@@ -120,23 +131,35 @@ public static partial class ModuleCompiler
         for (var index = 0; index < types.Count; index++)
         {
             var original = originals[types[index].Name];
-            types[index] = RemapStructure(original.Type, original.Table, types, destinationTypes);
+            types[index] = RemapNativeFunctionPointerTypes(
+                RemapNativePointerTypes(
+                    RemapStructure(original.Type, original.Table, types, destinationTypes),
+                    original.NativePointerMapping),
+                original.FunctionPointerMapping);
         }
         var combined = types.ToImmutable();
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(functionCount);
-        foreach (var reference in references)
+        for (var provider = 0; provider < references.Count; provider++)
         {
+            var reference = references[provider];
             foreach (var function in reference.Functions)
             {
                 if (originals.ContainsKey(function.Name) || !functionNames.Add(function.Name))
                 {
                     throw new ModuleContractException($"Ambiguous graph export '{function.Name}'.");
                 }
-                functions.Add(RemapFunction(function, reference.Structures, combined,
-                    destinationTypes: destinationTypes));
+                functions.Add(RemapNativeFunctionPointerTypes(
+                    RemapNativePointerTypes(
+                        RemapFunction(function, reference.Structures, combined, destinationTypes: destinationTypes),
+                        nativePointerMappings[provider]),
+                    functionPointerMappings[provider]));
             }
         }
-        return new CompilationReference(combined, functions.MoveToImmutable(), references[0].RuntimePolicy);
+        var nativePointerTypes = MergeNativePointerTypeDefinitions(references, combined,
+            nativePointerMappings, functionPointerMappings);
+        return new CompilationReference(combined, functions.MoveToImmutable(), references[0].RuntimePolicy,
+            nativeFunctionPointerSignatures: nativeFunctionPointerSignatures,
+            nativePointerTypes: nativePointerTypes);
     }
 
     /// <summary>Stores a verified DLL implementation with symbolic imports and no fabricated entry point.</summary>
@@ -153,6 +176,13 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Module contains an unsupported caller-unsafe member contract.");
         }
         SemanticVerifier.VerifyLibraryReferences(program);
+        _ = MapNativeFunctionPointerTypes(
+            program.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
+            program.Structures, dependencies.Structures, program.NativePointerTypes,
+            dependencies.NativePointerTypes);
+        _ = MapNativePointerTypes(program.NativePointerTypes, program.Structures,
+            program.NativeFunctionPointerSignatures, dependencies.NativePointerTypes,
+            dependencies.Structures, dependencies.NativeFunctionPointerSignatures);
         if (program.EntryPoint != -1 || program.RequiresSourceGrant || !program.Buffers.IsDefaultOrEmpty
             || dependencies.RequiresSourceGrant
             || program.RuntimePolicy != dependencies.RuntimePolicy)
@@ -181,7 +211,8 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleContractException($"Managed graph boundary '{function.Name}' requires public Copy values.");
             }
-            if (isExport && (function.IsExternal || !Exportable(function, program.Structures)))
+            if (isExport && (function.IsExternal
+                || !Exportable(function, program.Structures, program.NativePointerTypes)))
             {
                 throw new ModuleContractException($"Graph export '{function.Name}' is not a public implementation.");
             }
@@ -189,7 +220,8 @@ public static partial class ModuleCompiler
             {
                 if (function.DirectNativeImport is not null)
                 {
-                    if (!DirectNativeImportContract.IsValid(function, program.Structures))
+                    if (!DirectNativeImportContract.IsValid(function, program.Structures,
+                        program.NativeFunctionPointerSignatures, program.NativePointerTypes))
                     {
                         throw new ModuleContractException(
                             $"Graph library direct import '{function.Name}' is invalid.");
@@ -200,8 +232,11 @@ public static partial class ModuleCompiler
                     ? ImmutableDictionary<string, BoundFunction>.Empty
                     : dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
                 if (available is null || !available.TryGetValue(function.Name, out var actual)
-                    || !CompatibleContract(Contract(function, program.Structures),
-                        Contract(actual, dependencies.Structures)))
+                    || !CompatibleContract(
+                        Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
+                            program.NativePointerTypes),
+                        Contract(actual, dependencies.Structures,
+                            dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes)))
                 {
                     throw new ModuleContractException($"Incompatible graph import '{function.Name}'.");
                 }
@@ -218,8 +253,12 @@ public static partial class ModuleCompiler
             throw new ModuleContractException("Graph library must export owned functions.");
         }
         var required = RequiredStructures(program.Functions.Select(static item =>
-            item.IsExternal ? Declaration(item) : item), program.Structures);
+            item.IsExternal ? Declaration(item) : item), program.Structures,
+            nativePointerTypes: program.NativePointerTypes,
+            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
         var structures = SelectStructures(program.Structures, required);
+        var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
+            program.Structures, structures);
         Dictionary<string, BoundStruct>? dependencyTypes = structures.IsEmpty || dependencies.Structures.IsEmpty
             ? null
             : dependencies.Structures.ToDictionary(static item => item.Name, StringComparer.Ordinal);
@@ -230,7 +269,9 @@ public static partial class ModuleCompiler
             if (dependencyTypes is not null && dependencyTypes.TryGetValue(structure.Name, out var actual))
             {
                 if (structure.IsPrivate || structure.IsInternal
-                    || !SameStructure(structure, actual, structures, dependencies.Structures))
+                    || !SameStructure(structure, actual, structures, dependencies.Structures,
+                        program.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
+                        nativePointerTypes, dependencies.NativePointerTypes))
                 {
                     throw new ModuleContractException($"Incompatible imported value layout '{structure.Name}'.");
                 }
@@ -240,7 +281,9 @@ public static partial class ModuleCompiler
             }
         }
         var publicTypes = RequiredStructures(program.Functions.Where(item => names.Contains(item.Name))
-            .Select(Declaration), program.Structures);
+            .Select(Declaration), program.Structures,
+            nativePointerTypes: program.NativePointerTypes,
+            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
         foreach (var structure in structures)
         {
             if (publicTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
@@ -256,7 +299,9 @@ public static partial class ModuleCompiler
             var remapped = RemapFunction(function, program.Structures, structures);
             var isGraphImport = function.IsExternal && function.DirectNativeImport is null;
             functions.Add(new ModuleFunction(function.Name,
-                Contract(remapped, structures), isGraphImport ? null : remapped, isGraphImport) {
+                Contract(remapped, structures, program.NativeFunctionPointerSignatures,
+                    nativePointerTypes),
+                isGraphImport ? null : remapped, isGraphImport) {
                 HasOwnershipTransfer = isGraphImport
                     ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
             });
@@ -274,6 +319,8 @@ public static partial class ModuleCompiler
         var module = new Module(true, -1, structures, immutableFunctions) {
             Classes = classes.MoveToImmutable(),
             ImportedStructures = importedTypes.ToImmutable(),
+            NativeFunctionPointerSignatures = program.NativeFunctionPointerSignatures,
+            NativePointerTypes = nativePointerTypes,
             RuntimePolicy = program.RuntimePolicy,
         };
         var contract = Write(module, program);
@@ -304,7 +351,7 @@ public static partial class ModuleCompiler
             if (names.Contains(item.Name))
             {
                 if (item.Import || item.Function is not BoundFunction function
-                    || !Exportable(function, module.Structures)
+                    || !Exportable(function, module.Structures, module.NativePointerTypes)
                     || (hasPrivateManagedState && !ManagedExportShape.Supported(function, module.Structures)))
                 {
                     throw new ModuleFormatException($"Graph export '{item.Name}' has no public implementation.");
@@ -316,7 +363,9 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Graph export is missing from its semantic library.");
         }
-        var required = RequiredStructures(declarations, module.Structures);
+        var required = RequiredStructures(declarations, module.Structures,
+            nativePointerTypes: module.NativePointerTypes,
+            nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures);
         var importedTypes = allowImportedCleanup && !module.ImportedStructures.IsEmpty
             ? module.ImportedStructures.ToHashSet(StringComparer.Ordinal) : null;
         foreach (var structure in module.Structures)
@@ -329,13 +378,16 @@ public static partial class ModuleCompiler
             }
         }
         var structures = SelectStructures(module.Structures, required);
+        var nativePointerTypes = RemapNativePointerTypeDefinitions(module.NativePointerTypes,
+            module.Structures, structures);
         var remappedDeclarations = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Count);
         foreach (var declaration in declarations)
         {
             remappedDeclarations.Add(RemapFunction(declaration, module.Structures, structures));
         }
         return new CompilationReference(structures, remappedDeclarations.MoveToImmutable(),
-            module.RuntimePolicy);
+            module.RuntimePolicy, nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures,
+            nativePointerTypes: nativePointerTypes);
     }
 
     /// <summary>Validates a graph library against current dependency declarations, without emitting code.</summary>
@@ -351,6 +403,13 @@ public static partial class ModuleCompiler
     private static void ValidateGraphLibrary(Module module, CompilationReference dependencies,
         CompilationReference reference, bool hasPrivateManagedState)
     {
+        var dependencyFunctionPointerMapping = MapNativeFunctionPointerTypes(
+            module.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
+            module.Structures, dependencies.Structures, module.NativePointerTypes,
+            dependencies.NativePointerTypes);
+        var dependencyNativePointerMapping = MapNativePointerTypes(module.NativePointerTypes,
+            module.Structures, module.NativeFunctionPointerSignatures, dependencies.NativePointerTypes,
+            dependencies.Structures, dependencies.NativeFunctionPointerSignatures);
         if (ValidateGraphImports(module, dependencies, hasPrivateManagedState,
             out var dependencyFunctions))
         {
@@ -366,13 +425,19 @@ public static partial class ModuleCompiler
         {
             var item = module.Functions[index];
             functions.Add(item.Import
-                ? RemapFunction(RecordedImportPromises(item.Contract, dependencyFunctions[item.Name]),
-                    dependencies.Structures, module.Structures)
+                ? RemapNativePointerTypes(
+                    RemapNativeFunctionPointerTypes(
+                        RemapFunction(RecordedImportPromises(item.Contract, dependencyFunctions[item.Name]),
+                        dependencies.Structures, module.Structures),
+                        dependencyFunctionPointerMapping),
+                    dependencyNativePointerMapping)
                 : item.Function ?? throw new ModuleFormatException("Graph library implementation is missing."));
         }
         var program = new BoundProgram(functions.MoveToImmutable(), -1) {
             Structures = module.Structures,
             Classes = module.Classes,
+            NativeFunctionPointerSignatures = module.NativeFunctionPointerSignatures,
+            NativePointerTypes = module.NativePointerTypes,
             RuntimePolicy = module.RuntimePolicy,
         };
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
@@ -467,7 +532,9 @@ public static partial class ModuleCompiler
                 : dependencies.Functions.ToDictionary(static function => function.Name,
                     StringComparer.Ordinal);
             if (!availableFunctions.TryGetValue(item.Name, out var actual)
-                || !CompatibleContract(item.Contract, Contract(actual, dependencies.Structures))
+                || !CompatibleContract(item.Contract,
+                    Contract(actual, dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
+                        dependencies.NativePointerTypes))
                 || item.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))
             {
                 throw new ModuleContractException($"Incompatible graph import '{item.Name}'.");
@@ -483,7 +550,9 @@ public static partial class ModuleCompiler
         {
             if (dependencyTypes.TryGetValue(structure.Name, out var actual)
                 && (!imported.Contains(structure.Name)
-                || !SameStructure(structure, actual, module.Structures, dependencies.Structures)))
+                || !SameStructure(structure, actual, module.Structures, dependencies.Structures,
+                    module.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
+                    module.NativePointerTypes, dependencies.NativePointerTypes)))
             {
                 throw new ModuleContractException($"Incompatible graph dependency layout '{structure.Name}'.");
             }
@@ -530,16 +599,28 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph contains an unsupported caller-unsafe field contract.");
             }
             var imported = ReadImportedTypes(reader, structures.Length, names, expectedConsumer: true);
+            var nativeFunctionPointerSignatures = ReadNativeFunctionPointerSignatures(reader);
+            var nativePointerTypes = ReadNativePointerTypes(reader);
+            if (!NativePointerTypeContract.IsValidTable(nativePointerTypes, structures,
+                nativeFunctionPointerSignatures)
+                || reader is ModuleReader { FormatVersion: NativePointerVersion }
+                    && nativePointerTypes.IsEmpty)
+            {
+                throw new ModuleFormatException("Graph native pointer type table is invalid.");
+            }
             var count = Count(reader, MaximumFunctions);
             if (count == 0)
             {
                 throw new ModuleFormatException("Graph library has no functions.");
             }
-            var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes);
+            var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes,
+                nativeFunctionPointerSignatures, nativePointerTypes);
             var module = new Module(true, -1, structures, functions) {
                 FormatVersion = reader.FormatVersion,
                 Classes = classes,
                 ImportedStructures = imported,
+                NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
+                NativePointerTypes = nativePointerTypes,
                 RequiresSourceGrant = requiresSourceGrant,
                 RuntimePolicy = policy,
             };

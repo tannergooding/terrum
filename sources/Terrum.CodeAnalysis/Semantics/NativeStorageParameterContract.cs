@@ -286,39 +286,6 @@ internal static class NativeStorageParameterContract
             && address.ByteExtent == parameter.ByteExtent
             && address.IsReadonly == parameter.IsReadonly;
 
-    internal static bool MatchesComParameterAddress(BoundNativeStorageAddress address,
-        NativeComMethodDefinition method, int nativeParameterIndex, BoundFunction caller,
-        BoundProgram program)
-    {
-        if (program.NativeImportCatalog is not NativeImportCatalog catalog
-            || !NativeComCallContract.TryGetNativeParameter(method, nativeParameterIndex,
-                out var parameter)
-            || parameter is null || parameter.Retention != NativeParameterRetention.NoEscape
-            || parameter.Extent != 1
-            || !NativeComCallContract.TryGetNativeParameterPointeeType(method,
-                nativeParameterIndex, catalog, program.Structures, out var pointeeType)
-            || !DirectNativeImportContract.IsInputPointee(pointeeType, program.Structures))
-        {
-            return false;
-        }
-
-        var extent = ValueLayout.Size(pointeeType, program.Structures);
-        var variable = address.Variable;
-        var isReadonly = parameter.Access == NativeParameterAccess.Read;
-        return parameter.Access is NativeParameterAccess.Read
-                or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
-            && address.Type == PrimitiveType.NativeStorageAddress
-            && address.AddressType == PrimitiveType.NativeStorageAddress
-            && address.CarrierType == pointeeType && address.ElementType == pointeeType
-            && address.ElementCount == 1 && address.ElementStride == extent
-            && address.ByteExtent == extent && address.IsReadonly == isReadonly
-            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
-            && (uint)variable < (uint)caller.Variables.Length
-            && caller.Variables[variable].Type == pointeeType
-            && (isReadonly || caller.Variables[variable].IsMutable)
-            && !caller.Variables[variable].IsInitializationLocal;
-    }
-
     internal static bool MatchesAggregateAddress(BoundNativeStorageAddress address,
         NativeAggregateStorageParameterDefinition parameter, BoundProgram program)
     {
@@ -345,60 +312,6 @@ internal static class NativeStorageParameterContract
                         address.CarrierType, program.Structures) == true));
     }
 
-    internal static bool MatchesAggregateAddress(BoundNativeStorageAddress address,
-        NativeComParameterAdaptation adaptation, BoundProgram program)
-    {
-        var typeIndex = (int)address.CarrierType - 100;
-        var isReadonly = adaptation.TargetType.StartsWith("const ", System.StringComparison.Ordinal);
-        return adaptation.Kind == NativeComParameterAdaptationKind.AggregateStorageAddress
-            && adaptation.NoEscape
-            && address.Type == PrimitiveType.NativeStorageAddress
-            && address.AddressType == PrimitiveType.NativeStorageAddress
-            && address.CarrierType == address.ElementType
-            && address.ElementCount == 1
-            && address.ElementStride == adaptation.SourceSize
-            && address.ByteExtent == adaptation.SourceSize
-            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
-            && (isReadonly || !address.IsReadonly)
-            && typeIndex >= 0 && typeIndex < program.Structures.Length
-            && NativeAggregateContract.TryResolveSourceType(adaptation.SourceType,
-                program.Structures, out var sourceType)
-            && sourceType == address.CarrierType
-            && ValueLayout.Size(address.CarrierType, program.Structures) == adaptation.SourceSize
-            && ValueLayout.Alignment(address.CarrierType, program.Structures, program.NativeImportCatalog)
-                == adaptation.SourceAlignment
-            && NativeAggregateContract.IsPlainValueAggregate(address.CarrierType, program.Structures);
-    }
-
-    internal static bool MatchesValueOutputAddress(BoundNativeStorageAddress address,
-        NativeComParameterAdaptation adaptation, BoundProgram program)
-    {
-        if (program.NativeImportCatalog is not NativeImportCatalog catalog
-            || !NativeComCallContract.IsValidValueOutputAddressType(adaptation, catalog,
-                program.Structures, out var sourceType))
-        {
-            return false;
-        }
-        var extent = ValueLayout.Size(sourceType, program.Structures);
-        return address.Type == PrimitiveType.NativeStorageAddress
-            && address.AddressType == PrimitiveType.NativeStorageAddress
-            && address.CarrierType == sourceType
-            && address.ElementType == sourceType
-            && address.ElementCount == 1
-            && address.ElementStride == extent
-            && address.ByteExtent == extent
-            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
-            && !address.IsReadonly;
-    }
-
-    internal static bool SupportsValueOutputAddressType(NativeImportCatalog? catalog,
-        PrimitiveType type, IReadOnlyList<BoundStruct> structures, bool isReadonly) =>
-        !isReadonly && catalog is not null
-        && catalog.ComMethods.Any(method => !method.ParameterAdaptations.IsDefaultOrEmpty
-            && method.ParameterAdaptations.Any(adaptation => adaptation is not null
-                && NativeComCallContract.IsValidValueOutputAddressType(adaptation, catalog,
-                    structures, out var sourceType) && sourceType == type));
-
     internal static bool SupportsAggregateType(NativeImportCatalog? catalog, PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, bool isReadonly)
     {
@@ -422,17 +335,7 @@ internal static class NativeStorageParameterContract
                             out var sourceType)
                         && sourceType == type
                         && catalog.SupportsAggregateStorageLayout(type, structures)))
-                && (parameter.IsReadonly || !isReadonly)))
-            || catalog.ComMethods.Any(method => !method.ParameterAdaptations.IsDefaultOrEmpty
-                && method.ParameterAdaptations.Any(adaptation => adaptation is not null
-                    && adaptation.Kind == NativeComParameterAdaptationKind.AggregateStorageAddress
-                    && adaptation.NoEscape
-                    && NativeAggregateContract.TryResolveSourceType(adaptation.SourceType, structures,
-                        out var sourceType) && sourceType == type
-                    && adaptation.SourceSize == byteExtent
-                    && adaptation.SourceAlignment == alignment
-                    && (adaptation.TargetType.StartsWith("const ", System.StringComparison.Ordinal)
-                        || !isReadonly)));
+                && (parameter.IsReadonly || !isReadonly)));
     }
 
     internal static bool SupportsStorageRecordType(NativeStorageRecordLayoutDefinition layout,
@@ -539,9 +442,7 @@ internal sealed record NativeStorageRecordParameterDefinition(
     int ParameterIndex,
     string TypeName,
     bool IsReadonly,
-    string? LoanGroup = null,
-    bool NoEscape = false,
-    string? SignatureTypeName = null);
+    string? LoanGroup = null);
 
 internal sealed record NativeStorageRecordLayoutDefinition(
     string TypeName,

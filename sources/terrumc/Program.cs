@@ -55,7 +55,7 @@ internal static partial class Program
         + "       terrumc run-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc run-native-graph-jit <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
-        + "build-native-import opts into the immutable Windows x64 source-import catalog; ordinary build does not enable imports.\n"
+        + "build-native-import opts into the Windows x64 native source profile; ordinary build does not enable native imports.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "checked-exceptions enables recovery and unwinding for four compiler-generated failure reasons.\n"
         + "jit/run-module/run-trrm execute in this process and return the program's status; supervise them with a deadline.\n"

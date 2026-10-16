@@ -113,6 +113,17 @@ internal static class BoundTreeTraversal
                         pending.Push((argument, depth));
                     }
                     break;
+                case BoundIndirectCall call:
+                    if (call.Arguments.IsDefault)
+                    {
+                        return false;
+                    }
+                    pending.Push((call.Target, depth));
+                    foreach (var argument in call.Arguments)
+                    {
+                        pending.Push((argument, depth));
+                    }
+                    break;
                 case BoundOptionalLift optional:
                     pending.Push((optional.Value, depth));
                     break;
@@ -268,6 +279,132 @@ internal static class BoundTreeTraversal
     internal static BoundFunction RewriteCalls(BoundFunction function, Func<BoundCall, BoundCall> rewrite) =>
         function with { Body = (BoundBlock)RewriteCalls(function.Body, rewrite) };
 
+    internal static BoundFunction RewriteExpressions(BoundFunction function,
+        Func<BoundExpression, BoundExpression> rewrite) =>
+        function with { Body = (BoundBlock)RewriteExpressions(function.Body, rewrite) };
+
+    private static BoundStatement RewriteExpressions(BoundStatement statement,
+        Func<BoundExpression, BoundExpression> rewrite) =>
+        statement switch {
+            BoundBlock block => block with {
+                Statements = [.. block.Statements.Select(item => RewriteExpressions(item, rewrite))],
+            },
+            BoundIf branch => branch with {
+                Condition = RewriteExpressions(branch.Condition, rewrite),
+                Then = RewriteExpressions(branch.Then, rewrite),
+                Else = branch.Else is null ? null : RewriteExpressions(branch.Else, rewrite),
+            },
+            BoundTryFinally scope => scope with {
+                Body = (BoundBlock)RewriteExpressions(scope.Body, rewrite),
+                Finally = (BoundBlock)RewriteExpressions(scope.Finally, rewrite),
+            },
+            BoundTryCatch scope => scope with {
+                Body = (BoundBlock)RewriteExpressions(scope.Body, rewrite),
+                Catch = (BoundBlock)RewriteExpressions(scope.Catch, rewrite),
+                Finally = scope.Finally is null ? null : (BoundBlock)RewriteExpressions(scope.Finally, rewrite),
+            },
+            BoundWhile loop => loop with {
+                Condition = RewriteExpressions(loop.Condition, rewrite),
+                Body = RewriteExpressions(loop.Body, rewrite),
+                Iterator = loop.Iterator is null ? null : RewriteExpressions(loop.Iterator, rewrite),
+            },
+            BoundUnsafe unsafeBlock => unsafeBlock with {
+                Body = (BoundBlock)RewriteExpressions(unsafeBlock.Body, rewrite),
+            },
+            BoundViewScope view => view with {
+                Owner = RewriteExpressions(view.Owner, rewrite),
+                Start = RewriteExpressions(view.Start, rewrite),
+                Length = RewriteExpressions(view.Length, rewrite),
+                Body = (BoundBlock)RewriteExpressions(view.Body, rewrite),
+                RangeEnd = view.RangeEnd is null ? null : RewriteExpressions(view.RangeEnd, rewrite),
+            },
+            BoundLocal local => local with { Initializer = RewriteExpressions(local.Initializer, rewrite) },
+            BoundAssignment assignment => assignment with { Value = RewriteExpressions(assignment.Value, rewrite) },
+            BoundOptionalAssignment assignment => assignment with {
+                Place = RewriteExpressions(assignment.Place, rewrite),
+                Value = RewriteExpressions(assignment.Value, rewrite),
+            },
+            BoundFieldAssignment assignment => assignment with { Value = RewriteExpressions(assignment.Value, rewrite) },
+            BoundBufferAssignment assignment => assignment with {
+                Index = RewriteExpressions(assignment.Index, rewrite),
+                Value = RewriteExpressions(assignment.Value, rewrite),
+            },
+            BoundViewSet view => view with {
+                Index = RewriteExpressions(view.Index, rewrite),
+                Value = RewriteExpressions(view.Value, rewrite),
+            },
+            BoundExpressionStatement expression => expression with {
+                Expression = RewriteExpressions(expression.Expression, rewrite),
+            },
+            BoundReturn result => result with {
+                Value = result.Value is null ? null : RewriteExpressions(result.Value, rewrite),
+            },
+            BoundRequire require => require with { Condition = RewriteExpressions(require.Condition, rewrite) },
+            _ => statement,
+        };
+
+    private static BoundExpression RewriteExpressions(BoundExpression expression,
+        Func<BoundExpression, BoundExpression> rewrite)
+    {
+        var rewritten = expression switch {
+            BoundCall call => call with {
+                Arguments = [.. call.Arguments.Select(item => RewriteExpressions(item, rewrite))],
+            },
+            BoundIndirectCall call => call with {
+                Target = RewriteExpressions(call.Target, rewrite),
+                Arguments = [.. call.Arguments.Select(item => RewriteExpressions(item, rewrite))],
+            },
+            BoundOptionalLift optional => optional with { Value = RewriteExpressions(optional.Value, rewrite) },
+            BoundCoalesce coalesce => coalesce with {
+                Optional = RewriteExpressions(coalesce.Optional, rewrite),
+                Fallback = RewriteExpressions(coalesce.Fallback, rewrite),
+            },
+            BoundReadonlyProjection projection => projection with {
+                Value = RewriteExpressions(projection.Value, rewrite),
+            },
+            BoundIsNull isNull => isNull with { Value = RewriteExpressions(isNull.Value, rewrite) },
+            BoundIsSome isSome => isSome with { Value = RewriteExpressions(isSome.Value, rewrite) },
+            BoundIsVariablePattern pattern => pattern with { Value = RewriteExpressions(pattern.Value, rewrite) },
+            BoundViewRead view => view with { Index = RewriteExpressions(view.Index, rewrite) },
+            BoundSpanLength span => span with { View = RewriteExpressions(span.View, rewrite) },
+            BoundSpanRead span => span with {
+                View = RewriteExpressions(span.View, rewrite),
+                Index = RewriteExpressions(span.Index, rewrite),
+            },
+            BoundSpanAdvance span => span with { View = RewriteExpressions(span.View, rewrite) },
+            BoundFieldLoan loan => loan with {
+                Place = (BoundFieldRead)RewriteExpressions(loan.Place, rewrite),
+            },
+            BoundMutableFieldLoan loan => loan with {
+                Place = (BoundFieldRead)RewriteExpressions(loan.Place, rewrite),
+            },
+            BoundUnary unary => unary with { Operand = RewriteExpressions(unary.Operand, rewrite) },
+            BoundCast cast => cast with { Operand = RewriteExpressions(cast.Operand, rewrite) },
+            BoundUnsafeExpression unsafeExpression => unsafeExpression with {
+                Expression = RewriteExpressions(unsafeExpression.Expression, rewrite),
+            },
+            BoundFieldRead field => field with { Receiver = RewriteExpressions(field.Receiver, rewrite) },
+            BoundUpdate update => update with { Place = RewriteExpressions(update.Place, rewrite) },
+            BoundCompoundAssignment compound => compound with {
+                Place = RewriteExpressions(compound.Place, rewrite),
+                Right = RewriteExpressions(compound.Right, rewrite),
+            },
+            BoundNominalUpdate update => update with { Place = RewriteExpressions(update.Place, rewrite) },
+            BoundBinary binary => binary with {
+                Left = RewriteExpressions(binary.Left, rewrite),
+                Right = RewriteExpressions(binary.Right, rewrite),
+            },
+            BoundBufferRead buffer => buffer with { Index = RewriteExpressions(buffer.Index, rewrite) },
+            BoundConditional conditional => conditional with {
+                Condition = RewriteExpressions(conditional.Condition, rewrite),
+                WhenTrue = RewriteExpressions(conditional.WhenTrue, rewrite),
+                WhenFalse = RewriteExpressions(conditional.WhenFalse, rewrite),
+            },
+            _ => expression.RewriteNestedExpressions(item => RewriteExpressions(item, rewrite)),
+        };
+        return rewrite(rewritten);
+    }
+
     private static BoundStatement RewriteCalls(BoundStatement statement, Func<BoundCall, BoundCall> rewrite) =>
         statement switch {
             BoundBlock block => block with {
@@ -332,6 +469,10 @@ internal static class BoundTreeTraversal
             BoundCall call => rewrite(call with {
                 Arguments = [.. call.Arguments.Select(item => RewriteCalls(item, rewrite))],
             }),
+            BoundIndirectCall call => call with {
+                Target = RewriteCalls(call.Target, rewrite),
+                Arguments = [.. call.Arguments.Select(item => RewriteCalls(item, rewrite))],
+            },
             BoundOptionalLift optional => optional with { Value = RewriteCalls(optional.Value, rewrite) },
             BoundCoalesce coalesce => coalesce with {
                 Optional = RewriteCalls(coalesce.Optional, rewrite),

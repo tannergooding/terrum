@@ -24,6 +24,8 @@ internal sealed partial class Binder
     private List<Diagnostic>? _diagnostics;
     private List<SourceDiagnostic>? _sourceDiagnostics;
     private readonly List<Signature> _signatures = [];
+    private readonly List<NativeFunctionPointerSignatureDefinition> _nativeFunctionPointerSignatures = [];
+    private readonly List<NativePointerTypeDefinition> _nativePointerTypes = [];
     private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
     private readonly Dictionary<PrimitiveType, int> _structureAlignments = [];
@@ -125,8 +127,7 @@ internal sealed partial class Binder
         _reference = reference;
         _runtimePolicy = runtimePolicy;
         _nativeImportCatalog = nativeImportCatalog ?? reference?.NativeImportCatalog;
-        _usesNativeImportCatalog = _nativeImportCatalog is NativeImportCatalog catalog
-            && (catalog.SupportsCataloguedFixedArrayStorage || catalog.SupportsNativeComContracts);
+        _usesNativeImportCatalog = _nativeImportCatalog is not null;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null
@@ -164,6 +165,8 @@ internal sealed partial class Binder
         var pending = new Stack<(SyntaxTree Tree, SyntaxNode Node, int Depth)>();
         if (_reference is not null)
         {
+            _nativeFunctionPointerSignatures.AddRange(_reference.NativeFunctionPointerSignatures);
+            _nativePointerTypes.AddRange(_reference.NativePointerTypes);
             foreach (var structure in _reference.Structures)
             {
                 _structNames.Add(structure.Name, (PrimitiveType)(100 + _structs.Count));
@@ -257,7 +260,7 @@ internal sealed partial class Binder
             }
             _contexts.Add(tree, (_namespace, [.. _usings]));
         }
-        BindSourceNativeComMetadata();
+        RejectNativeComMetadata();
         DeclareProtocols();
         foreach (var tree in _trees)
         {
@@ -291,17 +294,10 @@ internal sealed partial class Binder
                         continue;
                     }
                     if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
-                        || qualified == NativeWindowHandleContract.TypeName
-                        || qualified == NativeImportCatalog.NativeNullPointerTypeName
                         || qualified == NativeStorageParameterContract.AddressTypeName
                         || _nativeImportCatalog?.StorageRecordLayouts.Any(layout =>
                             layout.TypeName == qualified || layout.TypeName == name) == true
                         || _nativeImportCatalog?.IsCallbackTypeName(qualified) == true
-                        || NativeWindowClassContract.IsTypeName(qualified)
-                        || NativeWindowMessageContract.IsTypeName(qualified)
-                        || NativeWindowCreationContract.IsNullOnlyParameterTypeName(qualified)
-                        || NativeComCallContract.IsCataloguedOwnerName(qualified, _nativeImportCatalog)
-                            && !HasSourceNativeComOwnerAttribute(structure)
                         || (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
                             && qualified is ("nint" or "nuint"))
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
@@ -343,16 +339,6 @@ internal sealed partial class Binder
         {
             _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
         }
-        _ = _structNames.TryAdd(NativeWindowHandleContract.TypeName, PrimitiveType.NativeWindowHandle);
-        _ = _structNames.TryAdd(NativeWindowClassContract.ModuleHandleTypeName,
-            PrimitiveType.NativeModuleHandle);
-        if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeNullPointer) == true)
-        {
-            foreach (var typeName in NativeWindowCreationContract.NullOnlyParameterTypeNames)
-            {
-                _ = _structNames.TryAdd(typeName, PrimitiveType.NativeNullPointer);
-            }
-        }
         if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true)
         {
             foreach (var typeName in _nativeImportCatalog.CallbackTypeNames)
@@ -362,36 +348,14 @@ internal sealed partial class Binder
             _ = _structNames.TryAdd("nint", PrimitiveType.Int64);
             _ = _structNames.TryAdd("nuint", PrimitiveType.UInt64);
         }
-        if (_nativeImportCatalog?.SupportsWindowClassInitialization == true)
-        {
-            _ = _structNames.TryAdd(NativeWindowClassContract.WindowClassTypeName,
-                PrimitiveType.NativeWindowClassEx);
-            _ = _structNames.TryAdd(NativeWindowClassContract.WindowClassAddressTypeName,
-                PrimitiveType.NativeWindowClassExAddress);
-        }
-        if (_nativeImportCatalog?.SupportsWindowMessageLoop == true)
-        {
-            _ = _structNames.TryAdd(NativeWindowMessageContract.TypeName,
-                PrimitiveType.NativeWindowMessage);
-            _ = _structNames.TryAdd(NativeWindowMessageContract.AddressTypeName,
-                PrimitiveType.NativeWindowMessageAddress);
-        }
         DeclareAliases();
         foreach (var index in _structDeclarations.Keys)
         {
             DeclareStruct(index);
         }
-        if (_nativeImportCatalog is NativeImportCatalog nativeComCatalogBeforeDirectSession)
-        {
-            DeclareNativeComOwners(nativeComCatalogBeforeDirectSession);
-        }
         foreach (var index in _classDeclarations.Keys)
         {
             DeclareClass(index);
-        }
-        if (_nativeImportCatalog is NativeImportCatalog nativeComCatalog)
-        {
-            DeclareNativeComOwners(nativeComCatalog);
         }
         DeclareConformances();
         foreach (var tree in _trees)
@@ -495,8 +459,6 @@ internal sealed partial class Binder
         DeclareClassFactories();
         if (_nativeImportCatalog is NativeImportCatalog nativeImportCatalog)
         {
-            DeclareNativeWindowMessageAccessors(nativeImportCatalog);
-            DeclareNativeComDirectMethods(nativeImportCatalog);
         }
         foreach (var template in _templates.Values)
         {
@@ -651,6 +613,7 @@ internal sealed partial class Binder
                 IsOperator = signature.IsOperator,
                 IsNoThrow = signature.IsNoThrow,
                 RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
+                NativeFunctionPointerType = signature.NativeFunctionPointerType,
                 IsClassConstructor = signature.IsClassConstructor,
                 IsCleanup = signature.IsCleanup,
                 DoesNotReturn = signature.DoesNotReturn,
@@ -660,9 +623,6 @@ internal sealed partial class Binder
                 CapturedParameters = signature.CapturedParameters,
                 ReturnsForwardedBacking = signature.ReturnsForwardedBacking,
                 ResultDependencyParameters = signature.ResultDependencyParameters,
-                NativeComAcquisitionOutputParameterIndexes =
-                    signature.NativeComAcquisitionOutputParameterIndexes,
-                NativeComAcquisitionSources = signature.NativeComAcquisitionSources,
             });
         }
 
@@ -676,6 +636,8 @@ internal sealed partial class Binder
         }
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             Structures = [.. _structs],
+            NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],
+            NativePointerTypes = [.. _nativePointerTypes],
             Classes = [.. _classes],
             Buffers = _buffers,
             RequiresSourceGrant = _buffers.Any(static buffer => buffer.IsInvocationScoped)
@@ -688,15 +650,6 @@ internal sealed partial class Binder
             NativeUtf8ZLiterals = [.. _nativeUtf8ZLiterals],
             RuntimePolicy = _runtimePolicy,
         };
-        try
-        {
-            program = NativeComCallContract.Bind(program);
-        }
-        catch (ArgumentException exception)
-        {
-            Report("TRM3030", exception.Message, _tree.Root.Span);
-            return null;
-        }
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit,
             out var invalidEffect))
         {
@@ -713,9 +666,6 @@ internal sealed partial class Binder
                 "Ownership" => ("TRM3023", "A unique value must be moved from a live named owner; copies, vacant reads, and escaping receiver loans are not allowed."),
                 "NativeImport" => ("TRM3030",
                     $"The source native import does not match its selected compiler-owned catalog in '{_signatures[functionIndex].Name}'."),
-                string nativeComMessage when nativeComMessage.StartsWith(
-                    "The closed COM call does not retain its catalogued owner acquisition and interface provenance",
-                    StringComparison.Ordinal) => ("TRM3030", nativeComMessage),
                 _ => ("TRM3016", exceededWorkLimit
                     ? "Source exceeds the semantic verification work limit."
                     : $"Source violates definite assignment, initialization, or executable type rules. {invalidEffect}"),
@@ -900,71 +850,6 @@ internal sealed partial class Binder
         return true;
     }
 
-    private static bool TryDecodeNativeComAcquisitionAttribute(SyntaxNode attribute,
-        out int parameterIndex) =>
-        TryDecodeNativeComAcquisitionAttribute(attribute, out parameterIndex, out _);
-
-    private static bool TryDecodeNativeComAcquisitionAttribute(SyntaxNode attribute,
-        out int parameterIndex, out NativeComAcquisitionSourceDefinition? source)
-    {
-        parameterIndex = -1;
-        source = null;
-        var children = attribute.Children;
-        if (children.Length < 10
-            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
-            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
-            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
-            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
-            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
-            || children[5] is not SyntaxTokenElement { Token.Name: "NativeComAcquisition" }
-            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
-            || children[^2] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
-            || children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }
-            || children[7] is not SyntaxTokenElement index
-            || index.Token.Kind != TokenKind.NumericLiteral
-            || !ScannerHost.TryParseIntegerMagnitude(index.Token.Text.AsSpan(), out var magnitude)
-            || magnitude > int.MaxValue)
-        {
-            return false;
-        }
-
-        parameterIndex = (int)magnitude;
-        if (children.Length == 10)
-        {
-            return true;
-        }
-        if (children.Length != 18
-            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
-            || children[9] is not SyntaxTokenElement ownerToken
-            || ownerToken.Token.Kind != TokenKind.StringLiteral
-            || !StringLiteralDecoder.TryDecode(ownerToken.Token.Text.AsSpan(), out var ownerIdentity)
-            || string.IsNullOrWhiteSpace(ownerIdentity)
-            || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
-            || children[11] is not SyntaxTokenElement methodToken
-            || methodToken.Token.Kind != TokenKind.StringLiteral
-            || !StringLiteralDecoder.TryDecode(methodToken.Token.Text.AsSpan(), out var sourceMethodIdentity)
-            || string.IsNullOrWhiteSpace(sourceMethodIdentity)
-            || children[12] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
-            || children[13] is not SyntaxTokenElement sourceIndexToken
-            || sourceIndexToken.Token.Kind != TokenKind.NumericLiteral
-            || !ScannerHost.TryParseIntegerMagnitude(sourceIndexToken.Token.Text.AsSpan(),
-                out var sourceOutputMagnitude)
-            || sourceOutputMagnitude > int.MaxValue
-            || children[14] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
-            || children[15] is not SyntaxTokenElement failureToken
-            || failureToken.Token.Kind != TokenKind.Identifier
-            || failureToken.Token.Name is not ("OutputMayBeWrittenOnFailure"
-                or "OutputNotWrittenOnFailure"))
-        {
-            return false;
-        }
-
-        source = new NativeComAcquisitionSourceDefinition(parameterIndex, ownerIdentity,
-            sourceMethodIdentity, (int)sourceOutputMagnitude,
-            failureToken.Token.Name == "OutputMayBeWrittenOnFailure");
-        return true;
-    }
-
     private bool TryBindDirectNativePointerType(SyntaxNode node, out PrimitiveType pointeeType,
         out bool isWritable)
     {
@@ -991,116 +876,33 @@ internal sealed partial class Binder
         return true;
     }
 
+    private void RejectNativeComMetadata()
+    {
+        foreach (var tree in _trees)
+        {
+            SetContext(tree);
+            foreach (var attribute in tree.Root.DescendantNodes().OfType<SyntaxNode>()
+                .Where(static node => node.Kind == SyntaxKind.Attribute))
+            {
+                var name = AttributeName(attribute);
+                if (name.StartsWith("Terrum.Interop.NativeCom", StringComparison.Ordinal)
+                    || name == "NativeComInterface")
+                {
+                    Report("TRM3030",
+                        $"'{name}' is retired compiler-owned COM metadata; use raw pointers and authored vtable declarations.",
+                        attribute.Span);
+                }
+            }
+        }
+    }
+
     private static bool IsNativeImportInteger(PrimitiveType type) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     private static bool IsNativeImportParameterType(PrimitiveType type) =>
         IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-            or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeNullPointer
-            or PrimitiveType.NativeCallbackAddress or PrimitiveType.NativeModuleHandle
-            or PrimitiveType.NativeWindowClassEx or PrimitiveType.NativeWindowClassExAddress
-            or PrimitiveType.NativeWindowMessageAddress
+            or PrimitiveType.NativeCallbackAddress
             or PrimitiveType.NativeStorageAddress;
-
-    private bool IsNativeComImportOutputParameter(PrimitiveType type,
-        NativeImportDefinition? importDefinition, int parameterIndex)
-    {
-        var structureIndex = (int)type - 100;
-        if (_nativeImportCatalog is not NativeImportCatalog catalog || importDefinition is null
-            || structureIndex < 0 || structureIndex >= _structs.Count
-            || parameterIndex < 0 || parameterIndex >= importDefinition.ParameterTypes.Length
-            || parameterIndex >= importDefinition.ParameterContracts.Length
-            || importDefinition.ParameterTypes[parameterIndex] != PrimitiveType.NativeComInterfaceOutputAddress
-            || importDefinition.ParameterContracts[parameterIndex]
-                != NativeImportParameterContract.OwnedNativeComInterfaceOutput
-            || !catalog.TryGetComOwner(_structs[structureIndex].Name, out var owner)
-            || owner is null || !owner.IsUnique
-            || owner.AcquisitionKind != NativeComOwnerAcquisitionKind.NativeImportOutput
-            || owner.AcquisitionIdentity != importDefinition.Key
-            || (owner.OutputParameterIndex != parameterIndex
-                && !owner.AdditionalOutputParameterIndexes.Contains(parameterIndex))
-            || !_structs[structureIndex].IsUnique
-            || !NativeComCallContract.HasOwnerCellLayout(_structs[structureIndex], owner)
-            || _structs[structureIndex].Size != owner.CellSize
-            || _structs[structureIndex].CleanupMethod != owner.BoundOwnerName + ".Close")
-        {
-            return false;
-        }
-        return importDefinition.ComOutputs.Any(output => output.ParameterIndex == parameterIndex
-            && output.InterfaceIdentity == owner.InterfaceIdentity
-            && output.Effects.HasFlag(NativeComEffects.AcquiresReference));
-    }
-
-    private bool IsCataloguedNativeComOwner(PrimitiveType type)
-    {
-        var structureIndex = (int)type - 100;
-        return structureIndex >= 0 && structureIndex < _structs.Count
-            && NativeComCallContract.IsCataloguedOwnerName(
-                _structs[structureIndex].Name, _nativeImportCatalog);
-    }
-
-    private static bool HasSourceNativeComOwnerAttribute(SyntaxNode declaration) =>
-        declaration.Children.OfType<SyntaxNode>().Any(static child =>
-            child.Kind == SyntaxKind.Attribute
-            && AttributeName(child) == "Terrum.Interop.NativeComOwner");
-
-    private bool TryGetNativeComOwner(PrimitiveType type, out NativeComOwnerDefinition? owner)
-    {
-        var structureIndex = (int)type - 100;
-        owner = null;
-        return _nativeImportCatalog is NativeImportCatalog catalog
-            && structureIndex >= 0 && structureIndex < _structs.Count
-            && catalog.TryGetComOwner(_structs[structureIndex].Name, out owner);
-    }
-
-    private string ResolveNativeComOwnerIdentity(string identity)
-    {
-        if (identity.Contains('.', StringComparison.Ordinal))
-        {
-            return identity;
-        }
-        var qualified = Qualify(identity);
-        if (_structNames.ContainsKey(qualified))
-        {
-            return qualified;
-        }
-        foreach (var imported in _usings)
-        {
-            var candidate = imported + "." + identity;
-            if (_structNames.ContainsKey(candidate))
-            {
-                return candidate;
-            }
-        }
-        return qualified;
-    }
-
-    private string ResolveNativeComAcquisitionIdentity(string identity)
-    {
-        var separator = identity.IndexOf("::", StringComparison.Ordinal);
-        if (separator < 0)
-        {
-            return identity.Contains('.', StringComparison.Ordinal) ? identity : Qualify(identity);
-        }
-        var interfaceIdentity = identity[..separator];
-        if (!interfaceIdentity.Contains('.', StringComparison.Ordinal))
-        {
-            foreach (var imported in _usings)
-            {
-                var candidate = imported + "." + interfaceIdentity;
-                if (_nativeImportCatalog?.TryGetComInterface(candidate, out _) == true)
-                {
-                    interfaceIdentity = candidate;
-                    break;
-                }
-            }
-            if (!interfaceIdentity.Contains('.', StringComparison.Ordinal))
-            {
-                interfaceIdentity = Qualify(interfaceIdentity);
-            }
-        }
-        return interfaceIdentity + identity[separator..];
-    }
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -1239,11 +1041,6 @@ internal sealed partial class Binder
                             }
                         }
                     }
-                }
-                else if (AttributeName(attribute) == "Terrum.Interop.NativeComOwner"
-                    && NativeComCallContract.IsCataloguedOwnerName(qualified, _nativeImportCatalog))
-                {
-                    continue;
                 }
                 else
                 {
@@ -1501,7 +1298,8 @@ internal sealed partial class Binder
         if (type is PrimitiveType.Bool or PrimitiveType.Char16
             or PrimitiveType.Int32 or PrimitiveType.UInt32
             or PrimitiveType.Int64 or PrimitiveType.UInt64
-            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.NativeRawPointer)
+            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
         {
             return true;
         }
@@ -1639,9 +1437,6 @@ internal sealed partial class Binder
                 if (TryPrimitiveType(name.Name, out _)
                     || qualifiedName == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                     || _nativeImportCatalog?.IsCallbackTypeName(qualifiedName) == true
-                    || NativeWindowClassContract.IsTypeName(qualifiedName)
-                    || NativeWindowMessageContract.IsTypeName(qualifiedName)
-                    || NativeComCallContract.IsCataloguedOwnerName(qualifiedName, _nativeImportCatalog)
                     || qualifiedName is NativeBufferIntrinsics.TypeName
                         or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
                     || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
@@ -1924,18 +1719,20 @@ internal sealed partial class Binder
         var isExternal = false;
         var isNoThrow = false;
         var requiresUnsafeCaller = false;
+        var isNativeCallable = false;
+        var isNativeVTableMethod = false;
         var isCleanup = false;
         var isConstEval = false;
         var doesNotReturn = false;
         SyntaxNode? nativeImportAttribute = null;
+        SyntaxNode? nativeVTableMethodAttribute = null;
+        var nativeVTableSlot = -1;
         string? nativeImportKey = null;
         string? nativeLibraryName = null;
         string? nativeExportName = null;
         var nativeOutputParameterIndexes = new HashSet<int>();
         var nativeOutputResultConditions = new Dictionary<int, uint>();
         var nativeParameters = new Dictionary<int, NativeParameterDefinition>();
-        var nativeComAcquisitionOutputParameterIndexes = new HashSet<int>();
-        var nativeComAcquisitionSources = new List<NativeComAcquisitionSourceDefinition>();
         SyntaxNode? captures = null;
         SyntaxNode? resultDependencies = null;
         var accessModifiers = 0;
@@ -1947,14 +1744,19 @@ internal sealed partial class Binder
                     && attribute.Children[1] is SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
                     && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
                 var attributeName = AttributeName(attribute);
+                if (attributeName.StartsWith("Terrum.Interop.NativeCom", StringComparison.Ordinal))
+                {
+                    continue;
+                }
                 if (attributeName.Contains('.')
                     && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                     && attributeName != "Terrum.Interop.NativeOutput"
                     && attributeName != "Terrum.Interop.NativeParameter"
-                    && attributeName != "Terrum.Interop.NativeComAcquisition")
+                    && attributeName != "Terrum.Interop.NativeCallable"
+                    && attributeName != "Terrum.Interop.NativeVTableMethod")
                 {
                     Report("TRM3001",
-                        "Only the compiler-owned NativeImport, NativeOutput, NativeParameter, and NativeComAcquisition qualified attributes are supported.",
+                        "Only the supported qualified interop attributes are accepted.",
                         attribute.Span);
                     continue;
                 }
@@ -1992,6 +1794,22 @@ internal sealed partial class Binder
                     }
                     continue;
                 }
+                if (attributeName == "Terrum.Interop.NativeVTableMethod")
+                {
+                    if (returnTarget || isNativeVTableMethod
+                        || !TryDecodeNativeVTableMethodAttribute(attribute, out nativeVTableSlot))
+                    {
+                        Report("TRM3030",
+                            "NativeVTableMethod requires one nonnegative vtable slot.",
+                            attribute.Span);
+                    }
+                    else
+                    {
+                        isNativeVTableMethod = true;
+                        nativeVTableMethodAttribute = attribute;
+                    }
+                    continue;
+                }
                 if (attributeName == "Terrum.Interop.NativeOutput")
                 {
                     if (returnTarget || !TryDecodeDirectNativeOutputAttribute(attribute,
@@ -2008,25 +1826,20 @@ internal sealed partial class Binder
                     }
                     continue;
                 }
-                if (attributeName == "Terrum.Interop.NativeComAcquisition")
+                if (attributeName == "Terrum.Interop.NativeCallable")
                 {
-                    if (returnTarget
-                        || !TryDecodeNativeComAcquisitionAttribute(attribute, out var outputParameterIndex,
-                            out var acquisitionSource)
-                        || !nativeComAcquisitionOutputParameterIndexes.Add(outputParameterIndex))
+                    if (returnTarget || isNativeCallable)
                     {
-                        Report("TRM3030",
-                            "NativeComAcquisition requires a distinct output ordinal and, for source metadata, an owner, source output, and failure disposition.",
-                            attribute.Span);
+                        Report("TRM3030", "NativeCallable is a nonrepeatable function attribute.", attribute.Span);
                     }
-                    else if (acquisitionSource is not null)
+                    else if (attribute.Children.OfType<SyntaxTokenElement>()
+                        .Any(static token => token.Token.Kind == TokenKind.OpenParen))
                     {
-                        nativeComAcquisitionSources.Add(acquisitionSource with {
-                            OwnerTypeIdentity = ResolveNativeComOwnerIdentity(
-                                acquisitionSource.OwnerTypeIdentity),
-                            SourceMethodIdentity = ResolveNativeComAcquisitionIdentity(
-                                acquisitionSource.SourceMethodIdentity),
-                        });
+                        Report("TRM3030", "NativeCallable does not accept arguments.", attribute.Span);
+                    }
+                    else
+                    {
+                        isNativeCallable = true;
                     }
                     continue;
                 }
@@ -2157,16 +1970,57 @@ internal sealed partial class Binder
         {
             Report("TRM3030", "NativeImport may appear only on an extern callable.", nativeImportAttribute.Span);
         }
+        if (isNativeVTableMethod
+            && (!isExternal || containingType is not null || nativeImportAttribute is not null
+                || nativeLibraryName is not null || nativeImportKey is not null
+                || nativeOutputParameterIndexes.Count != 0
+                || constructor || property || operatorDeclaration || isCleanup || doesNotReturn
+                || isNativeCallable
+                || declaration.Children.OfType<SyntaxNode>().Any(static child =>
+                    child.Kind is SyntaxKind.TypeParameterList or SyntaxKind.ConstraintClause)))
+        {
+            Report("TRM3030",
+                "NativeVTableMethod requires a top-level, non-generic extern function without import or output-effect metadata.",
+                nativeVTableMethodAttribute?.Span ?? declaration.Span);
+        }
+        else if (nativeVTableMethodAttribute is not null && !isNativeVTableMethod)
+        {
+            Report("TRM3030", "NativeVTableMethod is a nonrepeatable function attribute.",
+                nativeVTableMethodAttribute.Span);
+        }
+        if (isNativeVTableMethod && !requiresUnsafeCaller)
+        {
+            Report("TRM3030", "A NativeVTableMethod declaration must be marked unsafe.",
+                nativeVTableMethodAttribute?.Span ?? declaration.Span);
+        }
+        if (isNativeVTableMethod)
+        {
+            requiresUnsafeCaller = true;
+        }
+        if (isNativeCallable)
+        {
+            if (isExternal || constructor || property || operatorDeclaration || isCleanup || doesNotReturn
+                || containingType is not null || !isNoThrow
+                || declaration.Children.OfType<SyntaxNode>().Any(static child =>
+                    child.Kind is SyntaxKind.TypeParameterList or SyntaxKind.ConstraintClause))
+            {
+                Report("TRM3030",
+                    "NativeCallable requires a top-level, non-generic, NoThrow function with no native receiver or output effects.",
+                    declaration.Span);
+            }
+            requiresUnsafeCaller = true;
+        }
         if (nativeOutputParameterIndexes.Count != 0 && !isExternal)
         {
             Report("TRM3030", "NativeOutput may appear only on an extern callable.", declaration.Span);
         }
-        if (nativeParameters.Count != 0 && (!isExternal || nativeLibraryName is null))
+        if (nativeParameters.Count != 0 && (!isExternal
+            || nativeLibraryName is null && !isNativeVTableMethod))
         {
-            Report("TRM3030", "NativeParameter requires a two-string direct NativeImport declaration.",
+            Report("TRM3030", "NativeParameter requires a direct NativeImport or NativeVTableMethod declaration.",
                 nativeImportAttribute?.Span ?? declaration.Span);
         }
-        if (isExternal)
+        if (isExternal && !isNativeVTableMethod)
         {
             if (nativeImportAttribute is null)
             {
@@ -2190,6 +2044,10 @@ internal sealed partial class Binder
                 Report("TRM3030", "The scalar native-import profile does not support mutable receiver contracts.",
                     declaration.Span);
             }
+        }
+        if (isExternal && isNativeVTableMethod && isNativeCallable)
+        {
+            Report("TRM3030", "NativeVTableMethod cannot be combined with NativeCallable.", declaration.Span);
         }
         if (property)
         {
@@ -2242,19 +2100,10 @@ internal sealed partial class Binder
             Report("TRM3001", "A static operator implementation requires a supported arity and a struct body.", declaration.Span);
         }
         var classConstructor = constructor && TryResolveClass(Qualify(containingType!), out _);
-        PrimitiveType? directNativeReturnPointeeType = null;
-        var directNativeReturnIsWritable = false;
         PrimitiveType returnType;
         if (constructor)
         {
             returnType = ResolveDeclaredType(containingType!);
-        }
-        else if (nativeLibraryName is not null
-            && TryBindDirectNativePointerType(returnNode!, out var returnPointeeType,
-                out directNativeReturnIsWritable))
-        {
-            directNativeReturnPointeeType = returnPointeeType;
-            returnType = PrimitiveType.NativeRawPointer;
         }
         else
         {
@@ -2330,11 +2179,26 @@ internal sealed partial class Binder
             var token = ((SyntaxTokenElement)parameter.Children[^1]).Token;
             PrimitiveType? nativePointeeType = null;
             PrimitiveType type;
+            var parameterIndex = declared.Count;
             if (nativeLibraryName is not null
-                && TryBindDirectNativePointerType(typeNode, out var pointeeType, out var isWritablePointer))
+                && TryBindDirectNativePointerType(typeNode, out var pointeeType, out var isWritablePointer)
+                && nativeOutputParameterIndexes.Contains(parameterIndex) && isWritablePointer)
             {
-                type = isWritablePointer
-                    ? PrimitiveType.NativeStorageAddress : PrimitiveType.NativeRawPointer;
+                type = PrimitiveType.NativeStorageAddress;
+                nativePointeeType = pointeeType;
+            }
+            else if (nativeLibraryName is not null
+                && TryBindDirectNativePointerType(typeNode, out pointeeType, out isWritablePointer)
+                && nativeParameters.ContainsKey(parameterIndex + 1) && !isWritablePointer)
+            {
+                type = PrimitiveType.NativeRawPointer;
+                nativePointeeType = pointeeType;
+            }
+            else if (isNativeVTableMethod
+                && TryBindDirectNativePointerType(typeNode, out pointeeType, out isWritablePointer)
+                && nativeParameters.ContainsKey(parameterIndex + 1) && !isWritablePointer)
+            {
+                type = PrimitiveType.NativeRawPointer;
                 nativePointeeType = pointeeType;
             }
             else
@@ -2372,8 +2236,8 @@ internal sealed partial class Binder
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                     or PrimitiveType.Float32 or PrimitiveType.Float64)
                 && (!IsStruct(type) || IsUnique(type))
-                && !IsNativeComImportOutputParameter(type, importDefinition, declared.Count)
-                && (isExternal || !IsCataloguedNativeComOwner(type)))
+                && !(isNativeVTableMethod && NativeVTableCallContract.IsNativeValueType(type,
+                    [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes])))
             {
                 Report("TRM3011",
                     "A non-boolean output parameter requires a scalar or Copy struct type.", parameter.Span);
@@ -2406,6 +2270,25 @@ internal sealed partial class Binder
 
             declared.Add(new Parameter(token.Name, type, token.Span, isOut || isInit, isInit,
                 isImplicitRef, nativePointeeType));
+        }
+
+        PrimitiveType? nativeFunctionPointerType = null;
+        if (isNativeCallable)
+        {
+            var nativeSignature = new NativeFunctionPointerSignatureDefinition(NativeCallingConvention.Native,
+                returnType, [.. declared.Select(static parameter => parameter.Type)]);
+            if (declared.Any(static parameter => parameter.IsOut || parameter.IsInit || parameter.IsImplicitRef)
+                || !NativeFunctionPointerContract.IsValidSignature(nativeSignature,
+                    [.. _nativeFunctionPointerSignatures]))
+            {
+                Report("TRM3030",
+                    "NativeCallable signatures require ordinary scalar, raw pointer, or nested function pointer values.",
+                    declaration.Span);
+            }
+            else
+            {
+                nativeFunctionPointerType = GetNativeFunctionPointerType(nativeSignature);
+            }
         }
 
         DirectNativeImport? directNativeImport = null;
@@ -2464,16 +2347,10 @@ internal sealed partial class Binder
                         "A direct native writable pointer requires NativeOutput metadata.",
                         parameter.Span);
                 }
-                else if (parameter.Type == PrimitiveType.NativeRawPointer
-                    && !nativeParameters.ContainsKey(index + 1))
-                {
-                    Report("TRM3030",
-                        "A direct native input pointer requires NativeParameter access, retention, and extent metadata.",
-                        parameter.Span);
-                }
                 else if (parameter.NativePointeeType is null
                     && parameter.Type != PrimitiveType.NativeStorageAddress
-                    && !DirectNativeImportContract.IsValueParameter(parameter.Type))
+                    && !DirectNativeImportContract.IsValueParameter(parameter.Type,
+                        [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes]))
                 {
                     Report("TRM3030",
                         "A direct native import value parameter requires a supported scalar or explicit NativeParameter pointer contract.",
@@ -2493,18 +2370,12 @@ internal sealed partial class Binder
                     declaration.Span);
             }
             if (returnType is not (PrimitiveType.Void or PrimitiveType.NativeRawPointer)
-                && !DirectNativeImportContract.IsScalar(returnType))
+                && !DirectNativeImportContract.IsValueParameter(returnType,
+                    [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes]))
             {
                 Report("TRM3030",
-                    "A direct native import result must have a directly supported scalar or raw-pointer representation.",
+                    "A direct native import result must have a directly supported scalar, pointer, or function-pointer representation.",
                     declaration.Span);
-            }
-            if (returnType == PrimitiveType.NativeRawPointer
-                && (directNativeReturnPointeeType != PrimitiveType.Void || directNativeReturnIsWritable))
-            {
-                Report("TRM3030",
-                    "A raw pointer result must be exactly ptr<void>; typed pointer results require a preserved pointee contract.",
-                    returnNode?.Span ?? declaration.Span);
             }
             requiresUnsafeCaller = true;
             directNativeImport = new DirectNativeImport(nativeLibraryName, nativeExportName,
@@ -2512,47 +2383,66 @@ internal sealed partial class Binder
                 Parameters = directNativeParameters.ToImmutable(),
             };
         }
-        else if (nativeOutputParameterIndexes.Count != 0)
+        NativeVTableMethodDefinition? nativeVTableMethod = null;
+        if (isNativeVTableMethod)
+        {
+            var nativeVTableParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>();
+            if (declared.Count == 0 || declared[0].IsOut || declared[0].IsInit
+                || declared[0].IsImplicitRef
+                || declared[0].Type is not (PrimitiveType.NativeRawPointer
+                    or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer)
+                    && !NativePointerTypeContract.IsValidType(declared[0].Type, [.. _nativePointerTypes]))
+            {
+                Report("TRM3030",
+                    "NativeVTableMethod requires a direct native receiver pointer as its first explicit parameter.",
+                    nativeVTableMethodAttribute?.Span ?? declaration.Span);
+            }
+            foreach (var (ordinal, nativeParameter) in nativeParameters.OrderBy(static pair => pair.Key))
+            {
+                var parameterIndex = ordinal - 1;
+                if (parameterIndex <= 0 || parameterIndex >= declared.Count
+                    || declared[parameterIndex].Type != PrimitiveType.NativeRawPointer
+                    || declared[parameterIndex].IsOut
+                    || declared[parameterIndex].NativePointeeType is not PrimitiveType pointeeType
+                    || !DirectNativeImportContract.IsInputPointee(pointeeType, _structs))
+                {
+                    Report("TRM3030",
+                        "NativeParameter must identify a non-receiver raw pointer parameter with a supported pointee type.",
+                        nativeVTableMethodAttribute?.Span ?? declaration.Span);
+                    continue;
+                }
+                nativeVTableParameters.Add(new DirectNativeParameter(parameterIndex, pointeeType,
+                    nativeParameter.Access, nativeParameter.Retention, nativeParameter.Extent));
+            }
+            if (returnType != PrimitiveType.Void
+                && !DirectNativeImportContract.IsValueParameter(returnType,
+                    [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes]))
+            {
+                Report("TRM3030",
+                    "A NativeVTableMethod result must have a direct native scalar, pointer, or function-pointer representation.",
+                    nativeVTableMethodAttribute?.Span ?? declaration.Span);
+            }
+            for (var index = 0; index < declared.Count; index++)
+            {
+                var parameter = declared[index];
+                if (parameter.IsInit || parameter.IsImplicitRef
+                    || parameter.Type != PrimitiveType.NativeRawPointer
+                        && !DirectNativeImportContract.IsValueParameter(parameter.Type,
+                            [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes]))
+                {
+                    Report("TRM3030",
+                        "NativeVTableMethod parameters require direct native scalar or pointer representations.",
+                        parameter.Span);
+                }
+            }
+            nativeVTableMethod = new NativeVTableMethodDefinition(nativeVTableSlot,
+                nativeVTableParameters.ToImmutable());
+        }
+        else if (!isNativeVTableMethod && nativeLibraryName is null
+            && nativeOutputParameterIndexes.Count != 0)
         {
             Report("TRM3030", "NativeOutput requires a two-string direct NativeImport declaration.",
                 declaration.Span);
-        }
-        if (nativeComAcquisitionOutputParameterIndexes.Count != 0)
-        {
-            if (isExternal || constructor || property || operatorDeclaration || isCleanup
-                || returnType != PrimitiveType.Bool)
-            {
-                Report("TRM3030",
-                    "NativeComAcquisition is limited to a non-extern bool wrapper with ordinary output parameters.",
-                    declaration.Span);
-            }
-            foreach (var outputIndex in nativeComAcquisitionOutputParameterIndexes)
-            {
-                if (outputIndex >= declared.Count
-                    || !declared[outputIndex].IsOut || declared[outputIndex].IsInit
-                    || !IsCataloguedNativeComOwner(declared[outputIndex].Type))
-                {
-                    Report("TRM3030",
-                        "NativeComAcquisition must identify an out parameter with a catalogued unique COM owner type.",
-                        declaration.Span);
-                }
-            }
-            foreach (var acquisitionSource in nativeComAcquisitionSources)
-            {
-                if (acquisitionSource.OutputParameterIndex >= declared.Count
-                    || !TryGetNativeComOwner(
-                        declared[acquisitionSource.OutputParameterIndex].Type, out var owner)
-                    || owner is null
-                    || owner.BoundOwnerName != acquisitionSource.OwnerTypeIdentity
-                    || owner.AcquisitionIdentity != acquisitionSource.SourceMethodIdentity
-                    || owner.OutputParameterIndex != acquisitionSource.SourceOutputParameterIndex
-                    || owner.OutputMayBeWrittenOnFailure != acquisitionSource.OutputMayBeWrittenOnFailure)
-                {
-                    Report("TRM3030",
-                        "NativeComAcquisition must match the declared owner, acquisition source output, and failure disposition.",
-                        declaration.Span);
-                }
-            }
         }
         if (operatorDeclaration && operatorKey.Arity == 1
             && (containingType is null || !TryResolveStruct(Qualify(containingType), out var ownerType)
@@ -2583,7 +2473,7 @@ internal sealed partial class Binder
                     IsInit = parameter.IsInit,
                     IsImplicitRef = parameter.IsImplicitRef,
                 })], boundParameters.Length, new BoundBlock([], declaration.Span), declaration.Span) {
-                IsExternal = true,
+                IsExternal = !isNativeVTableMethod,
                 IsPrivate = isPrivate,
                 IsInternal = isInternal,
                 IsStatic = isStatic,
@@ -2597,24 +2487,17 @@ internal sealed partial class Binder
                 DeclaringStruct = declaringType,
                 NativeImportKey = nativeImportKey,
                 DirectNativeImport = directNativeImport,
+                NativeVTableMethod = nativeVTableMethod,
+                Intrinsic = isNativeVTableMethod ? BoundIntrinsic.NativeVTableCall : BoundIntrinsic.None,
             };
 
             if (isExternal && importDefinition is not null && externalFunction is not null
-                && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType)
-                    || returnType == PrimitiveType.NativeWindowHandle
-                        && NativeWindowCreationContract.MatchesImport(importDefinition)
-                    || returnType == PrimitiveType.NativeModuleHandle
-                        && NativeWindowClassContract.MatchesImport(importDefinition)
-                    || returnType == PrimitiveType.Char16
-                        && NativeWindowClassContract.MatchesImport(importDefinition)
-                    )
+                && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType))
                 && Enumerable.Range(0, boundParameters.Length).All(index =>
-                    !boundParameters[index].IsInit
-                    && (boundParameters[index].IsOut
-                        ? IsNativeComImportOutputParameter(boundParameters[index].Type, importDefinition, index)
-                        : IsNativeImportParameterType(boundParameters[index].Type)))
+                    !boundParameters[index].IsInit && !boundParameters[index].IsOut
+                    && IsNativeImportParameterType(boundParameters[index].Type))
                 && _nativeImportCatalog is not null
-                && _nativeImportCatalog.MatchesFunction(externalFunction, importDefinition, [.. _structs]))
+                && _nativeImportCatalog.MatchesFunction(externalFunction, importDefinition))
             {
                 _usesNativeImportCatalog = true;
             }
@@ -2687,12 +2570,10 @@ internal sealed partial class Binder
             PropertyName = property ? nameText : null,
             IsConstEval = isConstEval,
             RequiresUnsafeCaller = requiresUnsafeCaller,
+            NativeFunctionPointerType = nativeFunctionPointerType,
             CapturedParameters = capturedParameters,
             ReturnsForwardedBacking = spanResultCandidate && !resultDependencyParameters.IsEmpty,
             ResultDependencyParameters = resultDependencyParameters,
-            NativeComAcquisitionOutputParameterIndexes =
-                [.. nativeComAcquisitionOutputParameterIndexes.Order()],
-            NativeComAcquisitionSources = [.. nativeComAcquisitionSources],
         });
     }
 
@@ -2776,6 +2657,38 @@ internal sealed partial class Binder
         var writable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
         var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
+        if (name == "fnptr")
+        {
+            if (typeArgumentNodes.Length < 2 || writable || optional
+                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion }
+                || TypeNameIdentifier(typeArgumentNodes[0]) is not ("NativeAbi" or "Terrum.Interop.NativeAbi")
+                || typeArgumentNodes[0].Children.OfType<SyntaxNode>().Any())
+            {
+                Report("TRM3005",
+                    "A native function pointer type requires fnptr<NativeAbi, parameter types..., return type>.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+
+            var diagnosticCount = DiagnosticCount;
+            var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(typeArgumentNodes.Length - 2);
+            for (var index = 1; index < typeArgumentNodes.Length - 1; index++)
+            {
+                parameterTypes.Add(BindType(typeArgumentNodes[index], allowVoid: false));
+            }
+            var returnType = BindType(typeArgumentNodes[^1], allowVoid: true);
+            var signature = new NativeFunctionPointerSignatureDefinition(
+                NativeCallingConvention.Native, returnType, parameterTypes.MoveToImmutable());
+            if (DiagnosticCount != diagnosticCount
+                || !NativeFunctionPointerContract.IsValidSignature(signature, [.. _nativeFunctionPointerSignatures]))
+            {
+                Report("TRM3005",
+                    "Native function pointer signatures support only scalar, raw pointer, and nested function pointer values.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+            return GetNativeFunctionPointerType(signature);
+        }
         if (name == NativeStorageParameterContract.AddressTypeName)
         {
             if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeStorageAddress) == true
@@ -2801,74 +2714,36 @@ internal sealed partial class Binder
                 node.Span);
             return PrimitiveType.Int32;
         }
-        if (name == NativeWindowClassContract.ModuleHandleTypeName)
-        {
-            if (typeArgumentNodes.Length != 0 || writable || optional
-                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
-            {
-                Report("TRM3030",
-                    "A native module handle is an immutable opaque value type.",
-                    node.Span);
-                return PrimitiveType.Int32;
-            }
-
-            return PrimitiveType.NativeModuleHandle;
-        }
-        if (NativeWindowClassContract.IsTypeName(name))
-        {
-            if (_nativeImportCatalog?.SupportsWindowClassInitialization != true || typeArgumentNodes.Length != 0
-                || writable || optional
-                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
-            {
-                Report("TRM3030", "The Windows class descriptor and module handle are available only in the reviewed direct window-class profile.",
-                    node.Span);
-                return PrimitiveType.Int32;
-            }
-
-            return NativeWindowClassContract.Type(name);
-        }
-        if (NativeWindowMessageContract.IsTypeName(name))
-        {
-            if (_nativeImportCatalog?.SupportsWindowMessageLoop != true || typeArgumentNodes.Length != 0
-                || writable || optional
-                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
-            {
-                Report("TRM3030", "The opaque Windows MSG carrier is available only in the reviewed direct message-loop profile.",
-                    node.Span);
-                return PrimitiveType.Int32;
-            }
-
-            return NativeWindowMessageContract.Type(name);
-        }
         if (name == "ptr")
         {
-            if (typeArgumentNodes.Length != 1 || writable || optional
+            if (typeArgumentNodes.Length != 1 || optional
                 || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
             {
-                Report("TRM3005", "This FFI profile supports only readonly ptr<char16> parameters.", node.Span);
+                Report("TRM3005", "A native pointer type requires ptr<T> or write ptr<T>.", node.Span);
                 return PrimitiveType.Int32;
             }
             if (TypeNameIdentifier(typeArgumentNodes[0]) == "void"
                 && typeArgumentNodes[0].Children.Length == 1)
             {
-                return PrimitiveType.NativeRawPointer;
+                return writable ? GetNativePointerType(PrimitiveType.Void, isWritable: true, span: node.Span)
+                    : PrimitiveType.NativeRawPointer;
             }
             if (IsUnshadowedBareChar8Type(typeArgumentNodes[0]))
             {
-                if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf8ZPointer) == true)
+                if (!writable && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf8ZPointer) == true)
                 {
                     return PrimitiveType.NativeUtf8ZPointer;
                 }
                 Report("TRM3005", "ptr<char8> is available only for catalogued UTF-8-NUL imports.", node.Span);
                 return PrimitiveType.Int32;
             }
-            if (BindType(typeArgumentNodes[0], allowVoid: false) != PrimitiveType.Char16)
+            var diagnosticCount = DiagnosticCount;
+            var pointeeType = BindType(typeArgumentNodes[0], allowVoid: false);
+            if (DiagnosticCount != diagnosticCount)
             {
-                Report("TRM3005", "This FFI profile supports only ptr<char16> and catalogued ptr<char8> parameters.",
-                    node.Span);
                 return PrimitiveType.Int32;
             }
-            return PrimitiveType.NativeUtf16ZPointer;
+            return GetNativePointerType(pointeeType, writable, node.Span);
         }
         if (name is "Span" or "Terrum.Span")
         {
@@ -2981,6 +2856,46 @@ internal sealed partial class Binder
         }
 
         return type ?? PrimitiveType.Int32;
+    }
+
+    private PrimitiveType GetNativeFunctionPointerType(
+        NativeFunctionPointerSignatureDefinition signature)
+    {
+        for (var index = 0; index < _nativeFunctionPointerSignatures.Count; index++)
+        {
+            var existing = _nativeFunctionPointerSignatures[index];
+            if (existing.CallingConvention == signature.CallingConvention
+                && existing.ReturnType == signature.ReturnType
+                && existing.ParameterTypes.SequenceEqual(signature.ParameterTypes))
+            {
+                return NativeFunctionPointerTypes.Type(index);
+            }
+        }
+
+        var type = NativeFunctionPointerTypes.Type(_nativeFunctionPointerSignatures.Count);
+        _nativeFunctionPointerSignatures.Add(signature);
+        return type;
+    }
+
+    private PrimitiveType GetNativePointerType(PrimitiveType pointeeType, bool isWritable, TextSpan span)
+    {
+        for (var index = 0; index < _nativePointerTypes.Count; index++)
+        {
+            var existing = _nativePointerTypes[index];
+            if (existing.PointeeType == pointeeType && existing.IsWritable == isWritable)
+            {
+                return NativePointerTypes.Type(index);
+            }
+        }
+
+        if (_nativePointerTypes.Count >= SemanticVerifier.MaximumAnalysisVisits)
+        {
+            Report("TRM3005", "The compilation exceeds the native pointer type limit.", span);
+            return PrimitiveType.Int32;
+        }
+        var type = NativePointerTypes.Type(_nativePointerTypes.Count);
+        _nativePointerTypes.Add(new NativePointerTypeDefinition(pointeeType, isWritable));
+        return type;
     }
 
     private bool TryGetAliasTypeArgument(string name, out PrimitiveType type)
@@ -3596,20 +3511,16 @@ internal sealed partial class Binder
                             storageRecordInitializer, _nativeImportCatalog),
                     };
                 }
-                if (initializer is BoundNativeWindowClassExInitialization windowClass)
-                {
-                    _variables[slot] = _variables[slot] with {
-                        NativeWindowClassExFacts = NativeWindowClassContract.Facts(
-                            windowClass, _nativeUtf16ZLiterals),
-                    };
-                }
                 return new BoundLocal(slot, initializer, node.Span);
             }
 
             case SyntaxKind.VacantLocalDeclaration:
             {
-                var typeElement = node.Children[1];
-                var name = ((SyntaxTokenElement)node.Children[2]).Token;
+                var isMutable = node.Children[1] is SyntaxTokenElement modifier
+                    && modifier.Token.Kind == TokenKind.MutKeyword;
+                var typeIndex = isMutable ? 2 : 1;
+                var typeElement = node.Children[typeIndex];
+                var name = ((SyntaxTokenElement)node.Children[typeIndex + 1]).Token;
                 var inferred = typeElement is SyntaxTokenElement;
                 var type = inferred ? PrimitiveType.Void : BindType((SyntaxNode)typeElement, allowVoid: false);
                 if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
@@ -3624,7 +3535,7 @@ internal sealed partial class Binder
                 {
                     Report("TRM3023", "Span and cursor bindings require a complete initializer in this provisional profile.", node.Span);
                 }
-                var slot = AddVariable(name.Name, type, false, name.Span);
+                var slot = AddVariable(name.Name, type, isMutable, name.Span);
                 _variables[slot] = _variables[slot] with { IsInitializationLocal = true };
                 if (inferred)
                 {
@@ -3699,6 +3610,36 @@ internal sealed partial class Binder
                 {
                     return new BoundAssignment(destination,
                         BindExpression(valueNode, _variables[destination].Type), node.Span);
+                }
+
+                if (target.Kind == SyntaxKind.UnaryExpression
+                    && ((SyntaxTokenElement)target.Children[0]).Token.Kind == TokenKind.Star)
+                {
+                    var pointer = BindExpression((SyntaxNode)target.Children[1], null);
+                    var pointerType = pointer.Type;
+                    if (!NativePointerTypeContract.IsValidType(pointerType, [.. _nativePointerTypes]))
+                    {
+                        Report("TRM3030", "A pointer assignment requires a typed native pointer.", target.Span);
+                        _ = BindExpression(valueNode, null);
+                        return new BoundBlock([], node.Span);
+                    }
+
+                    var pointerDefinition = _nativePointerTypes[NativePointerTypes.Index(pointerType)];
+                    if (!pointerDefinition.IsWritable || pointerDefinition.PointeeType == PrimitiveType.Void)
+                    {
+                        Report("TRM3030", "A pointer assignment requires a writable pointer to a value type.",
+                            target.Span);
+                    }
+                    if (_unsafeDepth == 0)
+                    {
+                        Report("TRM3028", "A pointer write requires an explicit unsafe context.", target.Span);
+                    }
+                    var pointerValue = BindExpression(valueNode, pointerDefinition.PointeeType);
+                    return new BoundExpressionStatement(
+                        new BoundNativePointerWrite(pointer, pointerValue, node.Span) {
+                            IsUnsafeAuthorized = _unsafeDepth != 0,
+                        },
+                        node.Span);
                 }
 
                 if (target.Kind == SyntaxKind.IndexExpression
@@ -4378,6 +4319,10 @@ internal sealed partial class Binder
                     IsCleanup: false, IsMutable: false, IsOperator: false, PropertyName: null,
                 }))
             || call.Arguments.Any(ContainsAuthorizedExpressionScopeCall),
+        BoundNativeFunctionAddress address => address.IsUnsafeAuthorized,
+        BoundIndirectCall call => call.IsUnsafeAuthorized
+            || ContainsAuthorizedExpressionScopeCall(call.Target)
+            || call.Arguments.Any(ContainsAuthorizedExpressionScopeCall),
         BoundUnary unary => ContainsAuthorizedExpressionScopeCall(unary.Operand),
         BoundUpdate update => ContainsAuthorizedExpressionScopeCall(update.Place),
         BoundNominalUpdate update => (update.IsUnsafeAuthorized
@@ -4478,14 +4423,10 @@ internal sealed partial class Binder
                 var literalToken = ((SyntaxTokenElement)node.Children[0]).Token;
                 if (literalToken.Kind == TokenKind.NullKeyword)
                 {
-                    if (expected == PrimitiveType.NativeRawPointer)
+                    if (expected == PrimitiveType.NativeRawPointer || expected is PrimitiveType pointerType
+                        && NativePointerTypes.IsType(pointerType))
                     {
-                        expression = new BoundConstant(0, PrimitiveType.NativeRawPointer, node.Span);
-                    }
-                    else if (expected == PrimitiveType.NativeNullPointer
-                        && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeNullPointer) == true)
-                    {
-                        expression = new BoundConstant(0, PrimitiveType.NativeNullPointer, node.Span);
+                        expression = new BoundConstant(0, expected.Value, node.Span);
                     }
                     else if (expected is not PrimitiveType optionalType || !ManagedClassTypes.IsOptional(optionalType))
                     {
@@ -4632,11 +4573,6 @@ internal sealed partial class Binder
                 }
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
-                if (IsNativeWindowNoOwnerExpression(node))
-                {
-                    expression = new BoundNativeNoOwner(node.Span);
-                    break;
-                }
                 var receiverType = KnownType(receiverNode);
                 if (receiverType == PrimitiveType.TokenSpan && member == "Length")
                 {
@@ -4746,6 +4682,25 @@ internal sealed partial class Binder
                     {
                         expression = new BoundRead(destination, _variables[destination].Type, node.Span);
                     }
+                    else if (KnownType(operandNode) is PrimitiveType pointerType
+                        && NativePointerTypeContract.IsValidType(pointerType, [.. _nativePointerTypes]))
+                    {
+                        var pointeeType = _nativePointerTypes[NativePointerTypes.Index(pointerType)].PointeeType;
+                        if (pointeeType == PrimitiveType.Void)
+                        {
+                            Report("TRM3030", "A void pointer cannot be dereferenced.", node.Span);
+                            expression = ErrorExpression(node.Span);
+                            break;
+                        }
+                        if (_unsafeDepth == 0)
+                        {
+                            Report("TRM3028", "A pointer read requires an explicit unsafe context.", node.Span);
+                        }
+                        expression = new BoundNativePointerRead(
+                            BindExpression(operandNode, pointerType), pointeeType, node.Span) {
+                            IsUnsafeAuthorized = _unsafeDepth != 0,
+                        };
+                    }
                     else
                     {
                         Report("TRM3030", "Dereference requires an init ref destination in this source profile.",
@@ -4769,18 +4724,72 @@ internal sealed partial class Binder
                         expression = BindNativeAggregateStorageAddress(operandNode, node.Span);
                         break;
                     }
-                    if (expected == PrimitiveType.NativeWindowClassExAddress)
+                    if (expected is PrimitiveType expectedPointerType
+                        && NativePointerTypeContract.IsValidType(expectedPointerType, [.. _nativePointerTypes]))
                     {
-                        expression = BindNativeWindowClassExAddress(operandNode, node.Span);
-                        break;
-                    }
-                    if (expected == PrimitiveType.NativeWindowMessageAddress)
-                    {
-                        expression = BindNativeWindowMessageAddress(operandNode, node.Span);
+                        if (operandNode.Kind == SyntaxKind.IndexExpression)
+                        {
+                            expression = BindNativeFixedArrayPointerAddress(operandNode,
+                                expectedPointerType, node.Span);
+                            break;
+                        }
+                        if (operandNode.Kind != SyntaxKind.NameExpression
+                            || !TryFindVariable(NameText(operandNode), out var pointerVariable)
+                            || _nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].PointeeType
+                                != _variables[pointerVariable].Type
+                            || _nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].IsWritable
+                                && !_variables[pointerVariable].IsMutable)
+                        {
+                            Report("TRM3030",
+                                "Taking a native pointer address requires a matching local value and access mode.",
+                                node.Span);
+                            expression = ErrorExpression(node.Span);
+                        }
+                        else
+                        {
+                            if (_unsafeDepth == 0)
+                            {
+                                Report("TRM3028",
+                                    "Taking a native pointer address requires an explicit unsafe context.",
+                                    node.Span);
+                            }
+                            expression = new BoundNativePointerAddress(pointerVariable,
+                                expectedPointerType, node.Span) {
+                                IsUnsafeAuthorized = _unsafeDepth != 0,
+                            };
+                        }
                         break;
                     }
                     var functionName = NameText(operandNode);
-                    if (expected == PrimitiveType.NativeCallbackAddress
+                    if (expected is PrimitiveType nativeFunctionPointerType
+                        && NativeFunctionPointerTypes.IsType(nativeFunctionPointerType)
+                        && operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
+                        && !TryFindVariable(functionName, out _)
+                        && TryFindFunction(functionName, out var nativeCallable))
+                    {
+                        var signature = _signatures[nativeCallable];
+                        if (signature.NativeFunctionPointerType != nativeFunctionPointerType)
+                        {
+                            Report("TRM3030",
+                                "The function address does not match the expected native function pointer signature.",
+                                node.Span);
+                            expression = ErrorExpression(node.Span);
+                        }
+                        else
+                        {
+                            if (_unsafeDepth == 0)
+                            {
+                                Report("TRM3028",
+                                    "Taking a native function address requires an explicit unsafe context.",
+                                    node.Span);
+                            }
+                            expression = new BoundNativeFunctionAddress(nativeCallable,
+                                nativeFunctionPointerType, node.Span) {
+                                IsUnsafeAuthorized = _unsafeDepth != 0,
+                            };
+                        }
+                    }
+                    else if (expected == PrimitiveType.NativeCallbackAddress
                         && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
                         && operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
                         && !TryFindVariable(functionName, out _)
@@ -5130,13 +5139,13 @@ internal sealed partial class Binder
         var leftKnown = KnownType(leftNode);
         var rightKnown = KnownType(rightNode);
         if ((op.Kind is TokenKind.EqualsEquals or TokenKind.BangEquals)
-            && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeCallbackAddress) == true
-            && ((leftKnown == PrimitiveType.NativeWindowHandle && IsNativeWindowNoOwnerExpression(rightNode))
-                || (rightKnown == PrimitiveType.NativeWindowHandle && IsNativeWindowNoOwnerExpression(leftNode))))
+            && (leftKnown == PrimitiveType.NativeRawPointer || rightKnown == PrimitiveType.NativeRawPointer)
+            && (leftKnown is null or PrimitiveType.NativeRawPointer)
+            && (rightKnown is null or PrimitiveType.NativeRawPointer))
         {
-            var handleNode = leftKnown == PrimitiveType.NativeWindowHandle ? leftNode : rightNode;
-            var handle = BindExpression(handleNode, PrimitiveType.NativeWindowHandle);
-            return new BoundNativeWindowHandleIsNoOwner(handle, op.Kind == TokenKind.BangEquals, node.Span);
+            var leftPointer = BindExpression(leftNode, PrimitiveType.NativeRawPointer);
+            var rightPointer = BindExpression(rightNode, PrimitiveType.NativeRawPointer);
+            return new BoundBinary(op.Kind, leftPointer, rightPointer, PrimitiveType.Bool, node.Span);
         }
         if (leftKnown is PrimitiveType concrete && IsStruct(concrete) && IsStaticBinaryOperator(op.Kind))
         {
@@ -5262,6 +5271,11 @@ internal sealed partial class Binder
     private BoundExpression BindCall(SyntaxNode node, PrimitiveType? expected)
     {
         var callee = (SyntaxNode)node.Children[0];
+        if (KnownType(callee) is PrimitiveType functionPointerType
+            && NativeFunctionPointerTypes.IsType(functionPointerType))
+        {
+            return BindNativeFunctionPointerCall(node, callee, functionPointerType);
+        }
         var function = -1;
         SyntaxNode? receiver = null;
         if (callee.Kind == SyntaxKind.NameExpression)
@@ -5273,11 +5287,6 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Name, out function))
             {
-                if (name.Name == NativeMappedBufferContract.ReadByteIntrinsicName
-                    && FindGenericTemplate(name.Name) is null)
-                {
-                    return BindNativeMappedByteRead(node);
-                }
                 if (expected == PrimitiveType.NativeStorageRecord)
                 {
                     return BindNativeStorageRecordInitializer(node, expected);
@@ -5293,18 +5302,6 @@ internal sealed partial class Binder
                     && name.Name == "utf8z")
                 {
                     return BindNativeUtf8ZLiteral(node, expected);
-                }
-                if (expected == PrimitiveType.NativeWindowClassEx
-                    && _nativeImportCatalog?.SupportsWindowClassInitialization == true
-                    && name.Name == NativeWindowClassContract.InitializerName)
-                {
-                    return BindNativeWindowClassExInitializer(node);
-                }
-                if (expected == PrimitiveType.NativeWindowMessage
-                    && _nativeImportCatalog?.SupportsWindowMessageLoop == true
-                    && name.Name == NativeWindowMessageContract.InitializerName)
-                {
-                    return BindNativeWindowMessageInitializer(node);
                 }
                 if (expected == PrimitiveType.NativeStorageRecord)
                 {
@@ -5439,6 +5436,63 @@ internal sealed partial class Binder
             Report("TRM3011", "Only direct calls to named functions are supported.", callee.Span);
         }
         return BindArguments(node, (SyntaxNode)node.Children[1], function, receiver);
+    }
+
+    private BoundExpression BindNativeFunctionPointerCall(SyntaxNode node, SyntaxNode callee,
+        PrimitiveType functionPointerType)
+    {
+        var typeIndex = NativeFunctionPointerTypes.Index(functionPointerType);
+        if ((uint)typeIndex >= (uint)_nativeFunctionPointerSignatures.Count)
+        {
+            Report("TRM3005", "The native function pointer type has no bound signature.", callee.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        var signature = _nativeFunctionPointerSignatures[typeIndex];
+        var target = BindExpression(callee, functionPointerType);
+        var argumentList = (SyntaxNode)node.Children[1];
+        var argumentNodes = argumentList.Children.OfType<SyntaxNode>().ToArray();
+        if (HasNamedArguments(argumentList))
+        {
+            Report("TRM3011", "Native function pointer calls do not support named arguments.", argumentList.Span);
+        }
+        if (argumentNodes.Length != signature.ParameterTypes.Length)
+        {
+            Report("TRM3011", "Native function pointer argument count does not match its signature.",
+                argumentList.Span);
+        }
+        if (_unsafeDepth == 0)
+        {
+            Report("TRM3028", "Calling a native function pointer requires an explicit unsafe context.", node.Span);
+        }
+
+        var boundArguments = ImmutableArray.CreateBuilder<BoundExpression>(argumentNodes.Length);
+        for (var index = 0; index < argumentNodes.Length; index++)
+        {
+            var argument = argumentNodes[index];
+            if (argument.Children.Any(static child => child is SyntaxTokenElement {
+                    Token.Kind: TokenKind.OutKeyword or TokenKind.VarKeyword
+                } || child is SyntaxTokenElement { Token.Text: "init" }))
+            {
+                Report("TRM3011", "Native function pointer parameters do not support output argument modes.",
+                    argument.Span);
+            }
+            var value = argument.Children.OfType<SyntaxNode>().LastOrDefault();
+            if (value is null)
+            {
+                Report("TRM3011", "Native function pointer calls require value arguments.", argument.Span);
+                boundArguments.Add(ErrorExpression(argument.Span));
+                continue;
+            }
+            var parameterType = index < signature.ParameterTypes.Length
+                ? signature.ParameterTypes[index] : (PrimitiveType?)null;
+            boundArguments.Add(BindExpression(value, parameterType));
+        }
+
+        return new BoundIndirectCall(target, boundArguments.MoveToImmutable(),
+            signature.ReturnType, node.Span) {
+            IsUnsafeAuthorized = _unsafeDepth != 0,
+        };
     }
 
     private BoundConstant BindNativeUtf16ZLiteral(SyntaxNode node, PrimitiveType? expected)
@@ -5874,14 +5928,6 @@ internal sealed partial class Binder
                     implicitReferenceTemporaries[^1] = temporary;
                 }
             }
-            else if (signature?.External is BoundFunction external
-                && expected is PrimitiveType borrowedType
-                && NativeComCallContract.IsBorrowedOwnerArgument(external,
-                    position + receiverCount, borrowedType, _nativeImportCatalog)
-                && expected is PrimitiveType uniqueType && IsUnique(uniqueType))
-            {
-                bound.Add(BindReceiverLoan(value, uniqueType));
-            }
             else
             {
                 if (signature?.External?.DirectNativeImport is DirectNativeImport directImport
@@ -5899,39 +5945,13 @@ internal sealed partial class Binder
                 {
                     bound.Add(BindDirectNativeParameterAddress(value, directInputParameter, argument.Span));
                 }
-                else if (expected == PrimitiveType.NativeStorageAddress
-                    && signature?.External is BoundFunction comTarget
-                    && comTarget.NativeComMethod is NativeComMethodDefinition comMethod)
+                else if (signature?.External is BoundFunction nativeVTableFunction
+                    && nativeVTableFunction.NativeVTableMethod is not null
+                    && expectedParameter?.Type == PrimitiveType.NativeRawPointer && position >= 0
+                    && NativeVTableCallContract.ParameterForParameter(
+                        nativeVTableFunction, position) is DirectNativeParameter vtableInputParameter)
                 {
-                    if (_nativeImportCatalog is not NativeImportCatalog comCatalog)
-                    {
-                        Report("TRM3030",
-                            "A COM pointer address requires its selected metadata catalog.",
-                            argument.Span);
-                        bound.Add(ErrorExpression(argument.Span));
-                    }
-                    else
-                    {
-                        var nativeParameterIndex = NativeComCallContract.NativeParameterIndex(
-                            comTarget, position + receiverCount, comMethod);
-                        if (!NativeComCallContract.TryGetNativeParameter(
-                            comMethod, nativeParameterIndex, out var nativeParameter)
-                            || nativeParameter is null
-                            || !NativeComCallContract.TryGetNativeParameterPointeeType(
-                                comMethod, nativeParameterIndex, comCatalog, [.. _structs],
-                                out var pointeeType))
-                        {
-                            Report("TRM3030",
-                                "A COM pointer address requires matching NativeParameter metadata.",
-                                argument.Span);
-                            bound.Add(ErrorExpression(argument.Span));
-                        }
-                        else
-                        {
-                            bound.Add(BindNativeComParameterAddress(value,
-                                nativeParameter.Access, nativeParameter.Extent, pointeeType, argument.Span));
-                        }
-                    }
+                    bound.Add(BindDirectNativeParameterAddress(value, vtableInputParameter, argument.Span));
                 }
                 else
                 {
@@ -6078,7 +6098,8 @@ internal sealed partial class Binder
 
     private static bool IsScalarPrimitiveType(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
+            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+            || NativeFunctionPointerTypes.IsType(type);
 
     private bool IsSupportedImplicitReferenceType(PrimitiveType type) =>
         IsScalarPrimitiveType(type) || (IsStruct(type) && !IsUnique(type));
@@ -6318,6 +6339,13 @@ internal sealed partial class Binder
             case SyntaxKind.InvocationExpression:
             {
                 var callee = (SyntaxNode)node.Children[0];
+                if (KnownType(callee) is PrimitiveType functionPointerType
+                    && NativeFunctionPointerTypes.IsType(functionPointerType))
+                {
+                    var functionPointerIndex = NativeFunctionPointerTypes.Index(functionPointerType);
+                    return (uint)functionPointerIndex < (uint)_nativeFunctionPointerSignatures.Count
+                        ? _nativeFunctionPointerSignatures[functionPointerIndex].ReturnType : null;
+                }
                 if (callee.Kind == SyntaxKind.GenericNameExpression)
                 {
                     return GenericCallType(callee, (SyntaxNode)node.Children[1]);
@@ -6325,10 +6353,6 @@ internal sealed partial class Binder
                 if (callee.Kind == SyntaxKind.NameExpression)
                 {
                     var name = ((SyntaxTokenElement)callee.Children[0]).Token.Name;
-                    if (name == NativeMappedBufferContract.ReadByteIntrinsicName)
-                    {
-                        return PrimitiveType.UInt32;
-                    }
                     if (!TryFindVariable(name, out _) && TryFindFunction(name, out var index))
                     {
                         return _signatures[index].ReturnType;
@@ -6479,17 +6503,26 @@ internal sealed partial class Binder
                 var operation = ((SyntaxTokenElement)node.Children[0]).Token.Kind;
                 if (operation == TokenKind.Ampersand)
                 {
-                    if (operand == PrimitiveType.NativeWindowClassEx)
-                    {
-                        return PrimitiveType.NativeWindowClassExAddress;
-                    }
                     if (operandNode is { Kind: SyntaxKind.IndexExpression } element
                         && KnownType((SyntaxNode)element.Children[0]) is PrimitiveType arrayCarrier
                         && NativeFixedArrayContract.IsCarrier(arrayCarrier))
                     {
                         return PrimitiveType.NativeStorageAddress;
                     }
+                    var functionName = NameText(operandNode);
+                    if (operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
+                        && !TryFindVariable(functionName, out _)
+                        && TryFindFunction(functionName, out var function)
+                        && _signatures[function].NativeFunctionPointerType is PrimitiveType functionPointerType)
+                    {
+                        return functionPointerType;
+                    }
                     return PrimitiveType.NativeCallbackAddress;
+                }
+                if (operation == TokenKind.Star && operand is PrimitiveType pointerType
+                    && NativePointerTypeContract.IsValidType(pointerType, [.. _nativePointerTypes]))
+                {
+                    return _nativePointerTypes[NativePointerTypes.Index(pointerType)].PointeeType;
                 }
                 if (operand is PrimitiveType concrete && IsStruct(concrete)
                     && IsStaticUnaryOperator(operation)
@@ -6668,20 +6701,6 @@ internal sealed partial class Binder
             && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out _);
     }
 
-    private bool IsNativeWindowNoOwnerExpression(SyntaxNode node)
-    {
-        if (node.Kind != SyntaxKind.MemberAccessExpression
-            || ((SyntaxTokenElement)node.Children[2]).Token.Text != NativeWindowHandleContract.NoOwnerMemberName)
-        {
-            return false;
-        }
-
-        var receiver = (SyntaxNode)node.Children[0];
-        return !HasVariableReceiverName(receiver)
-            && ResolveTypeName(NameText(receiver), out var nativeHandleType) == DeclaredTypeResolution.Unique
-            && nativeHandleType == PrimitiveType.NativeWindowHandle;
-    }
-
     private bool TryFindFunctionExact(string name, out int function)
     {
         if (_genericProofSource is Binder source && source._functions.TryGetValue(name, out var sourceIndex)
@@ -6751,17 +6770,12 @@ internal sealed partial class Binder
         PrimitiveType.TokenSpan => "Span<Token>",
         PrimitiveType.NativeUtf16ZPointer => "ptr<char16>",
         PrimitiveType.NativeUtf8ZPointer => "ptr<char8>",
-        PrimitiveType.NativeWindowHandle => NativeWindowHandleContract.TypeName,
-        PrimitiveType.NativeNullPointer => NativeImportCatalog.NativeNullPointerTypeName,
         PrimitiveType.NativeRawPointer => "ptr<void>",
+        _ when NativePointerTypes.IsType(type) => NativePointerTypeName(type),
+        _ when NativeFunctionPointerTypes.IsType(type) => NativeFunctionPointerTypeName(type),
         PrimitiveType.NativeCallbackAddress => NativeCallbackContract.TypeName,
         PrimitiveType.NativeStorageAddress => NativeStorageParameterContract.AddressTypeName,
         PrimitiveType.NativeStorageRecord => "catalogued native storage record",
-        PrimitiveType.NativeModuleHandle => NativeWindowClassContract.ModuleHandleTypeName,
-        PrimitiveType.NativeWindowClassEx => NativeWindowClassContract.WindowClassTypeName,
-        PrimitiveType.NativeWindowClassExAddress => NativeWindowClassContract.WindowClassAddressTypeName,
-        PrimitiveType.NativeWindowMessage => NativeWindowMessageContract.TypeName,
-        PrimitiveType.NativeWindowMessageAddress => NativeWindowMessageContract.AddressTypeName,
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",
@@ -6774,6 +6788,30 @@ internal sealed partial class Binder
         _ when IsStruct(type) => _structs[(int)type - 100].Name,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
+
+    private string NativeFunctionPointerTypeName(PrimitiveType type)
+    {
+        var index = NativeFunctionPointerTypes.Index(type);
+        if ((uint)index >= (uint)_nativeFunctionPointerSignatures.Count)
+        {
+            return $"fnptr<{index}>";
+        }
+        var signature = _nativeFunctionPointerSignatures[index];
+        var parameters = signature.ParameterTypes.Select(TypeName).Append(TypeName(signature.ReturnType));
+        return $"fnptr<NativeAbi, {string.Join(", ", parameters)}>";
+    }
+
+    private string NativePointerTypeName(PrimitiveType type)
+    {
+        var index = NativePointerTypes.Index(type);
+        if ((uint)index >= (uint)_nativePointerTypes.Count)
+        {
+            return $"ptr<{index}>";
+        }
+        var pointerType = _nativePointerTypes[index];
+        var modifier = pointerType.IsWritable ? "write " : string.Empty;
+        return $"{modifier}ptr<{TypeName(pointerType.PointeeType)}>";
+    }
 
     private void Report(string code, string message, TextSpan span)
     {
@@ -6798,6 +6836,7 @@ internal sealed partial class Binder
         internal bool IsCleanup { get; init; }
         internal bool RequiresUnsafeCaller { get; init; }
         internal bool IsOperator { get; init; }
+        internal PrimitiveType? NativeFunctionPointerType { get; init; }
         internal GenericInstantiation? Generic { get; init; }
         internal bool IsClassConstructor { get; init; }
         internal int ClassConstructor { get; init; } = -1;
@@ -6805,7 +6844,5 @@ internal sealed partial class Binder
         internal ImmutableArray<int> CapturedParameters { get; init; } = [];
         internal bool ReturnsForwardedBacking { get; init; }
         internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
-        internal ImmutableArray<int> NativeComAcquisitionOutputParameterIndexes { get; init; } = [];
-        internal ImmutableArray<NativeComAcquisitionSourceDefinition> NativeComAcquisitionSources { get; init; } = [];
     }
 }

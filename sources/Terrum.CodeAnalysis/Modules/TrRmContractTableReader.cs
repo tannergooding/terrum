@@ -13,6 +13,9 @@ namespace Terrum.CodeAnalysis.Modules;
 internal readonly record struct TrRmNativeOutputContract(
     int ParameterOrdinal, PrimitiveType PointeeType, uint ResultCondition, uint FailureDisposition);
 
+internal readonly record struct TrRmNativeParameterContract(
+    int ParameterOrdinal, byte Access, byte Retention, uint Extent);
+
 /// <summary>Validates Contract row framing, owner ranges and assigned clause shapes.</summary>
 /// <remarks>Structural decoding does not prove the promises or make unassigned clause modes executable.</remarks>
 public readonly ref struct TrRmContractTableReader
@@ -22,10 +25,6 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmMethodSigTableReader _signatures;
     private readonly TrRmParamTableReader _parameters;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
-    private readonly TrRmNativeComInterfaceContract?[] _comInterfaces;
-    private readonly TrRmNativeComMethodContract?[] _comMethods;
-    private readonly bool[] _typeHasNativeComContracts;
-    private readonly bool[] _methodHasNativeComContracts;
     private readonly ImmutableArray<TrRmNativeParameterContract>[] _nativeParameters;
     private readonly uint[] _nativeBlittableTargetRequirements;
 
@@ -46,10 +45,6 @@ public readonly ref struct TrRmContractTableReader
         _signatures = signatures;
         _parameters = parameters;
         _typeSpecs = typeSpecs;
-        _comInterfaces = new TrRmNativeComInterfaceContract?[types.Count + 1];
-        _comMethods = new TrRmNativeComMethodContract?[methods.Count + 1];
-        _typeHasNativeComContracts = new bool[types.Count + 1];
-        _methodHasNativeComContracts = new bool[methods.Count + 1];
         _nativeParameters = new ImmutableArray<TrRmNativeParameterContract>[methods.Count + 1];
         _nativeBlittableTargetRequirements = new uint[types.Count + 1];
         var owners = new uint[recordCount + 1];
@@ -69,11 +64,8 @@ public readonly ref struct TrRmContractTableReader
         var outputs = new HashSet<(uint Owner, uint Ordinal)>();
         var outputStates = new HashSet<(uint Owner, uint Ordinal)>();
         var noThrowMethods = new HashSet<uint>();
-        var effectMasks = new uint[methods.Count + 1];
         var cleanupTypes = new HashSet<int>();
         var cleanupMethods = new List<uint>();
-        var interfaceIids = new HashSet<Guid>();
-        var interfaceMethods = new Dictionary<int, List<(uint Slot, int Method)>>();
         var nativeParameterOrdinals = new HashSet<(uint Owner, uint Ordinal)>();
         for (var row = 1; row <= recordCount; row++)
         {
@@ -82,7 +74,7 @@ public readonly ref struct TrRmContractTableReader
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
             if (owners[row] == 0 || owner != owners[row]
                 || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0
-                || (kind is 1 or 5 or 7 or 8 or 12 && !singletons.Add((owner, kind))))
+                || (kind is 1 or 5 or 12 && !singletons.Add((owner, kind))))
             {
                 throw InvalidContract();
             }
@@ -98,8 +90,7 @@ public readonly ref struct TrRmContractTableReader
                     if (owner >> 24 == 0x16)
                     {
                         var method = owner & 0xFF_FFFF;
-                        effectMasks[method] = Read(data, 8);
-                        if ((effectMasks[method] & 1) != 0)
+                        if ((Read(data, 8) & 1) != 0)
                         {
                             noThrowMethods.Add(method);
                         }
@@ -180,51 +171,6 @@ public readonly ref struct TrRmContractTableReader
                         throw InvalidContract();
                     }
                     break;
-                case 7:
-                    if (data.Length != 28 || owner >> 24 != 0x13)
-                    {
-                        throw InvalidContract();
-                    }
-
-                    var interfaceType = (int)(owner & 0xFF_FFFF);
-                    var interfaceIid = new Guid(data.Slice(8, 16), bigEndian: true);
-                    var baseInterface = Read(data, 24);
-                    if (((types.GetFlags(interfaceType) >> 2) & 0x03) != 3
-                        || interfaceIid == Guid.Empty || !interfaceIids.Add(interfaceIid)
-                        || baseInterface > types.Count || baseInterface == (uint)interfaceType)
-                    {
-                        throw InvalidContract();
-                    }
-                    _comInterfaces[interfaceType] = new TrRmNativeComInterfaceContract(
-                        interfaceIid, (int)baseInterface);
-                    _typeHasNativeComContracts[interfaceType] = true;
-                    break;
-                case 8:
-                    if (data.Length != 16 || owner >> 24 != 0x16)
-                    {
-                        throw InvalidContract();
-                    }
-
-                    var comMethod = (int)(owner & 0xFF_FFFF);
-                    var comMethodOwner = methods.GetOwnerType(comMethod);
-                    var vtableSlot = Read(data, 8);
-                    var comEffects = Read(data, 12);
-                    if (comMethodOwner == 0 || comEffects > 0x0F
-                        || (comEffects & 1) != 0
-                            && !HasResultType(methods, signatures, typeSpecs, comMethod, 8)
-                        || (comEffects & 4) != 0 && (comEffects & 1) == 0)
-                    {
-                        throw InvalidContract();
-                    }
-                    _comMethods[comMethod] = new TrRmNativeComMethodContract(vtableSlot, comEffects);
-                    _methodHasNativeComContracts[comMethod] = true;
-                    if (!interfaceMethods.TryGetValue(comMethodOwner, out var declaredMethods))
-                    {
-                        declaredMethods = [];
-                        interfaceMethods.Add(comMethodOwner, declaredMethods);
-                    }
-                    declaredMethods.Add((vtableSlot, comMethod));
-                    break;
                 case 10:
                     if (data.Length != 20 || owner >> 24 != 0x16)
                     {
@@ -249,7 +195,6 @@ public readonly ref struct TrRmContractTableReader
                     var nativeParameter = new TrRmNativeParameterContract(
                         (int)parameterOrdinal, data[12], data[13], Read(data, 16));
                     AddNativeParameter(parameterMethod, nativeParameter);
-                    _methodHasNativeComContracts[parameterMethod] = true;
                     break;
                 case 12:
                     if (data.Length != 12 || owner >> 24 != 0x13)
@@ -289,70 +234,6 @@ public readonly ref struct TrRmContractTableReader
         {
             if (_nativeBlittableTargetRequirements[type] != 0
                 && cleanupTypes.Contains(type))
-            {
-                throw InvalidContract();
-            }
-        }
-
-        foreach (var (interfaceType, definition) in Enumerate(_comInterfaces))
-        {
-            if (definition.BaseTypeDefRow != 0
-                && _comInterfaces[definition.BaseTypeDefRow] is null)
-            {
-                throw InvalidContract();
-            }
-
-            var visited = new HashSet<int>();
-            var inheritance = new List<int>();
-            var current = interfaceType;
-            while (_comInterfaces[current] is TrRmNativeComInterfaceContract currentInterface)
-            {
-                if (!visited.Add(current))
-                {
-                    throw InvalidContract();
-                }
-                inheritance.Add(current);
-                if (currentInterface.BaseTypeDefRow == 0)
-                {
-                    break;
-                }
-                current = currentInterface.BaseTypeDefRow;
-            }
-
-            var inheritedSlotCount = 0u;
-            for (var index = inheritance.Count - 1; index >= 0; index--)
-            {
-                var declaringInterface = inheritance[index];
-                if (interfaceMethods.TryGetValue(declaringInterface, out var localMethods))
-                {
-                    var slots = new HashSet<uint>();
-                    foreach (var (slot, method) in localMethods)
-                    {
-                        if (!slots.Add(slot)
-                            || methods.GetOwnerType(method) != declaringInterface
-                            || (effectMasks[method] & 4) == 0)
-                        {
-                            throw InvalidContract();
-                        }
-                    }
-                    if (localMethods.Any(method => method.Slot < inheritedSlotCount
-                            || method.Slot > (uint)(int.MaxValue / NativeTargetProfile.PointerSize)))
-                    {
-                        throw InvalidContract();
-                    }
-                    if (localMethods.Count != 0)
-                    {
-                        inheritedSlotCount = Math.Max(inheritedSlotCount,
-                            localMethods.Max(static method => method.Slot) + 1);
-                    }
-                }
-            }
-        }
-
-        foreach (var (method, _) in Enumerate(_comMethods))
-        {
-            var interfaceType = methods.GetOwnerType(method);
-            if (interfaceType == 0 || _comInterfaces[interfaceType] is null)
             {
                 throw InvalidContract();
             }
@@ -415,37 +296,13 @@ public readonly ref struct TrRmContractTableReader
         return results.ToImmutable();
     }
 
-    internal TrRmNativeComInterfaceContract? GetNativeComInterface(int typeDefRow)
-        => typeDefRow > 0 && typeDefRow < _comInterfaces.Length
-            ? _comInterfaces[typeDefRow] : null;
-
-    internal TrRmNativeComMethodContract? GetNativeComMethod(int methodDefRow)
-        => methodDefRow > 0 && methodDefRow < _comMethods.Length
-            ? _comMethods[methodDefRow] : null;
-
     internal uint GetNativeBlittableTargetRequirement(int typeDefRow)
         => typeDefRow > 0 && typeDefRow < _nativeBlittableTargetRequirements.Length
             ? _nativeBlittableTargetRequirements[typeDefRow] : 0;
 
-    internal bool HasNativeComContractsForTypeDef(int typeDefRow)
-        => typeDefRow > 0 && typeDefRow < _typeHasNativeComContracts.Length
-            && _typeHasNativeComContracts[typeDefRow];
-
-    internal bool HasNativeComContractsForMethodDef(int methodDefRow)
-        => methodDefRow > 0 && methodDefRow < _methodHasNativeComContracts.Length
-            && _methodHasNativeComContracts[methodDefRow];
-
     internal ImmutableArray<TrRmNativeParameterContract> GetNativeParameters(int methodDefRow)
         => methodDefRow > 0 && methodDefRow < _nativeParameters.Length
             ? _nativeParameters[methodDefRow] : [];
-
-    private static bool HasResultType(TrRmMethodDefTableReader methods,
-        TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader typeSpecs,
-        int method, byte typeCode)
-    {
-        var result = typeSpecs.GetRow(signatures.GetResultTypeSpec(methods.GetSignature(method)));
-        return result.Length == 3 && result[0] == 1 && result[1] == 0 && result[2] == typeCode;
-    }
 
     private static bool IsPointerTypeSpec(TrRmTypeSpecTableReader typeSpecs, int typeSpecRow)
     {
@@ -459,28 +316,6 @@ public readonly ref struct TrRmContractTableReader
         var parameters = _nativeParameters[method];
         _nativeParameters[method] = parameters.IsDefault
             ? [parameter] : parameters.Add(parameter);
-    }
-
-    private static IEnumerable<(int Row, T Value)> Enumerate<T>(T?[] rows) where T : struct
-    {
-        for (var row = 1; row < rows.Length; row++)
-        {
-            if (rows[row] is T value)
-            {
-                yield return (row, value);
-            }
-        }
-    }
-
-    private static IEnumerable<(int Row, int Value)> Enumerate(int[] rows)
-    {
-        for (var row = 1; row < rows.Length; row++)
-        {
-            if (rows[row] != 0)
-            {
-                yield return (row, rows[row]);
-            }
-        }
     }
 
     private static void Fill(uint[] owners, int start, int count, uint owner)

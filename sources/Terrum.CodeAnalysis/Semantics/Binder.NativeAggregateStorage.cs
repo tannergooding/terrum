@@ -56,8 +56,6 @@ internal sealed partial class Binder
                 recordLayout.ByteExtent, recordLayout.ByteExtent, IsReadonly: true, Span: span);
         }
         if (!NativeStorageParameterContract.SupportsAggregateType(_nativeImportCatalog,
-                type, _structs, !_variables[variable].IsMutable)
-            && !NativeStorageParameterContract.SupportsValueOutputAddressType(_nativeImportCatalog,
                 type, _structs, !_variables[variable].IsMutable))
         {
             Report("TRM3030", "A native storage address requires a matching initialized local.",

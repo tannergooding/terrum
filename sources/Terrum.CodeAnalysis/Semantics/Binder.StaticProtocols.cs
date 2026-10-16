@@ -315,6 +315,8 @@ internal sealed partial class Binder
 
     private bool IsCopyGenericType(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Char16
         or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+        || NativePointerTypes.IsType(type)
+        || NativeFunctionPointerTypes.IsType(type)
         || IsStruct(type)
         || (ManagedClassTypes.IsManaged(type)
             && ((int)type < ManagedClassTypes.First
@@ -338,12 +340,6 @@ internal sealed partial class Binder
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 if (node.Kind != SyntaxKind.InterfaceDeclaration)
-                {
-                    continue;
-                }
-                if (node.Children.OfType<SyntaxNode>().Any(static child =>
-                    child.Kind == SyntaxKind.Attribute
-                    && AttributeName(child) == "Terrum.Interop.NativeComInterface"))
                 {
                     continue;
                 }

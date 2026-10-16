@@ -63,15 +63,61 @@ public static partial class SemanticVerifier
                 && !(element.Index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(element.Layout,
                         program.Structures, program.NativeImportCatalog)))
-            || (function.IsNoThrow && element.Index is not BoundConstant
-                && !NativeFixedArrayContract.AllowsCheckedRuntimeAccess(element.Layout,
-                    program.Structures, program.NativeImportCatalog))
+            || (function.IsNoThrow
+                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+                && element.Index is not BoundConstant)
             || (element.Index is BoundConstant index
                 && (index.Value < 0 || index.Value >= element.Layout.ElementCount)))
         {
             throw InvalidEffect(element.Span, "NativeImport");
         }
         Expression(element.Index, initialized, fieldMasks, declarations, function, program,
+            ref remaining, depth + 1, failures);
+    }
+
+    private static void VerifyNativeFixedArrayPointerAddress(BoundNativeFixedArrayPointerAddress address,
+        InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
+    {
+        Count(ref remaining, depth);
+        if (!address.IsUnsafeAuthorized
+            || !NativePointerTypeContract.IsValidType(address.Type, program.NativePointerTypes)
+            || !NativeFixedArrayContract.MatchesProgram(program)
+            || function.IsExternal || function.IndexedBody is not null
+            || address.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+            || address.Variable >= function.Variables.Length
+            || !declarations.Contains(address.Variable) || !initialized[address.Variable]
+            || function.Variables[address.Variable].Type != address.Layout.CarrierType
+            || function.Variables[address.Variable].NativeFixedArrayLayout != address.Layout
+            || !NativeFixedArrayContract.MatchesLayout(address.Layout, program.Structures,
+                program.NativeImportCatalog)
+            || (function.Variables[address.Variable].IsMutable
+                && !NativeFixedArrayContract.AllowsMutableLocal(address.Layout,
+                    program.Structures, program.NativeImportCatalog))
+            || address.Index is null
+            || (address.Index.Type != PrimitiveType.Int32
+                && !(address.Index.Type == PrimitiveType.UInt32
+                    && NativeFixedArrayContract.AllowsUInt32Indices(address.Layout,
+                        program.Structures, program.NativeImportCatalog)))
+            || (function.IsNoThrow
+                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+                && address.Index is not BoundConstant)
+            || (address.Index is BoundConstant index
+                && (index.Value < 0 || index.Value >= address.Layout.ElementCount)))
+        {
+            throw InvalidEffect(address.Span, "NativePointer");
+        }
+
+        var pointer = program.NativePointerTypes[NativePointerTypes.Index(address.Type)];
+        if (pointer.PointeeType != address.Layout.ElementType
+            || pointer.IsWritable && (!function.Variables[address.Variable].IsMutable
+                || !NativeFixedArrayContract.AllowsMutableLocal(address.Layout,
+                    program.Structures, program.NativeImportCatalog)))
+        {
+            throw InvalidEffect(address.Span, "NativePointer");
+        }
+
+        Expression(address.Index, initialized, fieldMasks, declarations, function, program,
             ref remaining, depth + 1, failures);
     }
 
@@ -99,9 +145,9 @@ public static partial class SemanticVerifier
                 && !(write.Index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(write.Layout,
                         program.Structures, program.NativeImportCatalog)))
-            || (function.IsNoThrow && write.Index is not BoundConstant
-                && !NativeFixedArrayContract.AllowsCheckedRuntimeAccess(write.Layout,
-                    program.Structures, program.NativeImportCatalog))
+            || (function.IsNoThrow
+                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+                && write.Index is not BoundConstant)
             || (write.Index is BoundConstant index
                 && (index.Value < 0 || index.Value >= write.Layout.ElementCount)))
         {

@@ -240,8 +240,7 @@ public readonly ref struct TrRmNativeImportTableReader
             if (_rowByMethod[method] == 0)
             {
                 if (!outputs.IsEmpty
-                    || !contracts.GetNativeParameters(method).IsDefaultOrEmpty
-                        && contracts.GetNativeComMethod(method) is null)
+                    || !contracts.GetNativeParameters(method).IsDefaultOrEmpty)
                 {
                     throw InvalidNativeImport();
                 }

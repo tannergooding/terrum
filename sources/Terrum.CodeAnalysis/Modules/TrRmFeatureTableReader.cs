@@ -21,11 +21,6 @@ public readonly record struct TrRmFeatureRow(uint FeatureId, uint MinimumRuleRev
         => new(TrRmFeatureTableReader.WindowsNamedNativeImportsFeatureId,
             TrRmFeatureTableReader.WindowsNamedNativeImportsRuleRevision);
 
-    /// <summary>The provisional native COM contract assignment.</summary>
-    public static TrRmFeatureRow NativeComContracts
-        => new(TrRmFeatureTableReader.NativeComContractsFeatureId,
-            TrRmFeatureTableReader.NativeComContractsRuleRevision);
-
     /// <summary>The provisional explicit native Blittable-layout assignment.</summary>
     public static TrRmFeatureRow NativeBlittableLayouts
         => new(TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId,
@@ -42,9 +37,6 @@ public readonly ref struct TrRmFeatureTableReader
     /// <summary>The provisional feature identifier assigned to Windows named native imports.</summary>
     public const uint WindowsNamedNativeImportsFeatureId = 2;
 
-    /// <summary>The provisional feature identifier assigned to native COM contracts.</summary>
-    public const uint NativeComContractsFeatureId = 3;
-
     /// <summary>The provisional feature identifier assigned to native Blittable layouts.</summary>
     public const uint NativeBlittableLayoutsFeatureId = 4;
 
@@ -56,9 +48,6 @@ public readonly ref struct TrRmFeatureTableReader
 
     /// <summary>The initial Windows named native imports rule revision supported by this implementation.</summary>
     public const uint WindowsNamedNativeImportsRuleRevision = 1;
-
-    /// <summary>The provisional native COM contract rule revision supported by this implementation.</summary>
-    public const uint NativeComContractsRuleRevision = 1;
 
     /// <summary>The provisional native Blittable-layout rule revision supported by this implementation.</summary>
     public const uint NativeBlittableLayoutsRuleRevision = 1;
@@ -93,7 +82,6 @@ public readonly ref struct TrRmFeatureTableReader
             {
                 ScalarInitOutputFeatureId => ScalarInitOutputRuleRevision,
                 WindowsNamedNativeImportsFeatureId => WindowsNamedNativeImportsRuleRevision,
-                NativeComContractsFeatureId => NativeComContractsRuleRevision,
                 NativeBlittableLayoutsFeatureId => NativeBlittableLayoutsRuleRevision,
                 _ => 0u,
             };

@@ -19,18 +19,15 @@ internal static class ValueLayout
         PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Float32 => 4,
         PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer => 8,
         _ when ManagedClassTypes.IsManaged(type) => 8,
+        _ when NativePointerTypes.IsType(type) => NativeTargetProfile.PointerSize,
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
         PrimitiveType.TokenSpan => TokenSpanContract.DescriptorSize,
-        PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer or PrimitiveType.NativeWindowHandle
-            or PrimitiveType.NativeCallbackAddress
-            or PrimitiveType.NativeNullPointer or PrimitiveType.NativeModuleHandle
-            or PrimitiveType.NativeComInterfaceOutputAddress
-            or PrimitiveType.NativeWindowClassExAddress or PrimitiveType.NativeWindowMessageAddress
-            or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
-                => NativeTargetProfile.PointerSize,
-        PrimitiveType.NativeWindowClassEx => NativeWindowClassContract.WindowClassExSize,
-        PrimitiveType.NativeWindowMessage => NativeWindowMessageContract.MessageSize,
-        PrimitiveType.NativeStorageRecord => MaximumStructureSize,
+        PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                or PrimitiveType.NativeCallbackAddress
+                or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
+                    => NativeTargetProfile.PointerSize,
+                _ when NativeFunctionPointerTypes.IsType(type) => NativeTargetProfile.PointerSize,
+            PrimitiveType.NativeStorageRecord => MaximumStructureSize,
         PrimitiveType.Void => 0,
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
             && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
@@ -44,6 +41,10 @@ internal static class ValueLayout
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         NativeImportCatalog? catalog)
     {
+        if (NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
+        {
+            return NativeTargetProfile.PointerSize;
+        }
         if (ManagedClassTypes.IsManaged(type))
         {
             return 8;
@@ -51,21 +52,10 @@ internal static class ValueLayout
         if ((int)type < 100)
         {
             if (type is PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                or PrimitiveType.NativeWindowHandle or PrimitiveType.NativeCallbackAddress
-                or PrimitiveType.NativeNullPointer or PrimitiveType.NativeModuleHandle
-                or PrimitiveType.NativeComInterfaceOutputAddress
-                or PrimitiveType.NativeWindowClassExAddress or PrimitiveType.NativeWindowMessageAddress
+                or PrimitiveType.NativeCallbackAddress
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer)
             {
                 return NativeTargetProfile.PointerSize;
-            }
-            if (type == PrimitiveType.NativeWindowClassEx)
-            {
-                return NativeTargetProfile.PointerSize;
-            }
-            if (type == PrimitiveType.NativeWindowMessage)
-            {
-                return NativeWindowMessageContract.MessageAlignment;
             }
             if (type == PrimitiveType.NativeStorageRecord)
             {
@@ -75,11 +65,6 @@ internal static class ValueLayout
                 ? 8 : Size(type, structures);
         }
         var structure = structures[(int)type - 100];
-        if (catalog is not null && catalog.TryGetComOwner(structure.Name, out var owner))
-        {
-            return owner?.CellAlignment
-                ?? throw new InvalidOperationException("The native catalog contains a null COM owner record.");
-        }
         var alignment = 1;
         foreach (var field in structure.Fields)
         {

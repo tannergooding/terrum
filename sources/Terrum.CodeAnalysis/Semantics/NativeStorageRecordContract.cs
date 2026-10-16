@@ -82,31 +82,6 @@ internal static class NativeStorageRecordContract
                 == NativeImportParameterContract.ReadonlyNativeStorageNoEscape;
     }
 
-    internal static bool IsValidComParameter(NativeStorageRecordParameterDefinition parameter,
-        NativeComMethodDefinition method, ImmutableArray<NativeStorageRecordLayoutDefinition> layouts)
-    {
-        if (parameter is null || parameter.ParameterIndex <= 0
-            || string.IsNullOrWhiteSpace(parameter.TypeName) || !parameter.IsReadonly || !parameter.NoEscape
-            || string.IsNullOrWhiteSpace(parameter.SignatureTypeName)
-            || (parameter.LoanGroup is not null && string.IsNullOrWhiteSpace(parameter.LoanGroup))
-            || !NativeComCatalog.TryParseSignature(method.Signature, out _, out var parameters)
-            || parameter.ParameterIndex >= parameters.Length
-            || parameters[parameter.ParameterIndex] != $"const {parameter.SignatureTypeName}*"
-            || method.OutputParameterIndex == parameter.ParameterIndex
-            || method.BorrowedOwnerParameters.Contains(parameter.ParameterIndex)
-            || (!method.ParameterAdaptations.IsDefaultOrEmpty
-                && method.ParameterAdaptations.Any(adaptation =>
-                    adaptation?.ParameterIndex == parameter.ParameterIndex))
-            || (!method.HiddenParameters.IsDefaultOrEmpty
-                && method.HiddenParameters.Any(hidden =>
-                    hidden?.NativeParameterIndex == parameter.ParameterIndex)))
-        {
-            return false;
-        }
-
-        return layouts.Any(layout => layout.TypeName == parameter.TypeName && IsValidLayout(layout));
-    }
-
     internal static NativeStorageRecordFacts? Facts(BoundNativeStorageRecordInitialization initializer,
         NativeImportCatalog? catalog)
     {
@@ -206,28 +181,6 @@ internal static class NativeStorageRecordContract
         }
 
         foreach (var candidate in import.StorageRecordParameters)
-        {
-            if (candidate?.ParameterIndex == parameterIndex)
-            {
-                parameter = candidate;
-                return true;
-            }
-        }
-
-        parameter = null;
-        return false;
-    }
-
-    internal static bool TryGetParameter(NativeComMethodDefinition method, int parameterIndex,
-        out NativeStorageRecordParameterDefinition? parameter)
-    {
-        if (method.StorageRecordParameters.IsDefaultOrEmpty)
-        {
-            parameter = null;
-            return false;
-        }
-
-        foreach (var candidate in method.StorageRecordParameters)
         {
             if (candidate?.ParameterIndex == parameterIndex)
             {

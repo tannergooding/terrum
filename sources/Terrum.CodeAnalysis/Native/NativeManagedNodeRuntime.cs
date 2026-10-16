@@ -237,9 +237,6 @@ internal sealed partial class PeCompiler
                     CollectExpression(read.View, spill);
                     CollectExpression(read.Index, spill + 1);
                     break;
-                case BoundNativeMappedByteRead mappedByte:
-                    CollectExpression(mappedByte.Index, spill);
-                    break;
                 case BoundSpanAdvance advance:
                     CollectExpression(advance.View, spill);
                     break;
@@ -282,6 +279,13 @@ internal sealed partial class PeCompiler
                         {
                             CollectExpression(argument, argumentsBase + (call.Arguments.Length * 2));
                         }
+                    }
+                    break;
+                case BoundIndirectCall call:
+                    CollectExpression(call.Target, spill);
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        CollectExpression(call.Arguments[i], spill + 1 + i);
                     }
                     break;
             }

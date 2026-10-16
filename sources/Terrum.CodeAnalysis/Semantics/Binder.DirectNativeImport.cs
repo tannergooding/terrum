@@ -1,5 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 using Terrum.CodeAnalysis.Lexing;
@@ -8,6 +9,60 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed partial class Binder
 {
+    private static bool TryDecodeNativeParameterAttribute(SyntaxNode attribute,
+        out NativeParameterDefinition parameter)
+    {
+        parameter = new(-1, default, default, -1);
+        var children = attribute.Children;
+        if (children.Length != 16
+            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
+            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
+            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
+            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
+            || children[5] is not SyntaxTokenElement { Token.Name: "NativeParameter" }
+            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
+            || children[7] is not SyntaxTokenElement ordinalToken
+            || ordinalToken.Token.Kind != TokenKind.NumericLiteral
+            || !ScannerHost.TryParseIntegerMagnitude(ordinalToken.Token.Text.AsSpan(), out var ordinal)
+            || ordinal is 0 or > int.MaxValue
+            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[9] is not SyntaxTokenElement accessToken
+            || children[9] is not SyntaxTokenElement { Token.Kind: TokenKind.Identifier }
+            || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[11] is not SyntaxTokenElement retentionToken
+            || children[11] is not SyntaxTokenElement { Token.Kind: TokenKind.Identifier }
+            || children[12] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
+            || children[13] is not SyntaxTokenElement extentToken
+            || extentToken.Token.Kind != TokenKind.NumericLiteral
+            || !ScannerHost.TryParseIntegerMagnitude(extentToken.Token.Text.AsSpan(), out var extent)
+            || extent > int.MaxValue
+            || children[14] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
+            || children[15] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+        {
+            return false;
+        }
+
+        var access = accessToken.Token.Name switch {
+            "Read" => NativeParameterAccess.Read,
+            "Write" => NativeParameterAccess.Write,
+            "ReadWrite" => NativeParameterAccess.ReadWrite,
+            _ => (NativeParameterAccess)byte.MaxValue,
+        };
+        var retention = retentionToken.Token.Name switch {
+            "NoEscape" => NativeParameterRetention.NoEscape,
+            "MayEscape" => NativeParameterRetention.MayEscape,
+            _ => (NativeParameterRetention)byte.MaxValue,
+        };
+        if ((byte)access == byte.MaxValue || (byte)retention == byte.MaxValue)
+        {
+            return false;
+        }
+
+        parameter = new((int)ordinal, access, retention, (int)extent);
+        return true;
+    }
+
     private BoundExpression BindDirectNativeParameterAddress(SyntaxNode expression,
         DirectNativeParameter parameter, TextSpan span) =>
         IsAddressOfExpression(expression)
@@ -77,7 +132,7 @@ internal sealed partial class Binder
         {
             expression = (SyntaxNode)expression.Children[1];
         }
-        if (extent is not (0 or 1) || expression is not {
+        if (extent < 0 || expression is not {
                 Kind: SyntaxKind.UnaryExpression,
             } || ((SyntaxTokenElement)expression.Children[0]).Token.Kind != TokenKind.Ampersand)
         {
@@ -100,6 +155,7 @@ internal sealed partial class Binder
         {
             var index = BindNativeFixedArrayIndex((SyntaxNode)target.Children[2], layout);
             if ((pointeeType != PrimitiveType.Void && pointeeType != layout.ElementType)
+                || (extent > 0 && layout.ElementCount < extent)
                 || index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
                 || _variables[arrayVariable].IsInitializationLocal
                 || _unresolvedVacantLocals.Contains(arrayVariable)
@@ -123,6 +179,7 @@ internal sealed partial class Binder
         if (target.Kind != SyntaxKind.NameExpression
             || !TryFindVariable(NameText(target), out var variable)
             || (pointeeType != PrimitiveType.Void && _variables[variable].Type != pointeeType)
+            || extent > 1
             || (pointeeType == PrimitiveType.Void
                 && !DirectNativeImportContract.IsInputPointee(_variables[variable].Type, _structs))
             || _variables[variable].IsInitializationLocal

@@ -74,21 +74,12 @@ public sealed class TrRmArtifactWriterTests
             new TrRmSection(0x0002, 0, 1, strings),
             new TrRmSection(0x0004, 1, 1, features),
         ]));
-        var nativeComFeatures = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.NativeComContracts]);
-        var nativeComFeature = new TrRmFeatureTableReader(nativeComFeatures, 1).GetFeature(1);
-        Assert.That(nativeComFeature.FeatureId,
-            Is.EqualTo(TrRmFeatureTableReader.NativeComContractsFeatureId));
-        Assert.That(nativeComFeature.MinimumRuleRevision,
-            Is.EqualTo(TrRmFeatureTableReader.NativeComContractsRuleRevision));
-        var nativeComModule = Module();
-        Write(nativeComModule, 16, 1);
-        Write(nativeComModule, 20, 1);
-        var nativeComArtifact = TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, nativeComModule),
-            new TrRmSection(0x0002, 0, 1, strings),
-            new TrRmSection(0x0004, 0, 1, nativeComFeatures),
-        ]);
-        TrRmStructuralMetadataValidator.Validate(nativeComArtifact);
+        var retiredComFeatures = new byte[8];
+        Write(retiredComFeatures, 0, 3);
+        Write(retiredComFeatures, sizeof(uint), 1);
+        Assert.Throws<InvalidDataException>(() => new TrRmFeatureTableReader(retiredComFeatures, 1));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(3, 1)]));
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(0, 1)]));
         Assert.Throws<InvalidDataException>(() =>
@@ -96,10 +87,6 @@ public sealed class TrRmArtifactWriterTests
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1,
                 TrRmFeatureTableReader.ScalarInitOutputRuleRevision + 1)]));
-        Assert.Throws<InvalidDataException>(() =>
-            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(
-                TrRmFeatureTableReader.NativeComContractsFeatureId,
-                TrRmFeatureTableReader.NativeComContractsRuleRevision + 1)]));
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([
                 TrRmFeatureRow.ScalarInitOutput, TrRmFeatureRow.ScalarInitOutput,

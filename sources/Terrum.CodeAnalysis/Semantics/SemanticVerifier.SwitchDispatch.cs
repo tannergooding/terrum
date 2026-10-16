@@ -494,6 +494,21 @@ public static partial class SemanticVerifier
                     }
                 }
                 return true;
+            case BoundIndirectCall call:
+                if (!CleanupSwitchExpressionIsSafe(call.Target, variable, program,
+                    ref remaining, depth + 1, allowRead))
+                {
+                    return false;
+                }
+                foreach (var argument in call.Arguments)
+                {
+                    if (!CleanupSwitchExpressionIsSafe(argument, variable, program,
+                        ref remaining, depth + 1, allowRead))
+                    {
+                        return false;
+                    }
+                }
+                return true;
             default:
                 return false;
         }

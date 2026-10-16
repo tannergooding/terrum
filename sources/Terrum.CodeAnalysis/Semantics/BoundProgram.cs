@@ -52,28 +52,14 @@ public enum PrimitiveType
     TokenSpan,
     /// <summary>A compiler-owned UTF-16-NUL image address, restricted to reviewed no-escape imports.</summary>
     NativeUtf16ZPointer,
-    /// <summary>A closed Windows x64 HWND carrier, restricted to a catalogued no-owner argument.</summary>
-    NativeWindowHandle,
-    /// <summary>A closed Windows x64 WNDPROC address, restricted to a catalogued synchronous no-escape argument.</summary>
-    NativeCallbackAddress,
+    /// <summary>A native callback address restricted by its selected signature and lifetime contract.</summary>
+    NativeCallbackAddress = 19,
     /// <summary>Inline storage whose closed geometry is carried by selected native fixed-array metadata.</summary>
     NativeFixedArray,
     /// <summary>A compiler-owned ASCII UTF-8-NUL image address for reviewed no-escape imports.</summary>
     NativeUtf8ZPointer,
-    /// <summary>A catalogued null-only native pointer value.</summary>
-    NativeNullPointer,
-    /// <summary>A borrowed current-process module handle from the closed GetModuleHandleW import.</summary>
-    NativeModuleHandle,
-    /// <summary>A closed SDK-layout WNDCLASSEXW local initialized only for direct RegisterClassExW.</summary>
-    NativeWindowClassEx,
-    /// <summary>A readonly address of an initialized WNDCLASSEXW local for RegisterClassExW.</summary>
-    NativeWindowClassExAddress,
-    /// <summary>An opaque SDK-layout MSG local used only by the sealed Windows message loop.</summary>
-    NativeWindowMessage,
-    /// <summary>A no-escape address of the sealed message-loop MSG local.</summary>
-    NativeWindowMessageAddress,
-    /// <summary>A compiler-private writable output-cell address for an owned COM interface.</summary>
-    NativeComInterfaceOutputAddress,
+    // Keep the removed native-address value reserved so private module type ordinals remain stable.
+    ReservedNativeAddress = 28,
     /// <summary>A catalogued, no-escape address of a checked plain aggregate value.</summary>
     NativeStorageAddress,
     /// <summary>A catalogued immutable native storage record whose layout is local to its selected profile.</summary>
@@ -235,18 +221,8 @@ public enum BoundIntrinsic
     NodeCollect,
     /// <summary>Allocates and constructs a source class, publishing its handle only on success.</summary>
     ClassTryCreate,
-    /// <summary>Dispatches a catalogued COM method using its checked vtable slot and signature.</summary>
-    NativeComVTableCall,
-    /// <summary>Releases one catalogued unique COM owner through its verified interface method.</summary>
-    NativeComOwnerClose,
-    /// <summary>Adds a catalogued reference to a live unique COM owner and publishes a distinct owner.</summary>
-    NativeComOwnerTryClone,
-    /// <summary>Reads the message identifier field from a bounded Windows MSG address.</summary>
-    NativeWindowMessageId,
-    /// <summary>Reads the WPARAM field from a bounded Windows MSG address.</summary>
-    NativeWindowMessageWParam,
-    /// <summary>Compares the HWND field of a bounded Windows MSG with a borrowed window handle.</summary>
-    NativeWindowMessageWindowIs,
+    /// <summary>Dispatches an unsafe function through an explicit native vtable slot.</summary>
+    NativeVTableCall,
 }
 
 /// <summary>The verified behavior of compiler-generated checked failures.</summary>
@@ -265,6 +241,10 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 {
     /// <summary>Validated value layouts; type identifiers are 100 + declaration index.</summary>
     public ImmutableArray<BoundStruct> Structures { get; init; } = [];
+
+    internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
+
+    internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
 
     /// <summary>Source-defined managed layouts; handles have type identifiers starting at <see cref="ManagedClassTypes.First"/>.</summary>
     public ImmutableArray<BoundClass> Classes { get; init; } = [];
@@ -358,12 +338,10 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
     internal DirectNativeImport? DirectNativeImport { get; init; }
+    internal PrimitiveType? NativeFunctionPointerType { get; init; }
 
-    internal NativeComMethodDefinition? NativeComMethod { get; init; }
-    internal string? NativeComAcquisitionMethodIdentity { get; init; }
-    internal ImmutableArray<NativeComBoundParameterMapping> NativeComParameterMappings { get; init; }
+    internal NativeVTableMethodDefinition? NativeVTableMethod { get; init; }
     internal ImmutableArray<NativeImportBoundParameterMapping> NativeImportParameterMappings { get; init; }
-    internal ImmutableArray<NativeComHiddenParameter> NativeComHiddenParameters { get; init; }
 
     internal TrRmScalarGraph? IndexedBody { get; init; }
     /// <summary>The declared property member name, distinct from the callable implementation's name.</summary>
@@ -386,11 +364,6 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>The explicit native import key selected by a source semantic attribute, if any.</summary>
     internal string? NativeImportKey { get; init; }
-
-    /// <summary>The import that produces COM owners for this compiler-generated acquisition function.</summary>
-    internal string? NativeComAcquisitionImportKey { get; init; }
-    internal ImmutableArray<int> NativeComAcquisitionOutputParameterIndexes { get; init; } = [];
-    internal ImmutableArray<NativeComAcquisitionSourceDefinition> NativeComAcquisitionSources { get; init; } = [];
 
     /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
     public bool IsConstructor { get; init; }
@@ -454,9 +427,6 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
 
     internal NativeStorageRecordFacts? NativeStorageRecordFacts { get; init; }
 
-
-    internal NativeWindowClassExFacts? NativeWindowClassExFacts { get; init; }
-
     /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
     public bool IsOut { get; init; }
 
@@ -472,8 +442,6 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
     /// <summary>Whether a vacant local may initialize its storage without replacing a live value.</summary>
     public bool IsInitializationLocal { get; init; }
 }
-
-internal sealed record NativeWindowClassExFacts(int CallbackFunction, int ClassNameLiteralIndex);
 
 /// <summary>A structured statement, retaining its source range.</summary>
 /// <param name="Span">The source range.</param>
@@ -642,26 +610,52 @@ public abstract record BoundExpression(PrimitiveType Type, TextSpan Span)
 }
 
 /// <summary>A scalar constant represented by its canonical or raw-bit payload.</summary>
-/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, booleans use zero or one, native UTF-NUL pointers use a compiler-owned literal index, and null-only native pointers use zero.</param>
+/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, booleans use zero or one, and native UTF-NUL pointers use a compiler-owned literal index.</param>
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
-/// <summary>The compiler-owned no-owner HWND value; valid only in its catalogued native argument slot.</summary>
-public sealed record BoundNativeNoOwner(TextSpan Span)
-    : BoundExpression(PrimitiveType.NativeWindowHandle, Span);
-
-/// <summary>A verified address of a static Windows x64 WNDPROC callback.</summary>
+/// <summary>A verified address of a static function used as a native callback.</summary>
 public sealed record BoundNativeCallbackAddress(int Function, TextSpan Span)
     : BoundExpression(PrimitiveType.NativeCallbackAddress, Span);
 
-/// <summary>Tests a WNDPROC's HWND parameter against the closed no-owner sentinel.</summary>
-public sealed record BoundNativeWindowHandleIsNoOwner(BoundExpression Handle, bool IsNegated, TextSpan Span)
-    : BoundExpression(PrimitiveType.Bool, Span)
+/// <summary>A verified address of a static function with a concrete native ABI signature.</summary>
+public sealed record BoundNativeFunctionAddress(int Function, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
 {
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Handle];
+    internal bool IsUnsafeAuthorized { get; init; }
+}
+
+/// <summary>A raw address of a local value formed inside an unsafe scope.</summary>
+public sealed record BoundNativePointerAddress(int Variable, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+}
+
+/// <summary>Reads a value through an explicitly unsafe native pointer.</summary>
+public sealed record BoundNativePointerRead(BoundExpression Pointer, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Pointer];
     internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with { Handle = rewrite(Handle) };
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Pointer = rewrite(Pointer) };
+}
+
+/// <summary>Writes a value through an explicitly unsafe writable native pointer.</summary>
+public sealed record BoundNativePointerWrite(BoundExpression Pointer, BoundExpression Value, TextSpan Span)
+    : BoundExpression(PrimitiveType.Void, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Pointer, Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Pointer = rewrite(Pointer),
+            Value = rewrite(Value),
+        };
 }
 
 /// <summary>The verified storage geometry for a bounded native fixed-array carrier.</summary>
@@ -684,6 +678,17 @@ public sealed record BoundNativeFixedArrayInitialization(BoundNativeFixedArrayLa
 public sealed record BoundNativeFixedArrayElement(int Variable, BoundNativeFixedArrayLayout Layout,
     BoundExpression Index, TextSpan Span) : BoundExpression(Layout.ElementType, Span)
 {
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
+}
+
+/// <summary>Forms an unsafe typed pointer to one element of a bounded native fixed-array local.</summary>
+public sealed record BoundNativeFixedArrayPointerAddress(int Variable, BoundNativeFixedArrayLayout Layout,
+    BoundExpression Index, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
@@ -717,24 +722,6 @@ public sealed record BoundNativeStorageAddress(
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
-}
-
-/// <summary>A bounds-checked read from a catalogued native mapped region.</summary>
-public sealed record BoundNativeMappedByteRead(
-    int Variable,
-    BoundExpression Index,
-    string SourceType,
-    int PointerOffset,
-    int LengthOffset,
-    string MapMethodIdentity,
-    string UnmapMethodIdentity,
-    TextSpan Span) : BoundExpression(PrimitiveType.UInt32, Span)
-{
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
-    internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with {
-            Index = rewrite(Index),
-        };
 }
 
 internal sealed record NativeStorageLoan(int BackingVariable, PrimitiveType CarrierType,
@@ -775,32 +762,6 @@ internal sealed record NativeAggregateStorageLayoutDefinition(string TypeName, i
 
 internal sealed record NativeAggregateStorageFieldLayoutDefinition(
     string Name, string TypeName, int Offset, int Size);
-
-/// <summary>A closed WNDCLASSEXW initializer with a static callback, current module and UTF-16 class name.</summary>
-public sealed record BoundNativeWindowClassExInitialization(BoundNativeCallbackAddress Callback,
-    BoundExpression Instance, BoundExpression ClassName, TextSpan Span)
-    : BoundExpression(PrimitiveType.NativeWindowClassEx, Span)
-{
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Callback, Instance, ClassName];
-    internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with {
-            Callback = (BoundNativeCallbackAddress)rewrite(Callback),
-            Instance = rewrite(Instance),
-            ClassName = rewrite(ClassName),
-        };
-}
-
-/// <summary>A no-escape address loan of one initialized WNDCLASSEXW local.</summary>
-public sealed record BoundNativeWindowClassExAddress(int Variable, TextSpan Span)
-    : BoundExpression(PrimitiveType.NativeWindowClassExAddress, Span);
-
-/// <summary>Initializes the full opaque MSG storage used by the sealed Windows message loop.</summary>
-public sealed record BoundNativeWindowMessageInitialization(TextSpan Span)
-    : BoundExpression(PrimitiveType.NativeWindowMessage, Span);
-
-/// <summary>A no-escape address loan of the message-loop MSG local.</summary>
-public sealed record BoundNativeWindowMessageAddress(int Variable, TextSpan Span)
-    : BoundExpression(PrimitiveType.NativeWindowMessageAddress, Span);
 
 /// <summary>An explicitly absent optional managed handle.</summary>
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
@@ -917,8 +878,6 @@ public sealed record BoundConditional(BoundExpression Condition, BoundExpression
 public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arguments,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
-    internal NativeComCallFacts? NativeComCall { get; init; }
-
     /// <summary>Maps source-order arguments to formal argument positions when binding is non-positional.</summary>
     internal ImmutableArray<int> ArgumentParameterIndices { get; init; }
 
@@ -949,6 +908,23 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
     }
 
     internal bool IsUnsafeAuthorized { get; init; }
+}
+
+/// <summary>A checked call through a concrete native function-pointer signature.</summary>
+public sealed record BoundIndirectCall(BoundExpression Target, ImmutableArray<BoundExpression> Arguments,
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal bool IsUnsafeAuthorized { get; init; }
+
+    internal override bool HasValidNestedExpressions => !Arguments.IsDefault;
+    internal override ImmutableArray<BoundExpression> NestedExpressions => Arguments.IsDefault
+        ? [Target] : [Target, .. Arguments];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Arguments.IsDefault ? this
+        : this with {
+            Target = rewrite(Target),
+            Arguments = [.. Arguments.Select(rewrite)],
+        };
 }
 
 /// <summary>A checked conversion between supported scalar types.</summary>
