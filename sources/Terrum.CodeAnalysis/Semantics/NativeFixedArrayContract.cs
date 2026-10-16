@@ -2,7 +2,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -134,83 +133,6 @@ internal static class NativeFixedArrayContract
     internal static bool AllowsUInt32Indices(BoundNativeFixedArrayLayout layout,
         IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
         IsCarrier(layout.CarrierType);
-
-    internal static bool AllowsReadonlyUtf16ZLoan(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>
-        layout.ElementType == PrimitiveType.Char16 && IsCarrier(layout.CarrierType);
-
-    internal static bool IsValidElementFields(ImmutableArray<NativeFixedArrayFieldLayoutDefinition> fields,
-        int elementStride)
-    {
-        if (fields.IsDefaultOrEmpty)
-        {
-            return true;
-        }
-
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        var end = 0;
-        foreach (var field in fields)
-        {
-            if (field is null || string.IsNullOrWhiteSpace(field.Name)
-                || string.IsNullOrWhiteSpace(field.TypeName) || !names.Add(field.Name)
-                || field.Offset < end || field.Size <= 0
-                || field.Offset > elementStride - field.Size)
-            {
-                return false;
-            }
-            end = field.Offset + field.Size;
-        }
-        return true;
-    }
-
-    internal static bool MatchesElementFields(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
-        ImmutableArray<NativeFixedArrayFieldLayoutDefinition> expectedFields)
-    {
-        if (expectedFields.IsDefaultOrEmpty)
-        {
-            return true;
-        }
-
-        var index = (int)type - 100;
-        if (index < 0 || index >= structures.Count)
-        {
-            return false;
-        }
-
-        var actualFields = structures[index].Fields;
-        if (actualFields.IsDefault || actualFields.Length != expectedFields.Length)
-        {
-            return false;
-        }
-
-        for (var fieldIndex = 0; fieldIndex < actualFields.Length; fieldIndex++)
-        {
-            var actual = actualFields[fieldIndex];
-            var expected = expectedFields[fieldIndex];
-            if (expected is null || actual.Name != expected.Name
-                || ElementTypeName(actual.Type, structures) != expected.TypeName
-                || actual.Offset != expected.Offset || actual.Size != expected.Size
-                || (expected.IsMutable is bool isMutable && actual.IsMutable != isMutable)
-                || (expected.IsPrivate is bool isPrivate && actual.IsPrivate != isPrivate)
-                || (expected.IsInternal is bool isInternal && actual.IsInternal != isInternal)
-                || (expected.RequiresUnsafeCaller is bool requiresUnsafeCaller
-                    && actual.RequiresUnsafeCaller != requiresUnsafeCaller))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    internal static string? ElementTypeName(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
-    {
-        var typeIndex = (int)type - 100;
-        if (typeIndex >= 0)
-        {
-            return typeIndex < structures.Count ? structures[typeIndex].Name : null;
-        }
-        return (int)type < 100 ? type.ToString() : null;
-    }
 
     private static bool IsScalar(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16

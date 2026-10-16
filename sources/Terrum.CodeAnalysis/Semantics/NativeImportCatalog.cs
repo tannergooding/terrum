@@ -15,23 +15,16 @@ public sealed class NativeImportCatalog
         new("Terrum.Interop.NativeImport", ArgumentCount: 1, RequiresStringLiteral: true, IsRepeatable: false);
 
     private static readonly NativeImportCatalog s_windowsX64 = new(
-        "windows-x64-native-imports-v10", []);
+        "windows-x64-native-imports-v11", []);
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;
-    private readonly ImmutableArray<NativeFixedArrayStorageLayoutDefinition> _fixedArrayStorageLayouts;
 
     [SuppressMessage("Style", "IDE0072:Populate switch",
         Justification = "Unsupported native parameter types cannot acquire an import contract.")]
     private static bool ValidParameterContracts(NativeImportDefinition import)
     {
-        if (!NativeStorageParameterContract.IsValid(import))
-        {
-            return false;
-        }
-
         var hasRestrictedContract = import.ParameterTypes.Contains(PrimitiveType.NativeUtf16ZPointer)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeUtf8ZPointer)
-            || import.ParameterTypes.Contains(PrimitiveType.NativeStorageAddress);
+            || import.ParameterTypes.Contains(PrimitiveType.NativeUtf8ZPointer);
         if (!hasRestrictedContract)
         {
             return import.ParameterContracts.IsDefaultOrEmpty;
@@ -44,14 +37,8 @@ public sealed class NativeImportCatalog
         {
             var type = import.ParameterTypes[index];
             var expected = type switch {
-                PrimitiveType.NativeUtf16ZPointer =>
-                    NativeStorageParameterContract.TryGetParameter(import, index, out var utf16Storage)
-                    && utf16Storage is not null
-                        ? NativeStorageParameterContract.ExpectedParameterContract(import, index)
-                        : NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
+                PrimitiveType.NativeUtf16ZPointer => NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
                 PrimitiveType.NativeUtf8ZPointer => NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
-                PrimitiveType.NativeStorageAddress =>
-                    NativeStorageParameterContract.ExpectedParameterContract(import, index),
                 _ => NativeImportParameterContract.Value,
             };
             if (import.ParameterContracts[index] != expected)
@@ -63,8 +50,7 @@ public sealed class NativeImportCatalog
     }
 
     internal NativeImportCatalog(string identity, ImmutableArray<NativeImportDefinition> imports,
-        bool isForTesting = false,
-        ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default)
+        bool isForTesting = false)
     {
         if (string.IsNullOrWhiteSpace(identity) || imports.IsDefault)
         {
@@ -72,25 +58,6 @@ public sealed class NativeImportCatalog
                 nameof(identity));
         }
 
-        var storageLayouts = fixedArrayStorageLayouts.IsDefault ? [] : fixedArrayStorageLayouts;
-        if (storageLayouts.Any(static layout => layout is null
-                || string.IsNullOrWhiteSpace(layout.ElementTypeName)
-                || layout.ElementCount <= 0 || layout.ElementStride <= 0
-                || layout.ElementAlignment <= 0
-                || (layout.ElementAlignment & (layout.ElementAlignment - 1)) != 0
-                || layout.ElementStride % layout.ElementAlignment != 0
-                || layout.ElementCount > NativeFixedArrayContract.MaximumByteExtent / layout.ElementStride
-                || layout.ByteExtent != layout.ElementCount * layout.ElementStride
-                || !NativeFixedArrayContract.IsValidElementFields(layout.ElementFields, layout.ElementStride)
-                || (layout.AllowsElementWrites && !layout.AllowsMutableLocal)
-                || (layout.AllowsReadonlyUtf16ZLoan
-                    && (layout.ElementTypeName != nameof(PrimitiveType.Char16)
-                        || layout.ElementStride != sizeof(char)))
-                || (layout.AllowsCheckedRuntimeAccess && !layout.AllowsMutableLocal)))
-        {
-            throw new ArgumentException("A fixed-array storage layout has invalid element geometry.",
-                nameof(fixedArrayStorageLayouts));
-        }
         var builder = ImmutableDictionary.CreateBuilder<string, NativeImportDefinition>(StringComparer.Ordinal);
         foreach (var import in imports)
         {
@@ -104,8 +71,7 @@ public sealed class NativeImportCatalog
                     or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                     or PrimitiveType.Char16
                     or PrimitiveType.NativeUtf16ZPointer
-                    or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeStorageAddress))
+                    or PrimitiveType.NativeUtf8ZPointer))
                 || !import.RequiresUnsafeCaller
                 || import.ResultContract != NativeImportResultContract.Value
                 || !ValidParameterContracts(import)
@@ -122,7 +88,6 @@ public sealed class NativeImportCatalog
         Identity = identity;
         IsForTesting = isForTesting;
         _imports = builder.ToImmutable();
-        _fixedArrayStorageLayouts = storageLayouts;
     }
 
     /// <summary>Gets an empty catalog for Windows x64 native source imports.</summary>
@@ -133,102 +98,7 @@ public sealed class NativeImportCatalog
 
     internal bool IsForTesting { get; }
 
-    internal ImmutableArray<NativeImportDefinition> ImportDefinitions => [.. _imports.Values];
-
-    internal ImmutableArray<NativeFixedArrayStorageLayoutDefinition> FixedArrayStorageLayouts =>
-        _fixedArrayStorageLayouts;
-
     internal static NativeImportAttributeDefinition AttributeDefinition => s_attributeDefinition;
-
-    internal bool SupportsCataloguedFixedArrayStorage => IsForTesting
-        && (!_fixedArrayStorageLayouts.IsEmpty
-            || _imports.Values.Any(static import => import.StorageParameters.Any(parameter =>
-            parameter is not null && parameter.AddressType == PrimitiveType.NativeStorageAddress
-                && NativeFixedArrayContract.IsCarrier(parameter.CarrierType))));
-
-    internal bool SupportsNativeFixedArrayStorage => !_fixedArrayStorageLayouts.IsEmpty
-        || _imports.Values.Any(static import => import.StorageParameters.Any(parameter =>
-            parameter is not null && parameter.AddressType == PrimitiveType.NativeStorageAddress
-                && NativeFixedArrayContract.IsCarrier(parameter.CarrierType)));
-
-    internal bool SupportsCheckedFixedArrayStorage =>
-        _fixedArrayStorageLayouts.Any(static layout => layout.AllowsCheckedRuntimeAccess);
-
-    internal bool SupportsFixedArrayStorage(PrimitiveType carrierType) =>
-        _imports.Values.Any(import => import.StorageParameters.Any(parameter =>
-            parameter is not null && parameter.AddressType == PrimitiveType.NativeStorageAddress
-                && parameter.CarrierType == carrierType));
-
-    internal bool SupportsFixedArrayStorage(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures)
-        => HasFixedArrayStorageLayout(layout, structures, static _ => true);
-
-    internal bool AllowsEmptyFixedArrayInitialization(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures) =>
-        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsEmptyInitialization);
-
-    internal bool AllowsMutableFixedArrayLocal(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures) =>
-        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsMutableLocal);
-
-    internal bool AllowsFixedArrayElementWrites(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures) =>
-        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsElementWrites);
-
-    internal bool AllowsFixedArrayUInt32Indices(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures) =>
-        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsUInt32Indices);
-
-    internal bool AllowsCheckedFixedArrayAccess(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures) =>
-        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsCheckedRuntimeAccess);
-
-    internal bool AllowsReadonlyUtf16ZFixedArrayLoan(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures) =>
-        HasFixedArrayStorageLayout(layout, structures, static definition => definition.AllowsReadonlyUtf16ZLoan);
-
-    private bool HasFixedArrayStorageLayout(BoundNativeFixedArrayLayout layout,
-        IReadOnlyList<BoundStruct> structures, Func<NativeFixedArrayStorageLayoutDefinition, bool> predicate)
-    {
-        var elementTypeName = NativeFixedArrayContract.ElementTypeName(layout.ElementType, structures);
-        return elementTypeName is not null
-            && (_fixedArrayStorageLayouts.Any(definition =>
-                    predicate(definition) && definition.ElementTypeName == elementTypeName
-                    && definition.ElementCount == layout.ElementCount
-                    && definition.ElementStride == layout.ElementStride
-                    && definition.ElementAlignment == layout.Alignment
-                    && definition.ByteExtent == layout.ByteExtent
-                    && NativeFixedArrayContract.MatchesElementFields(
-                        layout.ElementType, structures, definition.ElementFields))
-                || _imports.Values.Any(import => !import.StorageParameters.IsDefaultOrEmpty
-                    && import.StorageParameters.Any(parameter => parameter is not null
-                        && parameter.AddressType == PrimitiveType.NativeStorageAddress
-                        && parameter.CarrierType == layout.CarrierType
-                        && parameter.ElementTypeName == elementTypeName
-                        && parameter.ElementCount == layout.ElementCount
-                        && parameter.ElementStride == layout.ElementStride
-                        && parameter.ElementAlignment == layout.Alignment
-                        && parameter.ByteExtent == layout.ByteExtent
-                        && NativeFixedArrayContract.MatchesElementFields(
-                            layout.ElementType, structures, parameter.ElementFields)
-                        && predicate(new NativeFixedArrayStorageLayoutDefinition(
-                            parameter.ElementTypeName, parameter.ElementCount, parameter.ElementStride,
-                            parameter.ElementAlignment, parameter.ByteExtent) {
-                            ElementFields = parameter.ElementFields,
-                            AllowsMutableLocal = !parameter.IsReadonly,
-                            AllowsElementWrites = !parameter.IsReadonly,
-                        }))));
-    }
-
-    internal bool SupportsFixedArrayElement(string elementTypeName, int elementStride, int elementAlignment) =>
-        _fixedArrayStorageLayouts.Any(definition => definition.ElementTypeName == elementTypeName
-            && definition.ElementStride == elementStride && definition.ElementAlignment == elementAlignment)
-        || _imports.Values.Any(import => import.StorageParameters.Any(parameter =>
-            parameter is not null && parameter.AddressType == PrimitiveType.NativeStorageAddress
-                && parameter.CarrierType == PrimitiveType.NativeFixedArray
-                && parameter.ElementTypeName == elementTypeName
-                && parameter.ElementStride == elementStride
-                && parameter.ElementAlignment == elementAlignment));
 
     internal int ImportCount => _imports.Count;
 
@@ -276,9 +146,8 @@ public sealed class NativeImportCatalog
     }
 
     internal static NativeImportCatalog CreateForTesting(string identity,
-        ImmutableArray<NativeImportDefinition> imports,
-        ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default) =>
-        new(identity, imports, isForTesting: true, fixedArrayStorageLayouts);
+        ImmutableArray<NativeImportDefinition> imports) =>
+        new(identity, imports, isForTesting: true);
 }
 
 internal sealed record NativeImportAttributeDefinition(string FullyQualifiedName, int ArgumentCount,
@@ -289,7 +158,6 @@ internal sealed record NativeImportDefinition(string Key, string DllName, string
     bool RequiresUnsafeCaller, bool DoesNotReturn, NativeImportDeploymentPolicy DeploymentPolicy)
 {
     internal ImmutableArray<NativeImportParameterContract> ParameterContracts { get; init; } = [];
-    internal ImmutableArray<NativeStorageParameterDefinition> StorageParameters { get; init; } = [];
     internal NativeImportResultContract ResultContract { get; init; }
 }
 
@@ -305,8 +173,10 @@ internal enum NativeImportParameterContract
     ReadonlyUtf8ZNoEscape,
     /// <summary>Reserved ordinal for the retired catalog-selected callback contract.</summary>
     ReservedNativeCallback = 11,
-    ReadonlyNativeStorageNoEscape,
-    WritableNativeStorageNoEscape,
+    /// <summary>Reserved ordinal for the retired catalog-selected readonly storage contract.</summary>
+    ReservedNativeStorageNoEscape = 12,
+    /// <summary>Reserved ordinal for the retired catalog-selected writable storage contract.</summary>
+    ReservedWritableNativeStorageNoEscape = 13,
 }
 
 internal static class NativeUtf16ZContract

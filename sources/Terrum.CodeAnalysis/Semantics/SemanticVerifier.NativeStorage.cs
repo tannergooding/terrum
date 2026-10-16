@@ -41,40 +41,6 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyNativeStorageParameterAddress(BoundNativeStorageAddress address,
-        NativeStorageParameterDefinition parameter,
-        InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
-        BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
-    {
-        Count(ref remaining, depth);
-        if (!NativeStorageParameterContract.MatchesAddress(address, parameter)
-            || (parameter.AddressType == PrimitiveType.NativeStorageAddress
-                && (parameter.RequiredStartIndex != 0
-                    || address.Index is not BoundConstant {
-                            Type: PrimitiveType.Int32,
-                            Value: 0,
-                        }))
-            || address.Variable < 0 || address.Variable >= function.Variables.Length
-            || function.Variables[address.Variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
-            || layout.CarrierType != parameter.CarrierType
-            || layout.ElementType != address.ElementType
-            || address.ElementCount != layout.ElementCount
-            || address.ElementStride != layout.ElementStride
-            || address.ByteExtent != layout.ByteExtent
-            || NativeFixedArrayContract.ElementTypeName(layout.ElementType, program.Structures)
-                != parameter.ElementTypeName
-            || (parameter.AddressType == PrimitiveType.NativeUtf16ZPointer
-                && !NativeFixedArrayContract.AllowsReadonlyUtf16ZLoan(
-                    layout, program.Structures, program.NativeImportCatalog))
-            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures, program.NativeImportCatalog))
-        {
-            throw InvalidEffect(address.Span, "NativeImport");
-        }
-        VerifyNativeFixedArrayPlace(address.Variable, address.Index, parameter.CarrierType,
-            parameter.RequiredStartIndex, parameter.IsReadonly, initialized, fieldMasks, declarations,
-            function, program, ref remaining, depth + 1, failures);
-    }
-
     private static void VerifyNativeFixedArrayPlace(int variable, BoundExpression index,
         PrimitiveType carrierType, int? requiredStartIndex, bool isReadonly,
         InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,

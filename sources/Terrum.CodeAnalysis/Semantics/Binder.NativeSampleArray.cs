@@ -115,34 +115,6 @@ internal sealed partial class Binder
         return new BoundNativeFixedArrayInitialization(layout, bound.MoveToImmutable(), node.Span);
     }
 
-    private BoundExpression BindNativeFixedArrayUtf16ZAddress(SyntaxNode node, TextSpan span)
-    {
-        if (node.Kind != SyntaxKind.IndexExpression
-            || !TryFindNativeFixedArrayLocal((SyntaxNode)node.Children[0], out var variable)
-            || _variables[variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
-            || !NativeFixedArrayContract.AllowsReadonlyUtf16ZLoan(
-                layout, _structs, _nativeImportCatalog))
-        {
-            Report("TRM3030", "A UTF-16Z address requires a selected fixed-array layout that permits the loan.",
-                span);
-            return ErrorExpression(span);
-        }
-        var index = BindNativeFixedArrayIndex((SyntaxNode)node.Children[2], layout);
-        if (index.Type != PrimitiveType.Int32
-            && !(index.Type == PrimitiveType.UInt32
-                && NativeFixedArrayContract.AllowsUInt32Indices(layout, _structs, _nativeImportCatalog)))
-        {
-            Report("TRM3030", "The selected fixed-array layout does not permit this index type.", index.Span);
-        }
-        if (index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 })
-        {
-            Report("TRM3030", "A UTF-16Z fixed-array loan must begin at code unit zero.", index.Span);
-        }
-        return new BoundNativeStorageAddress(variable, index, layout.CarrierType, layout.ElementType,
-            PrimitiveType.NativeUtf16ZPointer, layout.ElementCount, layout.ElementStride,
-            layout.ByteExtent, IsReadonly: true, Span: span);
-    }
-
     private BoundExpression BindNativeFixedArrayPointerAddress(SyntaxNode node,
         PrimitiveType pointerType, TextSpan span)
     {

@@ -293,7 +293,6 @@ internal sealed partial class Binder
                         continue;
                     }
                     if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
-                        || qualified == NativeStorageParameterContract.AddressTypeName
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -865,8 +864,7 @@ internal sealed partial class Binder
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
 
     private static bool IsNativeImportParameterType(PrimitiveType type) =>
-        IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-            or PrimitiveType.NativeStorageAddress;
+        IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer;
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -1156,8 +1154,6 @@ internal sealed partial class Binder
                 declaration.Span);
         }
         size = (size + alignment - 1) & -alignment;
-        var cataloguedFixedArrayElement = _nativeImportCatalog?.SupportsFixedArrayElement(
-            qualified, size, alignment) == true;
         var structureType = (PrimitiveType)(100 + index);
         _structs[index] = new BoundStruct(qualified, fieldLayout, size) {
             IsInternal = _structs[index].IsInternal,
@@ -1169,13 +1165,12 @@ internal sealed partial class Binder
         };
         _structureAlignments[structureType] = alignment;
         if (isSequential && (isPublic || isUnique || fields.Any(static field => !field.IsPrivate))
-            && !isBlittable
-            && !cataloguedFixedArrayElement)
+            && !isBlittable)
         {
             Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
         }
         if (size is < 1 or > ValueLayout.MaximumStructureSize
-            || (size > ValueLayout.MaximumSize && !cataloguedFixedArrayElement && !isBlittable))
+            || (size > ValueLayout.MaximumSize && !isBlittable))
         {
             Report("TRM3005",
                 $"A struct must fit the fixed-storage limit, and aggregates larger than {ValueLayout.MaximumSize} bytes require a Blittable commitment.",
@@ -2640,19 +2635,6 @@ internal sealed partial class Binder
                 return PrimitiveType.Int32;
             }
             return GetNativeFunctionPointerType(signature);
-        }
-        if (name == NativeStorageParameterContract.AddressTypeName)
-        {
-            if (_nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeStorageAddress) == true
-                && typeArgumentNodes.Length == 0 && !writable && !optional
-                && node.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion })
-            {
-                return PrimitiveType.NativeStorageAddress;
-            }
-
-            Report("TRM3030", "NativeStorageAddress is available only for selected catalogued native imports.",
-                node.Span);
-            return PrimitiveType.Int32;
         }
         if (name == "ptr")
         {
@@ -4619,19 +4601,6 @@ internal sealed partial class Binder
                 }
                 if (op.Kind == TokenKind.Ampersand)
                 {
-                    if (expected == PrimitiveType.NativeUtf16ZPointer
-                        && operandNode.Kind == SyntaxKind.IndexExpression
-                        && KnownType((SyntaxNode)operandNode.Children[0]) is PrimitiveType arrayCarrier
-                        && NativeFixedArrayContract.IsCarrier(arrayCarrier))
-                    {
-                        expression = BindNativeFixedArrayUtf16ZAddress(operandNode, node.Span);
-                        break;
-                    }
-                    if (expected == PrimitiveType.NativeStorageAddress)
-                    {
-                        expression = BindNativeFixedArrayStorageAddress(operandNode, node.Span);
-                        break;
-                    }
                     if (expected is PrimitiveType expectedPointerType
                         && NativePointerTypeContract.IsValidType(expectedPointerType, [.. _nativePointerTypes]))
                     {
@@ -6652,7 +6621,7 @@ internal sealed partial class Binder
         PrimitiveType.NativeRawPointer => "ptr<void>",
         _ when NativePointerTypes.IsType(type) => NativePointerTypeName(type),
         _ when NativeFunctionPointerTypes.IsType(type) => NativeFunctionPointerTypeName(type),
-        PrimitiveType.NativeStorageAddress => NativeStorageParameterContract.AddressTypeName,
+        PrimitiveType.NativeStorageAddress => "native address",
         PrimitiveType.ManagedNode => "ManagedNode",
         PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",

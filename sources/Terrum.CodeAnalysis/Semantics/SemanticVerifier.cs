@@ -249,7 +249,6 @@ public static partial class SemanticVerifier
         {
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
                 || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
-                || @class.Name == NativeStorageParameterContract.AddressTypeName
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
@@ -311,7 +310,6 @@ public static partial class SemanticVerifier
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
                 || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
                     or NativeManagedNodeIntrinsics.HeapName
-                || structure.Name == NativeStorageParameterContract.AddressTypeName
                 || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
@@ -447,8 +445,6 @@ public static partial class SemanticVerifier
                     var variable = function.Variables[variableIndex];
                     if (variable is null || string.IsNullOrEmpty(variable.Name)
                         || (variable.Type == PrimitiveType.NativeStorageAddress
-                            && !NativeStorageParameterContract.IsStorageAddressParameter(function,
-                                variableIndex, program.NativeImportCatalog)
                             && DirectNativeImportContract.OutputForParameter(function, variableIndex) is null
                             && DirectNativeImportContract.ParameterForParameter(function, variableIndex) is null)
                         || (NativeFixedArrayContract.IsCarrier(variable.Type)
@@ -470,7 +466,7 @@ public static partial class SemanticVerifier
                             && (!function.IsExternal || variableIndex >= function.ParameterCount)
                                     && !(function.RequiresUnsafeCaller
                                         && variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0))
-                                    && !NativeStorageParameterContract.IsReadonlyStringParameter(
+                                    && !NativeImportParameterContractFacts.IsReadonlyStringParameter(
                                         function, variableIndex, variable.Type, program))
                         || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -4380,17 +4376,18 @@ public static partial class SemanticVerifier
                         }
                         else
                         {
-                            _ = NativeStorageParameterContract.TryGetParameter(
-                                target, parameterIndex, program, out var storageParameter);
                             var isAllowedStorageAddress = argument is BoundNativeStorageAddress storageAddress
-                                && storageParameter is not null
-                                && NativeStorageParameterContract.MatchesAddress(storageAddress, storageParameter);
-                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress directOutputAddress
                                 && directNativeOutput is not null
                                 && DirectNativeImportContract.MatchesAddress(
-                                    directOutputAddress, directNativeOutput, function, program);
-                            isAllowedStorageAddress |= isDirectNativeParameterAddress;
-                            isAllowedStorageAddress |= isNativeVTableParameterAddress;
+                                    storageAddress, directNativeOutput, function, program);
+                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress matchedDirectParameterAddress
+                                && directNativeParameter is not null
+                                && DirectNativeImportContract.MatchesAddress(
+                                    matchedDirectParameterAddress, directNativeParameter, function, program);
+                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress nativeVTableAddress
+                                && nativeVTableParameter is not null
+                                && DirectNativeImportContract.MatchesAddress(
+                                    nativeVTableAddress, nativeVTableParameter, function, program);
                             if (directNativeOutput is not null)
                             {
                                 if (argument is not BoundNativeStorageAddress outputAddress
@@ -4441,18 +4438,6 @@ public static partial class SemanticVerifier
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                            }
-                            else if (storageParameter is not null
-                                && argument is BoundNativeStorageAddress nativeStorageAddress)
-                            {
-                                if (!NativeStorageParameterContract.MatchesAddress(
-                                    nativeStorageAddress, storageParameter))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                VerifyNativeStorageParameterAddress(nativeStorageAddress, storageParameter,
-                                    initialized, fieldMasks, declarations, function, program,
-                                    ref remaining, depth + 1, failures);
                             }
                             else if (argument is BoundNativeStorageAddress && !isAllowedStorageAddress)
                             {
@@ -4698,18 +4683,9 @@ public static partial class SemanticVerifier
         };
         var literalCount = parameterType == PrimitiveType.NativeUtf16ZPointer
             ? program.NativeUtf16ZLiterals.Length : program.NativeUtf8ZLiterals.Length;
-        if (argument is BoundNativeStorageAddress storageAddress
-            && NativeStorageParameterContract.TryGetParameter(target, parameterIndex, program,
-                out var storageParameter)
-            && storageParameter is not null
-            && storageParameter.AddressType == parameterType
-            && NativeStorageParameterContract.MatchesAddress(storageAddress, storageParameter))
-        {
-            return true;
-        }
         return argument is BoundConstant { Type: var literalType, Value: >= 0 } literal
             && literalType == parameterType && literal.Value < literalCount
-            && NativeStorageParameterContract.TryGetImportParameterContract(
+            && NativeImportParameterContractFacts.TryGetImportParameterContract(
                 target, parameterIndex, program, out var actualContract)
             && actualContract == expectedContract;
     }

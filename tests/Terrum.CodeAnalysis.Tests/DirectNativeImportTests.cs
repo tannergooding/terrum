@@ -213,6 +213,20 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void NativeStorageAddressIsNotAnExposedSourceType()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ConsumeStorage")]
+            extern int32 ConsumeStorage(Terrum.Interop.NativeStorageAddress value);
+
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
     public void RawPointerNullAndEqualityUseOrdinaryPointerValues()
     {
         Assume.That(OperatingSystem.IsWindows()

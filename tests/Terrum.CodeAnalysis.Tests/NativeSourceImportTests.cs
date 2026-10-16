@@ -200,6 +200,19 @@ public sealed partial class NativeSourceImportTests
                 extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
                     ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
                 int32 Main() {
+                    InlineArray<char16, 2> text = [char16(65), char16(0)];
+                    unsafe {
+                        return NativeFfiUtf16Z(&text[0], 1, 2,
+                            utf16z("second"), 3, utf16z("third"));
+                    }
+                }
+                """,
+            $$"""
+                [Terrum.Interop.NativeImport("{{Utf16ZFixtureKey}}")]
+                [NoThrow]
+                extern int32 NativeFfiUtf16Z(ptr<char16> first, uint32 second, uint64 third,
+                    ptr<char16> fourth, uint32 fifth, ptr<char16> sixth);
+                int32 Main() {
                     ptr<char16> value = utf16z("first");
                     return 0;
                 }
