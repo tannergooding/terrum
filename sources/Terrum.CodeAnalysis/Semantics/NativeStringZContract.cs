@@ -1,5 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
 using System.Collections.Immutable;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -10,7 +11,8 @@ internal static class NativeUtf16ZContract
 
     internal static bool IsValidLiteral(string value)
     {
-        if (value.Contains('\0') || ((long)value.Length + 1) * sizeof(char) > MaximumStorageBytes)
+        if (value.Contains('\0', StringComparison.Ordinal)
+            || ((long)value.Length + 1) * sizeof(char) > MaximumStorageBytes)
         {
             return false;
         }
