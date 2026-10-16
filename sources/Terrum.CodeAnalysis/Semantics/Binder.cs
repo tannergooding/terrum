@@ -1168,12 +1168,6 @@ internal sealed partial class Binder
             IsSequential = isSequential,
         };
         _structureAlignments[structureType] = alignment;
-        var cataloguedAggregateStorage = NativeStorageParameterContract.SupportsAggregateType(
-            _nativeImportCatalog, structureType, _structs, isReadonly: false)
-            || NativeStorageParameterContract.SupportsAggregateType(
-                _nativeImportCatalog, structureType, _structs, isReadonly: true);
-        var cataloguedAggregateLayout = _nativeImportCatalog?.SupportsAggregateStorageLayout(
-            structureType, _structs) == true;
         if (isSequential && (isPublic || isUnique || fields.Any(static field => !field.IsPrivate))
             && !isBlittable
             && !cataloguedFixedArrayElement)
@@ -1181,11 +1175,10 @@ internal sealed partial class Binder
             Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
         }
         if (size is < 1 or > ValueLayout.MaximumStructureSize
-            || (size > ValueLayout.MaximumSize && !cataloguedFixedArrayElement
-                && !cataloguedAggregateStorage && !cataloguedAggregateLayout && !isBlittable))
+            || (size > ValueLayout.MaximumSize && !cataloguedFixedArrayElement && !isBlittable))
         {
             Report("TRM3005",
-                $"A struct must fit the fixed-storage limit, and aggregates larger than {ValueLayout.MaximumSize} bytes require a Blittable commitment or a supported native storage layout.",
+                $"A struct must fit the fixed-storage limit, and aggregates larger than {ValueLayout.MaximumSize} bytes require a Blittable commitment.",
                 declaration.Span);
         }
         _ = _layingOut.Remove(index);
@@ -4636,7 +4629,7 @@ internal sealed partial class Binder
                     }
                     if (expected == PrimitiveType.NativeStorageAddress)
                     {
-                        expression = BindNativeAggregateStorageAddress(operandNode, node.Span);
+                        expression = BindNativeFixedArrayStorageAddress(operandNode, node.Span);
                         break;
                     }
                     if (expected is PrimitiveType expectedPointerType

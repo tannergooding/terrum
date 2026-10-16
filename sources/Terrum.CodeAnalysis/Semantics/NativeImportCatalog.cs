@@ -19,7 +19,6 @@ public sealed class NativeImportCatalog
 
     private readonly ImmutableDictionary<string, NativeImportDefinition> _imports;
     private readonly ImmutableArray<NativeFixedArrayStorageLayoutDefinition> _fixedArrayStorageLayouts;
-    private readonly ImmutableArray<NativeAggregateStorageLayoutDefinition> _aggregateStorageLayouts;
 
     [SuppressMessage("Style", "IDE0072:Populate switch",
         Justification = "Unsupported native parameter types cannot acquire an import contract.")]
@@ -65,8 +64,7 @@ public sealed class NativeImportCatalog
 
     internal NativeImportCatalog(string identity, ImmutableArray<NativeImportDefinition> imports,
         bool isForTesting = false,
-        ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default,
-        ImmutableArray<NativeAggregateStorageLayoutDefinition> aggregateStorageLayouts = default)
+        ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default)
     {
         if (string.IsNullOrWhiteSpace(identity) || imports.IsDefault)
         {
@@ -92,27 +90,6 @@ public sealed class NativeImportCatalog
         {
             throw new ArgumentException("A fixed-array storage layout has invalid element geometry.",
                 nameof(fixedArrayStorageLayouts));
-        }
-        var aggregateLayouts = aggregateStorageLayouts.IsDefault ? [] : aggregateStorageLayouts;
-        if (aggregateLayouts.Any(static layout => !NativeAggregateContract.IsValidStorageLayout(layout))
-            || aggregateLayouts.Select(static layout => layout.TypeName)
-                .Distinct(StringComparer.Ordinal).Count() != aggregateLayouts.Length)
-        {
-            throw new ArgumentException("A native aggregate storage layout is invalid or duplicated.",
-                nameof(aggregateStorageLayouts));
-        }
-        foreach (var import in imports)
-        {
-            ArgumentNullException.ThrowIfNull(import);
-            if (!import.AggregateStorageParameters.IsDefaultOrEmpty
-                && import.AggregateStorageParameters.Any(parameter => parameter?.SourceType is string sourceType
-                    && !aggregateLayouts.Any(layout => layout.TypeName == sourceType
-                        && layout.ByteExtent == parameter.ByteExtent
-                        && layout.Alignment == parameter.RequiredAlignment)))
-            {
-                throw new ArgumentException("A native aggregate storage parameter has no selected layout.",
-                    nameof(imports));
-            }
         }
         var builder = ImmutableDictionary.CreateBuilder<string, NativeImportDefinition>(StringComparer.Ordinal);
         foreach (var import in imports)
@@ -146,7 +123,6 @@ public sealed class NativeImportCatalog
         IsForTesting = isForTesting;
         _imports = builder.ToImmutable();
         _fixedArrayStorageLayouts = storageLayouts;
-        _aggregateStorageLayouts = aggregateLayouts;
     }
 
     /// <summary>Gets an empty catalog for Windows x64 native source imports.</summary>
@@ -161,9 +137,6 @@ public sealed class NativeImportCatalog
 
     internal ImmutableArray<NativeFixedArrayStorageLayoutDefinition> FixedArrayStorageLayouts =>
         _fixedArrayStorageLayouts;
-
-    internal ImmutableArray<NativeAggregateStorageLayoutDefinition> AggregateStorageLayouts =>
-        _aggregateStorageLayouts;
 
     internal static NativeImportAttributeDefinition AttributeDefinition => s_attributeDefinition;
 
@@ -180,20 +153,6 @@ public sealed class NativeImportCatalog
 
     internal bool SupportsCheckedFixedArrayStorage =>
         _fixedArrayStorageLayouts.Any(static layout => layout.AllowsCheckedRuntimeAccess);
-
-    internal bool SupportsAggregateStorageLayout(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures)
-    {
-        var typeIndex = (int)type - 100;
-        if (typeIndex < 0 || typeIndex >= structures.Count
-            || !NativeAggregateContract.IsPlainValueAggregate(type, structures))
-        {
-            return false;
-        }
-
-        return _aggregateStorageLayouts.Any(layout =>
-            NativeAggregateContract.MatchesStorageLayout(type, structures, this, layout));
-    }
 
     internal bool SupportsFixedArrayStorage(PrimitiveType carrierType) =>
         _imports.Values.Any(import => import.StorageParameters.Any(parameter =>
@@ -318,9 +277,8 @@ public sealed class NativeImportCatalog
 
     internal static NativeImportCatalog CreateForTesting(string identity,
         ImmutableArray<NativeImportDefinition> imports,
-        ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default,
-        ImmutableArray<NativeAggregateStorageLayoutDefinition> aggregateStorageLayouts = default) =>
-        new(identity, imports, isForTesting: true, fixedArrayStorageLayouts, aggregateStorageLayouts);
+        ImmutableArray<NativeFixedArrayStorageLayoutDefinition> fixedArrayStorageLayouts = default) =>
+        new(identity, imports, isForTesting: true, fixedArrayStorageLayouts);
 }
 
 internal sealed record NativeImportAttributeDefinition(string FullyQualifiedName, int ArgumentCount,
@@ -332,7 +290,6 @@ internal sealed record NativeImportDefinition(string Key, string DllName, string
 {
     internal ImmutableArray<NativeImportParameterContract> ParameterContracts { get; init; } = [];
     internal ImmutableArray<NativeStorageParameterDefinition> StorageParameters { get; init; } = [];
-    internal ImmutableArray<NativeAggregateStorageParameterDefinition> AggregateStorageParameters { get; init; } = [];
     internal NativeImportResultContract ResultContract { get; init; }
 }
 

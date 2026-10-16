@@ -105,6 +105,63 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void DirectNativeImportAcceptsNestedBlittableStructThroughTypedPointer()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct FixtureHeader {
+                uint64 First;
+                uint64 Second;
+                uint64 Third;
+
+                public FixtureHeader(uint64 first, uint64 second, uint64 third) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct FixtureDescriptor {
+                FixtureHeader Header;
+                uint64 OutputHandle;
+                uint32 Count;
+                uint32 Flags;
+
+                public FixtureDescriptor(FixtureHeader header, uint64 outputHandle,
+                    uint32 count, uint32 flags) {
+                    Header = header;
+                    OutputHandle = outputHandle;
+                    Count = count;
+                    Flags = flags;
+                }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadDescriptor")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            extern int32 ReadDescriptor(ptr<FixtureDescriptor> descriptor);
+
+            int32 Main() {
+                FixtureDescriptor descriptor = new FixtureDescriptor(
+                    new FixtureHeader(1, 2, 3), 4, 5, 6);
+                unsafe { return ReadDescriptor(&descriptor); }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(program.NativeImportCatalog, Is.Null);
+        var descriptor = program.Structures.Single(static structure =>
+            structure.Name == "FixtureDescriptor");
+        Assert.That(descriptor.Size, Is.EqualTo(40));
+        Assert.That(descriptor.Fields.Select(static field => field.Offset), Is.EqualTo([0, 24, 32, 36]));
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ReadDescriptor"));
+    }
+
+    [Test]
     public void DirectNativeImportAcceptsGenericFunctionPointerParametersWithoutCallbackPolicy()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""

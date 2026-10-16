@@ -716,22 +716,6 @@ public sealed record BoundNativeStorageAddress(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
 }
 
-internal sealed record NativeAggregateStorageParameterDefinition(
-    int ParameterIndex,
-    PrimitiveType AddressType,
-    int ByteExtent,
-    int RequiredAlignment,
-    bool IsReadonly,
-    string? SourceType = null);
-
-internal sealed record NativeAggregateStorageLayoutDefinition(string TypeName, int ByteExtent, int Alignment)
-{
-    internal ImmutableArray<NativeAggregateStorageFieldLayoutDefinition> Fields { get; init; } = [];
-}
-
-internal sealed record NativeAggregateStorageFieldLayoutDefinition(
-    string Name, string TypeName, int Offset, int Size);
-
 /// <summary>An explicitly absent optional managed handle.</summary>
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 

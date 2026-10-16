@@ -12,7 +12,7 @@ internal static class NativeStorageParameterContract
 
     internal static bool IsValid(NativeImportDefinition import)
     {
-        if (import.StorageParameters.IsDefault || import.AggregateStorageParameters.IsDefault)
+        if (import.StorageParameters.IsDefault)
         {
             return false;
         }
@@ -21,16 +21,14 @@ internal static class NativeStorageParameterContract
             && import.ParameterContracts.Any(static contract => contract is
                 NativeImportParameterContract.ReadonlyNativeStorageNoEscape
                 or NativeImportParameterContract.WritableNativeStorageNoEscape);
-        var hasAggregateAddress = !import.ParameterTypes.IsDefault
+        var hasStorageAddress = !import.ParameterTypes.IsDefault
             && import.ParameterTypes.Contains(PrimitiveType.NativeStorageAddress);
-        if (import.StorageParameters.IsDefaultOrEmpty && import.AggregateStorageParameters.IsDefaultOrEmpty
-            && !hasStorageContract && !hasAggregateAddress)
+        if (import.StorageParameters.IsDefaultOrEmpty && !hasStorageContract && !hasStorageAddress)
         {
             return true;
         }
 
         if (import.ParameterTypes.IsDefault || import.StorageParameters.IsDefault
-            || import.AggregateStorageParameters.IsDefault
             || import.ParameterContracts.IsDefault
             || import.ParameterContracts.Length != import.ParameterTypes.Length)
         {
@@ -67,34 +65,6 @@ internal static class NativeStorageParameterContract
                     && (!parameter.IsReadonly
                         || parameter.ElementTypeName != nameof(PrimitiveType.Char16)
                         || parameter.ElementStride != sizeof(char)))
-                || ValueLayout.Size(parameter.AddressType, []) != NativeTargetProfile.PointerSize)
-            {
-                return false;
-            }
-
-            hasStorageParameter[parameter.ParameterIndex] = true;
-        }
-
-        if (import.AggregateStorageParameters.Length > 1)
-        {
-            // Call-site alias checks are not defined for multiple generic aggregate loans.
-            return false;
-        }
-        foreach (var parameter in import.AggregateStorageParameters)
-        {
-            if (parameter is null || parameter.ParameterIndex < 0
-                || parameter.ParameterIndex >= import.ParameterTypes.Length
-                || hasStorageParameter[parameter.ParameterIndex]
-                || import.ParameterContracts[parameter.ParameterIndex]
-                    != (parameter.IsReadonly
-                        ? NativeImportParameterContract.ReadonlyNativeStorageNoEscape
-                        : NativeImportParameterContract.WritableNativeStorageNoEscape)
-                || import.ParameterTypes[parameter.ParameterIndex] != parameter.AddressType
-                || parameter.AddressType != PrimitiveType.NativeStorageAddress
-                || parameter.SourceType is string sourceType && string.IsNullOrWhiteSpace(sourceType)
-                || parameter.ByteExtent <= 0 || parameter.RequiredAlignment <= 0
-                || (parameter.RequiredAlignment & (parameter.RequiredAlignment - 1)) != 0
-                || parameter.ByteExtent % parameter.RequiredAlignment != 0
                 || ValueLayout.Size(parameter.AddressType, []) != NativeTargetProfile.PointerSize)
             {
                 return false;
@@ -191,41 +161,12 @@ internal static class NativeStorageParameterContract
             && actualContract == expectedContract;
     }
 
-    internal static bool TryGetAggregateParameter(NativeImportDefinition import, int parameterIndex,
-        out NativeAggregateStorageParameterDefinition? parameter)
-    {
-        if (import.AggregateStorageParameters.IsDefault)
-        {
-            parameter = null;
-            return false;
-        }
-
-        foreach (var candidate in import.AggregateStorageParameters)
-        {
-            if (candidate?.ParameterIndex == parameterIndex)
-            {
-                parameter = candidate;
-                return true;
-            }
-        }
-
-        parameter = null;
-        return false;
-    }
-
     internal static NativeImportParameterContract ExpectedParameterContract(
         NativeImportDefinition import, int parameterIndex)
     {
         if (TryGetParameter(import, parameterIndex, out var storageParameter) && storageParameter is not null)
         {
             return ExpectedParameterContract(storageParameter);
-        }
-        if (TryGetAggregateParameter(import, parameterIndex, out var aggregateParameter)
-            && aggregateParameter is not null)
-        {
-            return aggregateParameter.IsReadonly
-                ? NativeImportParameterContract.ReadonlyNativeStorageNoEscape
-                : NativeImportParameterContract.WritableNativeStorageNoEscape;
         }
         return NativeImportParameterContract.Value;
     }
@@ -269,58 +210,6 @@ internal static class NativeStorageParameterContract
             && address.ByteExtent == parameter.ByteExtent
             && address.IsReadonly == parameter.IsReadonly;
 
-    internal static bool MatchesAggregateAddress(BoundNativeStorageAddress address,
-        NativeAggregateStorageParameterDefinition parameter, BoundProgram program)
-    {
-        var typeIndex = (int)address.CarrierType - 100;
-        return address.Type == PrimitiveType.NativeStorageAddress
-            && address.AddressType == parameter.AddressType
-            && parameter.AddressType == PrimitiveType.NativeStorageAddress
-            && address.CarrierType == address.ElementType
-            && address.ElementCount == 1
-            && address.ElementStride == parameter.ByteExtent
-            && address.ByteExtent == parameter.ByteExtent
-            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
-            && (parameter.IsReadonly || !address.IsReadonly)
-            && typeIndex >= 0 && typeIndex < program.Structures.Length
-            && ValueLayout.Size(address.CarrierType, program.Structures) == parameter.ByteExtent
-            && ValueLayout.Alignment(address.CarrierType, program.Structures, program.NativeImportCatalog)
-                == parameter.RequiredAlignment
-            && NativeAggregateContract.IsPlainValueAggregate(address.CarrierType, program.Structures)
-            && (parameter.SourceType is null
-                || (NativeAggregateContract.TryResolveSourceType(parameter.SourceType,
-                        program.Structures, out var sourceType)
-                    && sourceType == address.CarrierType
-                    && program.NativeImportCatalog?.SupportsAggregateStorageLayout(
-                        address.CarrierType, program.Structures) == true));
-    }
-
-    internal static bool SupportsAggregateType(NativeImportCatalog? catalog, PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures, bool isReadonly)
-    {
-        var typeIndex = (int)type - 100;
-        if (catalog is null || typeIndex < 0 || typeIndex >= structures.Count
-            || !NativeAggregateContract.IsPlainValueAggregate(type, structures))
-        {
-            return false;
-        }
-
-        var byteExtent = ValueLayout.Size(type, structures);
-        var alignment = ValueLayout.Alignment(type, structures, catalog);
-        return catalog.SupportsParameterType(PrimitiveType.NativeStorageAddress)
-                && catalog.ImportDefinitions.Any(import =>
-            import.AggregateStorageParameters.Any(parameter => parameter is not null
-                && parameter.AddressType == PrimitiveType.NativeStorageAddress
-                && parameter.ByteExtent == byteExtent
-                && parameter.RequiredAlignment == alignment
-                && (parameter.SourceType is null
-                    || (NativeAggregateContract.TryResolveSourceType(parameter.SourceType, structures,
-                            out var sourceType)
-                        && sourceType == type
-                        && catalog.SupportsAggregateStorageLayout(type, structures)))
-                && (parameter.IsReadonly || !isReadonly)));
-    }
-
     internal static bool IsStorageAddressParameter(BoundFunction function, int parameterIndex,
         NativeImportCatalog? catalog) =>
         function.IsExternal && parameterIndex >= 0 && parameterIndex < function.ParameterCount
@@ -328,8 +217,7 @@ internal static class NativeStorageParameterContract
             && catalog.TryGetImport(key, out var import) && import is not null
             && parameterIndex < import.ParameterTypes.Length
             && import.ParameterTypes[parameterIndex] == PrimitiveType.NativeStorageAddress
-            && (TryGetParameter(import, parameterIndex, out _)
-                || TryGetAggregateParameter(import, parameterIndex, out _));
+            && TryGetParameter(import, parameterIndex, out _);
 }
 
 internal static class NativeImportBoundParameterMappingContract

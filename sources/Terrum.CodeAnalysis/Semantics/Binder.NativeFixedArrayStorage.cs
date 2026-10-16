@@ -7,7 +7,7 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed partial class Binder
 {
-    private BoundExpression BindNativeAggregateStorageAddress(SyntaxNode node, TextSpan span)
+    private BoundExpression BindNativeFixedArrayStorageAddress(SyntaxNode node, TextSpan span)
     {
         while (node.Kind == SyntaxKind.ParenthesizedExpression)
         {
@@ -34,26 +34,8 @@ internal sealed partial class Binder
                 layout.ByteExtent, isReadonly, span);
         }
 
-        if (node.Kind != SyntaxKind.NameExpression
-            || !TryFindVariable(NameText(node), out var variable))
-        {
-            Report("TRM3030", "A native storage address requires a matching initialized local.",
-                span);
-            return ErrorExpression(span);
-        }
-
-        var type = _variables[variable].Type;
-        if (!NativeStorageParameterContract.SupportsAggregateType(_nativeImportCatalog,
-                type, _structs, !_variables[variable].IsMutable))
-        {
-            Report("TRM3030", "A native storage address requires a matching initialized local.",
-                span);
-            return ErrorExpression(span);
-        }
-        var extent = ValueLayout.Size(type, _structs);
-        return new BoundNativeStorageAddress(variable,
-            new BoundConstant(0, PrimitiveType.Int32, span), type, type,
-            PrimitiveType.NativeStorageAddress, 1, extent, extent,
-            IsReadonly: !_variables[variable].IsMutable, Span: span);
+        Report("TRM3030", "A native storage address requires a matching fixed-array element.",
+            span);
+        return ErrorExpression(span);
     }
 }

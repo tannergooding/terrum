@@ -382,15 +382,9 @@ public static partial class SemanticVerifier
             }
             var isSupportedFixedArrayElement = NativeFixedArrayContract.IsSupportedElementType(
                 (PrimitiveType)(100 + index), program.Structures, program.NativeImportCatalog);
-            var cataloguedAggregateStorage = NativeStorageParameterContract.SupportsAggregateType(
-                program.NativeImportCatalog, (PrimitiveType)(100 + index), program.Structures, isReadonly: false)
-                || NativeStorageParameterContract.SupportsAggregateType(
-                    program.NativeImportCatalog, (PrimitiveType)(100 + index), program.Structures, isReadonly: true);
-            var cataloguedAggregateLayout = program.NativeImportCatalog?.SupportsAggregateStorageLayout(
-                (PrimitiveType)(100 + index), program.Structures) == true;
             if (structure.Size > ValueLayout.MaximumSize
                 && structure.BlittableTargetRequirement == 0
-                && !isSupportedFixedArrayElement && !cataloguedAggregateStorage && !cataloguedAggregateLayout)
+                && !isSupportedFixedArrayElement)
             {
                 throw Invalid();
             }
@@ -4397,20 +4391,6 @@ public static partial class SemanticVerifier
                                     directOutputAddress, directNativeOutput, function, program);
                             isAllowedStorageAddress |= isDirectNativeParameterAddress;
                             isAllowedStorageAddress |= isNativeVTableParameterAddress;
-                            NativeAggregateStorageParameterDefinition? aggregateStorageParameter = null;
-                            if (target.IsExternal && target.NativeImportKey is string aggregateImportKey
-                                && program.NativeImportCatalog is NativeImportCatalog aggregateCatalog
-                                && aggregateCatalog.TryGetImport(aggregateImportKey, out var aggregateImport)
-                                && aggregateImport is not null
-                                && NativeStorageParameterContract.TryGetAggregateParameter(aggregateImport,
-                                    parameterIndex, out var selectedAggregateStorageParameter))
-                            {
-                                aggregateStorageParameter = selectedAggregateStorageParameter;
-                            }
-                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress aggregateAddress
-                                && aggregateStorageParameter is not null
-                                && NativeStorageParameterContract.MatchesAggregateAddress(aggregateAddress,
-                                    aggregateStorageParameter, program);
                             if (directNativeOutput is not null)
                             {
                                 if (argument is not BoundNativeStorageAddress outputAddress
@@ -4473,18 +4453,6 @@ public static partial class SemanticVerifier
                                 VerifyNativeStorageParameterAddress(nativeStorageAddress, storageParameter,
                                     initialized, fieldMasks, declarations, function, program,
                                     ref remaining, depth + 1, failures);
-                            }
-                            else if (aggregateStorageParameter is not null)
-                            {
-                                if (argument is not BoundNativeStorageAddress address
-                                    || !NativeStorageParameterContract.MatchesAggregateAddress(address,
-                                        aggregateStorageParameter, program))
-                                {
-                                    throw InvalidEffect(argument.Span, "NativeImport");
-                                }
-                                VerifyNativeAggregateStorageAddress(address, aggregateStorageParameter,
-                                    initialized, fieldMasks, declarations, function, program,
-                                    ref remaining, depth + 1);
                             }
                             else if (argument is BoundNativeStorageAddress && !isAllowedStorageAddress)
                             {
