@@ -17,103 +17,6 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class NativeSourceImportTests
 {
-    private const string ImportKey = "test.source-import.counter";
-    private const string DelayImportKey = "test.source-import.delay";
-    private const string Utf16ZFixtureKey = "test.application.native-import-abi.NativeFfiUtf16Z";
-
-    [Test]
-    public void SourceImportRequiresItsExactCatalogSignatureAndCompilerAttribute()
-    {
-        var catalog = NativeImportCatalog.CreateForTesting("test-source-import-signature-v1", [
-            new NativeImportDefinition(ImportKey, "fixture.dll", "ReadCounter", [],
-                PrimitiveType.UInt32, IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
-                NativeImportDeploymentPolicy.ApplicationDirectory),
-        ]);
-        var valid = Compilation.CreateWithNativeImports([SyntaxTree.Parse($$"""
-            [Terrum.Interop.NativeImport("{{ImportKey}}")]
-            [NoThrow]
-            extern unsafe uint32 ReadCounter();
-            int32 Main() { unsafe { return int32(ReadCounter()); } }
-            """)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.That(valid.HasErrors, Is.False, string.Join(Environment.NewLine, valid.Diagnostics));
-
-        foreach (var source in new[] {
-            $"[Terrum.Interop.NativeImport(\"{ImportKey}\")] [NoThrow] extern unsafe int32 ReadCounter(); int32 Main() {{ return 0; }}",
-            "[Terrum.Interop.NativeImport(\"unknown\")] [NoThrow] extern unsafe uint32 ReadCounter(); int32 Main() { return 0; }",
-            $"[Terrum.Interop.NativeImport(\"{ImportKey}\")] [NoThrow] extern unsafe uint32 ReadCounter(uint32 value); int32 Main() {{ return 0; }}",
-            $"[NativeImport(\"{ImportKey}\")] [NoThrow] extern unsafe uint32 ReadCounter(); int32 Main() {{ return 0; }}",
-        })
-        {
-            var compilation = Compilation.CreateWithNativeImports(
-                [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
-            Assert.That(compilation.Program, Is.Null);
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3030"
-                || diagnostic.Code == "TRM3001"),Is.True);
-        }
-    }
-
-    [Test]
-    public void GenericCatalogImportMatchesItsExactFixedWidthSignature()
-    {
-        var catalog = NativeImportCatalog.CreateForTesting("test-generic-delay-v1", [
-            new NativeImportDefinition(DelayImportKey, "fixture.dll", "Delay",
-                [PrimitiveType.UInt32], PrimitiveType.Void, IsNoThrow: true,
-                RequiresUnsafeCaller: true, DoesNotReturn: false,
-                NativeImportDeploymentPolicy.ApplicationDirectory),
-        ]);
-        var source = $$"""
-            [Terrum.Interop.NativeImport("{{DelayImportKey}}")]
-            [NoThrow]
-            extern unsafe void Delay(uint32 milliseconds);
-
-            int32 Main() {
-                unsafe { Delay(16); }
-                return 0;
-            }
-            """;
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-        var delay = global::System.Linq.Enumerable.Single(program.Functions, static function => function.IsExternal);
-        Assert.That(delay.NativeImportKey, Is.EqualTo(DelayImportKey));
-        Assert.That(delay.ReturnType, Is.EqualTo(PrimitiveType.Void));
-        Assert.That(global::System.Linq.Enumerable.Single(delay.Variables).Type, Is.EqualTo(PrimitiveType.UInt32));
-        Assert.That(delay.IsNoThrow, Is.True);
-        Assert.That(delay.RequiresUnsafeCaller, Is.True);
-        Assert.That(delay.DoesNotReturn, Is.False);
-
-        var safeCall = source.Replace("unsafe { Delay(16); }", "Delay(16);", StringComparison.Ordinal);
-        var safeCompilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(safeCall)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.That(safeCompilation.Program, Is.Null);
-        Assert.That(global::System.Linq.Enumerable.Any(safeCompilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3028"), Is.True);
-
-        var image = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
-        Assert.That(image.AsSpan().IndexOf("fixture.dll\0"u8) >= 0, Is.True);
-        Assert.That(image.AsSpan().IndexOf("Delay\0"u8) >= 0, Is.True);
-
-        foreach (var declaration in new[] {
-            "[NoThrow] extern unsafe void Delay(int32 milliseconds);",
-            "[NoThrow] extern unsafe uint32 Delay(uint32 milliseconds);",
-            "extern unsafe void Delay(uint32 milliseconds);",
-        })
-        {
-            var invalidSource = $$"""
-                [Terrum.Interop.NativeImport("{{DelayImportKey}}")]
-                {{declaration}}
-                int32 Main() { Delay(16); return 0; }
-                """;
-            var invalidCompilation = Compilation.CreateWithNativeImports(
-                [SyntaxTree.Parse(invalidSource)], catalog, BoundRuntimePolicy.FailFast);
-            Assert.That(invalidCompilation.Program, Is.Null);
-            Assert.That(global::System.Linq.Enumerable.Any(invalidCompilation.Diagnostics,static diagnostic =>
-                diagnostic.Code == "TRM3030" || diagnostic.Code == "TRM3001"),Is.True);
-        }
-    }
-
     [Test]
     public void Utf16ZLiteralCannotBeForwardedToAnUnannotatedUnsafeFunction()
     {
@@ -137,11 +40,11 @@ public sealed partial class NativeSourceImportTests
             namespace Terrum.Interop;
             struct NativeImport { int32 Value; }
             [NoThrow]
-            [Terrum.Interop.NativeImport("{{ImportKey}}")]
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
             extern uint32 CurrentThreadId();
             void Main() {}
             """;
-        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3003"),Is.True);
     }
@@ -212,11 +115,6 @@ public sealed partial class NativeSourceImportTests
         Assert.That(addressCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, addressCompilation.Diagnostics));
 
-        var withoutNoEscape = new NativeImportDefinition(Utf16ZFixtureKey, "native-import-abi-probe.dll",
-            "NativeFfiUtf16Z", [PrimitiveType.NativeUtf16ZPointer], PrimitiveType.Int32,
-            true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory);
-        _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-            "test-native-utf16z-without-contract-v1", [withoutNoEscape]))!;
     }
 
     [Test]
@@ -229,45 +127,6 @@ public sealed partial class NativeSourceImportTests
         Assert.That(NativeUtf16ZContract.IsValidLiteral("supplementary \U0001F642"), Is.True);
         Assert.That(NativeUtf16ZContract.IsValidLiteral(new string('\uD83D', 1)), Is.False);
         Assert.That(NativeUtf16ZContract.IsValidPool([maximum, "extra"]), Is.False);
-    }
-
-    [Test]
-    public void CatalogImportRequiresItsMetadataForValidatedCalls()
-    {
-        const string importKey = "test.generic-import.observe-value";
-        var catalog = NativeImportCatalog.CreateForTesting("test-generic-import-metadata.v1", [
-            new NativeImportDefinition(importKey, "fixture.dll", "ObserveValue",
-                [PrimitiveType.UInt32], PrimitiveType.Int32,
-                IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
-                NativeImportDeploymentPolicy.ApplicationDirectory),
-        ]);
-        var source = $$"""
-            [Terrum.Interop.NativeImport("{{importKey}}")]
-            [NoThrow]
-            extern unsafe int32 ObserveValue(uint32 value);
-
-            int32 Main() {
-                unsafe { return ObserveValue(42); }
-            }
-            """;
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
-        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
-        var import = program.Functions.Single(static function => function.Name == "ObserveValue");
-        Assert.That(import.Variables.Single().Type, Is.EqualTo(PrimitiveType.UInt32));
-        Assert.That(Encoding.ASCII.GetString(
-            NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast)),
-            Does.Contain("ObserveValue"));
-
-        var stripped = program with {
-            Functions = program.Functions.SetItem(program.Functions.IndexOf(import),
-                import with { NativeImportKey = null }),
-            NativeImportCatalog = null,
-            NativeImportCatalogId = null,
-        };
-        _ = Assert.Throws<ArgumentException>(() =>
-            NativeEmitter.EmitCode(stripped, NativeRuntimePolicy.FailFast))!;
     }
 
     [Test]
@@ -328,14 +187,13 @@ public sealed partial class NativeSourceImportTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
-        Assert.That(program.NativeImportCatalog, Is.Null);
         Assert.That(program.Functions.Count(static function => function.IsExternal), Is.EqualTo(2));
 
         var image = NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast);
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program,
             [new NativeImportBinding("CurrentThreadId", "kernel32.dll", "GetCurrentThreadId")],
             NativeRuntimePolicy.FailFast))!;
-        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(program,
+        _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitCode(program,
             NativeRuntimePolicy.FailFast))!;
 
         var directory = Directory.CreateTempSubdirectory("terrum-source-import-").FullName;

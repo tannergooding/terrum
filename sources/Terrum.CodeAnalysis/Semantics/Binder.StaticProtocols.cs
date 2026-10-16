@@ -539,7 +539,7 @@ internal sealed partial class Binder
                     Report("TRM3001", "Static operator protocol signatures must match their operand and result formals and end in ';'.", member.Span);
                     continue;
                 }
-                if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
                     || !_protocols.TryAdd(qualified, new StaticProtocol(qualified,
                     new StaticOperatorKey(operation, arity), noThrow, unsafeModifierCount != 0,
                     hasSelf, node, tree)))

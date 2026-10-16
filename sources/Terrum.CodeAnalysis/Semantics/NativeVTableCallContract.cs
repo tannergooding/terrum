@@ -18,12 +18,11 @@ internal static class NativeVTableCallContract
         if ((!isImplementation && !isExternalDeclaration)
             || function.NativeVTableMethod is not NativeVTableMethodDefinition method
             || function.DirectNativeImport is not null
-            || function.NativeImportKey is not null || function.DeclaringStruct is not null
+            || function.DeclaringStruct is not null
             || function.IsCleanup || function.IsConstructor || function.IsStatic
             || function.IsOperator || function.IsClassConstructor || function.PropertyName is not null
             || function.DoesNotReturn || !function.RequiresUnsafeCaller
             || function.NativeFunctionPointerType is not null
-            || !function.NativeImportParameterMappings.IsDefaultOrEmpty
             || function.Body is null || function.Body.Statements.IsDefault
             || !function.Body.Statements.IsEmpty || function.Variables.IsDefault
             || function.ParameterCount < 1 || function.ParameterCount != function.Variables.Length

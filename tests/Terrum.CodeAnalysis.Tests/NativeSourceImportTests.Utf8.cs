@@ -10,8 +10,6 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class NativeSourceImportTests
 {
-    private const string Utf8ZFixtureKey = "test.application.native-import-abi.NativeFfiUtf8Z";
-
     [Test]
     public void Utf8ZRequiresAnAsciiLiteralAtAnExplicitNoEscapeArgument()
     {
@@ -69,14 +67,6 @@ public sealed partial class NativeSourceImportTests
         Assert.That(global::System.Linq.Enumerable.Any(escapingCompilation.Diagnostics,
             static diagnostic => diagnostic.Code == "TRM3011"), Is.True);
 
-        var missingContract = new NativeImportDefinition(Utf8ZFixtureKey, "native-import-abi-probe.dll",
-            "NativeFfiUtf8Z", [PrimitiveType.NativeUtf8ZPointer], PrimitiveType.Int32,
-            true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory);
-        _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-            "test-native-utf8z-without-contract-v1", [missingContract]))!;
-        var productionCatalog = new NativeImportCatalog("production-native-utf8z-v1",
-            [CreateUtf8ZImportDefinition()]);
-        Assert.That(productionCatalog.SupportsParameterType(PrimitiveType.NativeUtf8ZPointer), Is.True);
     }
 
     [Test]
@@ -173,18 +163,4 @@ public sealed partial class NativeSourceImportTests
             program with { NativeUtf8ZLiterals = [] }, NativeRuntimePolicy.FailFast))!;
     }
 
-    private static NativeImportDefinition CreateUtf8ZImportDefinition() =>
-        new(Utf8ZFixtureKey, "native-import-abi-probe.dll", "NativeFfiUtf8Z",
-            [PrimitiveType.NativeUtf8ZPointer, PrimitiveType.UInt32, PrimitiveType.UInt64,
-                PrimitiveType.NativeUtf8ZPointer, PrimitiveType.UInt32, PrimitiveType.NativeUtf8ZPointer],
-            PrimitiveType.Int32, true, true, false, NativeImportDeploymentPolicy.ApplicationDirectory) {
-            ParameterContracts = [
-                NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
-                NativeImportParameterContract.Value,
-                NativeImportParameterContract.Value,
-                NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
-                NativeImportParameterContract.Value,
-                NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
-            ],
-        };
 }

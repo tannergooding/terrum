@@ -42,7 +42,7 @@ public sealed class NativeResourceOwnerTests
     [Test]
     public void GenericUniqueCleanupOwnsAnOpaqueNativeResource()
     {
-        var compilation = Compilation.CreateWithNativeImports(
+        var compilation = Compilation.Create(
             SyntaxTree.Parse(OwnerSource), BoundRuntimePolicy.CheckedExceptions);
 
         Assert.That(compilation.HasErrors, Is.False,
@@ -71,7 +71,7 @@ public sealed class NativeResourceOwnerTests
 
             int32 Main() { return 0; }
             """);
-        var compilation = Compilation.CreateWithNativeImports(
+        var compilation = Compilation.Create(
             source, BoundRuntimePolicy.CheckedExceptions);
 
         Assert.That(compilation.HasErrors, Is.False,

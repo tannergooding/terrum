@@ -120,8 +120,7 @@ public sealed class NativePointerModuleTests
     [Test]
     public void PrivateModulesRejectNativeFixedArrayPointerAddresses()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test.private-fixed-array-pointer-address.v1", []);
-        var compilation = Compilation.CreateWithNativeImports([SyntaxTree.Parse("""
+        var compilation = Compilation.Create([SyntaxTree.Parse("""
             int32 Export() {
                 InlineArray<uint32, 2> values = [4, 5];
                 unsafe {
@@ -130,7 +129,7 @@ public sealed class NativePointerModuleTests
                 }
             }
             int32 Main() { return 0; }
-            """)], catalog, BoundRuntimePolicy.CheckedExceptions);
+            """)], BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 

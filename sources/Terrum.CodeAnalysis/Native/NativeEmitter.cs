@@ -35,7 +35,7 @@ public static class NativeEmitter
         EmitWithImportUsage(program, bindings, runtimePolicy,
             cancellationToken: cancellationToken).Image;
 
-    /// <summary>Emits a native executable using verified direct or catalogued native import declarations.</summary>
+    /// <summary>Emits a native executable using verified direct native import declarations.</summary>
     public static byte[] EmitWithNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default) =>
         EmitWithNativeImportsCore(program, runtimePolicy, allowApplicationDirectory: false, cancellationToken);
@@ -48,18 +48,6 @@ public static class NativeEmitter
         bool allowApplicationDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(program);
-        var catalog = program.NativeImportCatalog;
-        if ((catalog is null && program.NativeImportCatalogId is not null)
-            || (catalog is not null && program.NativeImportCatalogId != catalog.Identity))
-        {
-            throw new ArgumentException("The verified program has inconsistent native import metadata.",
-                nameof(program));
-        }
-        if (catalog?.IsForTesting == true && !allowApplicationDirectory)
-        {
-            throw new ArgumentException("Test-only native import catalogs require the internal test emitter.",
-                nameof(program));
-        }
 
         var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
         var system32ImportPaths = new Dictionary<int, string>();
@@ -86,21 +74,12 @@ public static class NativeEmitter
                 }
                 continue;
             }
-            if (catalog is null || function.NativeImportKey is not string key
-                || !catalog.TryGetImport(key, out var definition)
-                || definition is null || !catalog.MatchesFunction(function, definition, program.Structures)
-                || (definition.DeploymentPolicy != NativeImportDeploymentPolicy.System32
-                    && !(allowApplicationDirectory
-                        && definition.DeploymentPolicy == NativeImportDeploymentPolicy.ApplicationDirectory)))
+            if (function.NativeVTableMethod is not null)
             {
-                throw new ArgumentException("Every source native import must match the selected trusted catalog.",
-                    nameof(program));
+                continue;
             }
-            bindings.Add(new NativeImportBinding(function.Name, definition.DllName, definition.ExportName));
-            if (definition.DeploymentPolicy == NativeImportDeploymentPolicy.System32)
-            {
-                system32ImportPaths.Add(functionIndex, System32ImportPath(definition.DllName));
-            }
+            throw new ArgumentException("Every external source function must be a direct native import.",
+                nameof(program));
         }
 
         if (bindings.Count == 0 && !HasNativeFixedArrayStorage(program))
@@ -227,8 +206,7 @@ public static class NativeEmitter
         {
             throw new NotSupportedException("Native modules do not support Host.Source requirements.");
         }
-        if ((program.NativeImportCatalogId is not null
-                || program.Functions.Any(static function => function.DirectNativeImport is not null))
+        if (program.Functions.Any(static function => function.DirectNativeImport is not null)
             && !allowNativeImports)
         {
             throw new NotSupportedException("JIT and low-level import binding do not support source native imports.");
@@ -661,9 +639,9 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
-        if (program.NativeImportCatalogId is not null)
+        if (program.Functions.Any(static function => function.DirectNativeImport is not null))
         {
-            throw new NotSupportedException("Source native imports require the catalog-checked EmitWithNativeImports path.");
+            throw new NotSupportedException("Source native imports require the explicit EmitWithNativeImports path.");
         }
         if (program.RequiresSourceGrant && !program.IsInvocationSourceBound)
         {

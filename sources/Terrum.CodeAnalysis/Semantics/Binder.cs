@@ -66,10 +66,8 @@ internal sealed partial class Binder
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
-    private readonly NativeImportCatalog? _nativeImportCatalog;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
-    private bool _usesNativeImportCatalog;
 
     private sealed class LoopBinding
     {
@@ -109,13 +107,11 @@ internal sealed partial class Binder
 
     internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken,
         bool isLibrary = false, CompilationReference? reference = null,
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
-        NativeImportCatalog? nativeImportCatalog = null)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false)
     {
-        if ((coreLibrary && (!isLibrary || reference is not null))
-            || (nativeImportCatalog is not null && (isLibrary || reference is not null || coreLibrary)))
+        if (coreLibrary && (!isLibrary || reference is not null))
         {
-            throw new ArgumentException("Core declarations and source native imports require their respective compilation modes.");
+            throw new ArgumentException("Core declarations require library compilation without a reference.");
         }
         _tree = trees[0];
         _trees = trees;
@@ -125,8 +121,6 @@ internal sealed partial class Binder
         _coreLibrary = coreLibrary;
         _reference = reference;
         _runtimePolicy = runtimePolicy;
-        _nativeImportCatalog = nativeImportCatalog ?? reference?.NativeImportCatalog;
-        _usesNativeImportCatalog = _nativeImportCatalog is not null;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null
@@ -287,7 +281,7 @@ internal sealed partial class Binder
                         }
                         continue;
                     }
-                    if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                    if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
                         || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -620,8 +614,6 @@ internal sealed partial class Binder
                 || _reference?.RequiresSourceGrant == true,
             InvocationProfileId = _buffers.FirstOrDefault(static buffer => buffer.InvocationProfileId is not null)
                 ?.InvocationProfileId ?? _reference?.InvocationProfileId,
-            NativeImportCatalogId = _usesNativeImportCatalog ? _nativeImportCatalog?.Identity : null,
-            NativeImportCatalog = _usesNativeImportCatalog ? _nativeImportCatalog : null,
             NativeUtf16ZLiterals = [.. _nativeUtf16ZLiterals],
             NativeUtf8ZLiterals = [.. _nativeUtf8ZLiterals],
             RuntimePolicy = _runtimePolicy,
@@ -701,33 +693,6 @@ internal sealed partial class Binder
             }
         }
         return builder.ToString();
-    }
-
-    private static bool TryDecodeNativeImportAttribute(SyntaxNode attribute,
-        NativeImportAttributeDefinition definition, out string key)
-    {
-        key = "";
-        var children = attribute.Children;
-        if (definition.ArgumentCount != 1 || !definition.RequiresStringLiteral
-            || children.Length != 10
-            || children[0] is not SyntaxTokenElement open || open.Token.Kind != TokenKind.OpenBracket
-            || children[1] is not SyntaxTokenElement namespaceName || namespaceName.Token.Kind != TokenKind.Identifier
-            || namespaceName.Token.Name != "Terrum"
-            || children[2] is not SyntaxTokenElement firstDot || firstDot.Token.Kind != TokenKind.Dot
-            || children[3] is not SyntaxTokenElement typeNamespace || typeNamespace.Token.Kind != TokenKind.Identifier
-            || typeNamespace.Token.Name != "Interop"
-            || children[4] is not SyntaxTokenElement secondDot || secondDot.Token.Kind != TokenKind.Dot
-            || children[5] is not SyntaxTokenElement typeName || typeName.Token.Kind != TokenKind.Identifier
-            || typeName.Token.Name != "NativeImport"
-            || children[6] is not SyntaxTokenElement openParen || openParen.Token.Kind != TokenKind.OpenParen
-            || children[7] is not SyntaxTokenElement argument || argument.Token.Kind != TokenKind.StringLiteral
-            || children[8] is not SyntaxTokenElement closeParen || closeParen.Token.Kind != TokenKind.CloseParen
-            || children[9] is not SyntaxTokenElement closeBracket || closeBracket.Token.Kind != TokenKind.CloseBracket)
-        {
-            return false;
-        }
-
-        return StringLiteralDecoder.TryDecode(argument.Token.Text.AsSpan(), out key);
     }
 
     private static bool TryDecodeDirectNativeImportAttribute(SyntaxNode attribute,
@@ -851,12 +816,6 @@ internal sealed partial class Binder
         pointeeType = pointee;
         return true;
     }
-
-    private static bool IsNativeImportInteger(PrimitiveType type) =>
-        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
-
-    private static bool IsNativeImportParameterType(PrimitiveType type) =>
-        IsNativeImportInteger(type) || type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer;
 
     internal static bool TryPrimitiveType(string name, out PrimitiveType type)
     {
@@ -1381,7 +1340,7 @@ internal sealed partial class Binder
                 }
                 var qualifiedName = Qualify(name.Name);
                 if (TryPrimitiveType(name.Name, out _)
-                    || qualifiedName == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                    || qualifiedName == DirectNativeImportContract.AttributeFullyQualifiedName
                     || qualifiedName is NativeBufferIntrinsics.TypeName
                         or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
                     || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
@@ -1672,7 +1631,6 @@ internal sealed partial class Binder
         SyntaxNode? nativeImportAttribute = null;
         SyntaxNode? nativeVTableMethodAttribute = null;
         var nativeVTableSlot = -1;
-        string? nativeImportKey = null;
         string? nativeLibraryName = null;
         string? nativeExportName = null;
         var nativeOutputParameterIndexes = new HashSet<int>();
@@ -1690,7 +1648,7 @@ internal sealed partial class Binder
                     && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
                 var attributeName = AttributeName(attribute);
                 if (attributeName.Contains('.', StringComparison.Ordinal)
-                    && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+                    && attributeName != DirectNativeImportContract.AttributeFullyQualifiedName
                     && attributeName != "Terrum.Interop.NativeOutput"
                     && attributeName != "Terrum.Interop.NativeParameter"
                     && attributeName != "Terrum.Interop.NativeCallable"
@@ -1701,7 +1659,7 @@ internal sealed partial class Binder
                         attribute.Span);
                     continue;
                 }
-                if (attributeName == NativeImportCatalog.AttributeDefinition.FullyQualifiedName)
+                if (attributeName == DirectNativeImportContract.AttributeFullyQualifiedName)
                 {
                     if (nativeImportAttribute is not null)
                     {
@@ -1713,11 +1671,10 @@ internal sealed partial class Binder
                         nativeLibraryName = decodedLibraryName;
                         nativeExportName = decodedExportName;
                     }
-                    else if (!TryDecodeNativeImportAttribute(attribute,
-                        NativeImportCatalog.AttributeDefinition, out nativeImportKey))
+                    else
                     {
                         Report("TRM3030",
-                            "NativeImport requires one catalog key or a library and export string literal.",
+                            "NativeImport requires a library and export string literal.",
                             attribute.Span);
                     }
                     nativeImportAttribute = attribute;
@@ -1913,7 +1870,7 @@ internal sealed partial class Binder
         }
         if (isNativeVTableMethod
             && (!isExternal || containingType is not null || nativeImportAttribute is not null
-                || nativeLibraryName is not null || nativeImportKey is not null
+                || nativeLibraryName is not null
                 || nativeOutputParameterIndexes.Count != 0
                 || constructor || property || operatorDeclaration || isCleanup || doesNotReturn
                 || isNativeCallable
@@ -1966,11 +1923,6 @@ internal sealed partial class Binder
             if (nativeImportAttribute is null)
             {
                 Report("TRM3030", "An extern callable requires the compiler-owned NativeImport attribute.",
-                    declaration.Span);
-            }
-            if (nativeImportKey is not null && _nativeImportCatalog is null)
-            {
-                Report("TRM3030", "Source native imports require an explicitly selected compiler import catalog.",
                     declaration.Span);
             }
             if (constructor || property || operatorDeclaration || (containingType is not null && !isStatic)
@@ -2094,20 +2046,6 @@ internal sealed partial class Binder
         }
         var declared = ImmutableArray.CreateBuilder<Parameter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
-        NativeImportDefinition? importDefinition = null;
-        if (isExternal && nativeImportKey is string importKey)
-        {
-            if (_nativeImportCatalog is null
-                || !_nativeImportCatalog.TryGetImport(importKey, out importDefinition))
-            {
-                Report("TRM3030", $"Native import key '{importKey}' is not present in the selected catalog.",
-                    nativeImportAttribute?.Span ?? declaration.Span);
-            }
-            else if (importDefinition is not null)
-            {
-                requiresUnsafeCaller |= importDefinition.RequiresUnsafeCaller;
-            }
-        }
 
         foreach (var child in parameters?.Children ?? [])
         {
@@ -2426,27 +2364,10 @@ internal sealed partial class Binder
                 IsClassConstructor = classConstructor,
                 IsCleanup = isCleanup,
                 DeclaringStruct = declaringType,
-                NativeImportKey = nativeImportKey,
                 DirectNativeImport = directNativeImport,
                 NativeVTableMethod = nativeVTableMethod,
                 Intrinsic = isNativeVTableMethod ? BoundIntrinsic.NativeVTableCall : BoundIntrinsic.None,
             };
-
-            if (isExternal && importDefinition is not null && externalFunction is not null
-                && (returnType == PrimitiveType.Void || IsNativeImportInteger(returnType))
-                && Enumerable.Range(0, boundParameters.Length).All(index =>
-                    !boundParameters[index].IsInit && !boundParameters[index].IsOut
-                    && IsNativeImportParameterType(boundParameters[index].Type))
-                && _nativeImportCatalog is not null
-                && _nativeImportCatalog.MatchesFunction(externalFunction, importDefinition))
-            {
-                _usesNativeImportCatalog = true;
-            }
-            else if (isExternal && importDefinition is not null)
-            {
-                Report("TRM3030", "The extern declaration's complete signature and effects must exactly match its catalog entry.",
-                    declaration.Span);
-            }
         }
         ImmutableArray<int> resultDependencyParameters = [];
         if (resultDependencies is not null)
@@ -2646,11 +2567,7 @@ internal sealed partial class Binder
             }
             if (IsUnshadowedBareChar8Type(typeArgumentNodes[0]))
             {
-                if (!writable && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf8ZPointer) == true)
-                {
-                    return PrimitiveType.NativeUtf8ZPointer;
-                }
-                Report("TRM3005", "ptr<char8> is available only for catalogued UTF-8-NUL imports.", node.Span);
+                Report("TRM3005", "ptr<char8> is not supported by the current source type profile.", node.Span);
                 return PrimitiveType.Int32;
             }
             var diagnosticCount = DiagnosticCount;
@@ -5135,15 +5052,11 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Name, out function))
             {
-                if (expected == PrimitiveType.NativeUtf16ZPointer
-                    && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf16ZPointer) == true
-                    && name.Name == "utf16z")
+                if (expected == PrimitiveType.NativeUtf16ZPointer && name.Name == "utf16z")
                 {
                     return BindNativeUtf16ZLiteral(node, expected);
                 }
-                if (expected == PrimitiveType.NativeUtf8ZPointer
-                    && _nativeImportCatalog?.SupportsParameterType(PrimitiveType.NativeUtf8ZPointer) == true
-                    && name.Name == "utf8z")
+                if (expected == PrimitiveType.NativeUtf8ZPointer && name.Name == "utf8z")
                 {
                     return BindNativeUtf8ZLiteral(node, expected);
                 }
@@ -5346,7 +5259,7 @@ internal sealed partial class Binder
             || literal.Children is not [SyntaxTokenElement { Token.Kind: TokenKind.StringLiteral } token]
             || !StringLiteralDecoder.TryDecode(token.Token.Text.AsSpan(), out var value))
         {
-            Report("TRM3007", "utf16z requires one string literal in a catalogued ptr<char16> argument position.",
+            Report("TRM3007", "utf16z requires one string literal at a matching readonly, nonescaping native parameter.",
                 node.Span);
             return ErrorExpression(node.Span);
         }
@@ -5383,7 +5296,7 @@ internal sealed partial class Binder
             || literal.Children is not [SyntaxTokenElement { Token.Kind: TokenKind.StringLiteral } token]
             || !StringLiteralDecoder.TryDecode(token.Token.Text.AsSpan(), out var value))
         {
-            Report("TRM3007", "utf8z requires one string literal in a catalogued ptr<char8> argument position.",
+            Report("TRM3007", "utf8z requires one string literal at a matching readonly, nonescaping native parameter.",
                 node.Span);
             return ErrorExpression(node.Span);
         }

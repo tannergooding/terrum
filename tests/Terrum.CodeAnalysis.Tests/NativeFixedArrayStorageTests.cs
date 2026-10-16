@@ -9,7 +9,7 @@ using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class NativeStorageCatalogTests
+public sealed class NativeFixedArrayStorageTests
 {
     [Test]
     public void CheckedFixedArrayStorageAdmitsUnrelatedBlittableAggregates()
@@ -38,7 +38,6 @@ public sealed class NativeStorageCatalogTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
-        Assert.That(program.NativeImportCatalog, Is.Null);
 
         var layout = program.Functions[program.EntryPoint].Variables
             .Single(static variable => variable.Name == "values").NativeFixedArrayLayout;
@@ -163,17 +162,4 @@ public sealed class NativeStorageCatalogTests
         Assert.That(checkedExceptions.Diagnostics, Is.Not.Empty);
     }
 
-    [Test]
-    public void NativeImportCatalogRejectsImportsWithoutCallerUnsafety()
-    {
-        var safeImport = CreateImport() with { RequiresUnsafeCaller = false };
-
-        _ = Assert.Throws<ArgumentException>(() => NativeImportCatalog.CreateForTesting(
-            "test.native-import.safe-caller.v1", [safeImport]))!;
-    }
-
-    private static NativeImportDefinition CreateImport() =>
-        new("test.fixture.call", "fixture.dll", "Call", [PrimitiveType.UInt32], PrimitiveType.UInt32,
-            IsNoThrow: true, RequiresUnsafeCaller: true, DoesNotReturn: false,
-            NativeImportDeploymentPolicy.ApplicationDirectory);
 }

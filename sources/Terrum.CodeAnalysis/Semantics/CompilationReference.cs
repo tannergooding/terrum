@@ -9,7 +9,6 @@ public sealed class CompilationReference
 {
     internal CompilationReference(ImmutableArray<BoundStruct> structures, ImmutableArray<BoundFunction> functions,
         BoundRuntimePolicy runtimePolicy, bool requiresSourceGrant = false, string? invocationProfileId = null,
-        NativeImportCatalog? nativeImportCatalog = null,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
     {
@@ -18,7 +17,6 @@ public sealed class CompilationReference
         RuntimePolicy = runtimePolicy;
         RequiresSourceGrant = requiresSourceGrant;
         InvocationProfileId = invocationProfileId;
-        NativeImportCatalog = nativeImportCatalog;
         NativeFunctionPointerSignatures = nativeFunctionPointerSignatures.IsDefault
             ? [] : nativeFunctionPointerSignatures;
         NativePointerTypes = nativePointerTypes.IsDefault ? [] : nativePointerTypes;
@@ -38,8 +36,6 @@ public sealed class CompilationReference
 
     /// <summary>The retained provider's named invocation profile, if it has one.</summary>
     public string? InvocationProfileId { get; }
-
-    internal NativeImportCatalog? NativeImportCatalog { get; }
 
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; }
 

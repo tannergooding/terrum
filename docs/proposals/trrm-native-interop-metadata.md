@@ -39,9 +39,9 @@ export; it does not identify an operating-system DLL or native export.
 
 An earlier native-catalog prototype filled that gap out of band, including
 DX11 and sample behavior; that API-specific catalog policy has been retired.
-The production Windows x64 import catalog is empty. The branch now has a
-provisional source-authored direct-import form, but its experimental TRRM
-assignments and incomplete dependency paths are not canonical metadata. This
+The branch now has a provisional source-authored direct-import form without a
+compiler-owned import catalog, but its experimental TRRM assignments and
+incomplete dependency paths are not canonical metadata. This
 proposal addresses dependency consumption of authored native declarations;
 it does not preserve catalog-only convenience behavior or add API-specific
 compiler policy. Generic vtable calls exist in source and private-module

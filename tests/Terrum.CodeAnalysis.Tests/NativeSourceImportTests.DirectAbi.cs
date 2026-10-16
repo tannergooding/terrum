@@ -44,7 +44,6 @@ public sealed partial class NativeSourceImportTests
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
-        Assert.That(program.NativeImportCatalog, Is.Null);
         var import = program.Functions.Single(static function => function.Name == "GetClientRect");
         var directImport = import.DirectNativeImport
             ?? throw new AssertionException("Expected direct native import metadata.");

@@ -171,7 +171,7 @@ public static partial class SemanticVerifier
                 }
             }
         }
-        VerifyNativeImportCatalog(program);
+        VerifyDirectNativeImports(program);
         if (program.Classes.IsDefault || program.Classes.Length > MaximumVariables)
         {
             throw Invalid();
@@ -464,8 +464,8 @@ public static partial class SemanticVerifier
                             && (!function.IsExternal || variableIndex >= function.ParameterCount)
                                     && !(function.RequiresUnsafeCaller
                                         && variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0))
-                                    && !NativeImportParameterContractFacts.IsReadonlyStringParameter(
-                                        function, variableIndex, variable.Type, program))
+                                    && !DirectNativeImportContract.IsReadonlyStringParameter(
+                                        function, variableIndex, variable.Type))
                         || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
@@ -542,8 +542,8 @@ public static partial class SemanticVerifier
             if (function.IsExternal && (!allowExternal
                 || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
                 || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                || (!allowGenericProofDependencies && ((function.NativeImportKey is null
-                    && function.DirectNativeImport is null
+                || (!allowGenericProofDependencies && ((function.DirectNativeImport is null
+                    && function.NativeVTableMethod is null
                     && (function.IsPrivate || function.IsInternal))
                     || ManagedClassTypes.IsManaged(function.ReturnType)
                     || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))))
@@ -2042,9 +2042,8 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyNativeImportCatalog(BoundProgram program)
+    private static void VerifyDirectNativeImports(BoundProgram program)
     {
-        var catalog = program.NativeImportCatalog;
         foreach (var function in program.Functions)
         {
             if (function.DirectNativeImport is not null
@@ -2054,53 +2053,15 @@ public static partial class SemanticVerifier
                 throw InvalidEffect(function.Span, "NativeImport");
             }
         }
-        if (catalog is null)
-        {
-            if (program.NativeImportCatalogId is not null
-                || program.Functions.Any(static function => function.NativeImportKey is not null)
-                || program.Functions.Any(static function => function.DirectNativeImport is null
-                    && (function.ReturnType is
-                        PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        || function.Variables.Any(static variable => variable.Type is
-                            PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer)))
-                || !NativeStringZPoolContract.IsValid(
-                    program.NativeUtf16ZLiterals, program.NativeUtf8ZLiterals))
-            {
-                throw InvalidEffect(default, "NativeImport");
-            }
-            return;
-        }
-
-        if (program.NativeImportCatalogId != catalog.Identity)
+        if (program.Functions.Any(static function => function.DirectNativeImport is null
+                && (function.ReturnType is
+                    PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
+                    || function.Variables.Any(static variable => variable.Type is
+                        PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer)))
+            || !NativeStringZPoolContract.IsValid(
+                program.NativeUtf16ZLiterals, program.NativeUtf8ZLiterals))
         {
             throw InvalidEffect(default, "NativeImport");
-        }
-        if (!NativeStringZPoolContract.IsValid(program.NativeUtf16ZLiterals, program.NativeUtf8ZLiterals))
-        {
-            throw InvalidEffect(default, "NativeImport");
-        }
-
-        foreach (var function in program.Functions)
-        {
-            if (!function.IsExternal)
-            {
-                if (function.NativeImportKey is not null)
-                {
-                    throw InvalidEffect(function.Span, "NativeImport");
-                }
-                continue;
-            }
-
-            if (function.DirectNativeImport is not null)
-            {
-                continue;
-            }
-            if (function.NativeImportKey is not string key
-                || !catalog.TryGetImport(key, out var definition)
-                || definition is null || !catalog.MatchesFunction(function, definition, program.Structures))
-            {
-                throw InvalidEffect(function.Span, "NativeImport");
-            }
         }
     }
 
@@ -2109,9 +2070,7 @@ public static partial class SemanticVerifier
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
-        if (program.NativeImportCatalog is not null || program.NativeImportCatalogId is not null
-            || program.Functions.Any(static function => function.NativeImportKey is not null)
-            || (!allowDirectNativeImports
+        if ((!allowDirectNativeImports
                 && program.Functions.Any(static function => function.DirectNativeImport is not null))
             || program.Functions.Any(static function => function.ReturnType is
                 PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
@@ -4662,21 +4621,12 @@ public static partial class SemanticVerifier
         type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer;
 
     private static bool HasValidNativeStringArgument(BoundExpression argument, PrimitiveType parameterType,
-        int parameterIndex, BoundFunction target, BoundProgram program)
-    {
-        var expectedContract = parameterType switch {
-            PrimitiveType.NativeUtf16ZPointer => NativeImportParameterContract.ReadonlyUtf16ZNoEscape,
-            PrimitiveType.NativeUtf8ZPointer => NativeImportParameterContract.ReadonlyUtf8ZNoEscape,
-            _ => throw new ArgumentOutOfRangeException(nameof(parameterType)),
-        };
-        var literalCount = parameterType == PrimitiveType.NativeUtf16ZPointer
-            ? program.NativeUtf16ZLiterals.Length : program.NativeUtf8ZLiterals.Length;
-        return argument is BoundConstant { Type: var literalType, Value: >= 0 } literal
-            && literalType == parameterType && literal.Value < literalCount
-            && NativeImportParameterContractFacts.TryGetImportParameterContract(
-                target, parameterIndex, program, out var actualContract)
-            && actualContract == expectedContract;
-    }
+        int parameterIndex, BoundFunction target, BoundProgram program) =>
+        argument is BoundConstant { Type: var literalType }
+        && literalType == parameterType
+        && DirectNativeImportContract.ParameterForParameter(target, parameterIndex)
+            is DirectNativeParameter parameter
+        && DirectNativeImportContract.IsStringPointerArgument(argument, parameter, program);
 
     private static bool IsImplicitReferenceScalarType(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32

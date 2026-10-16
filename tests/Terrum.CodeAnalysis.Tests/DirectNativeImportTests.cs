@@ -57,7 +57,7 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void DirectNativeImportBindsOpaqueContextAndWritableBlittableRecordWithoutCatalogPolicy()
+    public void DirectNativeImportBindsOpaqueContextAndWritableBlittableRecord()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Blittable] [Layout(LayoutKind.Sequential)]
@@ -88,8 +88,8 @@ public sealed class DirectNativeImportTests
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(compilation.Program!.NativeImportCatalog, Is.Null);
-        var import = compilation.Program.Functions.Single(static function =>
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        var import = program.Functions.Single(static function =>
             function.Name == "ReadRectangle");
         Assert.That(import.Variables.Select(static variable => variable.Type),
             Is.EqualTo([PrimitiveType.NativeRawPointer, PrimitiveType.NativeRawPointer]));
@@ -100,7 +100,7 @@ public sealed class DirectNativeImportTests
                 NativeParameterAccess.Write, NativeParameterRetention.NoEscape, 1),
         ]));
         Assert.That(Encoding.ASCII.GetString(
-            NativeEmitter.EmitWithNativeImports(compilation.Program, NativeRuntimePolicy.FailFast)),
+            NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
             Does.Contain("ReadRectangle"));
     }
 
@@ -151,7 +151,6 @@ public sealed class DirectNativeImportTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
-        Assert.That(program.NativeImportCatalog, Is.Null);
         var descriptor = program.Structures.Single(static structure =>
             structure.Name == "FixtureDescriptor");
         Assert.That(descriptor.Size, Is.EqualTo(40));
@@ -162,7 +161,7 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void DirectNativeImportAcceptsGenericFunctionPointerParametersWithoutCallbackPolicy()
+    public void DirectNativeImportAcceptsGenericFunctionPointerParameters()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "InvokeCallback")]
@@ -180,13 +179,13 @@ public sealed class DirectNativeImportTests
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(compilation.Program!.NativeImportCatalog, Is.Null);
-        var import = compilation.Program.Functions.Single(static function =>
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        var import = program.Functions.Single(static function =>
             function.Name == "InvokeCallback");
         Assert.That(import.Variables[0].Type, Is.Not.EqualTo(PrimitiveType.NativeRawPointer));
         Assert.That(import.DirectNativeImport, Is.Not.Null);
         Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
-            compilation.Program, NativeRuntimePolicy.FailFast)), Does.Contain("InvokeCallback"));
+            program, NativeRuntimePolicy.FailFast)), Does.Contain("InvokeCallback"));
     }
 
     [Test]
@@ -376,7 +375,7 @@ public sealed class DirectNativeImportTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.CreateWithNativeImports(SyntaxTree.Parse("""
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
             [NoThrow]
             extern unsafe uint32 GetCurrentThreadId();
@@ -690,6 +689,22 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void NativeImportRejectsLegacyCatalogKeySyntax()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("test.catalog.key")]
+            [NoThrow]
+            extern unsafe uint32 ReadCounter();
+
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void SourceAuthoredOutputRequiresMatchingWritableLocal()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ImportDeclaration + """
@@ -936,7 +951,6 @@ public sealed class DirectNativeImportTests
         }
 
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
-        Assert.That(program.NativeImportCatalog, Is.Null);
         var import = program.Functions.Single(static function =>
             function.Name == "ObserveValues").DirectNativeImport!;
         Assert.That(import.Parameters.Single().Extent, Is.EqualTo(3));

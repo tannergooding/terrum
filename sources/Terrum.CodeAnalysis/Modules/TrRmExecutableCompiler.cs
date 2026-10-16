@@ -935,8 +935,7 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("A TRRM reference requires at least one public declaration.");
         }
 
-        return new CompilationReference(structures.ToImmutable(), functions, program.RuntimePolicy,
-            nativeImportCatalog: program.NativeImportCatalog);
+        return new CompilationReference(structures.ToImmutable(), functions, program.RuntimePolicy);
     }
 
     private static BoundFunction RemapNativeImportStructureTypes(BoundFunction function,

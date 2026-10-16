@@ -50,17 +50,17 @@ public enum PrimitiveType
     Float64,
     /// <summary>A compilation-local readonly descriptor of validated Copy token records, not a public ABI type.</summary>
     TokenSpan,
-    /// <summary>A compiler-owned UTF-16-NUL image address, restricted to reviewed no-escape imports.</summary>
+    /// <summary>A compiler-owned UTF-16-NUL image address for a matching nonescaping native parameter.</summary>
     NativeUtf16ZPointer,
     /// <summary>Retained ordinal for the retired catalog-selected callback carrier.</summary>
     LegacyNativeCallbackAddress = 19,
     /// <summary>Inline storage whose closed geometry is carried by selected native fixed-array metadata.</summary>
     NativeFixedArray,
-    /// <summary>A compiler-owned ASCII UTF-8-NUL image address for reviewed no-escape imports.</summary>
+    /// <summary>A compiler-owned ASCII UTF-8-NUL image address for a matching nonescaping native parameter.</summary>
     NativeUtf8ZPointer,
     /// <summary>Retained ordinal for the removed native-address carrier.</summary>
     LegacyNativeAddress = 28,
-    /// <summary>A catalogued, no-escape address of a checked plain aggregate value.</summary>
+    /// <summary>An address of checked storage validated against a native pointer contract.</summary>
     NativeStorageAddress,
     /// <summary>Retained ordinal for the retired catalog-selected native storage record.</summary>
     LegacyNativeStorageRecord = 30,
@@ -264,11 +264,6 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>The named invocation profile required by this program, or null for the source-only profile.</summary>
     public string? InvocationProfileId { get; internal init; }
 
-    /// <summary>The selected native import catalog identity, when source FFI is present.</summary>
-    public string? NativeImportCatalogId { get; internal init; }
-
-    internal NativeImportCatalog? NativeImportCatalog { get; init; }
-
     internal bool IsInvocationSourceBound { get; init; }
 
     /// <summary>The runtime behavior verified for this program and its imports.</summary>
@@ -341,8 +336,6 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     internal PrimitiveType? NativeFunctionPointerType { get; init; }
 
     internal NativeVTableMethodDefinition? NativeVTableMethod { get; init; }
-    internal ImmutableArray<NativeImportBoundParameterMapping> NativeImportParameterMappings { get; init; }
-
     internal TrRmScalarGraph? IndexedBody { get; init; }
     /// <summary>The declared property member name, distinct from the callable implementation's name.</summary>
     public string? PropertyName { get; init; }
@@ -361,9 +354,6 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>Whether this is an imported declaration with no implementation. Native emission requires it to be resolved.</summary>
     public bool IsExternal { get; init; }
-
-    /// <summary>The explicit native import key selected by a source semantic attribute, if any.</summary>
-    internal string? NativeImportKey { get; init; }
 
     /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
     public bool IsConstructor { get; init; }

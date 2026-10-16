@@ -126,13 +126,13 @@ Native DLL imports are a provisional source feature under the unapproved
 [TRRM native interop proposal](proposals/trrm-native-interop-metadata.md).
 Source declarations name a library and export directly and carry generic
 pointer access, retention, output-validity, and unsafe-caller contracts; they
-do not select a compiler-owned Win32 or DX11 API catalog. The production
-Windows x64 `NativeImportCatalog` is empty. `build-native-import` explicitly
-selects the Windows x64 native source profile, while ordinary `build` does not
-enable native imports. Fixed-array local storage is admitted by ordinary source
-compilation for fixed-width scalar or committed Blittable Windows x64 elements,
+do not select a compiler-owned Win32, DX11, or native-import catalog.
+`build-native-import` explicitly selects the Windows x64 native-import emitter;
+ordinary `build` does not emit source imports. Fixed-array local storage is
+admitted by ordinary source compilation for fixed-width scalar or committed
+Blittable Windows x64 elements,
 with a positive extent and 4096-byte total limit. It does not depend on
-import-catalog selection. The carrier is local-only and initializers must
+native-import emission mode. The carrier is local-only and initializers must
 fully initialize each element, except empty scalar arrays which zero-initialize.
 Checked element addresses retain their extent bounds. Current lowering remains
 limited to the native import AOT emitter; private semantic modules, native

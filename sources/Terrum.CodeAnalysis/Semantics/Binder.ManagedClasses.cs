@@ -28,7 +28,7 @@ internal sealed partial class Binder
             return;
         }
         var qualified = Qualify(name.Name);
-        if (qualified == NativeImportCatalog.AttributeDefinition.FullyQualifiedName
+        if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
             || _classes.Count >= SemanticVerifier.MaximumVariables
             || !_classNames.TryAdd(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count))
             || _structNames.ContainsKey(qualified)

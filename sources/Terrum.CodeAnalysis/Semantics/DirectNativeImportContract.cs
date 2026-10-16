@@ -9,6 +9,8 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal static class DirectNativeImportContract
 {
+    internal const string AttributeFullyQualifiedName = "Terrum.Interop.NativeImport";
+
     internal const uint Int32NonZeroResultCondition = 1;
     internal const uint UInt32NonZeroResultCondition = 2;
     internal const uint Int32NonNegativeResultCondition = 3;
@@ -49,9 +51,7 @@ internal static class DirectNativeImportContract
 
     internal static bool IsStringPointerArgument(BoundExpression argument,
         DirectNativeParameter parameter, BoundProgram program) =>
-        parameter.Access == NativeParameterAccess.Read
-        && parameter.Retention == NativeParameterRetention.NoEscape
-        && parameter.Extent == 0
+        IsReadonlyStringParameter(argument.Type, parameter)
         && (argument switch {
             BoundConstant {
                 Type: PrimitiveType.NativeUtf16ZPointer,
@@ -65,6 +65,21 @@ internal static class DirectNativeImportContract
                 && literal.Value < program.NativeUtf8ZLiterals.Length,
             _ => false,
         });
+
+    internal static bool IsReadonlyStringParameter(PrimitiveType type,
+        DirectNativeParameter parameter) =>
+        parameter.Access == NativeParameterAccess.Read
+        && parameter.Retention == NativeParameterRetention.NoEscape
+        && parameter.Extent == 0
+        && (type == PrimitiveType.NativeUtf16ZPointer
+            ? parameter.PointeeType is PrimitiveType.Void or PrimitiveType.Char16
+            : type == PrimitiveType.NativeUtf8ZPointer
+                && parameter.PointeeType == PrimitiveType.Void);
+
+    internal static bool IsReadonlyStringParameter(BoundFunction function, int parameterIndex,
+        PrimitiveType type) =>
+        ParameterForParameter(function, parameterIndex) is DirectNativeParameter parameter
+        && IsReadonlyStringParameter(type, parameter);
 
     internal static bool IsOutputPointee(PrimitiveType type) =>
         IsScalar(type) || type is PrimitiveType.NativeRawPointer or PrimitiveType.NativeUtf16ZPointer
@@ -95,7 +110,7 @@ internal static class DirectNativeImportContract
         ImmutableArray<NativePointerTypeDefinition> pointerTypes = default)
     {
         if (function.DirectNativeImport is not DirectNativeImport import
-            || !function.IsExternal || function.NativeImportKey is not null
+            || !function.IsExternal
             || !function.RequiresUnsafeCaller
             || !IsValidLibraryName(import.LibraryName) || !IsValidExportName(import.ExportName)
             || import.Outputs.IsDefault || import.Parameters.IsDefault
