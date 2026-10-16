@@ -227,13 +227,13 @@ methods are exposed to consumers as ordinary caller-unsafe external functions.
 Native module packages use the same producer/consumer path. Standard TRRM
 continues to reject these declarations until its metadata contract is reviewed.
 
-The earlier COM-specific source metadata path has been retired.
-`Terrum.Interop.NativeCom*` attributes and `NativeComInterface` produce
-`TRM3030`; compiler-owned interface identity, owner/acquisition,
-reference-count, hidden-parameter, argument-adaptation, and mapped-buffer
-behavior is not supported. The provisional TRRM COM feature and contract kinds
-7-9 and 11 are no longer recognized. No canonical COM metadata records have
-been assigned.
+The earlier COM-specific source metadata path has been retired. COM-shaped
+attributes have no compiler-owned meaning; unsupported qualified interop
+attributes use the generic unsupported-attribute diagnostic. Compiler-owned
+interface identity, owner/acquisition, reference-count, hidden-parameter,
+argument-adaptation, and mapped-buffer behavior is not supported. The
+provisional TRRM COM feature and contract kinds 7-9 and 11 are not part of the
+accepted format. No canonical COM metadata records have been assigned.
 
 `NativeParameter` remains a generic pointer access/retention/extent annotation
 for native declarations, and `NativeOutput` can describe result-correlated

@@ -260,7 +260,6 @@ internal sealed partial class Binder
             }
             _contexts.Add(tree, (_namespace, [.. _usings]));
         }
-        RejectNativeComMetadata();
         DeclareProtocols();
         foreach (var tree in _trees)
         {
@@ -862,26 +861,6 @@ internal sealed partial class Binder
         }
         pointeeType = pointee;
         return true;
-    }
-
-    private void RejectNativeComMetadata()
-    {
-        foreach (var tree in _trees)
-        {
-            SetContext(tree);
-            foreach (var attribute in tree.Root.DescendantNodes().OfType<SyntaxNode>()
-                .Where(static node => node.Kind == SyntaxKind.Attribute))
-            {
-                var name = AttributeName(attribute);
-                if (name.StartsWith("Terrum.Interop.NativeCom", StringComparison.Ordinal)
-                    || name == "NativeComInterface")
-                {
-                    Report("TRM3030",
-                        $"'{name}' is retired compiler-owned COM metadata; use raw pointers and authored vtable declarations.",
-                        attribute.Span);
-                }
-            }
-        }
     }
 
     private static bool IsNativeImportInteger(PrimitiveType type) =>
@@ -1730,10 +1709,6 @@ internal sealed partial class Binder
                     && attribute.Children[1] is SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
                     && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
                 var attributeName = AttributeName(attribute);
-                if (attributeName.StartsWith("Terrum.Interop.NativeCom", StringComparison.Ordinal))
-                {
-                    continue;
-                }
                 if (attributeName.Contains('.')
                     && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                     && attributeName != "Terrum.Interop.NativeOutput"
