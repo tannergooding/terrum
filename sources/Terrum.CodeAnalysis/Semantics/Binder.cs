@@ -67,7 +67,6 @@ internal sealed partial class Binder
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private NativeImportCatalog? _nativeImportCatalog;
-    private NativeSourceProfile _sourceProfile;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
     private bool _usesNativeImportCatalog;
@@ -161,7 +160,6 @@ internal sealed partial class Binder
             || _reference?.Structures.Any(static structure =>
                 structure.Fields.Any(static field => field.Type == PrimitiveType.OwnedInt32Buffer)) == true;
         // Parser depth limits do not bound left-associated flat expression trees.
-        var sourceProfileBuilder = new NativeSourceProfileBuilder();
         var pending = new Stack<(SyntaxTree Tree, SyntaxNode Node, int Depth)>();
         if (_reference is not null)
         {
@@ -238,9 +236,6 @@ internal sealed partial class Binder
                 }
             }
         }
-
-        var sourceProfile = sourceProfileBuilder.Select(_trees, _nativeImportCatalog, _runtimePolicy);
-        _sourceProfile = sourceProfile;
 
         foreach (var tree in _trees)
         {
@@ -3360,30 +3355,30 @@ internal sealed partial class Binder
                 var typeElement = node.Children[offset];
                 var name = ((SyntaxTokenElement)node.Children[offset + 1]).Token;
                 var initializerNode = (SyntaxNode)node.Children[offset + 3];
-                if (typeElement is SyntaxNode { Kind: SyntaxKind.InlineArrayTypeName } sampleArraySyntax)
+                if (typeElement is SyntaxNode { Kind: SyntaxKind.InlineArrayTypeName } fixedArraySyntax)
                 {
-                    if (!TryBindNativeFixedArrayType(sampleArraySyntax, out var sampleArrayType,
-                        out var sampleElementType, out var sampleElementCount))
+                    if (!TryBindNativeFixedArrayType(fixedArraySyntax, out var fixedArrayType,
+                        out var fixedElementType, out var fixedElementCount))
                     {
                         return new BoundExpressionStatement(BindExpression(initializerNode, null), node.Span);
                     }
-                    var sampleArrayInitializer = BindNativeFixedArrayInitializer(initializerNode,
-                        sampleArrayType, sampleElementType, sampleElementCount);
-                    if (sampleArrayInitializer is BoundNativeFixedArrayInitialization sampleArray)
+                    var fixedArrayInitializer = BindNativeFixedArrayInitializer(initializerNode,
+                        fixedArrayType, fixedElementType, fixedElementCount);
+                    if (fixedArrayInitializer is BoundNativeFixedArrayInitialization fixedArray)
                     {
-                        if (isMutable && !NativeFixedArrayContract.AllowsMutableLocal(sampleArray.Layout,
+                        if (isMutable && !NativeFixedArrayContract.AllowsMutableLocal(fixedArray.Layout,
                             _structs, _nativeImportCatalog))
                         {
                             Report("TRM3030", "The selected fixed-array layout does not permit mutable locals.",
                                 node.Span);
                         }
-                        var sampleArrayVariable = AddVariable(name.Name, sampleArrayType, isMutable, name.Span);
-                        _variables[sampleArrayVariable] = _variables[sampleArrayVariable] with {
-                            NativeFixedArrayLayout = sampleArray.Layout,
+                        var fixedArrayVariable = AddVariable(name.Name, fixedArrayType, isMutable, name.Span);
+                        _variables[fixedArrayVariable] = _variables[fixedArrayVariable] with {
+                            NativeFixedArrayLayout = fixedArray.Layout,
                         };
-                        return new BoundLocal(sampleArrayVariable, sampleArrayInitializer, node.Span);
+                        return new BoundLocal(fixedArrayVariable, fixedArrayInitializer, node.Span);
                     }
-                    return new BoundExpressionStatement(sampleArrayInitializer, node.Span);
+                    return new BoundExpressionStatement(fixedArrayInitializer, node.Span);
                 }
                 var declaredType = typeElement is SyntaxNode typeNode ? BindType(typeNode, allowVoid: false) : (PrimitiveType?)null;
                 if (declaredType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)

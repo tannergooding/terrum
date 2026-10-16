@@ -17,9 +17,13 @@ internal sealed partial class Binder
         arrayType = PrimitiveType.Int32;
         elementType = PrimitiveType.Int32;
         elementCount = 0;
-        var hasFixedArrayStorage = _sourceProfile.Has(NativeSourceFeature.NativeFixedArrayStorage);
-        if (!hasFixedArrayStorage
-            || node.Kind != SyntaxKind.InlineArrayTypeName
+        if (!NativeFixedArrayContract.SupportsRuntimePolicy(_runtimePolicy))
+        {
+            Report("TRM3030", "InlineArray is not supported under the selected runtime policy.",
+                node.Span);
+            return false;
+        }
+        if (node.Kind != SyntaxKind.InlineArrayTypeName
             || node.Children is not [
                 SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "InlineArray" },
                 SyntaxTokenElement { Token.Kind: TokenKind.Less },
@@ -29,8 +33,7 @@ internal sealed partial class Binder
                 SyntaxTokenElement { Token.Kind: TokenKind.Greater },
             ])
         {
-            Report("TRM3030", "InlineArray requires a selected native target profile.",
-                node.Span);
+            Report("TRM3030", "InlineArray requires a fixed numeric extent.", node.Span);
             return false;
         }
 

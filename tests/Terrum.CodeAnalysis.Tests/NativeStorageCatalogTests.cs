@@ -14,7 +14,6 @@ public sealed class NativeStorageCatalogTests
     [Test]
     public void CheckedFixedArrayStorageAdmitsUnrelatedBlittableAggregates()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test.generic-checked-fixed-array.v1", []);
         var source = """
             [Blittable] [Layout(Sequential)]
             struct Measurement {
@@ -36,10 +35,10 @@ public sealed class NativeStorageCatalogTests
                 return int32(values[index].GetThird());
             }
             """;
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(program.NativeImportCatalog, Is.Null);
 
         var layout = program.Functions[program.EntryPoint].Variables
             .Single(static variable => variable.Name == "values").NativeFixedArrayLayout;
@@ -48,14 +47,13 @@ public sealed class NativeStorageCatalogTests
         Assert.That(arrayLayout.ElementStride, Is.EqualTo(24));
         Assert.That(arrayLayout.ByteExtent, Is.EqualTo(48));
         Assert.That(NativeFixedArrayContract.MatchesProgram(program), Is.True);
-        Assert.That(NativeEmitter.EmitWithNativeImportsForTesting(
+        Assert.That(NativeEmitter.EmitWithNativeImports(
             program, NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
     }
 
     [Test]
     public void CheckedFixedArrayArithmeticUsesGenericSourceLayoutWithoutWindowsImports()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test.generic-checked-array-arithmetic.v1", []);
         var source = """
             int32 Main() {
                 mut InlineArray<uint32, 3> values = [4, 5, 6];
@@ -63,19 +61,17 @@ public sealed class NativeStorageCatalogTests
                 return int32(values[2]);
             }
             """;
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
 
-        Assert.That(NativeEmitter.EmitWithNativeImportsForTesting(program,
+        Assert.That(NativeEmitter.EmitWithNativeImports(program,
             NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
     }
 
     [Test]
     public void TypedNativePointerCanAddressACheckedFixedArrayElement()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test.fixed-array-pointer-address.v1", []);
         const string source = """
             int32 Main() {
                 mut InlineArray<uint32, 3> values = [4, 5, 6];
@@ -87,13 +83,12 @@ public sealed class NativeStorageCatalogTests
                 }
             }
             """;
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
-        Assert.That(NativeEmitter.EmitWithNativeImportsForTesting(program,
+        Assert.That(NativeEmitter.EmitWithNativeImports(program,
             NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
     }
 
@@ -102,7 +97,6 @@ public sealed class NativeStorageCatalogTests
     [TestCase("ptr<uint32> selected = &values[3];")]
     public void TypedNativePointerAddressRejectsMismatchedElementsAndAccess(string addressDeclaration)
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test.invalid-fixed-array-pointer-address.v1", []);
         var source = $$"""
             int32 Main() {
                 InlineArray<uint32, 3> values = [4, 5, 6];
@@ -112,8 +106,7 @@ public sealed class NativeStorageCatalogTests
                 }
             }
             """;
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
 
         Assert.That(compilation.HasErrors, Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -124,7 +117,6 @@ public sealed class NativeStorageCatalogTests
     [Test]
     public void FixedArraysRejectNonBlittableAndOversizedElements()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test.invalid-fixed-array.v1", []);
         const string nonBlittable = """
             [Layout(Sequential)]
             struct Measurement {
@@ -143,16 +135,15 @@ public sealed class NativeStorageCatalogTests
             }
             """;
 
-        Assert.That(Compilation.CreateWithNativeImports([SyntaxTree.Parse(nonBlittable)],
-            catalog, BoundRuntimePolicy.FailFast).Program, Is.Null);
-        Assert.That(Compilation.CreateWithNativeImports([SyntaxTree.Parse(oversized)],
-            catalog, BoundRuntimePolicy.FailFast).Program, Is.Null);
+        Assert.That(Compilation.Create(SyntaxTree.Parse(nonBlittable),
+            BoundRuntimePolicy.FailFast).Program, Is.Null);
+        Assert.That(Compilation.Create(SyntaxTree.Parse(oversized),
+            BoundRuntimePolicy.FailFast).Program, Is.Null);
     }
 
     [Test]
     public void FixedArrayDynamicIndexEffectDependsOnSelectedRuntimePolicy()
     {
-        var catalog = NativeImportCatalog.CreateForTesting("test.fixed-array-runtime-policy.v1", []);
         const string source = """
             [NoThrow]
             int32 Index() { return 0; }
@@ -164,11 +155,10 @@ public sealed class NativeStorageCatalogTests
             }
             """;
 
-        var failFast = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)],
-            catalog, BoundRuntimePolicy.FailFast);
+        var failFast = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
         Assert.That(failFast.HasErrors, Is.False, string.Join(Environment.NewLine, failFast.Diagnostics));
-        var checkedExceptions = Compilation.CreateWithNativeImports([SyntaxTree.Parse(source)],
-            catalog, BoundRuntimePolicy.CheckedExceptions);
+        var checkedExceptions = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.CheckedExceptions);
         Assert.That(checkedExceptions.Program, Is.Null);
         Assert.That(checkedExceptions.Diagnostics, Is.Not.Empty);
     }

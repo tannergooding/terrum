@@ -27,7 +27,7 @@ public enum SyntaxKind
     GetAccessor,
     /// <summary>A type name.</summary>
     TypeName,
-    /// <summary>The closed local-only <c>InlineArray&lt;T, N&gt;</c> fixture syntax.</summary>
+    /// <summary>The local fixed-array type name <c>InlineArray&lt;T, N&gt;</c>.</summary>
     InlineArrayTypeName,
     /// <summary>A function or constructor parameter list.</summary>
     ParameterList,

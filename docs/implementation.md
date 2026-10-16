@@ -129,8 +129,16 @@ pointer access, retention, output-validity, and unsafe-caller contracts; they
 do not select a compiler-owned Win32 or DX11 API catalog. The production
 Windows x64 `NativeImportCatalog` is empty. `build-native-import` explicitly
 selects the Windows x64 native source profile, while ordinary `build` does not
-enable native imports. The `MessageBoxW` sample is authored using the same
-direct import form as any other native function; its unattended CLI test
+enable native imports. Fixed-array local storage is admitted by ordinary source
+compilation for fixed-width scalar or committed Blittable Windows x64 elements,
+with a positive extent and 4096-byte total limit. It does not depend on
+import-catalog selection. The carrier is local-only and initializers must
+fully initialize each element, except empty scalar arrays which zero-initialize.
+Checked element addresses retain their extent bounds. Current lowering remains
+limited to the native import AOT emitter; private semantic modules, native
+modules, JIT, and standard TRRM continue to reject fixed-array expressions.
+The `MessageBoxW` sample is authored using the same direct import form as any
+other native function; its unattended CLI test
 checks the emitted import without invoking the modal API. This remains
 provisional implementation support, not canonical TRRM approval or a
 cross-platform FFI contract. Source-level typed and nested `ptr<T>` signatures

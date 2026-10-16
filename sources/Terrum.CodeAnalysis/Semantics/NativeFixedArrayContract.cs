@@ -12,13 +12,11 @@ internal static class NativeFixedArrayContract
 
     internal static bool IsCarrier(PrimitiveType type) => type == PrimitiveType.NativeFixedArray;
 
-    internal static bool SupportsRuntimePolicy(NativeImportCatalog? catalog,
-        BoundRuntimePolicy runtimePolicy) =>
-        catalog is not null
-        && runtimePolicy is BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions;
+    internal static bool SupportsRuntimePolicy(BoundRuntimePolicy runtimePolicy) =>
+        runtimePolicy is BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions;
 
     internal static bool MatchesProgram(BoundProgram program) =>
-        SupportsRuntimePolicy(program.NativeImportCatalog, program.RuntimePolicy);
+        SupportsRuntimePolicy(program.RuntimePolicy);
 
     internal static bool IsSupportedElementType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, NativeImportCatalog? catalog) =>

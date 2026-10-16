@@ -452,12 +452,12 @@ public static partial class SemanticVerifier
                                 || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsOut || variable.IsInit
                                 || variable.IsInitializationLocal
-                                || variable.NativeFixedArrayLayout is not BoundNativeFixedArrayLayout sampleLayout
-                                || sampleLayout.CarrierType != variable.Type
+                                || variable.NativeFixedArrayLayout is not BoundNativeFixedArrayLayout fixedArrayLayout
+                                || fixedArrayLayout.CarrierType != variable.Type
                                 || (variable.IsMutable
-                                    && !NativeFixedArrayContract.AllowsMutableLocal(sampleLayout,
+                                    && !NativeFixedArrayContract.AllowsMutableLocal(fixedArrayLayout,
                                         program.Structures, program.NativeImportCatalog))
-                                || !NativeFixedArrayContract.MatchesLayout(sampleLayout, program.Structures,
+                                || !NativeFixedArrayContract.MatchesLayout(fixedArrayLayout, program.Structures,
                                     program.NativeImportCatalog)
                                 || !NativeFixedArrayContract.MatchesProgram(program)))
                                 || (!NativeFixedArrayContract.IsCarrier(variable.Type)
@@ -2066,11 +2066,8 @@ public static partial class SemanticVerifier
                 || program.Functions.Any(static function => function.DirectNativeImport is null
                     && (function.ReturnType is
                         PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        || NativeFixedArrayContract.IsCarrier(function.ReturnType)
                         || function.Variables.Any(static variable => variable.Type is
-                            PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                            || NativeFixedArrayContract.IsCarrier(variable.Type)
-                            || variable.NativeFixedArrayLayout is not null)))
+                            PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer)))
                 || !NativeStringZPoolContract.IsValid(
                     program.NativeUtf16ZLiterals, program.NativeUtf8ZLiterals))
             {

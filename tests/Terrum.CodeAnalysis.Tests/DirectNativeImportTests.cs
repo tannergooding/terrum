@@ -924,9 +924,7 @@ public sealed class DirectNativeImportTests
                 unsafe { return ObserveValues(&values[0]); }
             }
             """;
-        var catalog = NativeImportCatalog.CreateForTesting("test.native-parameter-extent.v1", []);
-        var compilation = Compilation.CreateWithNativeImports(
-            [SyntaxTree.Parse(source)], catalog, BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
 
         Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -938,11 +936,12 @@ public sealed class DirectNativeImportTests
         }
 
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(program.NativeImportCatalog, Is.Null);
         var import = program.Functions.Single(static function =>
             function.Name == "ObserveValues").DirectNativeImport!;
         Assert.That(import.Parameters.Single().Extent, Is.EqualTo(3));
         Assert.That(Encoding.ASCII.GetString(
-            NativeEmitter.EmitWithNativeImportsForTesting(program, NativeRuntimePolicy.FailFast)),
+            NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
             Does.Contain("ObserveValues"));
     }
 
