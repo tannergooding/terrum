@@ -66,7 +66,7 @@ internal sealed partial class Binder
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
-    private NativeImportCatalog? _nativeImportCatalog;
+    private readonly NativeImportCatalog? _nativeImportCatalog;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
     private bool _usesNativeImportCatalog;
@@ -112,8 +112,8 @@ internal sealed partial class Binder
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
         NativeImportCatalog? nativeImportCatalog = null)
     {
-        if (coreLibrary && (!isLibrary || reference is not null)
-            || nativeImportCatalog is not null && (isLibrary || reference is not null || coreLibrary))
+        if ((coreLibrary && (!isLibrary || reference is not null))
+            || (nativeImportCatalog is not null && (isLibrary || reference is not null || coreLibrary)))
         {
             throw new ArgumentException("Core declarations and source native imports require their respective compilation modes.");
         }
@@ -904,8 +904,10 @@ internal sealed partial class Binder
                     member.Span);
             }
             else if (member is SyntaxNode { Kind: SyntaxKind.Attribute }
-                || member is SyntaxTokenElement { Token.Kind: TokenKind.UniqueKeyword
-                    or TokenKind.MutKeyword or TokenKind.InternalKeyword or TokenKind.UnsafeKeyword })
+                or SyntaxTokenElement {
+                    Token.Kind: TokenKind.UniqueKeyword
+                    or TokenKind.MutKeyword or TokenKind.InternalKeyword or TokenKind.UnsafeKeyword
+                })
             {
                 Report("TRM3001", "Core primitive declarations have compiler-owned visibility and layout.",
                     member.Span);
@@ -1038,7 +1040,7 @@ internal sealed partial class Binder
             {
                 Report("TRM3023", "A native buffer view or managed handle cannot be stored in an inline struct.", field.Span);
             }
-            if (type == PrimitiveType.TokenSpan && (qualified != TokenSpanContract.CursorName || !isUnique)
+            if ((type == PrimitiveType.TokenSpan && (qualified != TokenSpanContract.CursorName || !isUnique))
                 || TokenSpanContract.IsCursor(type, _structs))
             {
                 Report("TRM3023", "Stored span dependencies are limited to the compilation-local TokenCursor field.", field.Span);
@@ -1139,7 +1141,7 @@ internal sealed partial class Binder
             Report("TRM3005", "Public instance fields require an explicit Blittable layout commitment.",
                 declaration.Span);
         }
-        if (isBlittable && (!layoutAttributeSeen || !isSequential && !isTransparent))
+        if (isBlittable && (!layoutAttributeSeen || (!isSequential && !isTransparent)))
         {
             Report("TRM3005",
                 "The current Blittable source profile requires an explicit Layout(LayoutKind.Sequential) commitment.",
@@ -1237,7 +1239,7 @@ internal sealed partial class Binder
         return false;
     }
 
-    private bool IsBlittableLayoutFieldType(PrimitiveType type)
+    private static bool IsBlittableLayoutFieldType(PrimitiveType type)
     {
         if (type is PrimitiveType.Bool or PrimitiveType.Char16
             or PrimitiveType.Int32 or PrimitiveType.UInt32
@@ -1687,7 +1689,7 @@ internal sealed partial class Binder
                     && attribute.Children[1] is SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
                     && attribute.Children[2] is SyntaxTokenElement { Token.Kind: TokenKind.Colon };
                 var attributeName = AttributeName(attribute);
-                if (attributeName.Contains('.')
+                if (attributeName.Contains('.', StringComparison.Ordinal)
                     && attributeName != NativeImportCatalog.AttributeDefinition.FullyQualifiedName
                     && attributeName != "Terrum.Interop.NativeOutput"
                     && attributeName != "Terrum.Interop.NativeParameter"
@@ -1954,7 +1956,7 @@ internal sealed partial class Binder
             Report("TRM3030", "NativeOutput may appear only on an extern callable.", declaration.Span);
         }
         if (nativeParameters.Count != 0 && (!isExternal
-            || nativeLibraryName is null && !isNativeVTableMethod))
+            || (nativeLibraryName is null && !isNativeVTableMethod)))
         {
             Report("TRM3030", "NativeParameter requires a direct NativeImport or NativeVTableMethod declaration.",
                 nativeImportAttribute?.Span ?? declaration.Span);
@@ -2024,9 +2026,9 @@ internal sealed partial class Binder
                     && !_primitiveDeclarations.Contains(containingType))
                 || (IsStruct(propertyOwner) && IsUnique(propertyOwner))
                 || TryFindField(propertyOwner, nameToken.Name, out _)
-                || containingType is not null
+                || (containingType is not null
                     && _primitiveBackingFields.TryGetValue(containingType, out var backing)
-                    && backing == nameToken.Name)
+                    && backing == nameToken.Name))
             {
                 Report("TRM3001", "Getter-only properties require a distinct member on a Copy struct, source class or Core primitive with a readonly receiver.",
                     declaration.Span);
@@ -2058,7 +2060,7 @@ internal sealed partial class Binder
             && containingType is null && body is not null && isInternal
             && resultDependencies is not null;
         if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-            || !constructor && TokenSpanContract.IsDependent(returnType, _structs) && !spanResultCandidate)
+            || (!constructor && TokenSpanContract.IsDependent(returnType, _structs) && !spanResultCandidate))
         {
             Report("TRM3023", "A native buffer view cannot be returned.", returnNode!.Span);
         }
@@ -2328,9 +2330,9 @@ internal sealed partial class Binder
             var nativeVTableParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>();
             if (declared.Count == 0 || declared[0].IsOut || declared[0].IsInit
                 || declared[0].IsImplicitRef
-                || declared[0].Type is not (PrimitiveType.NativeRawPointer
+                || (declared[0].Type is not (PrimitiveType.NativeRawPointer
                     or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer)
-                    && !NativePointerTypeContract.IsValidType(declared[0].Type, [.. _nativePointerTypes]))
+                    && !NativePointerTypeContract.IsValidType(declared[0].Type, [.. _nativePointerTypes])))
             {
                 Report("TRM3030",
                     "NativeVTableMethod requires a direct native receiver pointer as its first explicit parameter.",
@@ -2365,9 +2367,9 @@ internal sealed partial class Binder
             {
                 var parameter = declared[index];
                 if (parameter.IsInit || parameter.IsImplicitRef
-                    || parameter.Type != PrimitiveType.NativeRawPointer
+                    || (parameter.Type != PrimitiveType.NativeRawPointer
                         && !DirectNativeImportContract.IsValueParameter(parameter.Type,
-                            [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes]))
+                            [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes])))
                 {
                     Report("TRM3030",
                         "NativeVTableMethod parameters require direct native scalar or pointer representations.",
@@ -4061,7 +4063,7 @@ internal sealed partial class Binder
         switch (place)
         {
             case BoundRead local:
-                if (!_variables[local.Variable].IsMutable || local.Variable == 0 && _hasReceiver)
+                if (!_variables[local.Variable].IsMutable || (local.Variable == 0 && _hasReceiver))
                 {
                     Report("TRM3008", "Update requires a mutable local, not a receiver or immutable slot.", span);
                 }
@@ -4303,8 +4305,8 @@ internal sealed partial class Binder
                 var literalToken = ((SyntaxTokenElement)node.Children[0]).Token;
                 if (literalToken.Kind == TokenKind.NullKeyword)
                 {
-                    if (expected == PrimitiveType.NativeRawPointer || expected is PrimitiveType pointerType
-                        && NativePointerTypes.IsType(pointerType))
+                    if (expected == PrimitiveType.NativeRawPointer || (expected is PrimitiveType pointerType
+                        && NativePointerTypes.IsType(pointerType)))
                     {
                         expression = new BoundConstant(0, expected.Value, node.Span);
                     }
@@ -4604,8 +4606,8 @@ internal sealed partial class Binder
                             || !TryFindVariable(NameText(operandNode), out var pointerVariable)
                             || _nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].PointeeType
                                 != _variables[pointerVariable].Type
-                            || _nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].IsWritable
-                                && !_variables[pointerVariable].IsMutable)
+                            || (_nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].IsWritable
+                                && !_variables[pointerVariable].IsMutable))
                         {
                             Report("TRM3030",
                                 "Taking a native pointer address requires a matching local value and access mode.",
@@ -5030,8 +5032,8 @@ internal sealed partial class Binder
                     ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
                         or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64 ? expected : null);
                 resultType = operandType ?? PrimitiveType.Int32;
-                var floatingArithmetic = operandType is (PrimitiveType.Float32 or PrimitiveType.Float64)
-                    && op.Kind is (TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash);
+                var floatingArithmetic = operandType is PrimitiveType.Float32 or PrimitiveType.Float64
+                    && op.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash;
                 if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
                     or PrimitiveType.UInt64) && !floatingArithmetic)
                 {
@@ -5309,8 +5311,8 @@ internal sealed partial class Binder
         {
             var argument = argumentNodes[index];
             if (argument.Children.Any(static child => child is SyntaxTokenElement {
-                    Token.Kind: TokenKind.OutKeyword or TokenKind.VarKeyword
-                } || child is SyntaxTokenElement { Token.Text: "init" }))
+                Token.Kind: TokenKind.OutKeyword or TokenKind.VarKeyword
+            } or SyntaxTokenElement { Token.Text: "init" }))
             {
                 Report("TRM3011", "Native function pointer parameters do not support output argument modes.",
                     argument.Span);
@@ -5613,10 +5615,7 @@ internal sealed partial class Binder
                     implicitReferenceTemporaries.Add(-1);
                 }
             }
-            if (implicitReferenceTemporaries is not null)
-            {
-                implicitReferenceTemporaries.Add(-1);
-            }
+            implicitReferenceTemporaries?.Add(-1);
             if (expectedParameter is not null && position >= 0 && assignedParameters is not null)
             {
                 if (assignedParameters[position] && argumentName is null)
@@ -6210,9 +6209,9 @@ internal sealed partial class Binder
                     var left = (SyntaxNode)callee.Children[0];
                     var member = ((SyntaxTokenElement)callee.Children[2]).Token.Name;
                     var receiverType = KnownType(left);
-                    if (receiverType == PrimitiveType.TokenSpan && member == "AdvanceOne"
-                        || member == "AsSpan" && receiverType is PrimitiveType snapshot
-                            && IsStruct(snapshot) && _structs[(int)snapshot - 100].Name == TokenSpanContract.SnapshotName)
+                    if ((receiverType == PrimitiveType.TokenSpan && member == "AdvanceOne")
+                        || (member == "AsSpan" && receiverType is PrimitiveType snapshot
+                            && IsStruct(snapshot) && _structs[(int)snapshot - 100].Name == TokenSpanContract.SnapshotName))
                     {
                         return PrimitiveType.TokenSpan;
                     }

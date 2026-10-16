@@ -153,7 +153,7 @@ public static partial class TrRmExecutableCompiler
         {
             var structureIndex = blittableStructureIndexes[index];
             var structure = program.Structures[structureIndex];
-            var separator = structure.Name.LastIndexOf('.');
+            var separator = structure.Name.LastIndexOf('.', StringComparison.Ordinal);
             var typeNamespace = separator < 0 ? "" : structure.Name[..separator];
             var typeName = separator < 0 ? structure.Name : structure.Name[(separator + 1)..];
             if (typeName.Length == 0 || !structureTypeDefRows.TryAdd(structureIndex, index + 1))
@@ -228,9 +228,9 @@ public static partial class TrRmExecutableCompiler
                 || function.IsClassConstructor || function.ClassConstructor != -1
                 || function.DeclaringStruct is not null || function.PropertyName is not null
                 || function.IsStatic || function.Intrinsic != BoundIntrinsic.None || function.IsCleanup
-                || !Scalar(function.ReturnType)
+                || (!Scalar(function.ReturnType)
                     && !(function.IsExternal && function.DirectNativeImport is not null
-                        && function.ReturnType == PrimitiveType.NativeRawPointer))
+                        && function.ReturnType == PrimitiveType.NativeRawPointer)))
             {
                 throw Unsupported($"Function '{function.Name}' has an unsupported declaration or effect.");
             }
@@ -271,7 +271,7 @@ public static partial class TrRmExecutableCompiler
                 if (variable.Type == PrimitiveType.Void || variable.IsInitializationLocal
                     || (function.DirectNativeImport is null
                         && (!Scalar(variable.Type) || variable.IsOut != variable.IsInit
-                            || variable.IsInit && !IsOutputScalarType(variable.Type)))
+                            || (variable.IsInit && !IsOutputScalarType(variable.Type))))
                     || (function.DirectNativeImport is not null
                         && (isNativeOutput
                             ? variable.Type != PrimitiveType.NativeStorageAddress
@@ -516,15 +516,15 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        index.TryGetSection(1, out var moduleBytes, out var moduleCount);
-        index.TryGetSection(0x16, out _, out var methodCount);
-        index.TryGetSection(0x17, out _, out var sigCount);
-        index.TryGetSection(0x18, out _, out _);
-        index.TryGetSection(0x13, out _, out var typeDefCount);
-        index.TryGetSection(4, out var featureBytes, out var featureCount);
-        index.TryGetSection(0x1B, out var contractBytes, out _);
-        index.TryGetSection(0x1D, out var exportBytes, out var exportCount);
-        index.TryGetSection(0x20, out _, out var bodyCount);
+        _ = index.TryGetSection(1, out var moduleBytes, out var moduleCount);
+        _ = index.TryGetSection(0x16, out _, out var methodCount);
+        _ = index.TryGetSection(0x17, out _, out var sigCount);
+        _ = index.TryGetSection(0x18, out _, out _);
+        _ = index.TryGetSection(0x13, out _, out var typeDefCount);
+        _ = index.TryGetSection(4, out var featureBytes, out var featureCount);
+        _ = index.TryGetSection(0x1B, out var contractBytes, out _);
+        _ = index.TryGetSection(0x1D, out var exportBytes, out var exportCount);
+        _ = index.TryGetSection(0x20, out _, out var bodyCount);
         if (moduleCount != 1 || methodCount == 0 || bodyCount > methodCount
             || sigCount == 0 || typeCount == 0)
         {
@@ -562,7 +562,7 @@ public static partial class TrRmExecutableCompiler
                 nativeBlittableLayoutRuleRevision = required.MinimumRuleRevision;
             }
         }
-        if ((nativeImports.Count != 0) != (nativeImportRuleRevision != 0))
+        if (nativeImports.Count != 0 != (nativeImportRuleRevision != 0))
         {
             throw Invalid("The Windows named native import feature does not match its table.");
         }
@@ -615,7 +615,7 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid($"Unsupported declaration for method {row}.");
             }
-            if ((flags == 2) != declaredExports.Contains(row))
+            if (flags == 2 != declaredExports.Contains(row))
             {
                 throw Invalid("Every public method requires its matching named export.");
             }
@@ -643,15 +643,15 @@ public static partial class TrRmExecutableCompiler
                         : FromRow(types, typeSpecRow);
                 var mode = parameters.GetMode(first + param);
                 if (type == PrimitiveType.Void
-                    || mode != 0 && mode != 2
-                    || isNativeImport && (mode != 0
-                        || nativeOutput is null && nativeParameter is null && !Scalar(type)
-                        || nativeOutput is not null && type != PrimitiveType.NativeStorageAddress
-                        || nativeParameter is not null && type != PrimitiveType.NativeRawPointer)
-                    || !isNativeImport && mode == 2 && (scalarInitOutputRuleRevision == 0
-                        || scalarInitOutputRuleRevision == TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision
-                            && type != PrimitiveType.Int32
-                        || flags == 2))
+                    || (mode != 0 && mode != 2)
+                    || (isNativeImport && (mode != 0
+                        || (nativeOutput is null && nativeParameter is null && !Scalar(type))
+                        || (nativeOutput is not null && type != PrimitiveType.NativeStorageAddress)
+                        || (nativeParameter is not null && type != PrimitiveType.NativeRawPointer)))
+                    || (!isNativeImport && mode == 2 && (scalarInitOutputRuleRevision == 0
+                        || (scalarInitOutputRuleRevision == TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision
+                            && type != PrimitiveType.Int32)
+                        || flags == 2)))
                 {
                     throw Invalid("Unsupported parameter type or mode.");
                 }
@@ -964,7 +964,7 @@ public static partial class TrRmExecutableCompiler
 
     private static PrimitiveType RemapStructureType(PrimitiveType type, int[] structureMap)
     {
-        if ((int)type < 100 || (int)type >= ManagedClassTypes.First)
+        if ((int)type is < 100 or >= ManagedClassTypes.First)
         {
             return type;
         }
@@ -1143,8 +1143,8 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var parameter in import.Parameters)
             {
-                if ((int)parameter.PointeeType >= 100
-                    && (int)parameter.PointeeType < ManagedClassTypes.First)
+                if ((int)parameter.PointeeType is >= 100
+                    and < ManagedClassTypes.First)
                 {
                     Visit((int)parameter.PointeeType - 100);
                 }
@@ -1180,7 +1180,7 @@ public static partial class TrRmExecutableCompiler
             if (structure.BlittableTargetRequirement != FixedLayoutStorage.WindowsX64TargetRequirement
                 || structure.IsSequential == structure.IsTransparent
                 || structure.IsUnique || structure.CleanupMethod is not null
-                || structure.IsPrivate && structure.IsInternal
+                || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty)
             {
                 throw Unsupported($"Native aggregate '{structure.Name}' lacks a supported fixed Blittable contract.");
@@ -1190,7 +1190,7 @@ public static partial class TrRmExecutableCompiler
             foreach (var field in structure.Fields)
             {
                 if (field is null || field.RequiresUnsafeCaller
-                    || field.IsPrivate && field.IsInternal)
+                    || (field.IsPrivate && field.IsInternal))
                 {
                     throw Unsupported($"Native Blittable field in '{structure.Name}' has unsupported access metadata.");
                 }
@@ -1199,7 +1199,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     continue;
                 }
-                if ((int)field.Type >= 100 && (int)field.Type < ManagedClassTypes.First)
+                if ((int)field.Type is >= 100 and < ManagedClassTypes.First)
                 {
                     Visit((int)field.Type - 100);
                     continue;
@@ -1325,7 +1325,7 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> structureTypeDefRows, Dictionary<int, int> typeDefTypeSpecRows,
         Dictionary<PrimitiveType, int> structurePointerTypeRows)
     {
-        if ((int)pointeeType >= 100 && (int)pointeeType < ManagedClassTypes.First)
+        if ((int)pointeeType is >= 100 and < ManagedClassTypes.First)
         {
             if (structurePointerTypeRows.TryGetValue(pointeeType, out var existing))
             {
@@ -1353,7 +1353,7 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> typeDefTypeSpecRows, Dictionary<int, int> structureTypeDefRows,
         PrimitiveType fieldType)
     {
-        if ((int)fieldType >= 100 && (int)fieldType < ManagedClassTypes.First)
+        if ((int)fieldType is >= 100 and < ManagedClassTypes.First)
         {
             var structureIndex = (int)fieldType - 100;
             if (!structureTypeDefRows.TryGetValue(structureIndex, out var typeDefRow))

@@ -59,9 +59,9 @@ public static partial class SemanticVerifier
             || (index.Type != PrimitiveType.Int32
                 && !(index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(layout)))
-            || function.IsNoThrow
+            || (function.IsNoThrow
                 && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
-                && index is not BoundConstant
+                && index is not BoundConstant)
             || (requiredStartIndex is int required
                 && index is BoundConstant { Type: PrimitiveType.Int32, Value: var actual }
                 && actual != required)

@@ -131,8 +131,8 @@ internal sealed partial class Binder
 
         var pointer = _nativePointerTypes[NativePointerTypes.Index(pointerType)];
         if (pointer.PointeeType != layout.ElementType
-            || pointer.IsWritable && (!_variables[variable].IsMutable
-                || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
+            || (pointer.IsWritable && (!_variables[variable].IsMutable
+                || !NativeFixedArrayContract.AllowsMutableLocal(layout))))
         {
             Report("TRM3030", "The fixed-array element does not match the native pointer access mode.", span);
             return ErrorExpression(span);
@@ -160,5 +160,4 @@ internal sealed partial class Binder
             ? PrimitiveType.UInt32 : PrimitiveType.Int32;
         return BindExpression(node, expectedType);
     }
-
 }

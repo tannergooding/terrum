@@ -43,8 +43,8 @@ public static partial class ModuleCompiler
             || program.Functions.Any(static function => !function.CapturedParameters.IsDefaultOrEmpty
                 || function.ReturnsForwardedBacking || !function.ResultDependencyParameters.IsDefaultOrEmpty
                 || function.ReturnType == PrimitiveType.TokenSpan
-                || function.IsExternal && function.Variables.Any(static variable =>
-                    variable.Type == PrimitiveType.TokenSpan)))
+                || (function.IsExternal && function.Variables.Any(static variable =>
+                    variable.Type == PrimitiveType.TokenSpan))))
         {
             throw new ModuleContractException("Compilation-local span and capture metadata cannot be persisted.");
         }
@@ -79,8 +79,8 @@ public static partial class ModuleCompiler
         if (module.FormatVersion is not (PrivateSpanVersion or DirectNativeImportVersion
                 or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
                 or NativePointerVersion or NativeVTableVersion)
-            || module.FormatVersion == PrivateSpanVersion && !module.RequiresSourceGrant
-            || hasSpans && !module.RequiresSourceGrant
+            || (module.FormatVersion == PrivateSpanVersion && !module.RequiresSourceGrant)
+            || (hasSpans && !module.RequiresSourceGrant)
             || module.Functions.Any(static item => item.Import
                 && ContractContainsType(item.Contract, PrimitiveType.TokenSpan)))
         {
@@ -108,8 +108,8 @@ public static partial class ModuleCompiler
         if (hasSpans && (!TokenSpanContract.ValidTokenLayout(module.Structures)
             || module.Structures.Count(static structure => structure.TokenSpanRole == TokenSpanTypeRole.Token) != 1
             || module.Structures.Count(static structure => structure.TokenSpanRole == TokenSpanTypeRole.Range) != 1
-            || hasSnapshotProjection
-                && module.Structures.Count(static structure => structure.TokenSpanRole == TokenSpanTypeRole.Snapshot) != 1))
+            || (hasSnapshotProjection
+                && module.Structures.Count(static structure => structure.TokenSpanRole == TokenSpanTypeRole.Snapshot) != 1)))
         {
             throw new ModuleFormatException("Private span IR requires explicit token and range type roles.");
         }

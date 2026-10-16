@@ -603,8 +603,8 @@ public static partial class ModuleCompiler
             var nativePointerTypes = ReadNativePointerTypes(reader);
             if (!NativePointerTypeContract.IsValidTable(nativePointerTypes, structures,
                 nativeFunctionPointerSignatures)
-                || reader is ModuleReader { FormatVersion: NativePointerVersion }
-                    && nativePointerTypes.IsEmpty)
+                || (reader is ModuleReader { FormatVersion: NativePointerVersion }
+                    && nativePointerTypes.IsEmpty))
             {
                 throw new ModuleFormatException("Graph native pointer type table is invalid.");
             }

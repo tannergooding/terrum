@@ -255,8 +255,8 @@ internal static class NativeModuleImageValidator
                 foreach (var providerDll in providerImports.Keys)
                 {
                     if (StringComparer.OrdinalIgnoreCase.Equals(providerDll, "KERNEL32.dll")
-                        || checkedExceptions
-                            && StringComparer.OrdinalIgnoreCase.Equals(providerDll, "NTDLL.dll"))
+                        || (checkedExceptions
+                            && StringComparer.OrdinalIgnoreCase.Equals(providerDll, "NTDLL.dll")))
                     {
                         continue;
                     }

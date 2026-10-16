@@ -203,7 +203,7 @@ public sealed class DirectNativeImportTests
         var identity = program.Functions.Single(static function => function.Name == "Identity");
         var identityIndex = program.Functions.IndexOf(identity);
         var variables = identity.Variables.SetItem(0,
-            identity.Variables[0] with { Type = PrimitiveType.ReservedNativeStorageRecord });
+            identity.Variables[0] with { Type = PrimitiveType.LegacyNativeStorageRecord });
         var forgedProgram = program with {
             Functions = program.Functions.SetItem(identityIndex, identity with { Variables = variables }),
         };

@@ -74,7 +74,7 @@ internal sealed partial class PeCompiler
 
     private void EmitNativePointerRead(BoundNativePointerRead read, int spill)
     {
-        Expression(read.Pointer, spill);
+        Expression(read.Address, spill);
         if (!IsIndirect(read.Type))
         {
             _code.LoadPointerField(0, Size(read.Type));
@@ -83,7 +83,7 @@ internal sealed partial class PeCompiler
 
     private void EmitNativePointerWrite(BoundNativePointerWrite write, int spill)
     {
-        Expression(write.Pointer, spill + 1);
+        Expression(write.Address, spill + 1);
         _code.Store64(Spill(spill));
         Expression(write.Value, spill + 1);
         if (IsIndirect(write.Value.Type))

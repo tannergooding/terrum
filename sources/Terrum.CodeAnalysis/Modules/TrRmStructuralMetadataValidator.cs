@@ -87,27 +87,27 @@ public static class TrRmStructuralMetadataValidator
             throw InvalidMetadata();
         }
 
-        index.TryGetSection(0x0004, out var featureBytes, out var featureCount);
-        index.TryGetSection(0x0010, out var moduleRefBytes, out var moduleRefCount);
-        index.TryGetSection(0x0011, out var typeSpecBytes, out var typeSpecCount);
-        index.TryGetSection(0x0012, out var typeArgBytes, out var typeArgCount);
-        index.TryGetSection(0x0013, out var typeDefBytes, out var typeDefCount);
-        index.TryGetSection(0x0014, out var fieldDefBytes, out var fieldDefCount);
-        index.TryGetSection(0x0015, out var layoutBytes, out var layoutCount);
-        index.TryGetSection(0x0016, out var methodDefBytes, out var methodDefCount);
-        index.TryGetSection(0x0017, out var methodSigBytes, out var methodSigCount);
-        index.TryGetSection(0x0018, out var paramBytes, out var paramCount);
-        index.TryGetSection(0x0019, out var genericParamBytes, out var genericParamCount);
-        index.TryGetSection(0x001A, out var constraintBytes, out var constraintCount);
-        index.TryGetSection(0x001B, out var contractBytes, out var contractCount);
-        index.TryGetSection(0x001C, out var importBytes, out var importCount);
-        index.TryGetSection(0x001D, out var exportBytes, out var exportCount);
-        index.TryGetSection(0x001E, out var propertyBytes, out var propertyCount);
-        index.TryGetSection(0x001F, out var sourceFileBytes, out var sourceFileCount);
-        index.TryGetSection(0x0003, out var blobBytes, out var blobCount);
-        index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount);
-        index.TryGetSection(0x0021, out var nativeImportBytes, out var nativeImportCount);
-        index.TryGetSection(0x7F00, out var sourceMapBytes, out var sourceMapCount);
+        _ = index.TryGetSection(0x0004, out var featureBytes, out var featureCount);
+        _ = index.TryGetSection(0x0010, out var moduleRefBytes, out var moduleRefCount);
+        _ = index.TryGetSection(0x0011, out var typeSpecBytes, out var typeSpecCount);
+        _ = index.TryGetSection(0x0012, out var typeArgBytes, out var typeArgCount);
+        _ = index.TryGetSection(0x0013, out var typeDefBytes, out var typeDefCount);
+        _ = index.TryGetSection(0x0014, out var fieldDefBytes, out var fieldDefCount);
+        _ = index.TryGetSection(0x0015, out var layoutBytes, out var layoutCount);
+        _ = index.TryGetSection(0x0016, out var methodDefBytes, out var methodDefCount);
+        _ = index.TryGetSection(0x0017, out var methodSigBytes, out var methodSigCount);
+        _ = index.TryGetSection(0x0018, out var paramBytes, out var paramCount);
+        _ = index.TryGetSection(0x0019, out var genericParamBytes, out var genericParamCount);
+        _ = index.TryGetSection(0x001A, out var constraintBytes, out var constraintCount);
+        _ = index.TryGetSection(0x001B, out var contractBytes, out var contractCount);
+        _ = index.TryGetSection(0x001C, out var importBytes, out var importCount);
+        _ = index.TryGetSection(0x001D, out var exportBytes, out var exportCount);
+        _ = index.TryGetSection(0x001E, out var propertyBytes, out var propertyCount);
+        _ = index.TryGetSection(0x001F, out var sourceFileBytes, out var sourceFileCount);
+        _ = index.TryGetSection(0x0003, out var blobBytes, out var blobCount);
+        _ = index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount);
+        _ = index.TryGetSection(0x0021, out var nativeImportBytes, out var nativeImportCount);
+        _ = index.TryGetSection(0x7F00, out var sourceMapBytes, out var sourceMapCount);
 
         if (blobCount != 0)
         {
@@ -183,8 +183,8 @@ public static class TrRmStructuralMetadataValidator
                     if (row != 0)
                     {
                         var linear = inspection == BodyInspection.CompactLinear
-                            || inspection == BodyInspection.CompactMixed
-                                && (bodies.GetRow(row)[0] & 0x0C) == 0x04;
+                            || (inspection == BodyInspection.CompactMixed
+                                && (bodies.GetRow(row)[0] & 0x0C) == 0x04);
                         if (linear)
                         {
                             var body = new TrRmCompactLinearBodyReader(bodies, method, modules,

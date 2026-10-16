@@ -134,12 +134,26 @@ internal static class TrRmNativeImportTypeContract
     };
 }
 
+/// <summary>One provisional TRRM named native import declaration.</summary>
+/// <param name="MethodDefRow">The 1-based method-definition row.</param>
+/// <param name="LibraryNameStringRow">The 1-based library-name string row.</param>
+/// <param name="ExportNameStringRow">The 1-based export-name string row.</param>
+/// <param name="ResolutionPolicy">A provisional resolution-policy value.</param>
 public readonly record struct TrRmNativeImportRow(
     int MethodDefRow, int LibraryNameStringRow, int ExportNameStringRow, uint ResolutionPolicy);
 
 /// <summary>Emits provisional TRRM Windows named native import rows.</summary>
 public static class TrRmNativeImportTableWriter
 {
+    /// <summary>Encodes and validates provisional named native import rows.</summary>
+    /// <param name="rows">The rows to encode.</param>
+    /// <param name="strings">The string table used to validate library and export names.</param>
+    /// <param name="methods">The method definitions associated with the imports.</param>
+    /// <param name="signatures">The method signatures associated with the imports.</param>
+    /// <param name="parameters">The method parameter declarations associated with the imports.</param>
+    /// <param name="types">The type specifications used by the signatures.</param>
+    /// <param name="contracts">The method contracts used by the imports.</param>
+    /// <returns>The encoded native-import section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmNativeImportRow> rows,
         TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
@@ -184,6 +198,15 @@ public readonly ref struct TrRmNativeImportTableReader
     private readonly int[] _rowByMethod;
     private readonly int _recordCount;
 
+    /// <summary>Validates a provisional named native import section against its declarations.</summary>
+    /// <param name="section">The borrowed section bytes.</param>
+    /// <param name="recordCount">The number of fixed-size rows in the section.</param>
+    /// <param name="strings">The associated string table.</param>
+    /// <param name="methods">The associated method-definition table.</param>
+    /// <param name="signatures">The associated method-signature table.</param>
+    /// <param name="parameters">The associated parameter table.</param>
+    /// <param name="types">The associated type-specification table.</param>
+    /// <param name="contracts">The associated contract table.</param>
     public TrRmNativeImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
@@ -252,12 +275,20 @@ public readonly ref struct TrRmNativeImportTableReader
         }
     }
 
+    /// <summary>Gets the number of import rows.</summary>
     public int Count => _recordCount;
 
+    /// <summary>Determines whether a method has a native import declaration.</summary>
+    /// <param name="methodDefRow">The 1-based method-definition row.</param>
+    /// <returns><see langword="true"/> when the method has an import row.</returns>
     public bool HasImportForMethod(int methodDefRow)
         => methodDefRow > 0 && methodDefRow < _rowByMethod.Length
             && _rowByMethod[methodDefRow] != 0;
 
+    /// <summary>Gets the import row for a method.</summary>
+    /// <param name="methodDefRow">The 1-based method-definition row.</param>
+    /// <returns>The import declaration for the method.</returns>
+    /// <exception cref="InvalidDataException">The method has no native import declaration.</exception>
     public TrRmNativeImportRow GetImportForMethod(int methodDefRow)
     {
         if (!HasImportForMethod(methodDefRow))
@@ -270,9 +301,15 @@ public readonly ref struct TrRmNativeImportTableReader
             (int)Read(data, 8), Read(data, 12));
     }
 
+    /// <summary>Gets the library name associated with a method's import.</summary>
+    /// <param name="methodDefRow">The 1-based method-definition row.</param>
+    /// <returns>The decoded library name.</returns>
     public string GetLibraryName(int methodDefRow)
         => _strings.DecodeName(GetImportForMethod(methodDefRow).LibraryNameStringRow);
 
+    /// <summary>Gets the export name associated with a method's import.</summary>
+    /// <param name="methodDefRow">The 1-based method-definition row.</param>
+    /// <returns>The decoded export name.</returns>
     public string GetExportName(int methodDefRow)
         => _strings.DecodeName(GetImportForMethod(methodDefRow).ExportNameStringRow);
 

@@ -65,7 +65,7 @@ public static class FixedLayoutStorage
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name) || !names.Add(structure.Name)
                 || structure.BlittableTargetRequirement != WindowsX64TargetRequirement
                 || structure.IsSequential == structure.IsTransparent
-                || structure.IsTransparent && structure.Fields.Length != 1
+                || (structure.IsTransparent && structure.Fields.Length != 1)
                 || (structure.CleanupMethod is not null && !structure.IsUnique)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty)

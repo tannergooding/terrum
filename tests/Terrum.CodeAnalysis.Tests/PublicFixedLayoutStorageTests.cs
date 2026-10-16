@@ -162,7 +162,7 @@ public sealed class PublicFixedLayoutStorageTests
             "view" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.ReadonlyInt32BufferView }) },
             "reserved-native-callback-address" => packet with {
                 Fields = packet.Fields.SetItem(1, packet.Fields[1] with {
-                    Type = PrimitiveType.ReservedNativeCallbackAddress,
+                    Type = PrimitiveType.LegacyNativeCallbackAddress,
                 }),
             },
             "native-carrier" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeFixedArray }) },

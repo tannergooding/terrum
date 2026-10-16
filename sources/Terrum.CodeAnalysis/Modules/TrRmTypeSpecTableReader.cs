@@ -111,7 +111,7 @@ public readonly ref struct TrRmTypeSpecTableReader
                 break;
             case 0x0C:
                 RequireLength(bytes, 7);
-                if (bytes[2] is < 0x80 or > 0x8A and not 0x8C)
+                if (bytes[2] is < 0x80 or (> 0x8A and not 0x8C))
                 {
                     throw InvalidType();
                 }

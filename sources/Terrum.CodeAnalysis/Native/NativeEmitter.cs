@@ -1596,9 +1596,9 @@ internal sealed partial class PeCompiler
             case BoundNativePointerAddress:
                 return 0;
             case BoundNativePointerRead pointerRead:
-                return ExpressionSpills(pointerRead.Pointer, ref maximumArguments);
+                return ExpressionSpills(pointerRead.Address, ref maximumArguments);
             case BoundNativePointerWrite pointerWrite:
-                return Math.Max(2, Math.Max(1 + ExpressionSpills(pointerWrite.Pointer, ref maximumArguments),
+                return Math.Max(2, Math.Max(1 + ExpressionSpills(pointerWrite.Address, ref maximumArguments),
                     1 + ExpressionSpills(pointerWrite.Value, ref maximumArguments)));
             case BoundUnary unary:
                 return ExpressionSpills(unary.Operand, ref maximumArguments);
@@ -1928,10 +1928,10 @@ internal sealed partial class PeCompiler
                     _ = variables.Add(address.Variable);
                     break;
                 case BoundNativePointerRead pointerRead:
-                    VisitExpression(pointerRead.Pointer);
+                    VisitExpression(pointerRead.Address);
                     break;
                 case BoundNativePointerWrite pointerWrite:
-                    VisitExpression(pointerWrite.Pointer);
+                    VisitExpression(pointerWrite.Address);
                     VisitExpression(pointerWrite.Value);
                     break;
                 case BoundConditional conditional:

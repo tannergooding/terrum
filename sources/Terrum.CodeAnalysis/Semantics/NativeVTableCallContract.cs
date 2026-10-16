@@ -37,9 +37,9 @@ internal static class NativeVTableCallContract
         var receiver = function.Variables[0];
         if (receiver is null || receiver.IsOut || receiver.IsInit || receiver.IsImplicitRef
             || !IsNativeValueType(receiver.Type, program)
-            || receiver.Type is not (PrimitiveType.NativeRawPointer
+            || (receiver.Type is not (PrimitiveType.NativeRawPointer
                 or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer)
-                && !NativePointerTypeContract.IsValidType(receiver.Type, program.NativePointerTypes))
+                && !NativePointerTypeContract.IsValidType(receiver.Type, program.NativePointerTypes)))
         {
             return false;
         }

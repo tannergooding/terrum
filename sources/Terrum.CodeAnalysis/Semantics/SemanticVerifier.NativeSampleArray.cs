@@ -102,8 +102,8 @@ public static partial class SemanticVerifier
 
         var pointer = program.NativePointerTypes[NativePointerTypes.Index(address.Type)];
         if (pointer.PointeeType != address.Layout.ElementType
-            || pointer.IsWritable && (!function.Variables[address.Variable].IsMutable
-                || !NativeFixedArrayContract.AllowsMutableLocal(address.Layout)))
+            || (pointer.IsWritable && (!function.Variables[address.Variable].IsMutable
+                || !NativeFixedArrayContract.AllowsMutableLocal(address.Layout))))
         {
             throw InvalidEffect(address.Span, "NativePointer");
         }
@@ -145,5 +145,4 @@ public static partial class SemanticVerifier
         Expression(write.Value, initialized, fieldMasks, declarations, function, program,
             ref remaining, depth + 1, failures);
     }
-
 }

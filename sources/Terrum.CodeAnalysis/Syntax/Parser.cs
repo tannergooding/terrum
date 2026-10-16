@@ -308,7 +308,7 @@ internal sealed class Parser
                 attribute.Add(ExpectAttached(TokenKind.OpenParen));
                 if (attributeName == "DependsOn")
                 {
-                    while (Current.Kind != TokenKind.CloseParen && Current.Kind != TokenKind.EndOfFile)
+                    while (Current.Kind is not TokenKind.CloseParen and not TokenKind.EndOfFile)
                     {
                         var argument = Expect(TokenKind.Identifier);
                         attribute.Add(argument);
@@ -349,8 +349,8 @@ internal sealed class Parser
                 }
                 else if (attributeName == "Terrum.Interop.NativeParameter")
                 {
-                    while (Current.Kind != TokenKind.CloseParen
-                        && Current.Kind != TokenKind.EndOfFile)
+                    while (Current.Kind is not TokenKind.CloseParen
+                        and not TokenKind.EndOfFile)
                     {
                         attribute.Add(Current.Kind is TokenKind.Identifier or TokenKind.NumericLiteral
                             or TokenKind.StringLiteral ? Take() : Expect(TokenKind.Identifier));
@@ -674,7 +674,7 @@ internal sealed class Parser
                 var modifier = Take();
                 if (missing == _missingTokens)
                 {
-                    _typePunctuation.Add(modifier.Span);
+                    _ = _typePunctuation.Add(modifier.Span);
                 }
                 children.Add(modifier);
                 for (var index = hasModifier ? 0 : 1; index < modifier.Token.Text.Length; index++)
@@ -1536,7 +1536,7 @@ internal sealed class Parser
         var closer = Expect(TokenKind.Greater);
         if (!closer.Token.IsMissing && missingBefore == _missingTokens)
         {
-            _typePunctuation.Add(closer.Span);
+            _ = _typePunctuation.Add(closer.Span);
         }
         return closer;
     }

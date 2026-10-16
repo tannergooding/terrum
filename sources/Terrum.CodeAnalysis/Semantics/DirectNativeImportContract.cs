@@ -1,8 +1,8 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
-using System.Collections.Immutable;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -101,8 +101,8 @@ internal static class DirectNativeImportContract
             || import.Outputs.IsDefault || import.Parameters.IsDefault
             || function.Variables.IsDefault || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length
-            || function.ReturnType != PrimitiveType.Void
-                && !IsValueParameter(function.ReturnType, functionPointerSignatures, pointerTypes)
+            || (function.ReturnType != PrimitiveType.Void
+                && !IsValueParameter(function.ReturnType, functionPointerSignatures, pointerTypes))
             || import.Outputs.Length > function.ParameterCount)
         {
             return false;
@@ -114,8 +114,8 @@ internal static class DirectNativeImportContract
         {
             if (output is null || output.ParameterIndex < 0 || output.ParameterIndex >= function.ParameterCount
                 || outputs[output.ParameterIndex] || !IsOutputPointee(output.PointeeType)
-                || NativePointerTypes.IsType(output.PointeeType)
-                    && !NativePointerTypeContract.IsValidType(output.PointeeType, pointerTypes)
+                || (NativePointerTypes.IsType(output.PointeeType)
+                    && !NativePointerTypeContract.IsValidType(output.PointeeType, pointerTypes))
                 || !IsValidResultCondition(function.ReturnType, output.ResultCondition)
                 || output.FailureDisposition != 1
                 || function.Variables[output.ParameterIndex] is not BoundVariable outputParameter
@@ -134,15 +134,13 @@ internal static class DirectNativeImportContract
                 || parameter.ParameterIndex >= function.ParameterCount
                 || nativeParameters[parameter.ParameterIndex] || outputs[parameter.ParameterIndex]
                 || !IsInputPointee(parameter.PointeeType, structures)
-                || NativePointerTypes.IsType(parameter.PointeeType)
-                    && !NativePointerTypeContract.IsValidType(parameter.PointeeType, pointerTypes)
+                || (NativePointerTypes.IsType(parameter.PointeeType)
+                    && !NativePointerTypeContract.IsValidType(parameter.PointeeType, pointerTypes))
                 || parameter.Access is not (NativeParameterAccess.Read
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention != NativeParameterRetention.NoEscape
                 || parameter.Extent < 0
-                || (parameter.PointeeType == PrimitiveType.Void
-                    ? parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0
-                    : false)
+                || (parameter.PointeeType == PrimitiveType.Void && (parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0))
                 || function.Variables[parameter.ParameterIndex] is not BoundVariable pointerParameter
                 || pointerParameter.Type != PrimitiveType.NativeRawPointer
                 || pointerParameter.IsOut || pointerParameter.IsInit)

@@ -19,7 +19,7 @@ internal static class NativeFunctionPointerTypes
     internal const int First = ManagedClassTypes.OptionalWriteFirst + 256;
 
     internal static bool IsType(PrimitiveType type) =>
-        (int)type >= First && (int)type < NativePointerTypes.First;
+        (int)type is >= First and < NativePointerTypes.First;
 
     internal static int Index(PrimitiveType type) => checked((int)type - First);
 
@@ -81,7 +81,7 @@ internal static class NativeFunctionPointerContract
             || function.DoesNotReturn || function.IsConstructor || function.IsClassConstructor
             || function.IsOperator || function.IsCleanup || function.PropertyName is not null
             || function.Intrinsic != BoundIntrinsic.None
-            || function.DeclaringStruct is not null && !function.IsStatic
+            || (function.DeclaringStruct is not null && !function.IsStatic)
             || function.ParameterCount != signatures[NativeFunctionPointerTypes.Index(functionPointerType)]
                 .ParameterTypes.Length
             || function.Variables.Length < function.ParameterCount)
@@ -114,8 +114,8 @@ internal static class NativeFunctionPointerContract
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
             or PrimitiveType.NativeRawPointer
             || NativePointerTypes.IsType(type)
-            || NativeFunctionPointerTypes.IsType(type)
-                && (uint)NativeFunctionPointerTypes.Index(type) < (uint)signatures.Length;
+            || (NativeFunctionPointerTypes.IsType(type)
+                && (uint)NativeFunctionPointerTypes.Index(type) < (uint)signatures.Length);
 
     private static bool IsSupportedReturnType(PrimitiveType type,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures) =>
@@ -170,6 +170,6 @@ internal static class NativeFunctionPointerContract
         return type == PrimitiveType.NativeRawPointer || NativePointerTypes.IsType(type)
             || type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
                 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
-            || allowVoid && type == PrimitiveType.Void;
+            || (allowVoid && type == PrimitiveType.Void);
     }
 }

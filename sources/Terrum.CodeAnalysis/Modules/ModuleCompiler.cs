@@ -196,7 +196,7 @@ public static partial class ModuleCompiler
                     }
                     if (consumer.Functions[target].Import)
                     {
-                        (imports ??= new HashSet<string>(StringComparer.Ordinal)).Add(name);
+                        _ = (imports ??= new HashSet<string>(StringComparer.Ordinal)).Add(name);
                     }
                 });
             }
@@ -1032,10 +1032,7 @@ public static partial class ModuleCompiler
             }
             if (!hasExternalDeclarations && implementationFunctions.Contains(function.Name))
             {
-                if (functionCalls is not null)
-                {
-                    functionCalls[i] = null;
-                }
+                functionCalls?[i] = null;
                 continue;
             }
             if (function.IsExternal && function.DirectNativeImport is not null)
@@ -1052,10 +1049,7 @@ public static partial class ModuleCompiler
                         program.NativePointerTypes), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
                 });
-                if (functionCalls is not null)
-                {
-                    functionCalls[i] = null;
-                }
+                functionCalls?[i] = null;
                 continue;
             }
             if (exports.TryGetValue(function.Name, out var imported))
@@ -1084,10 +1078,7 @@ public static partial class ModuleCompiler
                 declarations.Add(new ModuleFunction(function.Name, imported.Contract, null, true) {
                     HasOwnershipTransfer = hasOwnershipTransfer,
                 });
-                if (functionCalls is not null)
-                {
-                    functionCalls[i] = null;
-                }
+                functionCalls?[i] = null;
             }
             else
             {
@@ -1102,10 +1093,7 @@ public static partial class ModuleCompiler
                         throw new ModuleContractException("Consumer cannot call an unexported producer implementation.");
                     }
                 }
-                if (functionCalls is not null)
-                {
-                    functionCalls[i] = null;
-                }
+                functionCalls?[i] = null;
                 declarations.Add(new ModuleFunction(function.Name,
                     Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
                         program.NativePointerTypes), function, false) {
@@ -1313,8 +1301,8 @@ public static partial class ModuleCompiler
                 producerOwned.Add(functions.Count);
                 var owner = exported.Function?.DeclaringStruct;
                 var name = exported.Function is { Intrinsic: not (BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate) }
-                    || owner is not null && Binder.TryPrimitiveType(owner, out _)
-                        && !producerTypes.ContainsKey(owner)
+                    || (owner is not null && Binder.TryPrimitiveType(owner, out _)
+                        && !producerTypes.ContainsKey(owner))
                     ? exported.Name
                     : owner is not null && sharedTypes.Contains(owner)
                     ? owner + ".$producer." + exported.Name[(owner.Length + 1)..] : "$producer." + exported.Name;
@@ -1575,10 +1563,10 @@ public static partial class ModuleCompiler
                     }
                     break;
                 case BoundNativePointerRead pointerRead:
-                    VisitExpression(pointerRead.Pointer);
+                    VisitExpression(pointerRead.Address);
                     break;
                 case BoundNativePointerWrite pointerWrite:
-                    VisitExpression(pointerWrite.Pointer);
+                    VisitExpression(pointerWrite.Address);
                     VisitExpression(pointerWrite.Value);
                     break;
                 case SymbolicCall symbolic:
@@ -2278,7 +2266,7 @@ public static partial class ModuleCompiler
         }
         if (!function.IsStatic && (function.ParameterCount < 1 || function.Variables.IsEmpty
             || function.Variables[0].IsOut || function.Variables[0].IsInit
-            || function.PropertyName is not null && function.Variables[0].IsMutable))
+            || (function.PropertyName is not null && function.Variables[0].IsMutable)))
         {
             return false;
         }
@@ -3469,11 +3457,11 @@ public static partial class ModuleCompiler
     {
         if (!NativeFunctionPointerContract.IsValidTable(destination)
             || !NativeFunctionPointerContract.IsValidTable(source)
-            || !destinationPointerTypes.IsDefault
+            || (!destinationPointerTypes.IsDefault
                 && !NativePointerTypeContract.IsValidTable(destinationPointerTypes,
-                    destinationStructures, destination)
-            || !sourcePointerTypes.IsDefault
-                && !NativePointerTypeContract.IsValidTable(sourcePointerTypes, sourceStructures, source))
+                    destinationStructures, destination))
+            || (!sourcePointerTypes.IsDefault
+                && !NativePointerTypeContract.IsValidTable(sourcePointerTypes, sourceStructures, source)))
         {
             throw new ModuleContractException("Native function-pointer signature table is invalid.");
         }
@@ -3751,10 +3739,10 @@ public static partial class ModuleCompiler
             },
             BoundNativePointerRead pointerRead => pointerRead with {
                 Type = RemapType(pointerRead.Type, source, destination, classOffset, destinationTypes),
-                Pointer = RemapExpression(pointerRead.Pointer, source, destination, classOffset, destinationTypes),
+                Address = RemapExpression(pointerRead.Address, source, destination, classOffset, destinationTypes),
             },
             BoundNativePointerWrite pointerWrite => pointerWrite with {
-                Pointer = RemapExpression(pointerWrite.Pointer, source, destination, classOffset, destinationTypes),
+                Address = RemapExpression(pointerWrite.Address, source, destination, classOffset, destinationTypes),
                 Value = RemapExpression(pointerWrite.Value, source, destination, classOffset, destinationTypes),
             },
             BoundCall call => call with {
@@ -4135,8 +4123,8 @@ public static partial class ModuleCompiler
             var nativePointerTypes = ReadNativePointerTypes(reader);
             if (!NativePointerTypeContract.IsValidTable(nativePointerTypes, structures,
                 nativeFunctionPointerSignatures)
-                || reader is ModuleReader { FormatVersion: NativePointerVersion }
-                    && nativePointerTypes.IsEmpty)
+                || (reader is ModuleReader { FormatVersion: NativePointerVersion }
+                    && nativePointerTypes.IsEmpty))
             {
                 throw new ModuleFormatException("Module native pointer type table is invalid.");
             }
@@ -4187,10 +4175,10 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
-            if (hasPrivateManagedState || !expectedConsumer
+            if (hasPrivateManagedState || (!expectedConsumer
                 && module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
                     or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
-                    or NativePointerVersion or NativeVTableVersion)
+                    or NativePointerVersion or NativeVTableVersion))
             {
                 ValidateProducer(module);
             }
@@ -4235,11 +4223,11 @@ public static partial class ModuleCompiler
                 ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
-                    || invocationProfileId != ScannerHost.InvocationProfileIdentity
+                    || (invocationProfileId != ScannerHost.InvocationProfileIdentity
                         && (version is not (PrivateSpanVersion or DirectNativeImportVersion
                                 or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion
                                 or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion)
-                            || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId))))
+                            || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId)))))
             || (invocationProfileId is null && bufferCount != 0))
         {
             throw new ModuleFormatException("Unsupported invocation profile metadata.");
@@ -4642,8 +4630,8 @@ public static partial class ModuleCompiler
         var intrinsic = (BoundIntrinsic)reader.ReadByte();
         var classConstructor = GetBool(reader);
         var classFactoryConstructor = reader.ReadInt32();
-        if (intrinsic >= BoundIntrinsic.NodeTryCreate
-            && intrinsic != BoundIntrinsic.NativeVTableCall)
+        if (intrinsic is >= BoundIntrinsic.NodeTryCreate
+            and not BoundIntrinsic.NativeVTableCall)
         {
             throw new ModuleFormatException("Managed nodes have no persisted module runtime.");
         }
@@ -5220,14 +5208,14 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException("Native pointer read authorization requires an unsafe scope.");
                 }
-                PutExpression(writer, pointerRead.Pointer, names, ref remaining, depth + 1, inUnsafe);
+                PutExpression(writer, pointerRead.Address, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundNativePointerWrite pointerWrite:
                 if (!pointerWrite.IsUnsafeAuthorized || !inUnsafe)
                 {
                     throw new ModuleContractException("Native pointer write authorization requires an unsafe scope.");
                 }
-                PutExpression(writer, pointerWrite.Pointer, names, ref remaining, depth + 1, inUnsafe);
+                PutExpression(writer, pointerWrite.Address, names, ref remaining, depth + 1, inUnsafe);
                 PutExpression(writer, pointerWrite.Value, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundViewRead viewRead:
@@ -5720,12 +5708,12 @@ public static partial class ModuleCompiler
                 IsUnsafeAuthorized = inUnsafe || inUnsafeExpression,
             },
             BoundNativePointerRead pointerRead => pointerRead with {
-                Pointer = ResolveExpression(pointerRead.Pointer, names, functions, structures, valueTypes,
+                Address = ResolveExpression(pointerRead.Address, names, functions, structures, valueTypes,
                     inUnsafe, inUnsafeExpression),
                 IsUnsafeAuthorized = inUnsafe || inUnsafeExpression,
             },
             BoundNativePointerWrite pointerWrite => pointerWrite with {
-                Pointer = ResolveExpression(pointerWrite.Pointer, names, functions, structures, valueTypes,
+                Address = ResolveExpression(pointerWrite.Address, names, functions, structures, valueTypes,
                     inUnsafe, inUnsafeExpression),
                 Value = ResolveExpression(pointerWrite.Value, names, functions, structures, valueTypes,
                     inUnsafe, inUnsafeExpression),

@@ -92,7 +92,7 @@ public readonly ref struct TrRmContractTableReader
                         var method = owner & 0xFF_FFFF;
                         if ((Read(data, 8) & 1) != 0)
                         {
-                            noThrowMethods.Add(method);
+                            _ = noThrowMethods.Add(method);
                         }
                     }
                     break;
@@ -137,7 +137,7 @@ public readonly ref struct TrRmContractTableReader
                     }
 
                     cleanupMethods.Add(Read(data, 8));
-                    cleanupTypes.Add((int)(owner & 0xFF_FFFF));
+                    _ = cleanupTypes.Add((int)(owner & 0xFF_FFFF));
                     break;
                 case 6:
                     if (data.Length != 24 || owner >> 24 != 0x16)
@@ -238,7 +238,6 @@ public readonly ref struct TrRmContractTableReader
                 throw InvalidContract();
             }
         }
-
     }
 
     internal ReadOnlySpan<byte> GetRow(int row)
@@ -307,8 +306,8 @@ public readonly ref struct TrRmContractTableReader
     private static bool IsPointerTypeSpec(TrRmTypeSpecTableReader typeSpecs, int typeSpecRow)
     {
         var type = typeSpecs.GetRow(typeSpecRow);
-        return type.Length == 4 && type[0] == 1 && type[2] == 0x8C
-            || type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C;
+        return (type.Length == 4 && type[0] == 1 && type[2] == 0x8C)
+            || (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C);
     }
 
     private void AddNativeParameter(int method, TrRmNativeParameterContract parameter)

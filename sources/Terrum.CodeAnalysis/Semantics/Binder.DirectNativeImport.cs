@@ -1,9 +1,9 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
-using Terrum.CodeAnalysis.Lexing;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -86,8 +86,8 @@ internal sealed partial class Binder
         var literalType = NativeStringZConstructorType(expression);
         if (literalType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
             && (parameter.PointeeType == PrimitiveType.Void
-                || parameter.PointeeType == PrimitiveType.Char16
-                    && literalType == PrimitiveType.NativeUtf16ZPointer))
+                || (parameter.PointeeType == PrimitiveType.Char16
+                    && literalType == PrimitiveType.NativeUtf16ZPointer)))
         {
             return literalType == PrimitiveType.NativeUtf16ZPointer
                 ? BindNativeUtf16ZLiteral(expression, literalType)
@@ -159,9 +159,9 @@ internal sealed partial class Binder
                 || index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
                 || _variables[arrayVariable].IsInitializationLocal
                 || _unresolvedVacantLocals.Contains(arrayVariable)
-                || access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
+                || (access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
                     && (!_variables[arrayVariable].IsMutable
-                        || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
+                        || !NativeFixedArrayContract.AllowsMutableLocal(layout))))
             {
                 Report("TRM3030",
                     "A NativeParameter address requires a matching initialized fixed array and access mode.",
@@ -183,8 +183,8 @@ internal sealed partial class Binder
                 && !DirectNativeImportContract.IsInputPointee(_variables[variable].Type, _structs))
             || _variables[variable].IsInitializationLocal
             || _unresolvedVacantLocals.Contains(variable)
-            || access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
-                && !_variables[variable].IsMutable)
+            || (access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
+                && !_variables[variable].IsMutable))
         {
             Report("TRM3030",
                 "A NativeParameter address requires initialized local storage with matching type and access.",

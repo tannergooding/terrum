@@ -504,10 +504,7 @@ public static partial class SemanticVerifier
                     }
                 }
             }
-            if (function.IndexedBody is not null)
-            {
-                function.IndexedBody.Verify(program, function, ref remaining);
-            }
+            function.IndexedBody?.Verify(program, function, ref remaining);
             if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
             {
                 VerifyClassFactory(program, function, i);
@@ -574,13 +571,13 @@ public static partial class SemanticVerifier
                 var primitiveOwner = declaringType < 0
                     && Binder.TryPrimitiveType(declaringStruct, out var primitive)
                     ? primitive : (PrimitiveType?)null;
-                if (declaringType < 0 && primitiveOwner is null
+                if ((declaringType < 0 && primitiveOwner is null)
                     || !function.Name.StartsWith(declaringStruct + ".", StringComparison.Ordinal)
                     || (function.IsConstructor && function.IsStatic)
-                    || primitiveOwner is not null && (function.IsConstructor
+                    || (primitiveOwner is not null && (function.IsConstructor
                         || function.IsClassConstructor || function.IsCleanup
-                        || !function.IsStatic && !function.Variables.IsEmpty
-                            && function.Variables[0].IsMutable)
+                        || (!function.IsStatic && !function.Variables.IsEmpty
+                            && function.Variables[0].IsMutable)))
                     || (!function.IsStatic && (function.Variables.IsEmpty
                         || function.Variables[0].Name != "this"
                         || function.Variables[0].IsOut
@@ -985,10 +982,10 @@ public static partial class SemanticVerifier
                     Expression(address.Index, scope, depth + 1);
                     break;
                 case BoundNativePointerRead pointerRead:
-                    Expression(pointerRead.Pointer, scope, depth + 1);
+                    Expression(pointerRead.Address, scope, depth + 1);
                     break;
                 case BoundNativePointerWrite pointerWrite:
-                    Expression(pointerWrite.Pointer, scope, depth + 1);
+                    Expression(pointerWrite.Address, scope, depth + 1);
                     Expression(pointerWrite.Value, scope, depth + 1);
                     break;
                 case BoundIsInitialized:
@@ -1571,10 +1568,10 @@ public static partial class SemanticVerifier
                     Expression(pointerAddress.Index, depth + 1, acquiringRoot);
                     break;
                 case BoundNativePointerRead pointerRead:
-                    Expression(pointerRead.Pointer, depth + 1, acquiringRoot);
+                    Expression(pointerRead.Address, depth + 1, acquiringRoot);
                     break;
                 case BoundNativePointerWrite pointerWrite:
-                    Expression(pointerWrite.Pointer, depth + 1, acquiringRoot);
+                    Expression(pointerWrite.Address, depth + 1, acquiringRoot);
                     Expression(pointerWrite.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundNativeFixedArrayWrite fixedArrayWrite:
@@ -2105,7 +2102,6 @@ public static partial class SemanticVerifier
                 throw InvalidEffect(function.Span, "NativeImport");
             }
         }
-
     }
 
     internal static void RejectSourceNativeImports(BoundProgram program, string target,
@@ -2115,8 +2111,8 @@ public static partial class SemanticVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
         if (program.NativeImportCatalog is not null || program.NativeImportCatalogId is not null
             || program.Functions.Any(static function => function.NativeImportKey is not null)
-            || !allowDirectNativeImports
-                && program.Functions.Any(static function => function.DirectNativeImport is not null)
+            || (!allowDirectNativeImports
+                && program.Functions.Any(static function => function.DirectNativeImport is not null))
             || program.Functions.Any(static function => function.ReturnType is
                 PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
@@ -2277,7 +2273,7 @@ public static partial class SemanticVerifier
                         && !declarations.Contains(drop.Variable))
                     || !IsUnique(program, function.Variables[drop.Variable].Type)
                     || (drop.IsOutput && (!function.Variables[drop.Variable].IsOut
-                        || function.ReturnType != PrimitiveType.Bool && !function.Variables[drop.Variable].IsInit)))
+                        || (function.ReturnType != PrimitiveType.Bool && !function.Variables[drop.Variable].IsInit))))
                 {
                     throw Invalid(drop.Span);
                 }
@@ -2988,10 +2984,7 @@ public static partial class SemanticVerifier
                         }
                         finally
                         {
-                            if (dependencies is not null)
-                            {
-                                dependencies.Staged.RemoveRange(stagedCount, dependencies.Staged.Count - stagedCount);
-                            }
+                            dependencies?.Staged.RemoveRange(stagedCount, dependencies.Staged.Count - stagedCount);
                         }
                     }
                 }
@@ -3527,7 +3520,7 @@ public static partial class SemanticVerifier
                 var pointerDefinition = program.NativePointerTypes[NativePointerTypes.Index(address.Type)];
                 var addressedVariable = function.Variables[address.Variable];
                 if (pointerDefinition.PointeeType != addressedVariable.Type
-                    || pointerDefinition.IsWritable && !addressedVariable.IsMutable)
+                    || (pointerDefinition.IsWritable && !addressedVariable.IsMutable))
                 {
                     throw InvalidEffect(address.Span, "NativePointer");
                 }
@@ -3538,29 +3531,29 @@ public static partial class SemanticVerifier
                 break;
             case BoundNativePointerRead pointerRead:
                 if (!pointerRead.IsUnsafeAuthorized
-                    || !NativePointerTypeContract.IsValidType(pointerRead.Pointer.Type, program.NativePointerTypes))
+                    || !NativePointerTypeContract.IsValidType(pointerRead.Address.Type, program.NativePointerTypes))
                 {
                     throw InvalidEffect(pointerRead.Span, "NativePointer");
                 }
                 var readPointerDefinition =
-                    program.NativePointerTypes[NativePointerTypes.Index(pointerRead.Pointer.Type)];
+                    program.NativePointerTypes[NativePointerTypes.Index(pointerRead.Address.Type)];
                 if (readPointerDefinition.PointeeType == PrimitiveType.Void
                     || readPointerDefinition.PointeeType != pointerRead.Type
                     || !DirectNativeImportContract.IsInputPointee(pointerRead.Type, program.Structures))
                 {
                     throw InvalidEffect(pointerRead.Span, "NativePointer");
                 }
-                Expression(pointerRead.Pointer, initialized, fieldMasks, declarations, function, program,
+                Expression(pointerRead.Address, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 break;
             case BoundNativePointerWrite pointerWrite:
                 if (!pointerWrite.IsUnsafeAuthorized
-                    || !NativePointerTypeContract.IsValidType(pointerWrite.Pointer.Type, program.NativePointerTypes))
+                    || !NativePointerTypeContract.IsValidType(pointerWrite.Address.Type, program.NativePointerTypes))
                 {
                     throw InvalidEffect(pointerWrite.Span, "NativePointer");
                 }
                 var writePointerDefinition =
-                    program.NativePointerTypes[NativePointerTypes.Index(pointerWrite.Pointer.Type)];
+                    program.NativePointerTypes[NativePointerTypes.Index(pointerWrite.Address.Type)];
                 if (!writePointerDefinition.IsWritable
                     || writePointerDefinition.PointeeType == PrimitiveType.Void
                     || writePointerDefinition.PointeeType != pointerWrite.Value.Type
@@ -3568,7 +3561,7 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(pointerWrite.Span, "NativePointer");
                 }
-                Expression(pointerWrite.Pointer, initialized, fieldMasks, declarations, function, program,
+                Expression(pointerWrite.Address, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 Expression(pointerWrite.Value, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
@@ -3914,8 +3907,8 @@ public static partial class SemanticVerifier
                     || (int)update.Type < 100 || (int)update.Type - 100 >= program.Structures.Length
                     || IsUnique(program, update.Type) || update.Place.Type != update.Type
                     || update.Function < 0 || update.Function >= program.Functions.Length
-                    || update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
-                        && !function.IsStatic)
+                    || (update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
+                        && !function.IsStatic))
                 {
                     throw InvalidEffect(update.Span);
                 }
@@ -3923,8 +3916,8 @@ public static partial class SemanticVerifier
                 var updateOwner = program.Structures[(int)update.Type - 100].Name;
                 var updateMember = update.Operator == TokenKind.PlusPlus
                     ? ".op_Increment" : ".op_Decrement";
-                if (updateTarget.Name != updateOwner + updateMember
-                        && updateTarget.Name != updateOwner + ".$producer" + updateMember
+                if ((updateTarget.Name != updateOwner + updateMember
+                        && updateTarget.Name != updateOwner + ".$producer" + updateMember)
                     || updateTarget.DeclaringStruct != updateOwner
                     || !updateTarget.IsStatic || updateTarget.IsConstructor || updateTarget.IsClassConstructor
                     || updateTarget.IsCleanup || updateTarget.Intrinsic != BoundIntrinsic.None
@@ -3932,7 +3925,7 @@ public static partial class SemanticVerifier
                     || updateTarget.Variables[0].Type != update.Type
                     || updateTarget.Variables[0].IsOut || updateTarget.Variables[0].IsInit
                     || updateTarget.Variables[0].IsMutable || updateTarget.ReturnType != update.Type
-                    || updateTarget.IsPrivate && function.DeclaringStruct != updateTarget.DeclaringStruct)
+                    || (updateTarget.IsPrivate && function.DeclaringStruct != updateTarget.DeclaringStruct))
                 {
                     throw Invalid();
                 }
@@ -4033,8 +4026,8 @@ public static partial class SemanticVerifier
                     || update.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64)
                     || update.Place.Type != update.Type || function.IsNoThrow
-                    || update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
-                        && !function.IsStatic)
+                    || (update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
+                        && !function.IsStatic))
                 {
                     throw InvalidEffect(update.Span);
                 }
@@ -4051,8 +4044,8 @@ public static partial class SemanticVerifier
                     || compound.Place.Type != compound.Type
                     || compound.Right.Type != (CompoundOperators.IsShift(compound.Operator)
                         ? PrimitiveType.Int32 : compound.Type)
-                    || compound.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
-                        && !function.IsStatic)
+                    || (compound.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
+                        && !function.IsStatic))
                 {
                     throw InvalidEffect(compound.Span);
                 }
@@ -4118,8 +4111,8 @@ public static partial class SemanticVerifier
                     or TokenKind.Star or TokenKind.Slash);
                 var integerArithmetic = integerOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
                     or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
-                var checkedIntegerOperation = integerArithmetic || integerOperands
-                    && (binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned);
+                var checkedIntegerOperation = integerArithmetic || (integerOperands
+                    && (binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned));
                 var binaryValid = binary.Operator switch {
                     TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent =>
                         operands && (integerArithmetic || floatingArithmetic)
@@ -5102,7 +5095,7 @@ public static partial class SemanticVerifier
             {
                 if (argument is BoundOutArgument output)
                 {
-                    state[output.Variable] = call.Type == PrimitiveType.Bool ? result : true;
+                    state[output.Variable] = call.Type != PrimitiveType.Bool || result;
                 }
                 else
                 {
@@ -5258,10 +5251,10 @@ public static partial class SemanticVerifier
                 VacateNestedOutputs(address.Index, state, ref remaining);
                 break;
             case BoundNativePointerRead pointerRead:
-                VacateNestedOutputs(pointerRead.Pointer, state, ref remaining);
+                VacateNestedOutputs(pointerRead.Address, state, ref remaining);
                 break;
             case BoundNativePointerWrite pointerWrite:
-                VacateNestedOutputs(pointerWrite.Pointer, state, ref remaining);
+                VacateNestedOutputs(pointerWrite.Address, state, ref remaining);
                 VacateNestedOutputs(pointerWrite.Value, state, ref remaining);
                 break;
             case BoundNativeFixedArrayWrite write:
@@ -5381,9 +5374,9 @@ public static partial class SemanticVerifier
                 fixedArrayWrite.Value, flowFacts, ref remaining),
             BoundNativeStorageAddress address => FlowFacts(address.Index, flowFacts, ref remaining),
             BoundNativePointerAddress => 0,
-            BoundNativePointerRead pointerRead => FlowFacts(pointerRead.Pointer, flowFacts, ref remaining),
+            BoundNativePointerRead pointerRead => FlowFacts(pointerRead.Address, flowFacts, ref remaining),
             BoundNativePointerWrite pointerWrite => AddFlowFact(
-                FlowFacts(pointerWrite.Pointer, flowFacts, ref remaining),
+                FlowFacts(pointerWrite.Address, flowFacts, ref remaining),
                 pointerWrite.Value, flowFacts, ref remaining),
             BoundIsSome test => (byte)(OutcomeEffectFact | FlowFacts(test.Value, flowFacts, ref remaining)),
             BoundIsVariablePattern or BoundIsInitialized => AllFlowFacts,
@@ -5618,11 +5611,9 @@ public static partial class SemanticVerifier
             BoundUnary { Operator: TokenKind.Bang } unary =>
                 CanBe(unary.Operand, !result, ref remaining, remainingCanBeFacts),
             BoundIsNull test => KnownOptionalPresence(test.Value, remainingCanBeFacts,
-                ref remaining) is bool isPresent
-                ? result != isPresent : true,
+                ref remaining) is not bool isPresent || result != isPresent,
             BoundIsSome test => KnownOptionalPresence(test.Value, remainingCanBeFacts,
-                ref remaining) is bool isPresent
-                ? result == isPresent : true,
+                ref remaining) is not bool isPresent || result == isPresent,
             BoundBinary { Operator: TokenKind.AmpersandAmpersand } and => result
                 ? CanBe(and.Left, true, ref remaining, remainingCanBeFacts)
                     && CanBe(and.Right, true, ref remaining, remainingCanBeFacts)
@@ -5679,7 +5670,7 @@ public static partial class SemanticVerifier
             false => (byte)(OptionalPresenceAnalyzed | OptionalPresenceAbsent),
             null => OptionalPresenceAnalyzed,
         };
-        remainingCanBeFacts.TryGetValue(expression, out var existingFacts);
+        _ = remainingCanBeFacts.TryGetValue(expression, out var existingFacts);
         remainingCanBeFacts[expression] = (byte)(existingFacts | presenceFacts);
         return presence;
     }

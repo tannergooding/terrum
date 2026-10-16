@@ -52,18 +52,18 @@ public enum PrimitiveType
     TokenSpan,
     /// <summary>A compiler-owned UTF-16-NUL image address, restricted to reviewed no-escape imports.</summary>
     NativeUtf16ZPointer,
-    /// <summary>Reserved ordinal for the retired catalog-selected callback carrier.</summary>
-    ReservedNativeCallbackAddress = 19,
+    /// <summary>Retained ordinal for the retired catalog-selected callback carrier.</summary>
+    LegacyNativeCallbackAddress = 19,
     /// <summary>Inline storage whose closed geometry is carried by selected native fixed-array metadata.</summary>
     NativeFixedArray,
     /// <summary>A compiler-owned ASCII UTF-8-NUL image address for reviewed no-escape imports.</summary>
     NativeUtf8ZPointer,
-    // Keep the removed native-address value reserved so private module type ordinals remain stable.
-    ReservedNativeAddress = 28,
+    /// <summary>Retained ordinal for the removed native-address carrier.</summary>
+    LegacyNativeAddress = 28,
     /// <summary>A catalogued, no-escape address of a checked plain aggregate value.</summary>
     NativeStorageAddress,
-    /// <summary>Reserved ordinal for the retired catalog-selected native storage record.</summary>
-    ReservedNativeStorageRecord = 30,
+    /// <summary>Retained ordinal for the retired catalog-selected native storage record.</summary>
+    LegacyNativeStorageRecord = 30,
     /// <summary>An unmanaged opaque <c>ptr&lt;void&gt;</c> value with no pinning or ownership guarantee.</summary>
     NativeRawPointer,
 }
@@ -626,26 +626,26 @@ public sealed record BoundNativePointerAddress(int Variable, PrimitiveType Type,
 }
 
 /// <summary>Reads a value through an explicitly unsafe native pointer.</summary>
-public sealed record BoundNativePointerRead(BoundExpression Pointer, PrimitiveType Type, TextSpan Span)
+public sealed record BoundNativePointerRead(BoundExpression Address, PrimitiveType Type, TextSpan Span)
     : BoundExpression(Type, Span)
 {
     internal bool IsUnsafeAuthorized { get; init; }
 
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Pointer];
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Address];
     internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with { Pointer = rewrite(Pointer) };
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Address = rewrite(Address) };
 }
 
 /// <summary>Writes a value through an explicitly unsafe writable native pointer.</summary>
-public sealed record BoundNativePointerWrite(BoundExpression Pointer, BoundExpression Value, TextSpan Span)
+public sealed record BoundNativePointerWrite(BoundExpression Address, BoundExpression Value, TextSpan Span)
     : BoundExpression(PrimitiveType.Void, Span)
 {
     internal bool IsUnsafeAuthorized { get; init; }
 
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Pointer, Value];
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Address, Value];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with {
-            Pointer = rewrite(Pointer),
+            Address = rewrite(Address),
             Value = rewrite(Value),
         };
 }

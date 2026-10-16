@@ -32,8 +32,8 @@ public static partial class ModuleCompiler
     private static void ValidateFixedLayoutModule(Module module)
     {
         var hasCommitments = module.Structures.Any(static structure => structure.BlittableTargetRequirement != 0);
-        if (hasCommitments && module.FormatVersion < FixedLayoutVersion
-            || !hasCommitments && module.FormatVersion == FixedLayoutVersion)
+        if ((hasCommitments && module.FormatVersion < FixedLayoutVersion)
+            || (!hasCommitments && module.FormatVersion == FixedLayoutVersion))
         {
             throw new ModuleFormatException("Explicit fixed-storage commitments require semantic-module revision 78.");
         }
