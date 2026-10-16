@@ -152,10 +152,9 @@ approved.
   records the user-settled trust boundary and recommends removing
   compiler-owned COM ownership/acquisition policy. It does not approve a
   generic vtable source form or any metadata assignments.
-- [Native imports and COM metadata in TRRM](trrm-native-interop-metadata.md)
-  remains unapproved; its native binding and aggregate-pointer experiments
-  are provisional, and its COM owner/acquisition clauses are withdrawn.
-  Generic interface/vtable metadata remains unresolved.
+- [Native import metadata in TRRM](trrm-native-interop-metadata.md) remains
+  unapproved; its native binding and aggregate-pointer experiments are
+  provisional. Standard vtable metadata remains unresolved.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md) is
   deferred until an integrated compiler path needs it and its full-file
   size/resource policy is defined; revision-76 support remains provisional.
