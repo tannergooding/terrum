@@ -106,6 +106,34 @@ public sealed class NativeImportTests
     }
 
     [Test]
+    public void MultipleDeclarationsCanShareOneNativeImportTarget()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 First(int32 value) { return value + 1; }
+            public int32 Second(int32 value) { return value + 2; }
+            """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(providerCompilation.Program!, ["First", "Second"]);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() { return First(10) + Second(20); }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var program = consumerCompilation.Program!;
+        NativeImportBinding[] bindings = [
+            new("First", "shared-provider.dll", "Shared"),
+            new("Second", "shared-provider.dll", "Shared"),
+        ];
+
+        var image = NativeEmitter.EmitWithImports(program, bindings, NativeRuntimePolicy.FailFast);
+        using var stream = new MemoryStream(image);
+        using var reader = new PEReader(stream);
+        var header = reader.PEHeaders.PEHeader!;
+        Assert.That(header.ImportAddressTableDirectory.Size, Is.EqualTo(32));
+    }
+
+    [Test]
     public void RejectsIncompleteAmbiguousAndUnsafeBindings()
     {
         var program = Compile();
@@ -117,7 +145,6 @@ public sealed class NativeImportTests
             [a, new NativeImportBinding("Main", "provider.dll", "B")],
             [a, new NativeImportBinding("B", "..\\provider.dll", "B")],
             [a, new NativeImportBinding("B", "provider.dll", "B\0bad")],
-            [a, new NativeImportBinding("B", "provider.dll", "A")],
         })
         {
             _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithImports(program, bindings,

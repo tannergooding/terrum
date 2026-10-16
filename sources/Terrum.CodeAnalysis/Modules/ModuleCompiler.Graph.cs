@@ -363,9 +363,9 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Graph export is missing from its semantic library.");
         }
-        var required = RequiredStructures(declarations, module.Structures,
-            nativePointerTypes: module.NativePointerTypes,
-            nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures);
+        var projection = ProjectNativeContracts(declarations, module.Structures,
+            module.NativePointerTypes, module.NativeFunctionPointerSignatures);
+        var required = projection.RequiredStructures;
         var importedTypes = allowImportedCleanup && !module.ImportedStructures.IsEmpty
             ? module.ImportedStructures.ToHashSet(StringComparer.Ordinal) : null;
         foreach (var structure in module.Structures)
@@ -378,16 +378,20 @@ public static partial class ModuleCompiler
             }
         }
         var structures = SelectStructures(module.Structures, required);
-        var nativePointerTypes = RemapNativePointerTypeDefinitions(module.NativePointerTypes,
-            module.Structures, structures);
+        structures = [.. structures.Select(structure =>
+            RemapNativePointerTypes(
+                RemapNativeFunctionPointerTypes(structure, projection.FunctionPointerMapping),
+                projection.PointerMapping))];
         var remappedDeclarations = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Count);
         foreach (var declaration in declarations)
         {
-            remappedDeclarations.Add(RemapFunction(declaration, module.Structures, structures));
+            var mapped = RemapFunction(declaration, module.Structures, structures);
+            mapped = RemapNativeFunctionPointerTypes(mapped, projection.FunctionPointerMapping);
+            remappedDeclarations.Add(RemapNativePointerTypes(mapped, projection.PointerMapping));
         }
         return new CompilationReference(structures, remappedDeclarations.MoveToImmutable(),
-            module.RuntimePolicy, nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures,
-            nativePointerTypes: nativePointerTypes);
+            module.RuntimePolicy, nativeFunctionPointerSignatures: projection.FunctionPointerSignatures,
+            nativePointerTypes: projection.PointerTypes);
     }
 
     /// <summary>Validates a graph library against current dependency declarations, without emitting code.</summary>

@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection.PortableExecutable;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -213,6 +214,43 @@ public sealed class NativeModuleTests
             "return Evaluate(MakeTwelve(10, 11, 12), MakeWide(0, 0), 2147483648, 1, 2);",
             StringComparison.Ordinal));
         Assert.That(await NativeModuleCompiler.RunAsync(failed, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
+    }
+
+    [Test]
+    public void PrivateModuleDependenciesCanReuseOneNativeImportUnderDifferentNames()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+            [NoThrow]
+            extern unsafe uint32 ProviderThreadId();
+
+            public uint32 ReadProviderThreadId() {
+                unsafe { return ProviderThreadId(); }
+            }
+            """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["ReadProviderThreadId"]);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+            [NoThrow]
+            extern unsafe uint32 ConsumerThreadId();
+
+            int32 Main() {
+                unsafe {
+                    return ConsumerThreadId() != 0 && ReadProviderThreadId() != 0 ? 0 : -1;
+                }
+            }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+
+        Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast), Is.Zero);
     }
 
     [Test]

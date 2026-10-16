@@ -2153,6 +2153,10 @@ public static partial class SemanticVerifier
                         countedLoop: counted is not null && ReferenceEquals(child, counted.Loop) ? counted : null);
                     returns |= childReturns;
                 }
+                if (reachable && !returns)
+                {
+                    CheckNativePointerScopeExit(block, initialized);
+                }
                 return returns;
             case BoundLocal local:
                 if (local.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -2223,6 +2227,7 @@ public static partial class SemanticVerifier
                     throw Invalid(end.Span);
                 }
                 CheckBackingInvalidation(end.Variable, initialized, end.Span);
+                CheckNativePointerLifetimeEnd(end.Variable, initialized, end.Span);
                 initialized.Retire(end.Variable);
                 fieldMasks[end.Variable] = 0;
                 return false;
@@ -2245,6 +2250,7 @@ public static partial class SemanticVerifier
                     throw Invalid(drop.Span);
                 }
                 CheckBackingInvalidation(drop.Variable, initialized, drop.Span);
+                CheckNativePointerLifetimeEnd(drop.Variable, initialized, drop.Span);
                 initialized[drop.Variable] = false;
                 fieldMasks[drop.Variable] = 0;
                 return false;
@@ -2857,6 +2863,7 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                 }
+                CheckNativePointerReturn(function, initialized, result.Span);
                 IReadOnlySet<int>? forwardedBacking = null;
                 if (result.Value is { Type: PrimitiveType.TokenSpan } spanResult)
                 {
@@ -4400,8 +4407,8 @@ public static partial class SemanticVerifier
                             if (IsNativeUtfZPointer(argument.Type)
                                 && argument.Type != target.Variables[parameterSlot].Type)
                             {
-                                if (directNativeParameter is null
-                                    || !isDirectNativeStringPointerArgument)
+                                if (!isDirectNativeStringPointerArgument
+                                    && !isNativeVTableStringPointerArgument)
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }

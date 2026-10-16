@@ -183,6 +183,7 @@ internal sealed partial class Binder
                     IsOperator = function.IsOperator,
                     PropertyName = function.PropertyName,
                     RequiresUnsafeCaller = function.RequiresUnsafeCaller,
+                    NativeFunctionPointerType = function.NativeFunctionPointerType,
                 });
             }
         }

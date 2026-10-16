@@ -229,6 +229,56 @@ public sealed partial class NativeSourceImportTests
     }
 
     [Test]
+    public void NativeJitHandlesCaseVariantDllNamesAndSnapshotsHostBuffers()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+            [NoThrow]
+            extern unsafe uint32 CurrentThreadId();
+
+            [Terrum.Interop.NativeImport("KERNEL32.DLL", "GetCurrentThreadId")]
+            [NoThrow]
+            extern unsafe uint32 CurrentThreadIdAgain();
+
+            [Terrum.Interop.NativeImport("Kernel32.Dll", "lstrlenW")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [NoThrow]
+            extern unsafe int32 WideLength(ptr<char16> value);
+
+            [Terrum.Interop.NativeImport("KERNEL32.DLL", "Sleep")]
+            [NoThrow]
+            extern unsafe void Sleep(uint32 milliseconds);
+
+            int32 Main() {
+                unsafe {
+                    if (CurrentThreadId() == 0 || CurrentThreadIdAgain() == 0) {
+                        return 1;
+                    }
+                    if (WideLength(utf16z("abc")) != 3) {
+                        return 2;
+                    }
+                    Sleep(1);
+                }
+                return 0;
+            }
+            """), [
+                new HostBuffer("ReadOnly", PrimitiveType.Int32, [0x12345678, 0x23456789], false),
+                new HostBuffer("Writable", PrimitiveType.Int32, [0x3456789A], true),
+            ], BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var execution = NativeJit.ExecuteWithData(compilation.Program!, NativeRuntimePolicy.FailFast);
+        Assert.That(execution.ExitCode, Is.Zero);
+        Assert.That(execution.BufferOffsets, Is.EqualTo(new[] { 0, 8 }));
+        Assert.That(execution.Data, Is.EqualTo(new byte[] {
+            0x78, 0x56, 0x34, 0x12, 0x89, 0x67, 0x45, 0x23, 0x9A, 0x78, 0x56, 0x34,
+        }));
+    }
+
+    [Test]
     public async Task SourceImportsMatchIndependentCAbiAndDx11SdkLayoutsAsync()
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);

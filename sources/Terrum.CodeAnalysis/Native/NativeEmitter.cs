@@ -244,16 +244,14 @@ public static class NativeEmitter
             throw new ArgumentException("Every external function needs exactly one native import binding.", nameof(bindings));
         }
         var selected = new Dictionary<int, NativeImportBinding>(bindings.Count);
-        var importNames = new HashSet<string>(bindings.Count, StringComparer.Ordinal);
         foreach (var binding in bindings)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (binding is null || string.IsNullOrEmpty(binding.FunctionName)
                 || !externals.TryGetValue(binding.FunctionName, out var index)
-                || !ValidDllName(binding.DllName) || !ValidImportName(binding.ExportName)
-                || !importNames.Add(binding.DllName.ToUpperInvariant() + "\0" + binding.ExportName))
+                || !ValidDllName(binding.DllName) || !ValidImportName(binding.ExportName))
             {
-                throw new ArgumentException("Import bindings must uniquely identify external declarations and DLL exports.", nameof(bindings));
+                throw new ArgumentException("Import bindings must identify valid external declarations and DLL exports.", nameof(bindings));
             }
             if (!selected.TryAdd(index, binding))
             {
@@ -2532,6 +2530,18 @@ internal sealed partial class PeCompiler
         }
     }
 
+    private void NormalizeNativeNarrowReturn(PrimitiveType type)
+    {
+        if (type == PrimitiveType.Bool)
+        {
+            _code.Bytes(0x0F, 0xB6, 0xC0);
+        }
+        else if (type == PrimitiveType.Char16)
+        {
+            _code.Bytes(0x0F, 0xB7, 0xC0);
+        }
+    }
+
     private void EmitExceptionFilter(bool storeReason)
     {
         // A leaf filter rejects everything except the private noncontinuable, versioned
@@ -4149,6 +4159,10 @@ internal sealed partial class PeCompiler
                 {
                     _code.MoveFloatingReturnToAccumulator(call.Type == PrimitiveType.Float64);
                 }
+                else
+                {
+                    NormalizeNativeNarrowReturn(call.Type);
+                }
                 break;
             case BoundCall call:
                 var argumentsBase = spill + CallResultSpills(call);
@@ -4285,8 +4299,9 @@ internal sealed partial class PeCompiler
                 var hiddenReturn = IsIndirect(call.Type) ? 1 : 0;
                 var sourceHidden = _sourceDependent?[call.Function] == true ? 2 : 0;
                 var hidden = hiddenReturn + sourceHidden;
-                var nativeAbi = _program.Functions[call.Function].IsExternal
-                    || _program.Functions[call.Function].NativeFunctionPointerType is not null;
+                var targetFunction = _program.Functions[call.Function];
+                var nativeAbi = targetFunction.DirectNativeImport is not null
+                    || targetFunction.NativeFunctionPointerType is not null;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
                     var argumentIndex = call.ArgumentIndex(i);
@@ -4345,6 +4360,10 @@ internal sealed partial class PeCompiler
                 if (nativeAbi && call.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                 {
                     _code.MoveFloatingReturnToAccumulator(call.Type == PrimitiveType.Float64);
+                }
+                else if (nativeAbi)
+                {
+                    NormalizeNativeNarrowReturn(call.Type);
                 }
                 if (hiddenReturn != 0)
                 {

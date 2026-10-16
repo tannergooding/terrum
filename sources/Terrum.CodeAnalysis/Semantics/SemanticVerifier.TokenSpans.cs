@@ -114,23 +114,29 @@ public static partial class SemanticVerifier
         // A slot conservatively retains every source it can hold on any path. Liveness
         // remains path-sensitive in InitializationState, including unwind replay.
         internal HashSet<int>?[] Sources { get; }
+        internal HashSet<int>?[] NativePointerSources { get; }
         internal List<IReadOnlySet<int>> Staged { get; } = [];
 
         internal BackingDependencies(int length)
         {
             Sources = new HashSet<int>?[length];
+            NativePointerSources = new HashSet<int>?[length];
         }
     }
 
     private static BackingDependencies? CreateBackingDependencies(BoundFunction function, BoundProgram program, bool hasSpans)
     {
-        if (!hasSpans)
+        if (!hasSpans && program.NativePointerTypes.IsEmpty)
         {
             return null;
         }
         var facts = new BackingDependencies(function.Variables.Length);
         var edges = new List<int>?[function.Variables.Length];
+        var nativePointerEdges = new List<int>?[function.Variables.Length];
         var forwardedSpanReturns = function.ReturnsForwardedBacking ? new List<BoundExpression>() : null;
+        var nativePointerReturns = new List<BoundExpression>();
+        var nativePointerReads = new List<(int Destination, BoundExpression Address)>();
+        var nativePointerWrites = new List<(BoundExpression Address, BoundExpression Value)>();
         for (var slot = 0; slot < edges.Length; slot++)
         {
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -150,6 +156,18 @@ public static partial class SemanticVerifier
             {
                 outgoing = [];
                 edges[source] = outgoing;
+            }
+
+            outgoing.Add(destination);
+        }
+
+        void AddNativePointerEdge(int source, int destination)
+        {
+            var outgoing = nativePointerEdges[source];
+            if (outgoing is null)
+            {
+                outgoing = [];
+                nativePointerEdges[source] = outgoing;
             }
 
             outgoing.Add(destination);
@@ -234,29 +252,115 @@ public static partial class SemanticVerifier
             }
         }
 
+        void NativePointerSource(int destination, BoundExpression expression, int depth)
+        {
+            Count(ref remaining, depth);
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            switch (expression)
+            {
+                case BoundNativePointerAddress address:
+                    if ((uint)address.Variable >= (uint)function.Variables.Length
+                        || !NativePointerTypeContract.IsValidType(address.Type, program.NativePointerTypes))
+                    {
+                        throw InvalidEffect(address.Span, "NativePointer");
+                    }
+                    AddNativePointerSource(facts, destination, address.Variable);
+                    break;
+                case BoundNativeFixedArrayPointerAddress address:
+                    if ((uint)address.Variable >= (uint)function.Variables.Length
+                        || !NativePointerTypeContract.IsValidType(address.Type, program.NativePointerTypes))
+                    {
+                        throw InvalidEffect(address.Span, "NativePointer");
+                    }
+                    AddNativePointerSource(facts, destination, address.Variable);
+                    break;
+                case BoundRead read when CarriesNativePointer(read.Type, program):
+                    if ((uint)read.Variable >= (uint)function.Variables.Length
+                        || function.Variables[read.Variable].Type != read.Type)
+                    {
+                        throw Invalid(read.Span);
+                    }
+                    AddNativePointerEdge(read.Variable, destination);
+                    break;
+                case BoundMove move when CarriesNativePointer(move.Type, program):
+                    if ((uint)move.Variable >= (uint)function.Variables.Length
+                        || function.Variables[move.Variable].Type != move.Type)
+                    {
+                        throw Invalid(move.Span);
+                    }
+                    AddNativePointerEdge(move.Variable, destination);
+                    break;
+                case BoundFieldRead field:
+                    NativePointerSource(destination, field.Receiver, depth + 1);
+                    break;
+                case BoundNativePointerRead read when CarriesNativePointer(read.Type, program):
+                    nativePointerReads.Add((destination, read.Address));
+                    break;
+                case BoundUnsafeExpression unsafeExpression:
+                    NativePointerSource(destination, unsafeExpression.Expression, depth + 1);
+                    break;
+                case BoundCall call when CarriesNativePointer(call.Type, program)
+                    && (uint)call.Function < (uint)program.Functions.Length
+                    && !program.Functions[call.Function].IsExternal
+                    && program.Functions[call.Function].Body is not null:
+                    var callee = program.Functions[call.Function];
+                    ValidateSpanCall(call, callee);
+                    foreach (var argument in call.Arguments)
+                    {
+                        if (CarriesNativePointer(argument.Type, program))
+                        {
+                            NativePointerSource(destination, argument, depth + 1);
+                        }
+                    }
+                    break;
+                case BoundConditional conditional when CarriesNativePointer(conditional.Type, program):
+                    NativePointerSource(destination, conditional.WhenTrue, depth + 1);
+                    NativePointerSource(destination, conditional.WhenFalse, depth + 1);
+                    break;
+            }
+        }
+
         void Collect(BoundStatement statement, int depth)
         {
             Count(ref remaining, depth);
             switch (statement)
             {
-                case BoundLocal { Initializer: BoundExpression initializer } local
-                    when TokenSpanContract.IsDependent(initializer.Type, program.Structures):
+                case BoundLocal { Initializer: BoundExpression initializer } local:
                     if ((uint)local.Variable >= (uint)facts.Sources.Length)
                     {
                         throw Invalid(local.Span);
                     }
-                    Source(local.Variable, initializer, depth + 1);
+                    if (TokenSpanContract.IsDependent(initializer.Type, program.Structures))
+                    {
+                        Source(local.Variable, initializer, depth + 1);
+                    }
+                    if (CarriesNativePointer(initializer.Type, program))
+                    {
+                        NativePointerSource(local.Variable, initializer, depth + 1);
+                    }
                     break;
                 case BoundReturn { Value: BoundExpression result } when result.Type == PrimitiveType.TokenSpan:
                     forwardedSpanReturns?.Add(result);
                     break;
-                case BoundAssignment { Value: BoundExpression value } assignment
-                    when TokenSpanContract.IsDependent(value.Type, program.Structures):
+                case BoundReturn { Value: BoundExpression result } when CarriesNativePointer(result.Type, program):
+                    nativePointerReturns.Add(result);
+                    break;
+                case BoundAssignment { Value: BoundExpression value } assignment:
                     if ((uint)assignment.Variable >= (uint)facts.Sources.Length)
                     {
                         throw Invalid(assignment.Span);
                     }
-                    Source(assignment.Variable, value, depth + 1);
+                    if (TokenSpanContract.IsDependent(value.Type, program.Structures))
+                    {
+                        Source(assignment.Variable, value, depth + 1);
+                    }
+                    if (CarriesNativePointer(value.Type, program))
+                    {
+                        NativePointerSource(assignment.Variable, value, depth + 1);
+                    }
                     break;
                 case BoundFieldAssignment { Value.Type: PrimitiveType.TokenSpan } field:
                     if ((uint)field.Variable >= (uint)facts.Sources.Length)
@@ -264,6 +368,17 @@ public static partial class SemanticVerifier
                         throw Invalid(field.Span);
                     }
                     Source(field.Variable, field.Value, depth + 1);
+                    break;
+                case BoundFieldAssignment field when CarriesNativePointer(field.Value.Type, program):
+                    if ((uint)field.Variable >= (uint)facts.NativePointerSources.Length)
+                    {
+                        throw Invalid(field.Span);
+                    }
+                    NativePointerSource(field.Variable, field.Value, depth + 1);
+                    break;
+                case BoundExpressionStatement { Expression: BoundNativePointerWrite write }
+                    when CarriesNativePointer(write.Value.Type, program):
+                    nativePointerWrites.Add((write.Address, write.Value));
                     break;
                 case BoundBlock block:
                     if (block.Statements.IsDefault)
@@ -347,6 +462,100 @@ public static partial class SemanticVerifier
                 }
             }
         }
+
+        bool PropagateNativePointerEdges()
+        {
+            var changed = false;
+            var pointerPending = new Queue<int>(nativePointerEdges.Length);
+            var pointerQueued = new bool[nativePointerEdges.Length];
+            for (var source = 0; source < nativePointerEdges.Length; source++)
+            {
+                pointerPending.Enqueue(source);
+                pointerQueued[source] = true;
+            }
+            while (pointerPending.TryDequeue(out var source))
+            {
+                pointerQueued[source] = false;
+                if (nativePointerEdges[source] is not { } outgoing)
+                {
+                    continue;
+                }
+                var sourceFacts = facts.NativePointerSources[source];
+                foreach (var destination in outgoing)
+                {
+                    Count(ref remaining, 0);
+                    if (sourceFacts is { Count: > 0 })
+                    {
+                        var destinationFacts = facts.NativePointerSources[destination];
+                        if (destinationFacts is null)
+                        {
+                            destinationFacts = [];
+                            facts.NativePointerSources[destination] = destinationFacts;
+                        }
+                        var before = destinationFacts.Count;
+                        destinationFacts.UnionWith(sourceFacts);
+                        if (before != destinationFacts.Count)
+                        {
+                            changed = true;
+                            if (!pointerQueued[destination])
+                            {
+                                pointerPending.Enqueue(destination);
+                                pointerQueued[destination] = true;
+                            }
+                        }
+                    }
+                }
+            }
+            return changed;
+        }
+
+        var pointerFactsChanged = true;
+        while (pointerFactsChanged)
+        {
+            pointerFactsChanged = PropagateNativePointerEdges();
+            foreach (var (destination, address) in nativePointerReads)
+            {
+                Count(ref remaining, 0);
+                foreach (var target in NativePointerBackingOf(address, facts, program, ref remaining, 0))
+                {
+                    if ((uint)target >= (uint)facts.NativePointerSources.Length
+                        || facts.NativePointerSources[target] is not { Count: > 0 } sourceFacts)
+                    {
+                        continue;
+                    }
+                    var destinationFacts = facts.NativePointerSources[destination];
+                    if (destinationFacts is null)
+                    {
+                        destinationFacts = [];
+                        facts.NativePointerSources[destination] = destinationFacts;
+                    }
+                    var before = destinationFacts.Count;
+                    destinationFacts.UnionWith(sourceFacts);
+                    pointerFactsChanged |= before != destinationFacts.Count;
+                }
+            }
+            foreach (var (address, value) in nativePointerWrites)
+            {
+                Count(ref remaining, 0);
+                var targets = NativePointerBackingOf(address, facts, program, ref remaining, 0);
+                var valueSources = NativePointerBackingOf(value, facts, program, ref remaining, 0);
+                foreach (var target in targets)
+                {
+                    if ((uint)target >= (uint)facts.NativePointerSources.Length || valueSources.Count == 0)
+                    {
+                        continue;
+                    }
+                    pointerFactsChanged |= AddNativePointerSources(facts, target, valueSources);
+                }
+            }
+        }
+        foreach (var result in nativePointerReturns)
+        {
+            if (NativePointerBackingOf(result, facts, program, ref remaining, 0).Count != 0)
+            {
+                throw InvalidEffect(result.Span, "NativePointer");
+            }
+        }
         if (forwardedSpanReturns is not null)
         {
             if (forwardedSpanReturns.Count == 0)
@@ -367,11 +576,127 @@ public static partial class SemanticVerifier
         return facts;
     }
 
+    private static void AddNativePointerSource(BackingDependencies facts, int slot, int source)
+    {
+        var sources = facts.NativePointerSources[slot];
+        if (sources is null)
+        {
+            sources = [];
+            facts.NativePointerSources[slot] = sources;
+        }
+        _ = sources.Add(source);
+    }
+
+    private static bool AddNativePointerSources(BackingDependencies facts, int slot, IReadOnlySet<int> additions)
+    {
+        if (additions.Count == 0)
+        {
+            return false;
+        }
+        var sources = facts.NativePointerSources[slot];
+        if (sources is null)
+        {
+            facts.NativePointerSources[slot] = [.. additions];
+            return true;
+        }
+        var before = sources.Count;
+        sources.UnionWith(additions);
+        return before != sources.Count;
+    }
+
+    private static bool CarriesNativePointer(PrimitiveType type, BoundProgram program)
+    {
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        pending.Push(type);
+        while (pending.TryPop(out var current))
+        {
+            if (NativePointerTypeContract.IsValidType(current, program.NativePointerTypes))
+            {
+                return true;
+            }
+            var structureType = (int)current;
+            if (structureType < 100 || structureType - 100 >= program.Structures.Length
+                || !visited.Add(current))
+            {
+                continue;
+            }
+            var structureIndex = structureType - 100;
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                pending.Push(field.Type);
+            }
+        }
+        return false;
+    }
+
+    private static IReadOnlySet<int> NativePointerBackingOf(BoundExpression expression,
+        BackingDependencies facts, BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (expression is null)
+        {
+            throw Invalid();
+        }
+        switch (expression)
+        {
+            case BoundNativePointerAddress address when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
+                return new HashSet<int> { address.Variable };
+            case BoundNativeFixedArrayPointerAddress address
+                when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
+                return new HashSet<int> { address.Variable };
+            case BoundRead read when (uint)read.Variable < (uint)facts.NativePointerSources.Length:
+                return facts.NativePointerSources[read.Variable] ?? EmptyBackingSources;
+            case BoundMove move when (uint)move.Variable < (uint)facts.NativePointerSources.Length:
+                return facts.NativePointerSources[move.Variable] ?? EmptyBackingSources;
+            case BoundNativePointerRead read when CarriesNativePointer(read.Type, program):
+                var readSources = new HashSet<int>();
+                foreach (var target in NativePointerBackingOf(read.Address, facts, program,
+                    ref remaining, depth + 1))
+                {
+                    if ((uint)target < (uint)facts.NativePointerSources.Length
+                        && facts.NativePointerSources[target] is { } targetSources)
+                    {
+                        readSources.UnionWith(targetSources);
+                    }
+                }
+                return readSources;
+            case BoundFieldRead field:
+                return NativePointerBackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
+            case BoundUnsafeExpression unsafeExpression:
+                return NativePointerBackingOf(unsafeExpression.Expression, facts, program, ref remaining, depth + 1);
+            case BoundCall call when CarriesNativePointer(call.Type, program)
+                && (uint)call.Function < (uint)program.Functions.Length
+                && !program.Functions[call.Function].IsExternal
+                && program.Functions[call.Function].Body is not null:
+                var callee = program.Functions[call.Function];
+                ValidateSpanCall(call, callee);
+                var callBacking = new HashSet<int>();
+                foreach (var argument in call.Arguments)
+                {
+                    if (CarriesNativePointer(argument.Type, program))
+                    {
+                        callBacking.UnionWith(NativePointerBackingOf(argument, facts, program,
+                            ref remaining, depth + 1));
+                    }
+                }
+                return callBacking;
+            case BoundConditional conditional when CarriesNativePointer(conditional.Type, program):
+                var branchBacking = new HashSet<int>(NativePointerBackingOf(conditional.WhenTrue,
+                    facts, program, ref remaining, depth + 1));
+                branchBacking.UnionWith(NativePointerBackingOf(conditional.WhenFalse,
+                    facts, program, ref remaining, depth + 1));
+                return branchBacking;
+            default:
+                return EmptyBackingSources;
+        }
+    }
+
     private static void ValidateSpanCall(BoundCall call, BoundFunction callee)
     {
         var arguments = call.Arguments;
         if (arguments.IsDefault || arguments.Length != callee.ParameterCount || call.Type != callee.ReturnType
-            || !call.ArgumentParameterIndices.IsDefault && call.ArgumentParameterIndices.Length != arguments.Length)
+            || (!call.ArgumentParameterIndices.IsDefault && call.ArgumentParameterIndices.Length != arguments.Length))
         {
             throw Invalid(call.Span);
         }
@@ -400,6 +725,77 @@ public static partial class SemanticVerifier
             facts.Sources[slot] = sources;
         }
         _ = sources.Add(source);
+    }
+
+    private static void CheckNativePointerLifetimeEnd(int owner, InitializationState state, TextSpan span)
+    {
+        if (state.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+        for (var slot = 0; slot < state.Length; slot++)
+        {
+            if ((state.Possibilities(slot) & 2) != 0 && facts.NativePointerSources[slot]?.Contains(owner) == true)
+            {
+                throw InvalidEffect(span, "NativePointer");
+            }
+        }
+    }
+
+    private static void CheckNativePointerReturn(BoundFunction function, InitializationState state, TextSpan span)
+    {
+        if (state.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+        var parameterCount = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+        for (var slot = 0; slot < parameterCount; slot++)
+        {
+            if (slot < function.Variables.Length
+                && (function.Variables[slot].IsOut || function.Variables[slot].IsInit
+                    || (function.IsConstructor && slot == 0) || (function.IsClassConstructor && slot == 0))
+                && (state.Possibilities(slot) & 2) != 0
+                && facts.NativePointerSources[slot] is { Count: > 0 })
+            {
+                throw InvalidEffect(span, "NativePointer");
+            }
+        }
+    }
+
+    private static void CheckNativePointerScopeExit(BoundBlock block, InitializationState state)
+    {
+        if (state.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+        var scopedVariables = new HashSet<int>();
+        foreach (var statement in block.Statements)
+        {
+            switch (statement)
+            {
+                case BoundLocal local:
+                    _ = scopedVariables.Add(local.Variable);
+                    break;
+                case BoundVacantLocal vacant:
+                    _ = scopedVariables.Add(vacant.Variable);
+                    break;
+                case BoundOwnerDeclaration owner:
+                    _ = scopedVariables.Add(owner.Variable);
+                    break;
+            }
+        }
+        if (scopedVariables.Count == 0)
+        {
+            return;
+        }
+        for (var slot = 0; slot < state.Length; slot++)
+        {
+            if (!scopedVariables.Contains(slot) && (state.Possibilities(slot) & 2) != 0
+                && facts.NativePointerSources[slot]?.Any(scopedVariables.Contains) == true)
+            {
+                throw InvalidEffect(block.Span, "NativePointer");
+            }
+        }
     }
 
     private static IReadOnlySet<int> BackingOf(BoundExpression expression, BackingDependencies? facts,

@@ -69,6 +69,10 @@ internal sealed partial class PeCompiler
         {
             _code.MoveFloatingReturnToAccumulator(returnType == PrimitiveType.Float64);
         }
+        else
+        {
+            NormalizeNativeNarrowReturn(returnType);
+        }
 
         var hasOutputParameter = false;
         for (var index = 0; index < function.ParameterCount; index++)
@@ -77,12 +81,12 @@ internal sealed partial class PeCompiler
         }
         if (hasOutputParameter)
         {
-            if (returnType != PrimitiveType.Void)
+            if (returnType is not (PrimitiveType.Bool or PrimitiveType.Void))
             {
                 StoreValue(PendingReturnSlot(), returnType);
             }
             CommitOutParameters();
-            if (returnType != PrimitiveType.Void)
+            if (returnType is not (PrimitiveType.Bool or PrimitiveType.Void))
             {
                 LoadValue(PendingReturnSlot(), returnType);
             }

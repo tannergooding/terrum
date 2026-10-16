@@ -136,20 +136,24 @@ public static partial class ModuleCompiler
     private static CompilationReference CreateReference(Module producer)
     {
         var declarations = ImportDeclarations(producer);
-        var required = RequiredStructures(declarations, producer.Structures,
-            nativePointerTypes: producer.NativePointerTypes,
-            nativeFunctionPointerSignatures: producer.NativeFunctionPointerSignatures);
-        var structures = SelectStructures(producer.Structures, required);
+        var projection = ProjectNativeContracts(declarations, producer.Structures,
+            producer.NativePointerTypes, producer.NativeFunctionPointerSignatures);
+        var structures = SelectStructures(producer.Structures, projection.RequiredStructures);
+        structures = [.. structures.Select(structure =>
+            RemapNativePointerTypes(
+                RemapNativeFunctionPointerTypes(structure, projection.FunctionPointerMapping),
+                projection.PointerMapping))];
         var remapped = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Length);
         foreach (var declaration in declarations)
         {
-            remapped.Add(RemapFunction(declaration, producer.Structures, structures));
+            var mapped = RemapFunction(declaration, producer.Structures, structures);
+            mapped = RemapNativeFunctionPointerTypes(mapped, projection.FunctionPointerMapping);
+            remapped.Add(RemapNativePointerTypes(mapped, projection.PointerMapping));
         }
         return new CompilationReference(structures, remapped.MoveToImmutable(), producer.RuntimePolicy,
             producer.RequiresSourceGrant, producer.InvocationProfileId,
-            nativeFunctionPointerSignatures: producer.NativeFunctionPointerSignatures,
-            nativePointerTypes: RemapNativePointerTypeDefinitions(producer.NativePointerTypes,
-                producer.Structures, structures));
+            nativeFunctionPointerSignatures: projection.FunctionPointerSignatures,
+            nativePointerTypes: projection.PointerTypes);
     }
 
     private static ImmutableArray<BoundFunction> ImportDeclarations(Module module)
@@ -531,23 +535,108 @@ public static partial class ModuleCompiler
         return result;
     }
 
+    private sealed record NativeContractProjection(HashSet<string> RequiredStructures,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> FunctionPointerSignatures,
+        ImmutableArray<NativePointerTypeDefinition> PointerTypes,
+        ImmutableArray<PrimitiveType> FunctionPointerMapping,
+        ImmutableArray<PrimitiveType> PointerMapping);
+
+    private static NativeContractProjection ProjectNativeContracts(IEnumerable<BoundFunction> functions,
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures)
+    {
+        var requiredStructures = new HashSet<string>(StringComparer.Ordinal);
+        var requiredPointerTypes = new HashSet<int>();
+        var requiredFunctionPointerTypes = new HashSet<int>();
+        PopulateRequiredStructures(functions, structures, default, null, requiredStructures, new Queue<PrimitiveType>(),
+            nativePointerTypes, nativeFunctionPointerSignatures, includeAllInteropTypes: false,
+            requiredPointerTypes: requiredPointerTypes,
+            requiredFunctionPointerTypes: requiredFunctionPointerTypes);
+
+        var functionPointerMapping = CreateMapping(nativeFunctionPointerSignatures.Length,
+            requiredFunctionPointerTypes, NativeFunctionPointerTypes.Type);
+        var pointerMapping = CreateMapping(nativePointerTypes.Length,
+            requiredPointerTypes, NativePointerTypes.Type);
+        var selectedStructures = SelectStructures(structures, requiredStructures);
+        var functionPointerSignatures =
+            ImmutableArray.CreateBuilder<NativeFunctionPointerSignatureDefinition>(requiredFunctionPointerTypes.Count);
+        for (var index = 0; index < nativeFunctionPointerSignatures.Length; index++)
+        {
+            if (!NativeFunctionPointerTypes.IsType(functionPointerMapping[index]))
+            {
+                continue;
+            }
+            var signature = nativeFunctionPointerSignatures[index];
+            functionPointerSignatures.Add(signature with {
+                ReturnType = RemapNativePointerType(
+                    RemapNativeFunctionPointerType(
+                        RemapType(signature.ReturnType, structures, selectedStructures), functionPointerMapping),
+                    pointerMapping),
+                ParameterTypes = [.. signature.ParameterTypes.Select(type =>
+                    RemapNativePointerType(
+                        RemapNativeFunctionPointerType(
+                            RemapType(type, structures, selectedStructures), functionPointerMapping),
+                        pointerMapping))],
+            });
+        }
+
+        var pointerTypeDefinitions =
+            ImmutableArray.CreateBuilder<NativePointerTypeDefinition>(requiredPointerTypes.Count);
+        for (var index = 0; index < nativePointerTypes.Length; index++)
+        {
+            if (!NativePointerTypes.IsType(pointerMapping[index]))
+            {
+                continue;
+            }
+            var pointerType = nativePointerTypes[index];
+            pointerTypeDefinitions.Add(pointerType with {
+                PointeeType = RemapNativePointerType(
+                    RemapNativeFunctionPointerType(
+                        RemapType(pointerType.PointeeType, structures, selectedStructures),
+                        functionPointerMapping),
+                    pointerMapping),
+            });
+        }
+
+        return new NativeContractProjection(requiredStructures, functionPointerSignatures.MoveToImmutable(),
+            pointerTypeDefinitions.MoveToImmutable(), functionPointerMapping, pointerMapping);
+
+        static ImmutableArray<PrimitiveType> CreateMapping(int count, HashSet<int> required,
+            Func<int, PrimitiveType> createType)
+        {
+            var mapping = ImmutableArray.CreateBuilder<PrimitiveType>(count);
+            var nextIndex = 0;
+            for (var index = 0; index < count; index++)
+            {
+                mapping.Add(required.Contains(index) ? createType(nextIndex++) : PrimitiveType.Void);
+            }
+            return mapping.MoveToImmutable();
+        }
+    }
+
     private static void PopulateRequiredStructures(IEnumerable<BoundFunction> functions,
         ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes,
         Func<string, int>? findStructureIndex, HashSet<string> result, Queue<PrimitiveType> pending,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
-        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default)
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
+        bool includeAllInteropTypes = true, HashSet<int>? requiredPointerTypes = null,
+        HashSet<int>? requiredFunctionPointerTypes = null)
     {
         result.Clear();
         pending.Clear();
         var visitedPointerTypes = new HashSet<int>();
         var visitedFunctionPointerTypes = new HashSet<int>();
-        for (var index = 0; index < nativePointerTypes.Length; index++)
+        if (includeAllInteropTypes)
         {
-            Add(NativePointerTypes.Type(index));
-        }
-        for (var index = 0; index < nativeFunctionPointerSignatures.Length; index++)
-        {
-            Add(NativeFunctionPointerTypes.Type(index));
+            for (var index = 0; index < nativePointerTypes.Length; index++)
+            {
+                Add(NativePointerTypes.Type(index));
+            }
+            for (var index = 0; index < nativeFunctionPointerSignatures.Length; index++)
+            {
+                Add(NativeFunctionPointerTypes.Type(index));
+            }
         }
         if (!classes.IsDefaultOrEmpty)
         {
@@ -562,6 +651,10 @@ public static partial class ModuleCompiler
         foreach (var function in functions)
         {
             Add(function.ReturnType);
+            if (function.NativeFunctionPointerType is PrimitiveType nativeFunctionPointerType)
+            {
+                Add(nativeFunctionPointerType);
+            }
             foreach (var variable in function.Variables)
             {
                 Add(variable.Type);
@@ -626,6 +719,7 @@ public static partial class ModuleCompiler
                 }
                 if (visitedFunctionPointerTypes.Add(functionPointerIndex))
                 {
+                    _ = requiredFunctionPointerTypes?.Add(functionPointerIndex);
                     var signature = nativeFunctionPointerSignatures[functionPointerIndex];
                     Add(signature.ReturnType);
                     foreach (var parameterType in signature.ParameterTypes)
@@ -644,6 +738,7 @@ public static partial class ModuleCompiler
                 }
                 if (visitedPointerTypes.Add(pointerIndex))
                 {
+                    _ = requiredPointerTypes?.Add(pointerIndex);
                     Add(nativePointerTypes[pointerIndex].PointeeType);
                 }
                 return;
@@ -973,12 +1068,6 @@ public static partial class ModuleCompiler
         }
         var producer = Read(referenceProducer, expectedConsumer: false);
         ValidateProducer(producer);
-        _ = MapNativeFunctionPointerTypes(
-            program.NativeFunctionPointerSignatures, producer.NativeFunctionPointerSignatures,
-            program.Structures, producer.Structures, program.NativePointerTypes, producer.NativePointerTypes);
-        _ = MapNativePointerTypes(program.NativePointerTypes, program.Structures,
-            program.NativeFunctionPointerSignatures, producer.NativePointerTypes, producer.Structures,
-            producer.NativeFunctionPointerSignatures);
         if (program.RequiresSourceGrant != producer.RequiresSourceGrant)
         {
             throw new ModuleContractException("Consumer and producer Host.Source requirements differ.");
@@ -1164,12 +1253,6 @@ public static partial class ModuleCompiler
         var consumer = Read(consumerBytes, expectedConsumer: true);
         var producer = Read(producerBytes, expectedConsumer: false);
         ValidateProducer(producer);
-        _ = MapNativeFunctionPointerTypes(
-            consumer.NativeFunctionPointerSignatures, producer.NativeFunctionPointerSignatures,
-            consumer.Structures, producer.Structures, consumer.NativePointerTypes, producer.NativePointerTypes);
-        _ = MapNativePointerTypes(consumer.NativePointerTypes, consumer.Structures,
-            consumer.NativeFunctionPointerSignatures, producer.NativePointerTypes, producer.Structures,
-            producer.NativeFunctionPointerSignatures);
         if (consumer.RuntimePolicy != producer.RuntimePolicy)
         {
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
@@ -1206,12 +1289,6 @@ public static partial class ModuleCompiler
     private static BoundProgram Link(Module consumer, Module producer, CompilationReference reference)
     {
         _ = RestoreConsumerAgainstReference(consumer, reference);
-        var producerFunctionPointerMapping = MapNativeFunctionPointerTypes(
-            consumer.NativeFunctionPointerSignatures, producer.NativeFunctionPointerSignatures,
-            consumer.Structures, producer.Structures, consumer.NativePointerTypes, producer.NativePointerTypes);
-        var producerNativePointerMapping = MapNativePointerTypes(consumer.NativePointerTypes,
-            consumer.Structures, consumer.NativeFunctionPointerSignatures, producer.NativePointerTypes,
-            producer.Structures, producer.NativeFunctionPointerSignatures);
         if (consumer.Classes.Length + producer.Classes.Length > SemanticVerifier.MaximumVariables)
         {
             throw new ModuleContractException("Combined private managed class layouts exceed the supported limit.");
@@ -1230,26 +1307,49 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Incompatible producer type layout '{structure.Name}'.");
             }
         }
-        var structures = consumer.Structures.ToBuilder();
-        var renamedTypes = producer.Structures.Select(structure => sharedTypes.Contains(structure.Name)
+        var renamedProducerStructures = producer.Structures.Select(structure => sharedTypes.Contains(structure.Name)
             ? structure : structure with {
                 Name = "$producer." + structure.Name,
                 CleanupMethod = structure.CleanupMethod is null ? null : "$producer." + structure.CleanupMethod,
-            }).Select(structure =>
-                RemapNativePointerTypes(
-                    RemapNativeFunctionPointerTypes(structure, producerFunctionPointerMapping),
-                    producerNativePointerMapping)).ToImmutableArray();
-        structures.AddRange(renamedTypes.Where(structure => !sharedTypes.Contains(structure.Name)));
-        var allStructures = structures.ToImmutable();
-        for (var index = consumer.Structures.Length; index < allStructures.Length; index++)
+            }).ToImmutableArray();
+        var consumerReference = new CompilationReference(consumer.Structures, [], consumer.RuntimePolicy,
+            nativeFunctionPointerSignatures: consumer.NativeFunctionPointerSignatures,
+            nativePointerTypes: consumer.NativePointerTypes);
+        var producerReference = new CompilationReference(renamedProducerStructures, [], producer.RuntimePolicy,
+            nativeFunctionPointerSignatures: producer.NativeFunctionPointerSignatures,
+            nativePointerTypes: producer.NativePointerTypes);
+        CompilationReference[] contractReferences = [consumerReference, producerReference];
+        var nativeFunctionPointerSignatures = MergeNativeFunctionPointerSignatures(contractReferences,
+            out var functionPointerMappings, out var nativePointerMappings);
+        var structures = consumer.Structures.ToBuilder();
+        structures.AddRange(renamedProducerStructures.Where(structure => !sharedTypes.Contains(structure.Name)));
+        var structureSkeletons = structures.ToImmutable();
+        var destinationTypes = IndexTypes(structureSkeletons);
+        var nativePointerTypes = MergeNativePointerTypeDefinitions(contractReferences, structureSkeletons,
+            nativePointerMappings, functionPointerMappings);
+        var allStructures = ImmutableArray.CreateBuilder<BoundStruct>(structureSkeletons.Length);
+        for (var index = 0; index < consumer.Structures.Length; index++)
         {
-            structures[index] = RemapNativeFunctionPointerTypes(
+            allStructures.Add(RemapNativeFunctionPointerTypes(
                 RemapNativePointerTypes(
-                    RemapStructure(allStructures[index], renamedTypes, allStructures),
-                    producerNativePointerMapping),
-                producerFunctionPointerMapping);
+                    RemapStructure(consumer.Structures[index], consumer.Structures, structureSkeletons,
+                        destinationTypes),
+                    nativePointerMappings[0]),
+                functionPointerMappings[0]));
         }
-        allStructures = structures.ToImmutable();
+        for (var index = 0; index < renamedProducerStructures.Length; index++)
+        {
+            var structure = renamedProducerStructures[index];
+            if (!sharedTypes.Contains(structure.Name))
+            {
+                allStructures.Add(RemapNativeFunctionPointerTypes(
+                    RemapNativePointerTypes(
+                        RemapStructure(structure, renamedProducerStructures, structureSkeletons, destinationTypes),
+                        nativePointerMappings[1]),
+                    functionPointerMappings[1]));
+            }
+        }
+        var combinedStructures = allStructures.MoveToImmutable();
         var available = producer.Functions.Where(static function => function.Import)
             .ToDictionary(function => function.Name, StringComparer.Ordinal);
         var names = new Dictionary<string, int>(consumer.Functions.Length, StringComparer.Ordinal);
@@ -1275,7 +1375,7 @@ public static partial class ModuleCompiler
                 producerOwned.Add(functions.Count);
                 functions.Add(RemapNativePointerTypes(
                     RemapNativeFunctionPointerTypes(ImportFunction(replacement, declaration.Name),
-                        producerFunctionPointerMapping), producerNativePointerMapping));
+                        functionPointerMappings[1]), nativePointerMappings[1]));
             }
             else
             {
@@ -1284,7 +1384,13 @@ public static partial class ModuleCompiler
                     throw new ModuleContractException("Consumer cannot define members of an imported value type.");
                 }
                 consumerOwned.Add(functions.Count);
-                functions.Add(declaration.Function ?? throw new ModuleFormatException("Consumer has an unowned function."));
+                var function = declaration.Function
+                    ?? throw new ModuleFormatException("Consumer has an unowned function.");
+                functions.Add(RemapNativePointerTypes(
+                    RemapNativeFunctionPointerTypes(
+                        RemapFunction(function, consumer.Structures, combinedStructures),
+                        functionPointerMappings[0]),
+                    nativePointerMappings[0]));
             }
         }
         foreach (var exported in producer.Functions)
@@ -1308,7 +1414,7 @@ public static partial class ModuleCompiler
                     ? owner + ".$producer." + exported.Name[(owner.Length + 1)..] : "$producer." + exported.Name;
                 functions.Add(RemapNativePointerTypes(
                     RemapNativeFunctionPointerTypes(ImportFunction(exported, name),
-                        producerFunctionPointerMapping), producerNativePointerMapping));
+                        functionPointerMappings[1]), nativePointerMappings[1]));
             }
         }
         var resolvedFunctions = functions.ToImmutable();
@@ -1323,11 +1429,11 @@ public static partial class ModuleCompiler
                 ? function with { Name = ownerName + "." + function.Name[prefix.Length..] }
                 : function;
         }).ToImmutableArray();
-        var valueTypes = new ModuleUnsafeValueTypeCache(allStructures);
+        var valueTypes = new ModuleUnsafeValueTypeCache(combinedStructures);
         foreach (var owner in consumerOwned)
         {
             functions[owner] = functions[owner] with {
-                Body = (BoundBlock)ResolveStatement(functions[owner].Body, names, resolutionFunctions, allStructures,
+                Body = (BoundBlock)ResolveStatement(functions[owner].Body, names, resolutionFunctions, combinedStructures,
                     valueTypes),
             };
         }
@@ -1340,20 +1446,25 @@ public static partial class ModuleCompiler
                 function = function with { ClassConstructor = producerNames[constructor] };
             }
             functions[owner] = function with {
-                Body = (BoundBlock)ResolveStatement(function.Body, producerNames, resolutionFunctions, allStructures,
+                Body = (BoundBlock)ResolveStatement(function.Body, producerNames, resolutionFunctions, combinedStructures,
                     valueTypes),
             };
         }
         var result = new BoundProgram(functions.ToImmutable(), consumer.EntryPoint) {
-            Structures = allStructures,
-            Classes = [.. consumer.Classes, .. producer.Classes.Select(@class =>
-                RemapNativePointerTypes(
+            Structures = combinedStructures,
+            Classes = [.. consumer.Classes.Select(@class => RemapNativePointerTypes(
+                RemapNativeFunctionPointerTypes(
+                    RemapClass(@class, consumer.Structures, combinedStructures),
+                    functionPointerMappings[0]),
+                nativePointerMappings[0])),
+                .. producer.Classes.Select(@class => RemapNativePointerTypes(
                     RemapNativeFunctionPointerTypes(RemapClass(@class with {
                         Name = "$producer." + @class.Name,
-                    }, renamedTypes, allStructures, consumer.Classes.Length), producerFunctionPointerMapping),
-                    producerNativePointerMapping))],
-            NativeFunctionPointerSignatures = consumer.NativeFunctionPointerSignatures,
-            NativePointerTypes = consumer.NativePointerTypes,
+                    }, renamedProducerStructures, combinedStructures, consumer.Classes.Length),
+                        functionPointerMappings[1]),
+                    nativePointerMappings[1]))],
+            NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
+            NativePointerTypes = nativePointerTypes,
             Buffers = producer.InvocationProfileId is not null
                 ? producer.InvocationBuffers
                 : producer.RequiresSourceGrant
@@ -1393,8 +1504,8 @@ public static partial class ModuleCompiler
             {
                 owner = "$producer." + owner;
             }
-            return RemapFunction(function with { Name = name, DeclaringStruct = owner }, renamedTypes,
-                allStructures, consumer.Classes.Length);
+            return RemapFunction(function with { Name = name, DeclaringStruct = owner }, renamedProducerStructures,
+                combinedStructures, consumer.Classes.Length, destinationTypes);
         }
     }
 
@@ -3148,8 +3259,12 @@ public static partial class ModuleCompiler
             return type;
         }
         var index = NativeFunctionPointerTypes.Index(type);
-        return (uint)index < (uint)mapping.Length
-            ? mapping[index] : throw new ModuleFormatException("Unknown native function-pointer type.");
+        if ((uint)index >= (uint)mapping.Length)
+        {
+            throw new ModuleFormatException("Unknown native function-pointer type.");
+        }
+        return NativeFunctionPointerTypes.IsType(mapping[index])
+            ? mapping[index] : throw new ModuleFormatException("Unreferenced native function-pointer type.");
     }
 
     private static PrimitiveType RemapNativePointerType(PrimitiveType type,
@@ -3160,8 +3275,12 @@ public static partial class ModuleCompiler
             return type;
         }
         var index = NativePointerTypes.Index(type);
-        return (uint)index < (uint)mapping.Length
-            ? mapping[index] : throw new ModuleFormatException("Unknown native pointer type.");
+        if ((uint)index >= (uint)mapping.Length)
+        {
+            throw new ModuleFormatException("Unknown native pointer type.");
+        }
+        return NativePointerTypes.IsType(mapping[index])
+            ? mapping[index] : throw new ModuleFormatException("Unreferenced native pointer type.");
     }
 
     private static ImmutableArray<NativePointerTypeDefinition> RemapNativePointerTypeDefinitions(
@@ -3362,6 +3481,17 @@ public static partial class ModuleCompiler
         var mappings = ImmutableArray.CreateBuilder<ImmutableArray<PrimitiveType>>(references.Count);
         nativePointerMappings = MergeNativePointerIdentities(references);
         var pointerMappingsByReference = nativePointerMappings;
+        var structureIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var reference in references)
+        {
+            foreach (var structure in reference.Structures)
+            {
+                if (!structureIndexes.ContainsKey(structure.Name))
+                {
+                    structureIndexes.Add(structure.Name, structureIndexes.Count);
+                }
+            }
+        }
         for (var referenceIndex = 0; referenceIndex < references.Count; referenceIndex++)
         {
             var reference = references[referenceIndex];
@@ -3389,53 +3519,63 @@ public static partial class ModuleCompiler
                         ? pointerMappingsByReference[referenceIndex][pointerIndex]
                         : throw new ModuleContractException("Provider native pointer type is invalid.");
                 }
-                if (!NativeFunctionPointerTypes.IsType(type))
+                if (NativeFunctionPointerTypes.IsType(type))
                 {
-                    return type;
-                }
-                var index = NativeFunctionPointerTypes.Index(type);
-                if ((uint)index >= (uint)signatures.Length)
-                {
-                    throw new ModuleContractException("Provider native function-pointer type is invalid.");
-                }
-                if (mapping[index] >= 0)
-                {
-                    return NativeFunctionPointerTypes.Type(mapping[index]);
-                }
-                if (state[index] != 0)
-                {
-                    throw new ModuleContractException("Provider native function-pointer signatures are recursive.");
-                }
-                state[index] = 1;
-                var source = signatures[index];
-                var candidate = source with {
-                    ReturnType = MapType(source.ReturnType),
-                    ParameterTypes = [.. source.ParameterTypes.Select(MapType)],
-                };
-                var mergedIndex = -1;
-                for (var existing = 0; existing < combined.Count; existing++)
-                {
-                    var other = combined[existing];
-                    if (candidate.CallingConvention == other.CallingConvention
-                        && candidate.ReturnType == other.ReturnType
-                        && candidate.ParameterTypes.SequenceEqual(other.ParameterTypes))
+                    var index = NativeFunctionPointerTypes.Index(type);
+                    if ((uint)index >= (uint)signatures.Length)
                     {
-                        mergedIndex = existing;
-                        break;
+                        throw new ModuleContractException("Provider native function-pointer type is invalid.");
                     }
-                }
-                if (mergedIndex < 0)
-                {
-                    mergedIndex = combined.Count;
-                    if (mergedIndex >= MaximumNodes)
+                    if (mapping[index] >= 0)
                     {
-                        throw new ModuleContractException("Combined native function-pointer signatures exceed limits.");
+                        return NativeFunctionPointerTypes.Type(mapping[index]);
                     }
-                    combined.Add(candidate);
+                    if (state[index] != 0)
+                    {
+                        throw new ModuleContractException("Provider native function-pointer signatures are recursive.");
+                    }
+                    state[index] = 1;
+                    var source = signatures[index];
+                    var candidate = source with {
+                        ReturnType = MapType(source.ReturnType),
+                        ParameterTypes = [.. source.ParameterTypes.Select(MapType)],
+                    };
+                    var mergedIndex = -1;
+                    for (var existing = 0; existing < combined.Count; existing++)
+                    {
+                        var other = combined[existing];
+                        if (candidate.CallingConvention == other.CallingConvention
+                            && candidate.ReturnType == other.ReturnType
+                            && candidate.ParameterTypes.SequenceEqual(other.ParameterTypes))
+                        {
+                            mergedIndex = existing;
+                            break;
+                        }
+                    }
+                    if (mergedIndex < 0)
+                    {
+                        mergedIndex = combined.Count;
+                        if (mergedIndex >= MaximumNodes)
+                        {
+                            throw new ModuleContractException(
+                                "Combined native function-pointer signatures exceed limits.");
+                        }
+                        combined.Add(candidate);
+                    }
+                    mapping[index] = mergedIndex;
+                    state[index] = 2;
+                    return NativeFunctionPointerTypes.Type(mergedIndex);
                 }
-                mapping[index] = mergedIndex;
-                state[index] = 2;
-                return NativeFunctionPointerTypes.Type(mergedIndex);
+                var structureIndex = (int)type - 100;
+                if (!ManagedClassTypes.IsManaged(type)
+                    && structureIndex >= 0 && structureIndex < reference.Structures.Length)
+                {
+                    var structureName = reference.Structures[structureIndex].Name;
+                    return structureIndexes.TryGetValue(structureName, out var combinedIndex)
+                        ? (PrimitiveType)(100 + combinedIndex)
+                        : throw new ModuleContractException($"Provider value type '{structureName}' is invalid.");
+                }
+                return type;
             }
         }
         var result = combined.ToImmutable();

@@ -50,7 +50,7 @@ public static unsafe class NativeJit
             throw new ArgumentException("A source-dependent program requires ExecuteWithSourceGrant.", nameof(program));
         }
         var (code, modules, imports) = EmitForExecution(program, runtimePolicy);
-        return ExecuteCode(code, modules, imports, registrarAssembly, null, null, false, out _);
+        return ExecuteCode(code, modules, imports, registrarAssembly, null, null, 0, false, out _);
     }
 
     /// <summary>Executes a source-dependent program with one fresh, immutable UTF-16 source grant.</summary>
@@ -91,7 +91,7 @@ public static unsafe class NativeJit
             IsInvocationSourceBound = true,
         };
         var code = EmitCode(invocationProgram, runtimePolicy);
-        return ExecuteCode(code, [], [], registrarAssembly, null, null, false, out _);
+        return ExecuteCode(code, [], [], registrarAssembly, null, null, 0, false, out _);
     }
 
     /// <summary>Executes a persisted scanner-profile program against fresh source and output buffers.</summary>
@@ -119,8 +119,12 @@ public static unsafe class NativeJit
             IsInvocationSourceBound = true,
         };
         var code = EmitCode(invocationProgram, runtimePolicy);
-        var tokenCount = ExecuteCode(code, [], [], registrarAssembly, null, null, true, out var data);
-        var execution = new NativeExecutionResult(tokenCount, data) { BufferOffsets = code.BufferOffsets };
+        var literalPrefixLength = GetNativeLiteralPrefixLength(invocationProgram);
+        var tokenCount = ExecuteCode(code, [], [], registrarAssembly, null, null, literalPrefixLength,
+            true, out var data);
+        var execution = new NativeExecutionResult(tokenCount, data) {
+            BufferOffsets = [.. code.BufferOffsets.Select(offset => checked(offset - literalPrefixLength))],
+        };
         return ScannerHost.ReadInvocationResult(source, tokenCount, execution, buffers);
     }
 
@@ -142,8 +146,12 @@ public static unsafe class NativeJit
         var buffers = ScalarFrontendHost.CreateInvocationProfileBuffers(source, profileIdentity);
         var invocationProgram = program with { Buffers = buffers, IsInvocationSourceBound = true };
         var code = EmitCode(invocationProgram, runtimePolicy);
-        var tokenCount = ExecuteCode(code, [], [], registrarAssembly, null, null, true, out var data);
-        var execution = new NativeExecutionResult(tokenCount, data) { BufferOffsets = code.BufferOffsets };
+        var literalPrefixLength = GetNativeLiteralPrefixLength(invocationProgram);
+        var tokenCount = ExecuteCode(code, [], [], registrarAssembly, null, null, literalPrefixLength,
+            true, out var data);
+        var execution = new NativeExecutionResult(tokenCount, data) {
+            BufferOffsets = [.. code.BufferOffsets.Select(offset => checked(offset - literalPrefixLength))],
+        };
         return ScalarFrontendHost.ReadInvocationResult(source, tokenCount, execution, buffers,
             (BoundRuntimePolicy)runtimePolicy);
     }
@@ -158,8 +166,12 @@ public static unsafe class NativeJit
         string? registrarAssembly = null)
     {
         var (code, modules, imports) = EmitForExecution(program, runtimePolicy);
-        var exitCode = ExecuteCode(code, modules, imports, registrarAssembly, null, null, true, out var data);
-        return new NativeExecutionResult(exitCode, data) { BufferOffsets = code.BufferOffsets };
+        var literalPrefixLength = GetNativeLiteralPrefixLength(program);
+        var exitCode = ExecuteCode(code, modules, imports, registrarAssembly, null, null,
+            literalPrefixLength, true, out var data);
+        return new NativeExecutionResult(exitCode, data) {
+            BufferOffsets = [.. code.BufferOffsets.Select(offset => checked(offset - literalPrefixLength))],
+        };
     }
 
     private static (NativeCode Code, NativeJitModule[] Modules, ImmutableArray<NativeImportBinding> Imports)
@@ -182,8 +194,15 @@ public static unsafe class NativeJit
         var (code, imports) = NativeEmitter.EmitCodeWithDirectNativeImports(program, runtimePolicy);
         ValidateBufferMetadata(program, code);
         var exportsByDll = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var distinctImports = ImmutableArray.CreateBuilder<NativeImportBinding>();
+        var importTargets = new HashSet<(string Dll, string Export)>();
         foreach (var import in imports)
         {
+            if (!importTargets.Add(GetImportIdentity(import.DllName, import.ExportName)))
+            {
+                continue;
+            }
+            distinctImports.Add(import);
             if (!exportsByDll.TryGetValue(import.DllName, out var exports))
             {
                 exports = [];
@@ -200,7 +219,7 @@ public static unsafe class NativeJit
             modules[moduleIndex++] = new NativeJitModule(dllName,
                 NativeEmitter.System32ImportPath(dllName), exports);
         }
-        return (code, modules, imports);
+        return (code, modules, distinctImports.ToImmutable());
     }
 
     private static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy)
@@ -237,7 +256,21 @@ public static unsafe class NativeJit
             throw new ArgumentException("Native graph consumers cannot contain host buffers.", nameof(code));
         }
         return ExecuteCode(code, modules, expectedImports, registrarAssembly,
-            registrarInputPipe, registrarOutputPipe, false, out _);
+            registrarInputPipe, registrarOutputPipe, 0, false, out _);
+    }
+
+    private static int GetNativeLiteralPrefixLength(BoundProgram program)
+    {
+        long literalLength = 0;
+        foreach (var literal in program.NativeUtf16ZLiterals)
+        {
+            literalLength = checked(literalLength + ((literal.Length + 1L) * sizeof(char)));
+        }
+        foreach (var literal in program.NativeUtf8ZLiterals)
+        {
+            literalLength = checked(literalLength + literal.Length + 1L);
+        }
+        return checked((int)((literalLength + 3) & ~3));
     }
 
     private static void ValidateBufferMetadata(BoundProgram program, NativeCode code)
@@ -245,6 +278,7 @@ public static unsafe class NativeJit
         var buffers = program.Buffers;
         long readOnlyLength = 0;
         long totalLength = 0;
+        var literalPrefixLength = GetNativeLiteralPrefixLength(program);
         foreach (var buffer in buffers)
         {
             var length = (long)buffer.Values.Length * sizeof(int);
@@ -255,18 +289,19 @@ public static unsafe class NativeJit
             }
         }
 
-        var runtimeOffset = code.ManagedRuntimeOffset < 0 ? (int)totalLength
-            : checked(((int)totalLength + 7) & ~7);
+        var dataLength = checked(literalPrefixLength + (int)totalLength);
+        var runtimeOffset = code.ManagedRuntimeOffset < 0 ? dataLength
+            : checked((dataLength + 7) & ~7);
         if (code.BufferOffsets.Length != buffers.Length || totalLength != code.HostDataLength
-            || readOnlyLength != code.ReadOnlyDataLength
+            || literalPrefixLength + readOnlyLength != code.ReadOnlyDataLength
             || code.Data.Length != runtimeOffset + (code.ManagedRuntimeOffset < 0 ? 0 : 24)
             || (code.ManagedRuntimeOffset >= 0 && code.ManagedRuntimeOffset != runtimeOffset))
         {
             throw new ArgumentException("Native buffer metadata does not match the bound program.", nameof(code));
         }
 
-        var readOnlyOffset = 0;
-        var writableOffset = code.ReadOnlyDataLength;
+        var readOnlyOffset = literalPrefixLength;
+        var writableOffset = checked(literalPrefixLength + (int)readOnlyLength);
         for (var index = 0; index < buffers.Length; index++)
         {
             var buffer = buffers[index];
@@ -300,7 +335,8 @@ public static unsafe class NativeJit
 
     private static int ExecuteCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
         IReadOnlyList<NativeImportBinding> expectedImports, string? registrarAssembly,
-        string? registrarInputPipe, string? registrarOutputPipe, bool captureHostData, out byte[] dataSnapshot)
+        string? registrarInputPipe, string? registrarOutputPipe, int literalPrefixLength,
+        bool captureHostData, out byte[] dataSnapshot)
     {
         ArgumentNullException.ThrowIfNull(code);
         ArgumentNullException.ThrowIfNull(modules);
@@ -316,6 +352,11 @@ public static unsafe class NativeJit
             || (code.ReadOnlyDataLength & 3) != 0 || (data.Length & 3) != 0)
         {
             throw new ArgumentException("Invalid native data partition.", nameof(code));
+        }
+        if (captureHostData && (literalPrefixLength < 0 || literalPrefixLength > code.ReadOnlyDataLength
+            || code.HostDataLength < code.ReadOnlyDataLength - literalPrefixLength))
+        {
+            throw new ArgumentException("Invalid native host data snapshot layout.", nameof(code));
         }
 
         foreach (var offset in code.BufferOffsets)
@@ -428,7 +469,7 @@ public static unsafe class NativeJit
             }
         }
         var moduleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var providersByName = new Dictionary<string, NativeJitModule>(modules.Count, StringComparer.Ordinal);
+        var providersByName = new Dictionary<string, NativeJitModule>(modules.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var module in modules)
         {
             if (string.IsNullOrEmpty(module.DllName) || !moduleNames.Add(module.DllName)
@@ -444,7 +485,7 @@ public static unsafe class NativeJit
         {
             if (!providersByName.TryGetValue(binding.DllName, out var module)
                 || !ContainsSortedExport(module.Exports, binding.ExportName)
-                || !allowed.Add((binding.DllName, binding.ExportName)))
+                || !allowed.Add(GetImportIdentity(binding.DllName, binding.ExportName)))
             {
                 throw new ArgumentException("Native JIT import has no unique validated provider.", nameof(expectedImports));
             }
@@ -455,7 +496,7 @@ public static unsafe class NativeJit
         {
             if (fixup.DisplacementOffset < 0 || fixup.DisplacementOffset > text.Length - sizeof(int)
                 || (fixup.DeclarationIndex >= 0
-                    ? !allowed.Contains((fixup.DllName, fixup.ExportName))
+                    ? !allowed.Contains(GetImportIdentity(fixup.DllName, fixup.ExportName))
                     : !((fixup.DllName.Equals("KERNEL32.dll", StringComparison.OrdinalIgnoreCase)
                             && fixup.ExportName is "RaiseException" or "ExitProcess" or "GetProcessHeap"
                                 or "HeapAlloc" or "HeapFree")
@@ -470,7 +511,7 @@ public static unsafe class NativeJit
             }
             if (fixup.DeclarationIndex >= 0)
             {
-                _ = emitted.Add((fixup.DllName, fixup.ExportName));
+                _ = emitted.Add(GetImportIdentity(fixup.DllName, fixup.ExportName));
             }
             for (var offset = fixup.DisplacementOffset; offset < fixup.DisplacementOffset + sizeof(int); offset++)
             {
@@ -637,10 +678,12 @@ public static unsafe class NativeJit
             if (captureHostData)
             {
                 dataSnapshot = new byte[code.HostDataLength];
-                new ReadOnlySpan<byte>((void*)(memory + readOnlyOffset), code.ReadOnlyDataLength).CopyTo(dataSnapshot);
-                var hostWritableLength = code.HostDataLength - code.ReadOnlyDataLength;
+                var hostReadOnlyLength = code.ReadOnlyDataLength - literalPrefixLength;
+                new ReadOnlySpan<byte>((void*)(memory + readOnlyOffset + literalPrefixLength), hostReadOnlyLength)
+                    .CopyTo(dataSnapshot);
+                var hostWritableLength = code.HostDataLength - hostReadOnlyLength;
                 new ReadOnlySpan<byte>((void*)(memory + writableOffset), hostWritableLength)
-                    .CopyTo(dataSnapshot.AsSpan(code.ReadOnlyDataLength));
+                    .CopyTo(dataSnapshot.AsSpan(hostReadOnlyLength));
             }
             else
             {
@@ -679,6 +722,9 @@ public static unsafe class NativeJit
         }
         return false;
     }
+
+    private static (string Dll, string Export) GetImportIdentity(string dllName, string exportName) =>
+        (dllName.ToUpperInvariant(), exportName);
 
     private static void Release(nint memory, int tableOffset, bool registered,
         INativeJitContinuationRegistration? continuationRegistration, nint module, nint handlerModule,

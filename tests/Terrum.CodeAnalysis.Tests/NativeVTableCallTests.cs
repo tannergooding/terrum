@@ -152,6 +152,107 @@ public sealed class NativeVTableCallTests
     }
 
     [Test]
+    public async Task NativeVTableBoolResultWithOutputPreservesTheReturnValueAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestVTable {
+                public fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>, bool> Method;
+                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>, bool> method) {
+                    Method = method;
+                }
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestObject {
+                public ptr<TestVTable> VTable;
+                public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
+            }
+
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            bool GetValue(ptr<TestObject> receiver, write ptr<uint32> output) {
+                unsafe {
+                    *output = 42;
+                    return true;
+                }
+            }
+
+            [Terrum.Interop.NativeVTableMethod(0)]
+            extern unsafe bool Invoke(ptr<TestObject> receiver, out uint32 output);
+
+            public int32 Run() {
+                unsafe {
+                    TestVTable vtable = new TestVTable(&GetValue);
+                    TestObject instance = new TestObject(&vtable);
+                    ptr<TestObject> receiver = &instance;
+                    mut uint32 output = 0;
+                    return Invoke(receiver, out output) && output == 42 ? 0 : -1;
+                }
+            }
+            """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var producer = NativeModuleCompiler.CreateProducer(providerCompilation.Program!, ["Run"],
+            "BoolVTableOutput", NativeRuntimePolicy.FailFast);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Run(); }"),
+            NativeModuleCompiler.CreateReference(producer));
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer,
+            NativeRuntimePolicy.FailFast);
+
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, producer, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.Zero);
+    }
+
+    [Test]
+    public void NativeVTableMethodAcceptsNulTerminatedStringArguments()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestVTable {
+                public fnptr<NativeAbi, ptr<TestObject>, ptr<char16>, int32> Method;
+                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<char16>, int32> method) {
+                    Method = method;
+                }
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestObject {
+                public ptr<TestVTable> VTable;
+                public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
+            }
+
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            int32 ReadFirst(ptr<TestObject> receiver, ptr<char16> value) {
+                unsafe { return *value == 'a' ? 42 : 0; }
+            }
+
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeVTableMethod(0)]
+            extern unsafe int32 Invoke(ptr<TestObject> receiver, ptr<char16> value);
+
+            int32 Main() {
+                unsafe {
+                    TestVTable vtable = new TestVTable(&ReadFirst);
+                    TestObject instance = new TestObject(&vtable);
+                    return Invoke(&instance, utf16z("abc")) == 42 ? 0 : -1;
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
     public void NativeVTableMethodReturnsRawPointer()
     {
         Assume.That(OperatingSystem.IsWindows()

@@ -96,6 +96,209 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
+    public async Task NativeCallableExportsSurvivePrivateAndNativeModuleConsumersAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string providerSource = """
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 Identity(int32 value) { return value; }
+            """;
+        const string consumerSource = """
+            int32 Main() {
+                unsafe { return Identity(42) == 42 ? 0 : -1; }
+            }
+            """;
+        const string addressConsumerSource = """
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> identity = &Identity;
+                    return identity(42) == 42 ? 0 : -1;
+                }
+            }
+            """;
+
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+
+        var privateProducer = ModuleCompiler.CreateProducer(providerCompilation.Program!, ["Identity"]);
+        var privateReference = ModuleCompiler.CreateReference(privateProducer);
+        var privateConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource), privateReference);
+        Assert.That(privateConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, privateConsumerCompilation.Diagnostics));
+        var privateConsumer = ModuleCompiler.CreateConsumer(
+            privateConsumerCompilation.Program!, privateProducer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(privateConsumer, privateProducer),
+            NativeRuntimePolicy.FailFast), Is.Zero);
+        var addressConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(addressConsumerSource), privateReference);
+        Assert.That(addressConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, addressConsumerCompilation.Diagnostics));
+        var addressConsumer = ModuleCompiler.CreateConsumer(addressConsumerCompilation.Program!,
+            privateProducer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(addressConsumer, privateProducer),
+            NativeRuntimePolicy.FailFast), Is.Zero);
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["Identity"], "NativeCallableProvider", NativeRuntimePolicy.FailFast);
+        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Other() { return 0; }"));
+        Assert.That(secondCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, secondCompilation.Diagnostics));
+        var secondProducer = NativeModuleCompiler.CreateProducer(secondCompilation.Program!,
+            ["Other"], "NativeCallableSecond", NativeRuntimePolicy.FailFast);
+        var nativeProducers = new[] { nativeProducer, secondProducer };
+        var nativeReference = NativeModuleCompiler.CreateReferenceSet(nativeProducers);
+        var nativeConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource), nativeReference);
+        Assert.That(nativeConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, nativeConsumerCompilation.Diagnostics));
+        var nativeConsumer = NativeModuleCompiler.CreateConsumerSet(
+            nativeConsumerCompilation.Program!, nativeProducers, NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.ValidateConsumerSet(nativeConsumer, nativeProducers);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(nativeConsumer, nativeProducers,
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.Zero);
+    }
+
+    [Test]
+    public async Task NativeCallsNormalizeNarrowReturnsAcrossImportPointerAndVTableAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Microsoft Visual Studio", "Installer", "vswhere.exe");
+        Assert.That(File.Exists(vswhere), Is.True,
+            "Visual Studio discovery is required to build the independent native return fixture.");
+        var discover = new ProcessStartInfo(vswhere);
+        foreach (var argument in new[] {
+            "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property", "installationPath",
+        })
+        {
+            discover.ArgumentList.Add(argument);
+        }
+        var installation = (await RunProcessAsync(discover, TimeSpan.FromSeconds(10)).ConfigureAwait(true)).Trim();
+        var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
+        Assert.That(File.Exists(environment), Is.True,
+            "Visual Studio x64 build tools are required to build the independent native return fixture.");
+
+        var directory = Directory.CreateTempSubdirectory("terrum-native-narrow-return-").FullName;
+        var assemblyPath = Path.Combine(directory, "native-narrow-return.asm");
+        var objectPath = Path.Combine(directory, "native-narrow-return.obj");
+        var libraryPath = Path.Combine(directory, "native-narrow-return.dll");
+        var exportPath = Path.Combine(directory, "native-narrow-return.exp");
+        var importLibraryPath = Path.Combine(directory, "native-narrow-return.lib");
+        var executablePath = Path.Combine(directory, "native-narrow-return.exe");
+        try
+        {
+            await File.WriteAllTextAsync(assemblyPath, """
+                option casemap:none
+                .code
+                ReturnFalseDirty PROC
+                    mov eax, 0FFFFFF00h
+                    ret
+                ReturnFalseDirty ENDP
+
+                GetFalseDirty PROC
+                    lea rax, ReturnFalseDirty
+                    ret
+                GetFalseDirty ENDP
+
+                ReturnFalseDirtyWithReceiver PROC
+                    mov eax, 0FFFFFF00h
+                    ret
+                ReturnFalseDirtyWithReceiver ENDP
+
+                GetFalseDirtyWithReceiver PROC
+                    lea rax, ReturnFalseDirtyWithReceiver
+                    ret
+                GetFalseDirtyWithReceiver ENDP
+
+                ReturnChar16Dirty PROC
+                    mov eax, 0DEAD0001h
+                    ret
+                ReturnChar16Dirty ENDP
+                END
+                """).ConfigureAwait(true);
+
+            var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
+                ?? throw new InvalidOperationException("ComSpec is unset.")) {
+                Arguments = $"/d /s /c \"call \"{environment}\" >nul && ml64 /nologo /c /Fo\"{objectPath}\" \"{assemblyPath}\" && link /nologo /dll /noentry /incremental:no /out:\"{libraryPath}\" /export:ReturnFalseDirty /export:GetFalseDirty /export:ReturnFalseDirtyWithReceiver /export:GetFalseDirtyWithReceiver /export:ReturnChar16Dirty \"{objectPath}\"\"",
+                WorkingDirectory = directory,
+            };
+            _ = await RunProcessAsync(build, TimeSpan.FromMinutes(2)).ConfigureAwait(true);
+
+            var compilation = Compilation.Create(SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                struct TestVTable {
+                    public fnptr<NativeAbi, ptr<TestObject>, bool> Method;
+                    public TestVTable(fnptr<NativeAbi, ptr<TestObject>, bool> method) {
+                        Method = method;
+                    }
+                }
+
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                struct TestObject {
+                    public ptr<TestVTable> VTable;
+                    public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
+                }
+
+                [Terrum.Interop.NativeImport("native-narrow-return.dll", "ReturnFalseDirty")]
+                [NoThrow]
+                extern unsafe bool ReturnFalseDirty();
+
+                [Terrum.Interop.NativeImport("native-narrow-return.dll", "GetFalseDirty")]
+                [NoThrow]
+                extern unsafe fnptr<NativeAbi, bool> GetFalseDirty();
+
+                [Terrum.Interop.NativeImport("native-narrow-return.dll", "GetFalseDirtyWithReceiver")]
+                [NoThrow]
+                extern unsafe fnptr<NativeAbi, ptr<TestObject>, bool> GetFalseDirtyWithReceiver();
+
+                [Terrum.Interop.NativeImport("native-narrow-return.dll", "ReturnChar16Dirty")]
+                [NoThrow]
+                extern unsafe char16 ReturnChar16Dirty();
+
+                [Terrum.Interop.NativeVTableMethod(0)]
+                extern unsafe bool Invoke(ptr<TestObject> receiver);
+
+                int32 Main() {
+                    unsafe {
+                        if (ReturnFalseDirty()) { return 1; }
+                        fnptr<NativeAbi, bool> callback = GetFalseDirty();
+                        if (callback()) { return 2; }
+                        char16 value = ReturnChar16Dirty();
+                        if (value != char16(1)) { return 3; }
+                        TestVTable table = new TestVTable(GetFalseDirtyWithReceiver());
+                        TestObject instance = new TestObject(&table);
+                        return Invoke(&instance) ? 4 : 0;
+                    }
+                }
+                """));
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            await File.WriteAllBytesAsync(executablePath, NativeEmitter.EmitWithNativeImportsForTesting(
+                compilation.Program!, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
+            _ = await RunProcessAsync(new ProcessStartInfo(executablePath) {
+                WorkingDirectory = directory,
+            }, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(executablePath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(exportPath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(importLibraryPath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(objectPath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(assemblyPath).ConfigureAwait(true);
+            Directory.Delete(directory);
+        }
+    }
+
+    [Test]
     public void FunctionPointerSignaturesMergeAcrossPrivateModuleReferences()
     {
         var firstProducer = CreateProducer("""

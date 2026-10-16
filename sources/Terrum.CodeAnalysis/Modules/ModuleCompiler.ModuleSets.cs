@@ -102,19 +102,23 @@ public static partial class ModuleCompiler
     private static CompilationReference SetReference(Module module)
     {
         var declarations = ImportDeclarations(module);
-        var required = RequiredStructures(declarations, module.Structures,
-            nativePointerTypes: module.NativePointerTypes,
-            nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures);
-        var structures = SelectStructures(module.Structures, required);
+        var projection = ProjectNativeContracts(declarations, module.Structures,
+            module.NativePointerTypes, module.NativeFunctionPointerSignatures);
+        var structures = SelectStructures(module.Structures, projection.RequiredStructures);
+        structures = [.. structures.Select(structure =>
+            RemapNativePointerTypes(
+                RemapNativeFunctionPointerTypes(structure, projection.FunctionPointerMapping),
+                projection.PointerMapping))];
         var remapped = ImmutableArray.CreateBuilder<BoundFunction>(declarations.Length);
         foreach (var declaration in declarations)
         {
-            remapped.Add(RemapFunction(declaration, module.Structures, structures));
+            var mapped = RemapFunction(declaration, module.Structures, structures);
+            mapped = RemapNativeFunctionPointerTypes(mapped, projection.FunctionPointerMapping);
+            remapped.Add(RemapNativePointerTypes(mapped, projection.PointerMapping));
         }
         return new CompilationReference(structures, remapped.MoveToImmutable(), module.RuntimePolicy,
-            nativeFunctionPointerSignatures: module.NativeFunctionPointerSignatures,
-            nativePointerTypes: RemapNativePointerTypeDefinitions(module.NativePointerTypes,
-                module.Structures, structures));
+            nativeFunctionPointerSignatures: projection.FunctionPointerSignatures,
+            nativePointerTypes: projection.PointerTypes);
     }
 
     private static Module[] ReadSet(IReadOnlyList<byte[]> producers)
