@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -12,6 +13,16 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeVTableCallTests
 {
+    private static string CompilerApphost()
+    {
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        return Path.Combine(root, "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+    }
+
     [Test]
     public void NativeVTableSlotForwardsExplicitReceiverAndWindowsX64ArgumentPositions()
     {
@@ -339,6 +350,50 @@ public sealed class NativeVTableCallTests
         NativeModuleCompiler.Validate(nativeConsumer, nativeProducer);
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.Zero);
+
+        var extraProviderCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Extra() { return 43; }"));
+        Assert.That(extraProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, extraProviderCompilation.Diagnostics));
+        var extraNativeProducer = NativeModuleCompiler.CreateProducer(
+            extraProviderCompilation.Program!, ["Extra"], "native_extra", NativeRuntimePolicy.FailFast);
+        var nativeProviders = new[] { nativeProducer, extraNativeProducer };
+        var multiProviderConsumerSource = consumerSource.Replace(
+            "return Invoke(receiver, &value) == 42 ? 0 : -1;",
+            "if (Invoke(receiver, &value) != 42) { return -1; }\n"
+                + "                    return Extra() == 43 ? 0 : -2;",
+            StringComparison.Ordinal);
+
+        var setReference = NativeModuleCompiler.CreateReferenceSet(nativeProviders);
+        var setCompilation = Compilation.Create(
+            SyntaxTree.Parse(multiProviderConsumerSource), setReference);
+        Assert.That(setCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var nativeSet = NativeModuleCompiler.CreateConsumerSet(setCompilation.Program!,
+            nativeProviders, NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.ValidateConsumerSet(nativeSet, nativeProviders);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(nativeSet, nativeProviders,
+            TimeSpan.FromSeconds(15), NativeRuntimePolicy.FailFast), Is.Zero);
+
+        var graphReference = NativeModuleCompiler.CreateGraphReference(nativeProviders);
+        var graphCompilation = Compilation.Create(
+            SyntaxTree.Parse(multiProviderConsumerSource), graphReference);
+        Assert.That(graphCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(graphCompilation.Program!,
+            nativeProviders, NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.ValidateGraph(graphConsumer, nativeProviders);
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(graphConsumer, nativeProviders,
+            CompilerApphost(), TimeSpan.FromSeconds(15), NativeRuntimePolicy.FailFast), Is.Zero);
+
+        var incompatibleNativeProducer = NativeModuleCompiler.CreateProducer(
+            incompatibleCompilation.Program!, exports, "native_vtable", NativeRuntimePolicy.FailFast);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateConsumerSet(nativeSet,
+                [incompatibleNativeProducer, extraNativeProducer]));
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(graphConsumer,
+                [incompatibleNativeProducer, extraNativeProducer]));
 
         var directCompilation = Compilation.Create(SyntaxTree.Parse(providerSource + consumerSource));
         Assert.That(directCompilation.HasErrors, Is.False,
