@@ -56,10 +56,21 @@ private span metadata, fixed-layout commitments, direct imports and outputs,
 and direct `NativeParameter` input metadata, respectively; revisions 79 and 80
 retain the applicable earlier private fields. Revision 81 combines private
 span roles with fixed-layout facts for source-granted modules that do not
-retain direct native imports. Writers select the required revision for the
-retained contracts, and readers accept revisions 76 through 81 while
-rejecting unsupported combinations. Older artifacts must be
-recreated from source. These private formats preserve verified, typed,
+retain direct native imports. Revision 82 adds concrete native function-pointer
+signature tables, native-callable function identities, and
+function-address/indirect-call nodes. Revision 83 adds typed native-pointer
+tables and pointer-address/read/write nodes. Set and graph dependency paths
+structurally merge and remap both type-table families before consumer-side
+verification. The function-pointer table may be empty in revision 83 when a
+module uses typed pointers without function pointers. Writers select the
+required revision for the retained contracts. Revision 84 adds numeric-slot
+native vtable method metadata, including parameter pointee/access/retention
+facts. Producer verification revalidates those declarations; references expose
+them as caller-unsafe external functions, while provider implementations retain
+the slot for native lowering. Set and graph dependency remapping also preserves
+the parameter pointee identities. Readers accept revisions 76 through 84 while
+rejecting unsupported combinations. Older artifacts must
+be recreated from source. These private formats preserve verified, typed,
 source-mapped structured IR and the supported declaration, layout,
 initialization, cleanup, and runtime contracts described in this reference and
 the [implementation reference](../implementation.md).
@@ -76,6 +87,9 @@ not persisted as an independent capability; removing the only scope rejects.
 | Field-value reads and getters inside `unsafe(expr)` | Eligible public `Copy` paths/owners and recursively exportable results. Getter identity remains canonical; linking permits only established producer qualification. This slice does not admit field/getter mutation. |
 | Readonly instance calls inside `unsafe(expr)` | One by-value receiver with recursively exportable by-value parameters/results. The method identifier is owner-relative; producer qualification is admitted only during linking. |
 | Mutable field-receiver calls inside `unsafe(expr)` | A nonescaping receiver loan is source argument zero mapped to formal zero of an ordinary or caller-unsafe synchronous mutable method. At least one field edge is caller-unsafe; every edge's declared access and the complete `MutReceiver`, initialization, place, mutability, ownership and reservation contracts are checked. Public non-unique `Copy` layouts and explicit by-value parameters/results must be recursively exportable. Wrapped/remapped or readonly receiver loans, mutable receiver imports, direct mutable-method exports, unsafe-block calls in this slice and other reference/output modes reject. |
+| Native function addresses and indirect calls | Revision 82 retains explicit Windows x64 `NativeAbi` signatures, native-callable function identities, address targets, and indirect-call operands/results. The target must exactly match its declared signature and retain `NoThrow` plus caller-unsafety; address formation and invocation require reconstructed unsafe scopes. Function-pointer values are non-owning code addresses and do not extend image lifetime. Standard TRRM does not encode this slice. |
+| Typed native pointers | Revision 83 retains pointer identities, pointee types, write access, and address/read/write body nodes. Pointer and function-pointer tables are recursively validated and structurally remapped through private dependency sets and graphs; unsafe scopes are reconstructed and verified. Standard TRRM does not encode typed-pointer tables or these body nodes and rejects programs that use them. |
+| Numeric-slot native vtable methods | Revision 84 retains the provider's slot and pointer parameter contracts through private modules and native packages. Exported references expose the function as a caller-unsafe external dependency; the slot remains provider implementation metadata. Standard TRRM does not encode this declaration. |
 | Static binary nominal operators inside `unsafe(expr)` | Two exact owner-typed by-value operands and an owner result, or `bool` for comparisons. Public non-unique `Copy` owners have recursively exportable layouts, and the complete call retains canonical positional mapping. |
 | Static unary nominal operators inside `unsafe(expr)` | Unary plus, negation, logical-not and ones-complement use one exact owner-typed by-value operand. The declared result may be a distinct recursively exportable scalar or `Copy` type; the complete call retains canonical default mapping. |
 | Nominal prefix/postfix `++` and `--` inside `unsafe(expr)` | The matching static operator has the exact owner operand/result and a public recursively exportable non-unique `Copy` owner. The place is ordinarily writable; unsafe field paths are excluded from expression update places. |

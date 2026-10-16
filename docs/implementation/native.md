@@ -103,6 +103,18 @@ and its writable fields are supported receiver places. Current artifacts
 record the validated access and receiver contracts directly; revision 76
 remains the base when no private span, fixed-layout or direct-import facts
 require a later revision.
+The current Windows x64 prototype also emits `NoThrow` native-callable
+functions and explicit native function-pointer values. It carries the exact
+scalar/raw-pointer signature through local and field storage, direct address
+formation, indirect-call verification, native x64 lowering, and private
+module/dependency paths. Forming or invoking a function pointer requires an
+explicit unsafe scope; a callback target remains valid only while its code
+image is loaded. This prototype is separate from the accepted grammar and
+standard TRRM metadata.
+For the supported provisional invocation-scoped `Host.Source` library path,
+semantic verification rejects native-callable functions that directly or
+transitively depend on that source grant: the foreign callback ABI has no
+hidden source context. The emitter retains a defensive check.
 The provisional `Host.Source` semantic-module JIT adapter is a separate,
 unapproved extension; accepted module execution remains source-independent.
 It does not establish source-dependent native packages or persisted AOT.

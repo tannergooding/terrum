@@ -1,0 +1,413 @@
+namespace Triangle.Interop;
+
+[Blittable] [Layout(Sequential)]
+struct Color4 {
+    float32 Red;
+    float32 Green;
+    float32 Blue;
+    float32 Alpha;
+
+    [NoThrow]
+    public Color4(float32 red, float32 green, float32 blue, float32 alpha) {
+        Red = red;
+        Green = green;
+        Blue = blue;
+        Alpha = alpha;
+    }
+}
+
+[Blittable] [Layout(Sequential)]
+struct Viewport {
+    float32 TopLeftX;
+    float32 TopLeftY;
+    float32 Width;
+    float32 Height;
+    float32 MinDepth;
+    float32 MaxDepth;
+
+    [NoThrow]
+    public Viewport(float32 topLeftX, float32 topLeftY, float32 width, float32 height,
+        float32 minDepth, float32 maxDepth) {
+        TopLeftX = topLeftX;
+        TopLeftY = topLeftY;
+        Width = width;
+        Height = height;
+        MinDepth = minDepth;
+        MaxDepth = maxDepth;
+    }
+}
+
+[Blittable] [Layout(Sequential)]
+struct InterfaceId {
+    uint32 Data1;
+    uint32 Data2Data3;
+    uint64 Data4;
+
+    [NoThrow]
+    public InterfaceId(uint32 data1, uint32 data2Data3, uint64 data4) {
+        Data1 = data1;
+        Data2Data3 = data2Data3;
+        Data4 = data4;
+    }
+}
+
+[Terrum.Interop.NativeVTableMethod(2)]
+[NoThrow]
+extern unsafe uint32 Release(ptr<void> receiver);
+
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(4, Write, NoEscape, 1)]
+[Terrum.Interop.NativeVTableMethod(9)]
+[NoThrow]
+extern unsafe int32 GetBufferRaw(
+    ptr<void> receiver, uint32 buffer, ptr<InterfaceId> interfaceId, ptr<ptr<void>> output);
+
+[Terrum.Interop.NativeVTableMethod(8)]
+[NoThrow]
+extern unsafe int32 PresentRaw(ptr<void> receiver, uint32 syncInterval, uint32 flags);
+
+[Terrum.Interop.NativeVTableMethod(13)]
+[NoThrow]
+extern unsafe int32 ResizeBuffersRaw(
+    ptr<void> receiver, uint32 bufferCount, uint32 width, uint32 height, uint32 format, uint32 flags);
+
+[Terrum.Interop.NativeParameter(4, Write, NoEscape, 1)]
+[Terrum.Interop.NativeVTableMethod(9)]
+[NoThrow]
+extern unsafe int32 CreateRenderTargetViewRaw(
+    ptr<void> receiver, ptr<void> resource, ptr<void> description, ptr<ptr<void>> output);
+
+[Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+[Terrum.Interop.NativeVTableMethod(12)]
+[NoThrow]
+extern unsafe int32 CreateVertexShaderRaw(
+    ptr<void> receiver, ptr<void> bytecode, uint64 bytecodeSize,
+    ptr<void> classLinkage, ptr<ptr<void>> output);
+
+[Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+[Terrum.Interop.NativeVTableMethod(15)]
+[NoThrow]
+extern unsafe int32 CreatePixelShaderRaw(
+    ptr<void> receiver, ptr<void> bytecode, uint64 bytecodeSize,
+    ptr<void> classLinkage, ptr<ptr<void>> output);
+
+[Terrum.Interop.NativeVTableMethod(3)]
+[NoThrow]
+extern unsafe ptr<void> GetBufferPointerRaw(ptr<void> receiver);
+
+[Terrum.Interop.NativeVTableMethod(4)]
+[NoThrow]
+extern unsafe uint64 GetBufferSizeRaw(ptr<void> receiver);
+
+[Terrum.Interop.NativeVTableMethod(9)]
+[NoThrow]
+extern unsafe void PSSetShaderRaw(
+    ptr<void> receiver, ptr<void> shader, ptr<void> classInstances, uint32 classInstanceCount);
+
+[Terrum.Interop.NativeVTableMethod(11)]
+[NoThrow]
+extern unsafe void VSSetShaderRaw(
+    ptr<void> receiver, ptr<void> shader, ptr<void> classInstances, uint32 classInstanceCount);
+
+[Terrum.Interop.NativeVTableMethod(13)]
+[NoThrow]
+extern unsafe void DrawRaw(ptr<void> receiver, uint32 vertexCount, uint32 startVertexLocation);
+
+[Terrum.Interop.NativeVTableMethod(24)]
+[NoThrow]
+extern unsafe void IASetPrimitiveTopologyRaw(ptr<void> receiver, uint32 topology);
+
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
+[Terrum.Interop.NativeVTableMethod(33)]
+[NoThrow]
+extern unsafe void OMSetRenderTargetsRaw(
+    ptr<void> receiver, uint32 count, ptr<ptr<void>> renderTargets, ptr<void> depthStencil);
+
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
+[Terrum.Interop.NativeVTableMethod(44)]
+[NoThrow]
+extern unsafe void RSSetViewportsRaw(ptr<void> receiver, uint32 count, ptr<Viewport> viewports);
+
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
+[Terrum.Interop.NativeVTableMethod(50)]
+[NoThrow]
+extern unsafe void ClearRenderTargetViewRaw(
+    ptr<void> receiver, ptr<void> view, ptr<Color4> color);
+
+[Terrum.Interop.NativeVTableMethod(110)]
+[NoThrow]
+extern unsafe void ClearStateRaw(ptr<void> receiver);
+
+public unique struct ShaderBlobOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe ShaderBlobOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    public unsafe ptr<void> GetBufferPointer() {
+        unsafe { return GetBufferPointerRaw(Pointer); }
+    }
+
+    public unsafe uint64 GetBufferSize() {
+        unsafe { return GetBufferSizeRaw(Pointer); }
+    }
+}
+
+public unique struct SampleSwapChainOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe SampleSwapChainOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    [NoThrow]
+    public bool GetBuffer(out BackBufferOwner backBuffer) {
+        mut InterfaceId interfaceId = new InterfaceId(
+            0x6F15AAF2, 0x4E89D208, 0x9C4FD3359548B49A);
+        mut ptr<void> pointer = null;
+        mut int32 status = -1;
+        unsafe {
+            status = GetBufferRaw(Pointer, 0, &interfaceId, &pointer);
+        }
+        backBuffer = unsafe(new BackBufferOwner(pointer));
+        return status >= 0;
+    }
+
+    [NoThrow]
+    public bool Present() {
+        unsafe { return PresentRaw(Pointer, 1, 0) >= 0; }
+    }
+
+    [NoThrow]
+    public bool ResizeBuffers(
+        uint32 bufferCount, uint32 width, uint32 height, uint32 format, uint32 flags) {
+        unsafe {
+            return ResizeBuffersRaw(Pointer, bufferCount, width, height, format, flags) >= 0;
+        }
+    }
+}
+
+public unique struct SampleDeviceOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe SampleDeviceOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    [NoThrow]
+    public bool CreateRenderTargetView(ptr<void> resource, out RenderTargetViewOwner view) {
+        mut ptr<void> pointer = null;
+        mut int32 status = -1;
+        unsafe {
+            status = CreateRenderTargetViewRaw(Pointer, resource, null, &pointer);
+        }
+        view = unsafe(new RenderTargetViewOwner(pointer));
+        return status >= 0;
+    }
+
+    [NoThrow]
+    public bool CreateVertexShader(
+        ptr<void> bytecode, uint64 bytecodeSize, out VertexShaderOwner shader) {
+        mut ptr<void> pointer = null;
+        mut int32 status = -1;
+        unsafe {
+            status = CreateVertexShaderRaw(
+                Pointer, bytecode, bytecodeSize, null, &pointer);
+        }
+        shader = unsafe(new VertexShaderOwner(pointer));
+        return status >= 0;
+    }
+
+    [NoThrow]
+    public bool CreatePixelShader(
+        ptr<void> bytecode, uint64 bytecodeSize, out PixelShaderOwner shader) {
+        mut ptr<void> pointer = null;
+        mut int32 status = -1;
+        unsafe {
+            status = CreatePixelShaderRaw(
+                Pointer, bytecode, bytecodeSize, null, &pointer);
+        }
+        shader = unsafe(new PixelShaderOwner(pointer));
+        return status >= 0;
+    }
+}
+
+public unique struct SampleContextOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe SampleContextOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    [NoThrow]
+    public void ClearState() {
+        unsafe { ClearStateRaw(Pointer); }
+    }
+
+    [NoThrow]
+    public void Draw(uint32 vertexCount, uint32 startVertexLocation) {
+        unsafe { DrawRaw(Pointer, vertexCount, startVertexLocation); }
+    }
+
+    [NoThrow]
+    public void IASetPrimitiveTopology(uint32 topology) {
+        unsafe { IASetPrimitiveTopologyRaw(Pointer, topology); }
+    }
+
+    [NoThrow]
+    public void OMSetRenderTargets(ptr<void> renderTarget) {
+        mut ptr<void> pointer = renderTarget;
+        unsafe { OMSetRenderTargetsRaw(Pointer, 1, &pointer, null); }
+    }
+
+    [NoThrow]
+    public void PSSetShader(ptr<void> shader) {
+        unsafe { PSSetShaderRaw(Pointer, shader, null, 0); }
+    }
+
+    [NoThrow]
+    public void VSSetShader(ptr<void> shader) {
+        unsafe { VSSetShaderRaw(Pointer, shader, null, 0); }
+    }
+
+    public unsafe ptr<void> GetPointer() {
+        unsafe { return Pointer; }
+    }
+}
+
+public unique struct BackBufferOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe BackBufferOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    public unsafe ptr<void> GetPointer() {
+        unsafe { return Pointer; }
+    }
+}
+
+public unique struct RenderTargetViewOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe RenderTargetViewOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    public unsafe ptr<void> GetPointer() {
+        unsafe { return Pointer; }
+    }
+}
+
+public unique struct VertexShaderOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe VertexShaderOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    public unsafe ptr<void> GetPointer() {
+        unsafe { return Pointer; }
+    }
+}
+
+public unique struct PixelShaderOwner {
+    private ptr<void> Pointer;
+
+    [NoThrow]
+    public unsafe PixelShaderOwner(ptr<void> pointer) {
+        unsafe { Pointer = pointer; }
+    }
+
+    [NoThrow]
+    [Cleanup]
+    public void Close() {
+        unsafe {
+            if (Pointer != null) {
+                Release(Pointer);
+            }
+        }
+    }
+
+    public unsafe ptr<void> GetPointer() {
+        unsafe { return Pointer; }
+    }
+}

@@ -1,0 +1,178 @@
+namespace Triangle.Interop;
+
+[Blittable] [Layout(Sequential)]
+struct WindowPoint {
+    int32 X;
+    int32 Y;
+
+    [NoThrow]
+    public WindowPoint(int32 x, int32 y) {
+        X = x;
+        Y = y;
+    }
+}
+
+[Blittable] [Layout(Sequential)]
+struct WindowMessage {
+    public ptr<void> Window;
+    public uint32 Message;
+    public uint64 WParam;
+    public int64 LParam;
+    public uint32 Time;
+    public WindowPoint Point;
+
+    [NoThrow]
+    public unsafe WindowMessage() {
+        unsafe { Window = null; }
+        Message = 0;
+        WParam = 0;
+        LParam = 0;
+        Time = 0;
+        Point = new WindowPoint(0, 0);
+    }
+}
+
+[Blittable] [Layout(Sequential)]
+struct WindowClass {
+    public uint32 Size;
+    public uint32 Style;
+    public fnptr<NativeAbi, ptr<void>, uint32, uint64, int64, int64> WindowProcedure;
+    public int32 ClassExtraBytes;
+    public int32 WindowExtraBytes;
+    public ptr<void> Instance;
+    public ptr<void> Icon;
+    public ptr<void> Cursor;
+    public ptr<void> Background;
+    public ptr<void> MenuName;
+    public ptr<char16> ClassName;
+    public ptr<void> IconSmall;
+
+    public unsafe WindowClass(
+        fnptr<NativeAbi, ptr<void>, uint32, uint64, int64, int64> windowProcedure,
+        ptr<void> instance, ptr<char16> className) {
+        Size = 80;
+        Style = 0;
+        unsafe {
+            WindowProcedure = windowProcedure;
+            Instance = instance;
+            Icon = null;
+            Cursor = null;
+            Background = null;
+            MenuName = null;
+            ClassName = className;
+            IconSmall = null;
+        }
+        ClassExtraBytes = 0;
+        WindowExtraBytes = 0;
+    }
+}
+
+[Terrum.Interop.NativeImport("kernel32.dll", "ExitProcess")]
+[NoThrow] [DoesNotReturn]
+extern unsafe void ExitProcess(uint32 exitCode);
+
+[Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+[NoThrow]
+extern unsafe uint32 GetCurrentThreadId();
+
+[Terrum.Interop.NativeImport("kernel32.dll", "GetModuleHandleW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe ptr<void> GetModuleHandleW(ptr<char16> moduleName);
+
+[Terrum.Interop.NativeImport("user32.dll", "RegisterClassExW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+[NoThrow]
+extern unsafe char16 RegisterClassExW(ptr<WindowClass> windowClass);
+
+[Terrum.Interop.NativeImport("user32.dll", "UnregisterClassW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe int32 UnregisterClassW(ptr<char16> className, ptr<void> instance);
+
+[Terrum.Interop.NativeImport("user32.dll", "CreateWindowExW")]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(9, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(10, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(11, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(12, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe ptr<void> CreateWindowExW(
+    uint32 exStyle,
+    ptr<char16> className,
+    ptr<char16> windowName,
+    uint32 style,
+    int32 x,
+    int32 y,
+    int32 width,
+    int32 height,
+    ptr<void> parent,
+    ptr<void> menu,
+    ptr<void> instance,
+    ptr<void> parameter);
+
+[Terrum.Interop.NativeImport("user32.dll", "DestroyWindow")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe int32 DestroyWindow(ptr<void> window);
+
+[Terrum.Interop.NativeImport("user32.dll", "ShowWindow")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe int32 ShowWindow(ptr<void> window, int32 command);
+
+[Terrum.Interop.NativeImport("user32.dll", "GetMessageW")]
+[Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe int32 GetMessageW(
+    ptr<WindowMessage> message, ptr<void> window, uint32 minimum, uint32 maximum);
+
+[Terrum.Interop.NativeImport("user32.dll", "TranslateMessage")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+[NoThrow]
+extern unsafe int32 TranslateMessage(ptr<WindowMessage> message);
+
+[Terrum.Interop.NativeImport("user32.dll", "DispatchMessageW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+[NoThrow]
+extern unsafe int64 DispatchMessageW(ptr<WindowMessage> message);
+
+[Terrum.Interop.NativeImport("user32.dll", "DefWindowProcW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe int64 DefWindowProcW(
+    ptr<void> window, uint32 message, uint64 wParam, int64 lParam);
+
+[Terrum.Interop.NativeImport("user32.dll", "PostQuitMessage")]
+[NoThrow]
+extern unsafe void PostQuitMessage(int32 exitCode);
+
+[Terrum.Interop.NativeImport("user32.dll", "PostMessageW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe int32 PostMessageW(
+    ptr<void> window, uint32 message, uint64 wParam, int64 lParam);
+
+[Terrum.Interop.NativeImport("user32.dll", "PeekMessageW")]
+[Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+[NoThrow]
+extern unsafe int32 PeekMessageW(
+    ptr<WindowMessage> message, ptr<void> window,
+    uint32 minimum, uint32 maximum, uint32 remove);
+
+[Terrum.Interop.NativeImport("kernel32.dll", "GetModuleFileNameW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(2, Write, NoEscape, 260)]
+[NoThrow]
+extern unsafe uint32 GetModuleFileNameW(
+    ptr<void> moduleName, ptr<char16> fileName, uint32 size);
+
+[Terrum.Interop.NativeImport("user32.dll", "GetClientRect")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+[NoThrow]
+extern unsafe int32 GetClientRect(ptr<void> window, ptr<ClientRectangle> rectangle);

@@ -19,17 +19,6 @@ extern int32 D3DCompileFromFileRaw(
     write ptr<ptr<void>> code,
     ptr<void> diagnostics);
 
-[Terrum.Interop.NativeComOwner("ID3D10Blob")]
-public unique struct ShaderBlobOwner {
-    private ptr<void> Pointer;
-
-    public unsafe ShaderBlobOwner(ptr<void> pointer) {
-        unsafe { Pointer = pointer; }
-    }
-}
-
-[Terrum.Interop.NativeComAcquisition(
-    1, "ShaderBlobOwner", "D3DCompileFromFileRaw", 7, OutputMayBeWrittenOnFailure)]
 bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
     mut InlineArray<char16, 260> shaderPath = [];
     mut uint32 pathLength = 0;
@@ -126,7 +115,7 @@ struct SwapChainDescription {
     SampleDescription SampleDescription;
     uint32 BufferUsage;
     uint32 BufferCount;
-    Terrum.Interop.Windows.HWND OutputWindow;
+    ptr<void> OutputWindow;
     int32 Windowed;
     uint32 SwapEffect;
     uint32 Flags;
@@ -134,7 +123,7 @@ struct SwapChainDescription {
     [NoThrow]
     public unsafe SwapChainDescription(ModeDescription bufferDescription,
         SampleDescription sampleDescription, uint32 bufferUsage, uint32 bufferCount,
-        Terrum.Interop.Windows.HWND outputWindow, int32 windowed, uint32 swapEffect, uint32 flags) {
+        ptr<void> outputWindow, int32 windowed, uint32 swapEffect, uint32 flags) {
         BufferDescription = bufferDescription;
         SampleDescription = sampleDescription;
         BufferUsage = bufferUsage;
@@ -170,45 +159,9 @@ extern int32 D3D11CreateDeviceAndSwapChainRaw(
     write ptr<uint32> selectedFeatureLevel,
     write ptr<ptr<void>> immediateContext);
 
-[Terrum.Interop.NativeComOwner("IDXGISwapChain")]
-public unique struct SampleSwapChainOwner {
-    private ptr<void> Pointer;
-
-    [NoThrow]
-    public unsafe SampleSwapChainOwner(ptr<void> pointer) {
-        unsafe { Pointer = pointer; }
-    }
-}
-
-[Terrum.Interop.NativeComOwner("ID3D11Device")]
-public unique struct SampleDeviceOwner {
-    private ptr<void> Pointer;
-
-    [NoThrow]
-    public unsafe SampleDeviceOwner(ptr<void> pointer) {
-        unsafe { Pointer = pointer; }
-    }
-}
-
-[Terrum.Interop.NativeComOwner("ID3D11DeviceContext")]
-public unique struct SampleContextOwner {
-    private ptr<void> Pointer;
-
-    [NoThrow]
-    public unsafe SampleContextOwner(ptr<void> pointer) {
-        unsafe { Pointer = pointer; }
-    }
-}
-
-[Terrum.Interop.NativeComAcquisition(
-    1, "SampleSwapChainOwner", "D3D11CreateDeviceAndSwapChainRaw", 8, OutputMayBeWrittenOnFailure)]
-[Terrum.Interop.NativeComAcquisition(
-    2, "SampleDeviceOwner", "D3D11CreateDeviceAndSwapChainRaw", 9, OutputMayBeWrittenOnFailure)]
-[Terrum.Interop.NativeComAcquisition(
-    3, "SampleContextOwner", "D3D11CreateDeviceAndSwapChainRaw", 11, OutputMayBeWrittenOnFailure)]
 [NoThrow]
 unsafe bool CreateD3D11DeviceAndSwapChain(
-    Terrum.Interop.Windows.HWND window,
+    ptr<void> window,
     out SampleSwapChainOwner swapChain,
     out SampleDeviceOwner device,
     out SampleContextOwner immediateContext) {
@@ -232,127 +185,67 @@ unsafe bool CreateD3D11DeviceAndSwapChain(
     return status >= 0;
 }
 
-[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.ExitProcess")]
-[NoThrow] [DoesNotReturn]
-extern void ExitProcess(uint32 exitCode);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetCurrentThreadId")]
 [NoThrow]
-extern uint32 GetCurrentThreadId();
-
-[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetModuleHandleW")]
-[NoThrow]
-extern Terrum.Interop.Windows.HINSTANCE GetModuleHandleW(
-    Terrum.Interop.Windows.NativeNullPointer moduleName);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.RegisterClassExW")]
-[NoThrow]
-extern char16 RegisterClassExW(Terrum.Interop.Windows.ReadonlyWNDCLASSEXW windowClass);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.UnregisterClassW")]
-[NoThrow]
-extern int32 UnregisterClassW(
-    ptr<char16> className, Terrum.Interop.Windows.HINSTANCE instance);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.CreateWindowExW")]
-[NoThrow]
-extern Terrum.Interop.Windows.HWND CreateWindowExW(
-    uint32 exStyle,
-    ptr<char16> className,
-    ptr<char16> windowName,
-    uint32 style,
-    int32 x,
-    int32 y,
-    int32 width,
-    int32 height,
-    Terrum.Interop.Windows.HWND parent,
-    Terrum.Interop.Windows.HMENU menu,
-    Terrum.Interop.Windows.HINSTANCE instance,
-    Terrum.Interop.Windows.LPVOID parameter);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.DestroyWindow")]
-[NoThrow]
-extern int32 DestroyWindow(Terrum.Interop.Windows.HWND window);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.ShowWindow")]
-[NoThrow]
-extern int32 ShowWindow(Terrum.Interop.Windows.HWND window, int32 command);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.GetMessageW")]
-[NoThrow]
-extern int32 GetMessageW(
-    Terrum.Interop.Windows.MSGAddress message,
-    Terrum.Interop.Windows.HWND window,
-    uint32 minimum,
-    uint32 maximum);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.TranslateMessage")]
-[NoThrow]
-extern int32 TranslateMessage(Terrum.Interop.Windows.MSGAddress message);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.DispatchMessageW")]
-[NoThrow]
-extern nint DispatchMessageW(Terrum.Interop.Windows.MSGAddress message);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.DefWindowProcW")]
-[NoThrow]
-extern nint DefWindowProcW(
-    Terrum.Interop.Windows.HWND window,
-    uint32 message,
-    nuint wParam,
-    nint lParam);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.PostQuitMessage")]
-[NoThrow]
-extern void PostQuitMessage(int32 exitCode);
-
-struct Host {
-    int32 Value;
-
-    [NoThrow]
-    public static unsafe nint WindowProcedure(Terrum.Interop.Windows.HWND window, uint32 message,
-        nuint wParam, nint lParam) { unsafe {
+[Terrum.Interop.NativeCallable]
+unsafe int64 WindowProcedure(ptr<void> window, uint32 message, uint64 wParam, int64 lParam) { unsafe {
         if (message == 5) {
             if (PostMessageW(window, 32768, wParam, 0) == 0) {
-                mut Terrum.Interop.Windows.MSG failureQuit = msgzero();
-                PeekMessageW(&failureQuit, Terrum.Interop.Windows.HWND.NoOwner, 18, 18, 1);
+                mut WindowMessage failureQuit = new WindowMessage();
+                PeekMessageW(&failureQuit, null, 18, 18, 1);
                 PostQuitMessage(1);
             }
             return 0;
         }
         if (message == 16) {
-            mut Terrum.Interop.Windows.MSG quit = msgzero();
-            if (PeekMessageW(&quit, Terrum.Interop.Windows.HWND.NoOwner, 18, 18, 0) == 0) {
+            mut WindowMessage quit = new WindowMessage();
+            if (PeekMessageW(&quit, null, 18, 18, 0) == 0) {
                 PostQuitMessage(0);
             }
             return 0;
         }
         return DefWindowProcW(window, message, wParam, lParam);
     } }
-}
 
 public unique struct WindowOwner {
-    private Terrum.Interop.Windows.HWND Handle;
+    private ptr<void> Handle;
     private char16 Atom;
     private uint32 ThreadId;
 
     public WindowOwner() { unsafe {
-        Handle = Terrum.Interop.Windows.HWND.NoOwner;
+        Handle = null;
         Atom = 0;
         ThreadId = GetCurrentThreadId();
         require ThreadId != 0;
-        Terrum.Interop.Windows.WNDCLASSEXW descriptor = windowclassex(
-            &Host.WindowProcedure, GetModuleHandleW(null), utf16z("TerrumOwnerClass"));
+        mut InlineArray<char16, 17> className = [];
+        className[0] = 84;
+        className[1] = 101;
+        className[2] = 114;
+        className[3] = 114;
+        className[4] = 117;
+        className[5] = 109;
+        className[6] = 79;
+        className[7] = 119;
+        className[8] = 110;
+        className[9] = 101;
+        className[10] = 114;
+        className[11] = 67;
+        className[12] = 108;
+        className[13] = 97;
+        className[14] = 115;
+        className[15] = 115;
+        className[16] = 0;
+        WindowClass descriptor = new WindowClass(
+            &Triangle.Interop.WindowProcedure, GetModuleHandleW(null), &className[0]);
         Atom = RegisterClassExW(&descriptor);
         try {
             require Atom != 0;
             Handle = CreateWindowExW(
                 0, utf16z("TerrumOwnerClass"), utf16z("Terrum DX11 Triangle"), 13238272,
                 100, 100, 800, 600,
-                Terrum.Interop.Windows.HWND.NoOwner, null, GetModuleHandleW(null), null);
-            require Handle != Terrum.Interop.Windows.HWND.NoOwner;
+                null, null, GetModuleHandleW(null), null);
+            require Handle != null;
         } finally {
-            if (Handle == Terrum.Interop.Windows.HWND.NoOwner && Atom != 0) {
+            if (Handle == null && Atom != 0) {
                 ExitIfFalse(UnregisterClassW(
                     utf16z("TerrumOwnerClass"), GetModuleHandleW(null)) != 0);
             } }
@@ -379,14 +272,16 @@ public unique struct WindowOwner {
         if (CreateD3D11DeviceAndSwapChain(
             Handle, out var swapchain, out var device, out var context)) {
             if (TryCompileShader(true, out var vertexCode)) {
-                if (device.CreateVertexShader(vertexCode, out var vertexShader)) {
+                if (device.CreateVertexShader(
+                    vertexCode.GetBufferPointer(), vertexCode.GetBufferSize(), out var vertexShader)) {
                     if (TryCompileShader(false, out var pixelCode)) {
-                        if (device.CreatePixelShader(pixelCode, out var pixelShader)) {
+                        if (device.CreatePixelShader(
+                            pixelCode.GetBufferPointer(), pixelCode.GetBufferSize(), out var pixelShader)) {
                             try {
                                 ShowWindow(Handle, 5);
-                                mut Terrum.Interop.Windows.MSG message = msgzero();
+                                mut WindowMessage message = new WindowMessage();
                                 mut int32 result = 1;
-                                mut nuint exitCode = 0;
+                                mut uint64 exitCode = 0;
                                 mut bool resizePending = true;
                                 mut bool minimized = false;
                                 mut bool redrawPending = true;
@@ -394,17 +289,17 @@ public unique struct WindowOwner {
                                 mut uint32 lastHeight = 0;
                                 while (result > 0) {
                                     while (PeekMessageW(
-                                        &message, Terrum.Interop.Windows.HWND.NoOwner, 0, 0, 1) != 0) {
-                                        uint32 queuedMessageId = msgid(&message);
-                                        bool queuedWindowMessage = msgwindowis(&message, Handle);
+                                        &message, null, 0, 0, 1) != 0) {
+                                        uint32 queuedMessageId = message.Message;
+                                        bool queuedWindowMessage = message.Window == Handle;
                                         if (queuedMessageId == 18) {
-                                            exitCode = msgwparam(&message);
+                                            exitCode = message.WParam;
                                             result = 0;
                                             break;
                                         }
                                         if (queuedWindowMessage && queuedMessageId == 32768) {
                                             resizePending = true;
-                                            minimized = msgwparam(&message) == 1;
+                                            minimized = message.WParam == 1;
                                         } else {
                                             if (queuedWindowMessage && queuedMessageId == 15) {
                                                 redrawPending = true;
@@ -443,20 +338,24 @@ public unique struct WindowOwner {
                                                 if (redrawPending) {
                                                     if (swapchain.GetBuffer(out var backBuffer)) {
                                                         if (device.CreateRenderTargetView(
-                                                            backBuffer, out var renderTarget)) {
+                                                            backBuffer.GetPointer(), out var renderTarget)) {
                                                             try {
                                                                 context.ClearState();
-                                                                context.ClearRenderTargetView(
-                                                                    renderTarget, 0.08, 0.12, 0.18, 1.0);
-                                                                context.OMSetRenderTargets(renderTarget);
-                                                                context.RSSetViewports(
-                                                                    0.0, 0.0,
+                                                                mut Color4 clearColor =
+                                                                    new Color4(float32(0.08), float32(0.12),
+                                                                        float32(0.18), float32(1.0));
+                                                                mut Viewport viewport = new Viewport(
+                                                                    float32(0.0), float32(0.0),
                                                                     float32(clientWidth),
                                                                     float32(clientHeight),
-                                                                    0.0, 1.0);
+                                                                    float32(0.0), float32(1.0));
+                                                                ClearRenderTargetViewRaw(
+                                                                    context.GetPointer(), renderTarget.GetPointer(), &clearColor);
+                                                                context.OMSetRenderTargets(renderTarget.GetPointer());
+                                                                RSSetViewportsRaw(context.GetPointer(), 1, &viewport);
                                                                 context.IASetPrimitiveTopology(4);
-                                                                context.VSSetShader(vertexShader);
-                                                                context.PSSetShader(pixelShader);
+                                                                context.VSSetShader(vertexShader.GetPointer());
+                                                                context.PSSetShader(pixelShader.GetPointer());
                                                                 context.Draw(3, 0);
                                                                 if (!swapchain.Present()) {
                                                                     return 1;
@@ -476,18 +375,18 @@ public unique struct WindowOwner {
                                         redrawPending = false;
                                     }
                                     result = GetMessageW(
-                                        &message, Terrum.Interop.Windows.HWND.NoOwner, 0, 0);
+                                        &message, null, 0, 0);
                                     if (result < 0) {
                                         return 1;
                                     }
                                     if (result == 0) {
-                                        return msgwparam(&message) == 0 ? 0 : 1;
+                                        return message.WParam == 0 ? 0 : 1;
                                     }
-                                    uint32 messageId = msgid(&message);
-                                    bool isWindowMessage = msgwindowis(&message, Handle);
+                                    uint32 messageId = message.Message;
+                                    bool isWindowMessage = message.Window == Handle;
                                     if (isWindowMessage && messageId == 32768) {
                                         resizePending = true;
-                                        minimized = msgwparam(&message) == 1;
+                                        minimized = message.WParam == 1;
                                     } else {
                                         if (isWindowMessage && messageId == 15) {
                                             redrawPending = true;
@@ -513,29 +412,6 @@ int32 Main() {
     WindowOwner window = new WindowOwner();
     return window.Run();
 }
-
-[Terrum.Interop.NativeImport("windows-x64.system32.kernel32.GetModuleFileNameW")]
-[NoThrow]
-extern uint32 GetModuleFileNameW(
-    Terrum.Interop.Windows.NativeNullPointer moduleName,
-    Terrum.Interop.NativeStorageAddress fileName,
-    uint32 size);
-
-[Terrum.Interop.NativeImport("user32.dll", "GetClientRect")]
-[Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
-[NoThrow]
-extern int32 GetClientRect(Terrum.Interop.Windows.HWND window, ptr<ClientRectangle> rectangle);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.PostMessageW")]
-[NoThrow]
-extern int32 PostMessageW(
-    Terrum.Interop.Windows.HWND window, uint32 message, nuint wParam, nint lParam);
-
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.PeekMessageW")]
-[NoThrow]
-extern int32 PeekMessageW(
-    Terrum.Interop.Windows.MSGAddress message, Terrum.Interop.Windows.HWND window,
-    uint32 minimum, uint32 maximum, uint32 remove);
 
 [Blittable] [Layout(LayoutKind.Sequential)]
 struct ClientRectangle {

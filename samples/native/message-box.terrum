@@ -1,10 +1,13 @@
-[Terrum.Interop.NativeImport("windows-x64.system32.user32.MessageBoxW")]
+[Terrum.Interop.NativeImport("user32.dll", "MessageBoxW")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
 [NoThrow]
-extern int32 MessageBoxW(Terrum.Interop.Windows.HWND owner, ptr<char16> text,
+extern unsafe int32 MessageBoxW(ptr<void> owner, ptr<char16> text,
     ptr<char16> caption, uint32 flags);
 
 int32 Main() {
-    int32 result = unsafe(MessageBoxW(owner: Terrum.Interop.Windows.HWND.NoOwner,
+    int32 result = unsafe(MessageBoxW(owner: null,
         text: utf16z("Terrum native FFI smoke test."),
         caption: utf16z("MessageBoxW"), flags: 0));
     if (result == 1) {

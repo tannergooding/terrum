@@ -40,10 +40,12 @@ reading it in a loop; the owner remains live until the view's scope ends.
 The [writable buffer-view sample](../samples/native/mutable-buffer-view.terrum)
 returns 42 after an exclusive scoped update and a NoThrow in-place `Clear`
 followed by reuse of the same fixed-capacity owner.
-The [Windows `MessageBoxW` sample](../samples/native/message-box.terrum) uses
-the provisional compiler-owned native-import catalog, a no-owner `HWND`, and
-static UTF-16-NUL literals. Build it with the explicit `build-native-import`
-command; it returns success only when the user dismisses the dialog with OK.
+The [`MessageBoxW` sample](../samples/native/message-box.terrum) declares the
+ordinary `user32.dll` import with `ptr<void>` and read-only, no-escape pointer
+contracts. It passes a null owner and static UTF-16-NUL literals from an
+explicit unsafe call. Build it with `build-native-import`; it returns success
+only when the user dismisses the dialog with OK. Unattended tests inspect the
+image without displaying the dialog.
 
 ```powershell
 terrumc build-native-import samples\native\message-box.terrum -o artifacts\message-box.exe --runtime fail-fast
@@ -151,9 +153,9 @@ derived comparison laws or universal equality/hash behavior.
 | Formatting/construction | [construction-and-formatting](../samples/design/construction-and-formatting.terrum) | Typed nested Point/scalar writer forwarding, borrowed hole, `require`, owning text target and collection builder; `point = (3, 4)`, `saved = (3, 4)`, `4` |
 | Requirements and contracts | [requirements](../samples/design/requirements.terrum) | Declaration pre/postconditions, private static proofs, body-local runtime checks and single-output `require Try` lifting with optional failure-type selection; illustrative syntax, intended return 21, not executable yet |
 | Numerics/tensors | [numerics-and-tensors](../samples/design/numerics-and-tensors.terrum) | Generic math/SIMD composition with vector/lane ABI distinct from logical multidimensional `TensorSpan<T>` views; distinct lane masks, masked tails, `write Span<T>`/`write TensorSpan<T>` destinations, and explicit dense-view reduction; no execution or performance claim |
-| Win32 + Direct3D 11 triangle | [overview](../samples/design/win32-dx11-triangle/README.md), [main](../samples/design/win32-dx11-triangle/main.terrum), [interop API](../samples/design/win32-dx11-triangle/interop.api.terrum), [shader](../samples/design/win32-dx11-triangle/triangle.hlsl), [NOTICE](../samples/design/win32-dx11-triangle/NOTICE.txt) | Intended cyan triangle on dark blue; window close exits 0; device removal reports and exits 3. Requires later native ownership/callback/ABI implementation |
+| Win32 + Direct3D 11 triangle | [overview](../samples/design/win32-dx11-triangle/README.md), [WARP entrypoint](../samples/design/win32-dx11-triangle/main.terrum), [hardware entrypoint](../samples/design/win32-dx11-triangle/main-hardware.terrum), [Win32 declarations](../samples/design/win32-dx11-triangle/win32-api.terrum), [DX11 declarations](../samples/design/win32-dx11-triangle/dx11-api.terrum), [shader](../samples/design/win32-dx11-triangle/triangle.hlsl), [NOTICE](../samples/design/win32-dx11-triangle/NOTICE.txt) | Both source-authored entrypoints emit Windows x64 native images using ordinary imports, layouts, ABI-level vtable slots, and Terrum ownership wrappers. Intended cyan triangle on dark blue; close exits 0 and device removal reports and exits 3. UI and hardware execution are not implied |
 
-The calculator must reject U+0661/U+FF11 digits, U+2212 minus and U+FF0B operator rather than normalize them into ASCII. `mandelbrot` marks points bounded after 64 updates, not proven set membership. Async entry returns only after both writes and required cleanup. Nothing here claims a Terrum compiler produced an image, window, executable or output.
+The calculator must reject U+0661/U+FF11 digits, U+2212 minus and U+FF0B operator rather than normalize them into ASCII. `mandelbrot` marks points bounded after 64 updates, not proven set membership. Async entry returns only after both writes and required cleanup. The table records intended behavior, not uniform runtime qualification; compilation, emitted-image inspection, and execution are distinct evidence.
 
 Single ASCII operators/delimiters use target-typed character intent where helpful;
 casts replace per-source numeric helpers without changing the proposed output.

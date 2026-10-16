@@ -34,10 +34,9 @@ runtime, and load `triangle.hlsl` from beside the executable. Normal shutdown
 clears context bindings before releasing COM resources and destroys the window
 before unregistering its class.
 
-`device-buffer-stage.terrum` is a separate generic storage-record and COM
-`CreateBuffer` example. Older stage and evidence sources in this directory are
-historical prototypes; they are not maintained entry points and may depend on
-compiler features that have been retired.
+`device-buffer-stage.terrum` and the older stage/evidence sources in this
+directory are historical prototypes, not maintained entry points or build
+inputs. They may depend on retired compiler-owned native-import contracts.
 
 ## Compiler boundary
 

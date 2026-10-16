@@ -3991,7 +3991,12 @@ assignment, safe `*r`, and `r->Member` follow
 [references and explicit indirection](language/references.md). Neither
 `ref<T>` nor `ptr<T>` implicitly forwards `.` member access to `T`.
 Class handles keep ordinary `.` access. `&place` forms an address only with
-checked initialized storage, access, lifetime and stable/rooted backing.
+addressable storage, access, lifetime and stable/rooted backing. Safe
+formation requires initialized storage. In an explicit unsafe context,
+formation and raw-pointer reads or writes may bypass definite-initialization
+checks; they do not establish checked initialization facts for direct local
+reads or checked-reference formation. This exception does not waive known
+access, provenance, lifetime, alignment, backing/root or pin obligations.
 GC storage requires a statically known covering pin; `unsafe` is not a
 substitute for rooting or pinning. `pin ref<T>` has an implicit conversion to
 the matching `ptr<T>` form, preserving referent access, lifetime, pin and
