@@ -48,6 +48,89 @@ public sealed class ParserTests
     }
 
     [Test]
+    public void ParsesCollectionSpreadElementsLosslessly()
+    {
+        const string Source = "int32 Main() { var items = [First(), ..Source(), Last()]; return 0; }";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+
+        var initializer = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.ArrayInitializerExpression);
+        var elements = initializer.Children.OfType<SyntaxNode>().ToArray();
+        Assert.That(elements.Select(static element => element.Kind),
+            Is.EqualTo(new[] {
+                SyntaxKind.InvocationExpression,
+                SyntaxKind.CollectionSpreadElement,
+                SyntaxKind.InvocationExpression,
+            }));
+
+        var spread = elements[1];
+        Assert.That(spread.Children.OfType<SyntaxTokenElement>()
+            .Select(static token => token.Token.Kind), Is.EqualTo(new[] { TokenKind.DotDot }));
+        Assert.That(spread.Children.OfType<SyntaxNode>().Single().Kind,
+            Is.EqualTo(SyntaxKind.InvocationExpression));
+        AssertLossless(tree);
+
+        var separated = SyntaxTree.Parse("int32 Main() { var items = [. .Source()]; return 0; }");
+        Assert.That(separated.HasErrors, Is.True);
+        AssertLossless(separated);
+    }
+
+    [Test]
+    public void ParsesGenericNominalTypeParameterLists()
+    {
+        const string Source = """
+            public struct Pair<TLeft, TRight> { TLeft Left; TRight Right; }
+            public mut class Box<T> { T Value; }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+
+        var declarations = tree.Root.Children.OfType<SyntaxNode>()
+            .Where(static node => node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
+            .ToArray();
+        Assert.That(declarations, Has.Length.EqualTo(2));
+        Assert.That(declarations.Select(static declaration => declaration.Kind),
+            Is.EqualTo(new[] { SyntaxKind.StructDeclaration, SyntaxKind.ClassDeclaration }));
+        Assert.That(declarations.Select(declaration =>
+                declaration.Children.OfType<SyntaxNode>()
+                    .Single(static node => node.Kind == SyntaxKind.TypeParameterList)
+                    .Children.OfType<SyntaxTokenElement>()
+                    .Where(static token => token.Token.Kind == TokenKind.Identifier)
+                    .Select(static token => token.Token.Name)),
+            Is.EqualTo(new[] { new[] { "TLeft", "TRight" }, new[] { "T" } }));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesGenericNominalConformancesAndConstraintsLosslessly()
+    {
+        const string Source = """
+            interface IValue<this T> where T : [Copy] {}
+            struct Pair<T> where T : [Copy] { int32 Count; }
+            class Box<T> : IValue<T> where T : [Copy] {}
+            """;
+        var tree = SyntaxTree.Parse(Source);
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+
+        var declarations = tree.Root.Children.OfType<SyntaxNode>()
+            .Where(static node => node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
+            .ToArray();
+        Assert.That(declarations, Has.Length.EqualTo(2));
+        Assert.That(declarations.Select(declaration =>
+                declaration.Children.OfType<SyntaxNode>()
+                    .Where(static node => node.Kind is SyntaxKind.TypeParameterList
+                        or SyntaxKind.ConformanceList or SyntaxKind.ConstraintClause)
+                    .Select(static node => node.Kind)
+                    .ToArray()),
+            Is.EqualTo(new[] {
+                new[] { SyntaxKind.TypeParameterList, SyntaxKind.ConstraintClause },
+                new[] { SyntaxKind.TypeParameterList, SyntaxKind.ConformanceList, SyntaxKind.ConstraintClause },
+            }.ToArray()));
+        AssertLossless(tree);
+    }
+
+    [Test]
     public void ParsesQualifiedNativeImportAttributesAndBodylessCallables()
     {
         const string Source = """

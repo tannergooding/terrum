@@ -33,9 +33,12 @@ internal sealed partial class Binder
     private readonly HashSet<int> _layingOut = [];
     private readonly HashSet<int> _laidOut = [];
     private readonly Dictionary<string, PrimitiveType> _structNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, GenericStructTemplate> _genericStructTemplates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PrimitiveType> _genericStructSpecializations = new(StringComparer.Ordinal);
+    private readonly HashSet<PrimitiveType> _genericStructSpecializationTypes = [];
     private readonly Dictionary<string, AliasDefinition> _aliases = new(StringComparer.Ordinal);
     private readonly List<AliasDefinition> _aliasResolutionStack = [];
-    private readonly List<Dictionary<string, PrimitiveType>> _aliasTypeArguments = [];
+    private readonly List<IReadOnlyDictionary<string, PrimitiveType>> _aliasTypeArguments = [];
     private readonly ImmutableArray<HostBuffer> _buffers;
     private readonly Dictionary<string, int> _functions = new(StringComparer.Ordinal);
     private readonly HashSet<string> _usings = new(StringComparer.Ordinal);
@@ -52,6 +55,7 @@ internal sealed partial class Binder
     private int _localStart;
     private readonly List<Dictionary<string, int>> _scopes = [];
     private readonly List<LoopBinding> _loops = [];
+    private ImmutableDictionary<string, PrimitiveType>? _genericOwnerTypeArguments;
     private int _finallyLoopDepth;
     private GenericInstantiation? _genericContext;
     private PrimitiveType _returnType;
@@ -89,6 +93,9 @@ internal sealed partial class Binder
         internal bool IsInvalid { get; set; }
         internal PrimitiveType Type { get; set; }
     }
+
+    private sealed record GenericStructTemplate(string Name, string QualifiedName,
+        ImmutableArray<string> TypeParameters, SyntaxTree Tree, SyntaxNode Declaration);
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
         : this([tree], [], cancellationToken)
@@ -262,6 +269,11 @@ internal sealed partial class Binder
                 }
                 if (child is SyntaxNode { Kind: SyntaxKind.StructDeclaration } structure)
                 {
+                    if (HasGenericTypeParameters(structure))
+                    {
+                        DeclareGenericStructTemplate(tree, structure);
+                        continue;
+                    }
                     var name = StructName(structure).Name;
                     var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
                     if (TryPrimitiveType(name, out var primitive))
@@ -296,7 +308,7 @@ internal sealed partial class Binder
                         Report("TRM3016", "Source exceeds the supported number of value layouts.", structure.Span);
                         return null;
                     }
-                    if (_classNames.ContainsKey(qualified)
+                    if (_classNames.ContainsKey(qualified) || _genericStructTemplates.ContainsKey(qualified)
                         || !_structNames.TryAdd(qualified, (PrimitiveType)(100 + index)))
                     {
                         Report("TRM3003", $"Duplicate struct '{name}'.", structure.Span);
@@ -323,7 +335,7 @@ internal sealed partial class Binder
             _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
         }
         DeclareAliases();
-        foreach (var index in _structDeclarations.Keys)
+        foreach (var index in _structDeclarations.Keys.ToArray())
         {
             DeclareStruct(index);
         }
@@ -343,6 +355,10 @@ internal sealed partial class Binder
                 }
                 if (node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
                 {
+                    if (HasGenericTypeParameters(node))
+                    {
+                        continue;
+                    }
                     var structName = StructName(node).Name;
                     if (TryPrimitiveType(structName, out _)
                         && (node.Kind != SyntaxKind.StructDeclaration
@@ -535,8 +551,23 @@ internal sealed partial class Binder
             }
 
             _localStart = _variables.Count;
-            var body = signature.Generic is GenericInstantiation generic
-                ? BindGenericBody(generic) : BindCallableBody(syntaxBody);
+            if (signature.GenericOwnerTypeArguments is { } ownerTypeArguments)
+            {
+                _aliasTypeArguments.Add(ownerTypeArguments);
+            }
+            BoundBlock body;
+            try
+            {
+                body = signature.Generic is GenericInstantiation generic
+                    ? BindGenericBody(generic) : BindCallableBody(syntaxBody);
+            }
+            finally
+            {
+                if (signature.GenericOwnerTypeArguments is not null)
+                {
+                    _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
+                }
+            }
             if (signature.IsConstructor)
             {
                 var end = new TextSpan(syntaxBody.Span.End, 0);
@@ -1066,6 +1097,12 @@ internal sealed partial class Binder
         }
         var fieldLayout = fields.ToImmutable();
         var hasPublicFields = fieldLayout.Any(static field => !field.IsPrivate && !field.IsInternal);
+        if (isPublic && fieldLayout.Any(field => ContainsGenericStructSpecialization(field.Type)))
+        {
+            Report("TRM3005",
+                "Public structs cannot expose compilation-local generic struct specializations.",
+                declaration.Span);
+        }
         if (isPublic && hasPublicFields && !isBlittable)
         {
             Report("TRM3005", "Public instance fields require an explicit Blittable layout commitment.",
@@ -1214,6 +1251,150 @@ internal sealed partial class Binder
         throw new InvalidOperationException();
     }
 
+    private static bool HasGenericTypeParameters(SyntaxNode declaration) =>
+        declaration.Children.OfType<SyntaxNode>()
+            .Any(static child => child.Kind == SyntaxKind.TypeParameterList);
+
+    private void DeclareGenericStructTemplate(SyntaxTree tree, SyntaxNode declaration)
+    {
+        var name = StructName(declaration);
+        var qualifiedName = Qualify(name.Name);
+        if (TryPrimitiveType(name.Name, out _)
+            || qualifiedName == DirectNativeImportContract.AttributeFullyQualifiedName
+            || qualifiedName is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
+                or "MutableInt32BufferView" or NativeManagedNodeIntrinsics.TypeName
+                or NativeManagedNodeIntrinsics.HeapName
+            || _classNames.ContainsKey(qualifiedName) || _structNames.ContainsKey(qualifiedName)
+            || _genericStructTemplates.ContainsKey(qualifiedName) || _protocols.ContainsKey(qualifiedName))
+        {
+            Report("TRM3003", $"Duplicate or reserved generic struct '{qualifiedName}'.", declaration.Span);
+            return;
+        }
+
+        var parameterList = declaration.Children.OfType<SyntaxNode>()
+            .First(static child => child.Kind == SyntaxKind.TypeParameterList);
+        var typeParameters = parameterList.Children.OfType<SyntaxTokenElement>()
+            .Where(static child => child.Token.Kind == TokenKind.Identifier)
+            .Select(static child => child.Token.Name)
+            .ToImmutableArray();
+        if (typeParameters.IsEmpty
+            || typeParameters.Distinct(StringComparer.Ordinal).Count() != typeParameters.Length)
+        {
+            Report("TRM3005", "Generic structs require distinct type parameters.", parameterList.Span);
+            return;
+        }
+
+        if (declaration.Children.OfType<SyntaxTokenElement>()
+            .Any(static child => child.Token.Kind == TokenKind.PublicKeyword))
+        {
+            Report("TRM3005",
+                "Public generic structs require generic definition metadata, which is not supported by this profile.",
+                declaration.Span);
+            return;
+        }
+
+        if (declaration.Children.OfType<SyntaxNode>().Any(static child =>
+                child.Kind is SyntaxKind.ConformanceList or SyntaxKind.ConstraintClause))
+        {
+            Report("TRM3005",
+                "Generic struct conformances and constraints require nominal witness support.",
+                declaration.Span);
+            return;
+        }
+
+        var unsupportedMember = declaration.Children.OfType<SyntaxNode>().FirstOrDefault(static child =>
+            child.Kind is SyntaxKind.OperatorDeclaration or SyntaxKind.PropertyDeclaration
+            || child.Kind is SyntaxKind.FunctionDeclaration or SyntaxKind.ConstructorDeclaration
+                && HasGenericTypeParameters(child));
+        if (unsupportedMember is not null)
+        {
+            Report("TRM3005",
+                "Generic struct specializations do not support operators, properties, or generic methods.",
+                unsupportedMember.Span);
+            return;
+        }
+
+        if (declaration.Children.OfType<SyntaxTokenElement>().Any(static child =>
+                child.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword
+                    or TokenKind.MutKeyword or TokenKind.UnsafeKeyword or TokenKind.ExternKeyword))
+        {
+            Report("TRM3001", "Top-level structs support only public or internal visibility.", declaration.Span);
+            return;
+        }
+
+        var visibilityCount = declaration.Children.OfType<SyntaxTokenElement>()
+            .Count(static child => child.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword);
+        if (visibilityCount > 1)
+        {
+            Report("TRM3001", "A struct can declare only one visibility modifier.", declaration.Span);
+            return;
+        }
+
+        _genericStructTemplates.Add(qualifiedName,
+            new GenericStructTemplate(name.Name, qualifiedName, typeParameters, tree, declaration));
+    }
+
+    private PrimitiveType InstantiateGenericStruct(GenericStructTemplate template,
+        ImmutableArray<PrimitiveType> typeArguments, TextSpan useSite)
+    {
+        var key = template.QualifiedName + "\u001F" + string.Join(",",
+            typeArguments.Select(static type => ((int)type).ToString(
+                System.Globalization.CultureInfo.InvariantCulture)));
+        if (_genericStructSpecializations.TryGetValue(key, out var existing))
+        {
+            return existing;
+        }
+        if (_structs.Count >= SemanticVerifier.MaximumVariables)
+        {
+            Report("TRM3016", "Source exceeds the supported number of value layouts.", useSite);
+            return PrimitiveType.Int32;
+        }
+
+        var displayArguments = string.Join(", ", typeArguments.Select(TypeName));
+        var specializationName = template.Name + "<" + displayArguments + ">";
+        var qualifiedName = template.QualifiedName + "<" + displayArguments + ">";
+        var index = _structs.Count;
+        var type = (PrimitiveType)(100 + index);
+        var arguments = ImmutableDictionary.CreateBuilder<string, PrimitiveType>(StringComparer.Ordinal);
+        for (var parameterIndex = 0; parameterIndex < typeArguments.Length; parameterIndex++)
+        {
+            arguments.Add(template.TypeParameters[parameterIndex], typeArguments[parameterIndex]);
+        }
+        var typeMap = arguments.ToImmutable();
+
+        _genericStructSpecializations.Add(key, type);
+        _ = _genericStructSpecializationTypes.Add(type);
+        _structNames.Add(qualifiedName, type);
+        _structs.Add(new BoundStruct(qualifiedName, [], 0) {
+            IsInternal = true,
+        });
+        _structDeclarations.Add(index, (template.Tree, template.Declaration));
+
+        var previousTree = _tree;
+        var previousGenericOwnerTypeArguments = _genericOwnerTypeArguments;
+        SetContext(template.Tree);
+        _aliasTypeArguments.Add(typeMap);
+        _genericOwnerTypeArguments = typeMap;
+        try
+        {
+            DeclareStruct(index);
+            foreach (var member in template.Declaration.Children.OfType<SyntaxNode>())
+            {
+                if (member.Kind is SyntaxKind.FunctionDeclaration or SyntaxKind.ConstructorDeclaration)
+                {
+                    Declare(member, specializationName);
+                }
+            }
+        }
+        finally
+        {
+            _genericOwnerTypeArguments = previousGenericOwnerTypeArguments;
+            _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
+            SetContext(previousTree);
+        }
+        return type;
+    }
+
     private void DeclareAliases()
     {
         foreach (var tree in _trees)
@@ -1316,6 +1497,7 @@ internal sealed partial class Binder
                         or "ReadonlyInt32BufferView" or "MutableInt32BufferView"
                     || name.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
                     || _structNames.ContainsKey(qualifiedName)
+                    || _genericStructTemplates.ContainsKey(qualifiedName)
                     || _classNames.ContainsKey(qualifiedName)
                     || _protocols.ContainsKey(qualifiedName)
                     || !_aliases.TryAdd(qualifiedName,
@@ -2440,6 +2622,20 @@ internal sealed partial class Binder
         {
             Report("TRM3023", "TokenCursor construction must declare its checked backing dependency capture.", declaration.Span);
         }
+        var callableIsPublic = !isPrivate && !isInternal
+            && (containingType is null
+                || (_structNames.TryGetValue(Qualify(containingType), out var containingStruct)
+                    && IsPublicType(containingStruct))
+                || (_classNames.TryGetValue(Qualify(containingType), out var containingClass)
+                    && IsPublicType(containingClass)));
+        if (callableIsPublic
+            && (ContainsGenericStructSpecialization(returnType)
+                || declared.Any(parameter => ContainsGenericStructSpecialization(parameter.Type))))
+        {
+            Report("TRM3005",
+                "Public callables cannot expose a compilation-local generic struct specialization.",
+                declaration.Span);
+        }
         if (containingType is not null && Qualify(containingType) == TokenSpanContract.SnapshotName
             && nameText == "AsSpan")
         {
@@ -2454,6 +2650,8 @@ internal sealed partial class Binder
             declared.ToImmutable(), body, declaration, _tree,
             containingType, constructor && !classConstructor, isPrivate, isInternal, isMutable, isStatic,
             isNoThrow, doesNotReturn, externalFunction) {
+            GenericOwnerTypeArguments = _genericOwnerTypeArguments,
+            IsInternal = isInternal || _genericOwnerTypeArguments is not null,
             IsCleanup = isCleanup,
             IsOperator = operatorDeclaration,
             IsClassConstructor = classConstructor,
@@ -5813,6 +6011,60 @@ internal sealed partial class Binder
     private bool IsStruct(PrimitiveType type) => (int)type >= 100
         && (int)type < ManagedClassTypes.First && (int)type - 100 < _structs.Count;
 
+    private bool IsGenericStructSpecialization(PrimitiveType type) =>
+        _genericStructSpecializationTypes.Contains(type);
+
+    private bool ContainsGenericStructSpecialization(PrimitiveType type)
+    {
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        pending.Push(type);
+        while (pending.Count != 0)
+        {
+            var current = pending.Pop();
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+            if (IsGenericStructSpecialization(current))
+            {
+                return true;
+            }
+            if (IsStruct(current))
+            {
+                foreach (var field in _structs[(int)current - 100].Fields)
+                {
+                    pending.Push(field.Type);
+                }
+            }
+            if (ManagedClassTypes.IsManaged(current) && (int)current >= ManagedClassTypes.First)
+            {
+                var classIndex = ManagedClassTypes.ClassIndex(current);
+                if (classIndex < _classes.Count)
+                {
+                    foreach (var field in _classes[classIndex].Fields)
+                    {
+                        pending.Push(field.Type);
+                    }
+                }
+            }
+            if (NativePointerTypes.IsType(current))
+            {
+                pending.Push(_nativePointerTypes[NativePointerTypes.Index(current)].PointeeType);
+            }
+            if (NativeFunctionPointerTypes.IsType(current))
+            {
+                var signature = _nativeFunctionPointerSignatures[NativeFunctionPointerTypes.Index(current)];
+                pending.Push(signature.ReturnType);
+                foreach (var parameter in signature.ParameterTypes)
+                {
+                    pending.Push(parameter);
+                }
+            }
+        }
+        return false;
+    }
+
     private bool TryFindBuffer(SyntaxNode node, out int buffer)
     {
         if (node.Kind == SyntaxKind.MemberAccessExpression
@@ -6762,6 +7014,7 @@ internal sealed partial class Binder
         internal bool IsOperator { get; init; }
         internal PrimitiveType? NativeFunctionPointerType { get; init; }
         internal GenericInstantiation? Generic { get; init; }
+        internal ImmutableDictionary<string, PrimitiveType>? GenericOwnerTypeArguments { get; init; }
         internal bool IsClassConstructor { get; init; }
         internal int ClassConstructor { get; init; } = -1;
         internal bool IsConstEval { get; init; }

@@ -417,9 +417,17 @@ internal sealed class Parser
             children.Add(Take());
             var name = Expect(TokenKind.Identifier);
             children.Add(name);
-            if (!isClass && Current.Kind == TokenKind.Colon)
+            if (Current.Kind == TokenKind.Less)
+            {
+                children.Add(ParseTypeParameters());
+            }
+            if (Current.Kind == TokenKind.Colon)
             {
                 children.Add(ParseConformances());
+            }
+            while (Current.Kind == TokenKind.WhereKeyword)
+            {
+                children.Add(ParseConstraint());
             }
             children.Add(Expect(TokenKind.OpenBrace));
 
@@ -444,6 +452,10 @@ internal sealed class Parser
             if (Current.Kind == TokenKind.Colon)
             {
                 children.Add(ParseConformances());
+            }
+            while (Current.Kind == TokenKind.WhereKeyword)
+            {
+                children.Add(ParseConstraint());
             }
             children.Add(Expect(TokenKind.OpenBrace));
             while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
@@ -1244,7 +1256,14 @@ internal sealed class Parser
             while (Current.Kind is not (TokenKind.CloseBracket or TokenKind.EndOfFile))
             {
                 var start = _position;
-                children.Add(ParseExpression());
+                if (Current.Kind == TokenKind.DotDot)
+                {
+                    children.Add(Node(SyntaxKind.CollectionSpreadElement, [Take(), ParseExpression()]));
+                }
+                else
+                {
+                    children.Add(ParseExpression());
+                }
                 if (Current.Kind != TokenKind.Comma)
                 {
                     break;

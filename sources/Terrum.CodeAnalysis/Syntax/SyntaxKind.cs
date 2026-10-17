@@ -159,4 +159,6 @@ public enum SyntaxKind
     AliasDeclaration,
     /// <summary>A bodyless callable declaration terminated by a semicolon.</summary>
     ExternalBody,
+    /// <summary>A source-ordered collection spread element beginning with <c>..</c>.</summary>
+    CollectionSpreadElement,
 }

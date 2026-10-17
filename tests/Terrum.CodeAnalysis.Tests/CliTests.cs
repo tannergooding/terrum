@@ -1537,6 +1537,7 @@ public sealed partial class CliTests
     [TestCase("/* first */ int32 Main() { int32 \u03B1 = 17; return \u03B1 + 25; } // end")]
     [TestCase("int32 F(int32 value) { if (value == 0) { return 1; } return value * F(value - 1); } int32 Main() { return F(5); }")]
     [TestCase("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { S value = new S(42); return value.Value; }")]
+    [TestCase("struct Box<T> { T value; public Box(T value) { this.value = value; } public T Get() { return this.value; } } int32 Main() { Box<int32> value = new Box<int32>(42); return value.Get(); }")]
     [TestCase("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
     [TestCase("int32 Main() { int64 minimum = -9223372036854775808; return int32(minimum % -1); }")]
     [TestCase("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; i < 10; i = i + 1) { sum = sum + i; } return sum; }")]

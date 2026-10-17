@@ -20,6 +20,14 @@ internal sealed partial class Binder
 
     private void DeclareClassName(SyntaxTree tree, SyntaxNode declaration)
     {
+        if (HasGenericTypeParameters(declaration))
+        {
+            Report("TRM3005",
+                "Generic nominal type declarations are not supported by the current compiler profile.",
+                declaration.Span);
+            return;
+        }
+
         _usesManagedNode = true;
         var name = StructName(declaration);
         if (TryPrimitiveType(name.Text, out _))
@@ -30,13 +38,15 @@ internal sealed partial class Binder
         var qualified = Qualify(name.Name);
         if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
             || _classes.Count >= SemanticVerifier.MaximumVariables
-            || !_classNames.TryAdd(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count))
+            || _classNames.ContainsKey(qualified)
             || _structNames.ContainsKey(qualified)
+            || _genericStructTemplates.ContainsKey(qualified)
             || qualified is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
         {
             Report("TRM3003", $"Duplicate or reserved managed class '{qualified}'.", declaration.Span);
             return;
         }
+        _classNames.Add(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count));
         var index = _classes.Count;
         var isMutable = false;
         var isPublic = false;
@@ -113,6 +123,7 @@ internal sealed partial class Binder
             }
         }
         var invalidAlias = false;
+        var genericArityMismatch = false;
         var hasCandidate = false;
         var ambiguous = false;
         var candidate = default(PrimitiveType);
@@ -141,6 +152,12 @@ internal sealed partial class Binder
             type = default;
             return DeclaredTypeResolution.Invalid;
         }
+        if (!hasCandidate && genericArityMismatch)
+        {
+            type = default;
+            Report("TRM3005", $"Generic type '{name}' requires its declared type argument count.", useSite);
+            return DeclaredTypeResolution.Invalid;
+        }
         if (!hasCandidate)
         {
             type = default;
@@ -162,6 +179,18 @@ internal sealed partial class Binder
             if (typeArguments is null && _classNames.TryGetValue(qualified, out var @class))
             {
                 AddTypeCandidate(@class);
+            }
+            if (_genericStructTemplates.TryGetValue(qualified, out var genericStruct))
+            {
+                if (typeArguments is ImmutableArray<PrimitiveType> arguments
+                    && arguments.Length == genericStruct.TypeParameters.Length)
+                {
+                    AddTypeCandidate(InstantiateGenericStruct(genericStruct, arguments, useSite));
+                }
+                else
+                {
+                    genericArityMismatch = true;
+                }
             }
             if (_aliases.TryGetValue(qualified, out var alias))
             {
@@ -272,6 +301,12 @@ internal sealed partial class Binder
                 continue;
             }
             var type = BindType((SyntaxNode)child.Children[^3], allowVoid: false);
+            if (!_classes[index].IsInternal && ContainsGenericStructSpecialization(type))
+            {
+                Report("TRM3005",
+                    "Public classes cannot expose compilation-local generic struct specializations.",
+                    child.Span);
+            }
             if (type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                 or PrimitiveType.MutableInt32BufferView or PrimitiveType.TokenSpan || IsUnique(type))
             {

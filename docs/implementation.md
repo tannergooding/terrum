@@ -364,9 +364,14 @@ the selected [machine protocol](specs/cli-protocol.md) is a separate target cont
 The hosted compiler supports selected compilation-local constrained generic
 functions and static operator protocols. Templates are checked against their
 declared constraints and produce closed specializations for supported concrete
-types. This does not establish generic classes or structs, public generic
-witnesses, runtime generic captures, or support for every accepted generic
-contract. The [development native profile](implementation/native.md) and
+types. Internal generic structs have a separate closed-specialization path for
+type-only formals, fields, constructors and ordinary methods; the source
+definition itself is not exported or imported. Public generic definitions,
+generic classes, nominal constraints/conformances, methods with their own
+type parameters, interface witnesses, and executable generic metadata remain
+unsupported. Neither specialization path establishes runtime generic
+captures or support for every accepted generic contract. The
+[development native profile](implementation/native.md) and
 [source grammar](specs/grammar-spec.md) define the relevant boundaries.
 Bounded output combinations remain provisional only where they extend the
 accepted profiles: fixed sides alongside mixed generic modes, or floating

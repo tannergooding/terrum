@@ -26,6 +26,20 @@ identity, checked public effect/capture contract or independently usable
 metadata/value/operation codec. Names and implementation details cannot
 fill those gaps.
 
+The parser preserves `..sequence` inside a bracket initializer as a
+`CollectionSpreadElement`. Binding, verification, persistence and execution
+of collection builders or spread protocols remain unsupported; bracket
+initializers are still admitted only by the closed fixed-storage gate.
+The parser preserves generic struct/class type parameters, conformances, and
+`where` clauses, as well as interface formals and constraints. The binder
+supports compilation-local closed specialization of internal generic structs
+with type-only formals, fields, constructors and ordinary methods. Their
+closed layouts and bodies use the existing bound representation; no open
+generic definition is exported or imported. Public generic structs, generic
+classes, nominal constraints/conformances, methods with their own type
+parameters, independent generic metadata, interface witnesses and builders
+remain unsupported.
+
 Implementation work must state the actual selected source/runtime/target
 profile and verify its transitive requirements. Parsing a signature, running
 a finite logical fixture or emitting a private development artifact does
