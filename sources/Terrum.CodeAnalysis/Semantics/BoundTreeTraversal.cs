@@ -9,6 +9,75 @@ namespace Terrum.CodeAnalysis.Semantics;
 internal static class BoundTreeTraversal
 {
     internal static bool IsWithinLimits(BoundBlock body)
+        => VisitExpressionsCore(body, static _ => { }, requireComplete: true);
+
+    internal static bool VisitExpressions(BoundBlock body, Action<BoundExpression> visitor)
+        => VisitExpressionsCore(body, visitor, requireComplete: false);
+
+    internal static bool VisitStatements(BoundBlock body, Action<BoundStatement> visitor)
+    {
+        var pending = new Stack<(BoundStatement? Statement, int Depth)>();
+        pending.Push((body, 0));
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            if (item.Statement is null || item.Depth > SemanticVerifier.MaximumDepth || --remaining < 0)
+            {
+                return false;
+            }
+            visitor(item.Statement);
+            var depth = item.Depth + 1;
+            switch (item.Statement)
+            {
+                case BoundBlock block:
+                    if (block.Statements.IsDefault)
+                    {
+                        return false;
+                    }
+                    foreach (var statement in block.Statements)
+                    {
+                        pending.Push((statement, depth));
+                    }
+                    break;
+                case BoundIf branch:
+                    pending.Push((branch.Then, depth));
+                    if (branch.Else is not null)
+                    {
+                        pending.Push((branch.Else, depth));
+                    }
+                    break;
+                case BoundWhile loop:
+                    pending.Push((loop.Body, depth));
+                    if (loop.Iterator is not null)
+                    {
+                        pending.Push((loop.Iterator, depth));
+                    }
+                    break;
+                case BoundTryFinally cleanup:
+                    pending.Push((cleanup.Body, depth));
+                    pending.Push((cleanup.Finally, depth));
+                    break;
+                case BoundTryCatch recovery:
+                    pending.Push((recovery.Body, depth));
+                    pending.Push((recovery.Catch, depth));
+                    if (recovery.Finally is not null)
+                    {
+                        pending.Push((recovery.Finally, depth));
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    pending.Push((unsafeBlock.Body, depth));
+                    break;
+                case BoundViewScope view:
+                    pending.Push((view.Body, depth));
+                    break;
+            }
+        }
+        return true;
+    }
+
+    private static bool VisitExpressionsCore(BoundBlock body, Action<BoundExpression> visitor,
+        bool requireComplete)
     {
         var pending = new Stack<(object? Node, int Depth)>();
         pending.Push((body, 0));
@@ -34,6 +103,13 @@ internal static class BoundTreeTraversal
                     break;
                 case BoundLocal local:
                     pending.Push((local.Initializer, depth));
+                    break;
+                case BoundVacantLocal or BoundLifetimeEnd or BoundOwnerDeclaration or BoundBreak or BoundContinue
+                    or BoundDrop or BoundDropSpan or BoundDropConstructedFields:
+                    if (requireComplete)
+                    {
+                        return false;
+                    }
                     break;
                 case BoundAssignment assignment:
                     pending.Push((assignment.Value, depth));
@@ -100,6 +176,12 @@ internal static class BoundTreeTraversal
                 case BoundReturn { Value: BoundExpression value }:
                     pending.Push((value, depth));
                     break;
+                case BoundReturn { Value: null }:
+                    if (requireComplete)
+                    {
+                        return false;
+                    }
+                    break;
                 case BoundRequire require:
                     pending.Push((require.Condition, depth));
                     break;
@@ -108,6 +190,7 @@ internal static class BoundTreeTraversal
                     {
                         return false;
                     }
+                    visitor(expression);
                     foreach (var child in expression.NestedExpressions)
                     {
                         pending.Push((child, depth));

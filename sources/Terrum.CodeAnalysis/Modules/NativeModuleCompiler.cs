@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -68,6 +69,10 @@ public static partial class NativeModuleCompiler
         var provider = ReadAndValidateProducer(producer);
         var package = provider.Package;
         CheckPolicy(runtimePolicy);
+        var providerReference = package.ProviderSnapshot?.GetReference()
+            ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
+        program = BindModuleImportBindings(program,
+            [(package.Identity, package.Policy, providerReference)]);
         var contract = ModuleCompiler.CreateConsumer(program, package.Contract);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
         var dll = DllName(package.Identity);
@@ -247,13 +252,8 @@ public static partial class NativeModuleCompiler
 
     private static void ValidatePair(Package consumer, Package producer)
     {
-        var producerReference = ValidatePairContracts(consumer, producer);
-        var exports = new string[producerReference.Functions.Length];
-        for (var i = 0; i < exports.Length; i++)
-        {
-            exports[i] = producerReference.Functions[i].Name;
-        }
-        ValidateProducerImage(producer, exports);
+        _ = ValidatePairContracts(consumer, producer);
+        ValidateProducerImage(producer, ProducerImageExports(producer));
         ValidateConsumerImage(consumer);
     }
 
@@ -290,10 +290,23 @@ public static partial class NativeModuleCompiler
 
     private static void ValidateProducerImage(Package producer, IReadOnlyList<string> exports)
     {
-        var nativeImports = ModuleCompiler.GetProducerNativeImports(producer.Contract);
+        var nativeImports = System32DirectImports(
+            ModuleCompiler.GetProducerNativeImports(producer.Contract));
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, nativeImports, exports,
             producer.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(producer.Profile),
             allowManagedRuntimeData: AllowsManagedRuntimeData(producer.Profile));
+    }
+
+    private static Dictionary<string, IReadOnlyList<string>> System32DirectImports(
+        IReadOnlyDictionary<string, IReadOnlyList<string>> directImports)
+    {
+        var imports = new Dictionary<string, IReadOnlyList<string>>(directImports.Count,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var (dllName, symbols) in directImports)
+        {
+            imports.Add(NativeEmitter.System32ImportPath(dllName), symbols);
+        }
+        return imports;
     }
 
     private static void ValidateConsumerImage(Package consumer)
@@ -309,10 +322,11 @@ public static partial class NativeModuleCompiler
         foreach (var (dllName, directImports) in
             ModuleCompiler.GetConsumerNativeImports(consumer.Contract))
         {
-            if (!imports.TryGetValue(dllName, out var symbols))
+            var importPath = NativeEmitter.System32ImportPath(dllName);
+            if (!imports.TryGetValue(importPath, out var symbols))
             {
                 symbols = new HashSet<string>(StringComparer.Ordinal);
-                imports.Add(dllName, symbols);
+                imports.Add(importPath, symbols);
             }
             foreach (var symbol in directImports)
             {
@@ -356,13 +370,30 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native package and semantic contract policies differ.");
         }
-        var exports = new string[reference.Functions.Length];
-        for (var i = 0; i < exports.Length; i++)
-        {
-            exports[i] = reference.Functions[i].Name;
-        }
-        ValidateProducerImage(producer, exports);
+        ValidateProducerImage(producer, ProducerImageExports(producer));
         return reference;
+    }
+
+    private static string[] ProducerImageExports(Package producer)
+    {
+        var providerSnapshot = producer.ProviderSnapshot
+            ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var function in providerSnapshot.ParsedModule.Functions)
+        {
+            if (function.Import && !names.Add(function.Name))
+            {
+                throw new ModuleFormatException("Native producer contains duplicate image export names.");
+            }
+            if (function.Function is { IsExternal: false, NativeCallableEntryName: string entryName }
+                && !names.Add(entryName))
+            {
+                throw new ModuleFormatException("Native producer contains duplicate image export names.");
+            }
+        }
+        var exports = names.ToArray();
+        Array.Sort(exports, StringComparer.Ordinal);
+        return exports;
     }
 
     private static ValidatedProducer ReadAndValidateProducer(byte[] producer)
@@ -370,6 +401,104 @@ public static partial class NativeModuleCompiler
         var package = Read(producer);
         ValidateProducer(package);
         return new ValidatedProducer(package);
+    }
+
+    private static BoundProgram BindModuleImportBindings(BoundProgram program,
+        IReadOnlyList<(string Identity, NativeRuntimePolicy Policy, CompilationReference Reference)> providers)
+    {
+        ImmutableArray<BoundFunction>.Builder? reboundFunctions = null;
+        for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
+        {
+            var function = program.Functions[functionIndex];
+            var import = function.ModuleImport;
+            var isNativeCallable = function.IsExternal && function.NativeFunctionPointerType is not null;
+            var isNativeVTable = function.NativeVTableMethod is not null
+                && NativeVTableCallContract.IsValid(function, program);
+            if (import is null && function.IsExternal && isNativeVTable)
+            {
+                var selectedProviderIndex = -1;
+                for (var providerIndex = 0; providerIndex < providers.Count; providerIndex++)
+                {
+                    if (!providers[providerIndex].Reference.Functions.Any(declaration =>
+                        declaration.Name == function.Name && declaration.NativeVTableMethod is not null))
+                    {
+                        continue;
+                    }
+                    if (selectedProviderIndex >= 0)
+                    {
+                        throw new ModuleContractException(
+                            $"Native vtable declaration '{function.Name}' has ambiguous providers.");
+                    }
+                    selectedProviderIndex = providerIndex;
+                }
+                if (selectedProviderIndex < 0)
+                {
+                    throw new ModuleContractException(
+                        $"Native vtable declaration '{function.Name}' has no selected provider.");
+                }
+                var (providerIdentity, providerPolicy, _) = providers[selectedProviderIndex];
+                import = new BoundModuleImport(providerIdentity, function.Name, 1,
+                    (uint)providerPolicy);
+            }
+
+            if (import is null)
+            {
+                continue;
+            }
+            if ((!isNativeCallable && !isNativeVTable)
+                || import.TargetRequirement != 1 || import.ExportKey != function.Name)
+            {
+                throw new ModuleContractException(
+                    "A retained TRRM import is not a supported native callable or vtable dependency.");
+            }
+
+            var matchedProvider = false;
+            foreach (var (providerIdentity, providerPolicy, providerReference) in providers)
+            {
+                if (!StringComparer.Ordinal.Equals(providerIdentity, import.ProducerIdentity))
+                {
+                    continue;
+                }
+
+                matchedProvider = true;
+                var declaration = providerReference.Functions.SingleOrDefault(candidate =>
+                    candidate.Name == import.ExportKey);
+                if (import.RuntimePolicy != (uint)providerPolicy
+                    || declaration is null
+                    || (isNativeCallable && declaration.NativeFunctionPointerType is null)
+                    || (isNativeVTable
+                        && (declaration.NativeVTableMethod is not NativeVTableMethodDefinition providerVTable
+                            || !ModuleCompiler.SameNativeVTableMethod(
+                                function.NativeVTableMethod!, providerVTable))))
+                {
+                    throw new ModuleContractException(
+                        "The selected native provider does not satisfy a retained TRRM import identity.");
+                }
+                if (isNativeVTable)
+                {
+                    reboundFunctions ??= program.Functions.ToBuilder();
+                    reboundFunctions[functionIndex] = function with {
+                        IsExternal = true,
+                        Intrinsic = BoundIntrinsic.None,
+                        Body = new BoundBlock([], default),
+                        IndexedBody = null,
+                        NativeCallableEntryName = null,
+                        ModuleImport = import,
+                    };
+                }
+                break;
+            }
+
+            if (!matchedProvider)
+            {
+                throw new ModuleContractException(
+                    "A retained TRRM import does not match a selected native provider.");
+            }
+        }
+
+        return reboundFunctions is null
+            ? program
+            : program with { Functions = reboundFunctions.ToImmutable() };
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,

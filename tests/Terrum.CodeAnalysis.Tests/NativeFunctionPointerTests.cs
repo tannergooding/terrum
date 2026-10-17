@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -28,6 +29,85 @@ public sealed class NativeFunctionPointerTests
             unsafe { return &Answer; }
         }
         """;
+
+    [Test]
+    public void VerifierRejectsFunctionAddressAfterRemovingItsUnsafeScope()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            int32 Answer() { return 42; }
+
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32> answer = &Answer;
+                    return 0;
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var forged = RemoveFunctionUnsafeScope(program, "Main");
+
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
+    }
+
+    [Test]
+    public void VerifierRejectsIndirectCallAfterRemovingItsUnsafeScope()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe int32 Invoke(fnptr<NativeAbi, int32, int32> callback, int32 value) {
+                unsafe { return callback(value); }
+            }
+
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var forged = RemoveFunctionUnsafeScope(program, "Invoke");
+
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
+    }
+
+    [Test]
+    public void DirectEmissionRejectsCallerUnsafeCallOutsideLexicalUnsafeScope()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe int32 Danger() { return 42; }
+            int32 Main() { return unsafe(Danger()); }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var functionIndex = Enumerable.Range(0, program.Functions.Length)
+            .Single(index => program.Functions[index].Name == "Main");
+        var function = program.Functions[functionIndex];
+        var result = (BoundReturn)function.Body.Statements.Single();
+        var authorized = (BoundUnsafeExpression)result.Value!;
+        var forged = program with {
+            Functions = program.Functions.SetItem(functionIndex, function with {
+                Body = function.Body with {
+                    Statements = [result with { Value = authorized.Expression }],
+                },
+            }),
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+    }
+
+    private static BoundProgram RemoveFunctionUnsafeScope(BoundProgram program, string functionName)
+    {
+        var functionIndex = Enumerable.Range(0, program.Functions.Length)
+            .Single(index => program.Functions[index].Name == functionName);
+        var function = program.Functions[functionIndex];
+        var unsafeScope = function.Body.Statements.OfType<BoundUnsafe>().Single();
+        return program with {
+            Functions = program.Functions.SetItem(functionIndex, function with { Body = unsafeScope.Body }),
+        };
+    }
 
     [Test]
     public void NativeCallableAndIndirectFloatCallsUseWindowsX64Abi()
@@ -104,6 +184,9 @@ public sealed class NativeFunctionPointerTests
             [NoThrow]
             [Terrum.Interop.NativeCallable]
             public int32 Identity(int32 value) { return value; }
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 NamedOnly(int32 value) { return value; }
             """;
         const string consumerSource = """
             int32 Main() {
@@ -122,6 +205,16 @@ public sealed class NativeFunctionPointerTests
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(providerSource));
         Assert.That(providerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var nativeProviderProgram = providerCompilation.Program!;
+        var namedOnlyIndex = nativeProviderProgram.Functions.IndexOf(
+            nativeProviderProgram.Functions.Single(static function => function.Name == "NamedOnly"));
+        nativeProviderProgram = nativeProviderProgram with
+        {
+            Functions = nativeProviderProgram.Functions.SetItem(namedOnlyIndex,
+                nativeProviderProgram.Functions[namedOnlyIndex] with {
+                    NativeCallableEntryName = "NamedOnly|Native",
+                }),
+        };
 
         var privateProducer = ModuleCompiler.CreateProducer(providerCompilation.Program!, ["Identity"]);
         var privateReference = ModuleCompiler.CreateReference(privateProducer);
@@ -142,8 +235,11 @@ public sealed class NativeFunctionPointerTests
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(addressConsumer, privateProducer),
             NativeRuntimePolicy.FailFast), Is.Zero);
 
-        var nativeProducer = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+        var nativeProducer = NativeModuleCompiler.CreateProducer(nativeProviderProgram,
             ["Identity"], "NativeCallableProvider", NativeRuntimePolicy.FailFast);
+        var nativeProducerReference = NativeModuleCompiler.CreateReference(nativeProducer);
+        Assert.That(nativeProducerReference.Functions.Select(static function => function.Name),
+            Is.EqualTo(new[] { "Identity" }));
         var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "public int32 Other() { return 0; }"));
         Assert.That(secondCompilation.HasErrors, Is.False,
@@ -566,16 +662,542 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
-    public void StandardTrRmRejectsNativeFunctionPointerSignatures()
+    public void StandardTrRmRoundTripsAndExecutesNativeFunctionPointerBodyOperations()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(NativeCallbackProvider + """
-            int32 Main() { return 0; }
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> callback = GetAnswer();
+                    return callback(42) == 42 ? 0 : -1;
+                }
+            }
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.Emit(compilation.Program!, "unapproved-native-function-pointer"));
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
+            "native-function-pointer-body");
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.That(features.TryGetFeature(
+            TrRmFeatureTableReader.DirectNativeCallsFeatureId, out _), Is.True);
+        Assert.That(features.TryGetFeature(
+            TrRmFeatureTableReader.NativeCallableEntriesFeatureId, out _), Is.True);
+
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.That(loaded.Functions.Single(static function => function.Name == "GetAnswer")
+            .IndexedBody, Is.Not.Null);
+        Assert.That(loaded.Functions.Single(static function => function.Name == "Main")
+            .IndexedBody, Is.Not.Null);
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public void StandardTrRmRejectsMalformedNativeFunctionAddressOperations()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(NativeCallbackProvider + """
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            int64 WrongSignature() { return 0; }
+
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> callback = GetAnswer();
+                    return callback(42);
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
+            "malformed-native-function-address");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var wrongSignatureMethodRow = loaded.Functions
+            .Select((function, index) => (function, index))
+            .Single(static item => item.function.Name == "WrongSignature").index + 1;
+        var addressTargetOffset = FindIndexedOperationTargetOffset(artifact, 0x31);
+
+        var mismatchedTarget = (byte[])artifact.Clone();
+        mismatchedTarget[addressTargetOffset] = checked((byte)wrongSignatureMethodRow);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(mismatchedTarget));
+
+        var missingUnsafeRegion = (byte[])artifact.Clone();
+        RemoveIndexedUnsafeAuthorization(missingUnsafeRegion);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingUnsafeRegion));
+    }
+
+    [Test]
+    public void StandardTrRmRoundTripsNestedNativeFunctionPointerSignatures()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 Invoke(fnptr<NativeAbi, int32> callback, int32 value) {
+                return value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var function = program.Functions.Single(static candidate => candidate.Name == "Invoke");
+        Assert.That(function.NativeFunctionPointerType, Is.Not.Null);
+        var callableSignature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(function.NativeFunctionPointerType!.Value)];
+        Assert.That(callableSignature.ParameterTypes, Has.Length.EqualTo(2));
+        var callbackType = callableSignature.ParameterTypes[0];
+        Assert.That(NativeFunctionPointerTypes.IsType(callbackType), Is.True);
+        var callbackSignature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(callbackType)];
+        Assert.That(callbackSignature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(callbackSignature.ParameterTypes, Is.Empty);
+
+        var artifact = TrRmExecutableCompiler.Emit(program, "nested-native-callable");
+        var artifactIndex = new TrRmArtifactIndex(artifact);
+        Assert.That(artifactIndex.TryGetSection(0x0033, out _, out var signatureCount), Is.True);
+        Assert.That(signatureCount, Is.EqualTo(program.NativeFunctionPointerSignatures.Length));
+        Assert.That(artifactIndex.TryGetSection(0x0011, out var typeSpecBytes,
+            out var typeSpecCount), Is.True);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecCount,
+            0, 0, 0, 0, signatureCount);
+        var hasFunctionPointerTypeSpec = false;
+        for (var row = 1; row <= typeSpecCount; row++)
+        {
+            hasFunctionPointerTypeSpec |= typeSpecs.GetRow(row)[0] == 0x0D;
+        }
+        Assert.That(hasFunctionPointerTypeSpec, Is.True);
+        Assert.That(artifactIndex.TryGetSection(0x0004, out var featureBytes,
+            out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.That(features.TryGetFeature(
+            TrRmFeatureTableReader.NativeBoundaryContractsFeatureId, out _), Is.True);
+        Assert.That(features.TryGetFeature(
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId, out _), Is.True);
+
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loadedFunction = loaded.Functions.Single(static candidate => candidate.Name == "Invoke");
+        Assert.That(loadedFunction.Variables[0].Type, Is.EqualTo(callbackType));
+        Assert.That(loaded.NativeFunctionPointerSignatures, Has.Length.EqualTo(
+            program.NativeFunctionPointerSignatures.Length));
+        for (var index = 0; index < program.NativeFunctionPointerSignatures.Length; index++)
+        {
+            var expected = program.NativeFunctionPointerSignatures[index];
+            var actual = loaded.NativeFunctionPointerSignatures[index];
+            Assert.That(actual.ReturnType, Is.EqualTo(expected.ReturnType));
+            Assert.That(actual.ParameterTypes.ToArray(), Is.EqualTo(expected.ParameterTypes.ToArray()));
+        }
+        Assert.That(TrRmExecutableCompiler.Emit(loaded, "nested-native-callable"),
+            Is.EqualTo(artifact));
+
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        Assert.That(Export(reference, "Invoke").Variables[0].Type, Is.EqualTo(callbackType));
+        Assert.That(reference.NativeFunctionPointerSignatures, Has.Length.EqualTo(
+            program.NativeFunctionPointerSignatures.Length));
+
+        var malformed = artifact.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            malformed.AsSpan(FindSectionOffset(malformed, 0x0033)), 0x00FF_FFFF);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+
+        Assert.That(signatureCount, Is.EqualTo(2));
+        var duplicateSignature = artifact.ToArray();
+        var signatureOffset = FindSectionOffset(duplicateSignature, 0x0033);
+        var methodOffset = FindSectionOffset(duplicateSignature, 0x0016);
+        var firstAnchor = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            duplicateSignature.AsSpan(signatureOffset)));
+        var secondAnchor = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            duplicateSignature.AsSpan(signatureOffset + 8)));
+        var firstMethodSignature = BinaryPrimitives.ReadUInt32LittleEndian(
+            duplicateSignature.AsSpan(methodOffset + ((firstAnchor - 1) * 28) + 8));
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            duplicateSignature.AsSpan(methodOffset + ((secondAnchor - 1) * 28) + 8),
+            firstMethodSignature);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(duplicateSignature));
+    }
+
+    [Test]
+    public void ReorderedTrRmNestedSignaturesPreserveOutputStorageInPrivateModules()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 Invoke(fnptr<NativeAbi, int32> callback) {
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "forward-native-signature");
+        var reordered = ReverseNativeFunctionPointerSignatureRows(artifact);
+        var loaded = TrRmExecutableCompiler.Load(reordered);
+        var loadedFunction = loaded.Functions.Single(static candidate => candidate.Name == "Invoke");
+        var callableSignatureIndex =
+            NativeFunctionPointerTypes.Index(loadedFunction.NativeFunctionPointerType!.Value);
+        Assert.That(callableSignatureIndex, Is.EqualTo(0));
+        var callableSignature = loaded.NativeFunctionPointerSignatures[callableSignatureIndex];
+        Assert.That(NativeFunctionPointerTypes.Index(callableSignature.ParameterTypes[0]), Is.EqualTo(1));
+
+        var producer = ModuleCompiler.CreateProducer(loaded, ["Invoke"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "AcquireCallback")]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
+            extern int32 AcquireCallback(
+                write ptr<fnptr<NativeAbi, fnptr<NativeAbi, int32>, int32>> callback);
+
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            int32 Placeholder(fnptr<NativeAbi, int32> callback) { return 0; }
+
+            int32 Main() {
+                unsafe {
+                    mut fnptr<NativeAbi, fnptr<NativeAbi, int32>, int32> callback = &Placeholder;
+                    int32 status = AcquireCallback(&callback);
+                    if (status != 0) { return 0; }
+                    return -1;
+                }
+            }
+            """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumerProgram = consumerCompilation.Program!;
+        var mainFunction = consumerProgram.Functions.Single(static function =>
+            function.Name == "Main");
+        var importCall = mainFunction.Body.Statements.OfType<BoundUnsafe>().Single().Body
+            .Statements.OfType<BoundLocal>()
+            .Select(static local => local.Initializer)
+            .OfType<BoundCall>().Single();
+        var outputAddress = (BoundNativeStorageAddress)importCall.Arguments[0];
+        var outputPointee = consumerProgram.Functions.Single(static function =>
+            function.Name == "AcquireCallback").DirectNativeImport!.Outputs.Single().PointeeType;
+        Assert.That(outputAddress.CarrierType,
+            Is.EqualTo(mainFunction.Variables[outputAddress.Variable].Type));
+        Assert.That(outputAddress.CarrierType, Is.EqualTo(outputPointee));
+
+        var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.DoesNotThrow(() => SemanticVerifier.VerifyWithDirectNativeImports(linked));
+    }
+
+    [Test]
+    public void StandardTrRmRequiresFunctionPointerFeaturesOnEveryUsingModule()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 Invoke(fnptr<NativeAbi, int32> callback) {
+                return 0;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "module-feature-closure");
+
+        Assert.DoesNotThrow(() => TrRmStructuralMetadataValidator.Validate(
+            SplitSignatureAnchorModule(artifact, includeRootlessFeature: true)));
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(
+            SplitSignatureAnchorModule(artifact, includeRootlessFeature: false)));
+    }
+
+    [Test]
+    public void StandardTrRmRoundTripsScalarNativeCallableContracts()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public float64 Sum(float64 first, int32 ignored, float64 second) {
+                return first + second;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var function = program.Functions.Single(static candidate => candidate.Name == "Sum");
+        program = program with
+        {
+            Functions = program.Functions.SetItem(0, function with { NativeCallableEntryName = "Sum|Native" }),
+        };
+        var artifact = TrRmExecutableCompiler.Emit(program, "native-callable");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var callable = loaded.Functions.Single(static function => function.Name == "Sum");
+
+        Assert.That(callable.NativeFunctionPointerType, Is.EqualTo(NativeFunctionPointerTypes.Type(0)));
+        Assert.That(callable.NativeCallableEntryName, Is.EqualTo("Sum|Native"));
+        Assert.That(loaded.NativeFunctionPointerSignatures, Has.Length.EqualTo(1));
+        Assert.That(loaded.NativeFunctionPointerSignatures[0].ReturnType, Is.EqualTo(PrimitiveType.Float64));
+        Assert.That(loaded.NativeFunctionPointerSignatures[0].ParameterTypes,
+            Is.EqualTo(new[] { PrimitiveType.Float64, PrimitiveType.Int32, PrimitiveType.Float64 }));
+        Assert.That(callable.IsNoThrow, Is.True);
+        Assert.That(callable.RequiresUnsafeCaller, Is.True);
+        Assert.That(TrRmExecutableCompiler.Emit(loaded, "native-callable"), Is.EqualTo(artifact));
+
+        var privateProducer = ModuleCompiler.CreateProducer(program, ["Sum"]);
+        var privateReference = ModuleCompiler.CreateReference(privateProducer);
+        Assert.That(Export(privateReference, "Sum").NativeCallableEntryName, Is.EqualTo("Sum|Native"));
+    }
+
+    [Test]
+    public void RejectsOversizedNestedFunctionPointerTypeIdentityBeforeExpansion()
+    {
+        var source = new StringBuilder();
+        var previousAlias = "A";
+        source.Append("alias ").Append(previousAlias)
+            .AppendLine(" = fnptr<NativeAbi, int32>;");
+        for (var depth = 1; depth <= 10; depth++)
+        {
+            var alias = ((char)('A' + depth)).ToString();
+            var parametersAndReturn = string.Join(", ", Enumerable.Repeat(previousAlias, 9));
+            source.Append("alias ").Append(alias).Append(" = fnptr<NativeAbi, ")
+                .Append(parametersAndReturn).AppendLine(">;");
+            previousAlias = alias;
+        }
+        source.Append("public ").Append(previousAlias).Append(" Identity(")
+            .Append(previousAlias).AppendLine(" callback) { return callback; }");
+
+        Assert.That(source.Length, Is.LessThan(1024));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source.ToString()));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var error = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(compilation.Program!, ["Identity"]));
+        Assert.That(error!.Message, Does.Contain("type identity exceeds the string limit"));
+    }
+
+    [Test]
+    public void FunctionPointerTypeDiagnosticsBoundRecursiveFormatting()
+    {
+        var source = new StringBuilder();
+        var previousAlias = "A";
+        source.Append("alias ").Append(previousAlias)
+            .AppendLine(" = fnptr<NativeAbi, int32>;");
+        for (var depth = 1; depth <= 10; depth++)
+        {
+            var alias = ((char)('A' + depth)).ToString();
+            var parametersAndReturn = string.Join(", ", Enumerable.Repeat(previousAlias, 9));
+            source.Append("alias ").Append(alias).Append(" = fnptr<NativeAbi, ")
+                .Append(parametersAndReturn).AppendLine(">;");
+            previousAlias = alias;
+        }
+        source.Append("public ").Append(previousAlias)
+            .AppendLine(" Reject() { return true; }");
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source.ToString()));
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Max(static diagnostic => diagnostic.Message.Length),
+            Is.LessThanOrEqualTo(512));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Message.Contains("...", StringComparison.Ordinal)),
+            Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void StandardTrRmNativeCallableReferenceBindsUnsafeCalls()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 GetAnswer(int32 value) { return value; }
+            """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(providerCompilation.Program!, "native-callable-provider");
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe { return GetAnswer(42); }
+            }
+            """), reference);
+
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var imported = reference.Functions.Single(static function => function.Name == "GetAnswer");
+        Assert.That(imported.IsExternal, Is.True);
+        Assert.That(imported.NativeFunctionPointerType, Is.Not.Null);
+        Assert.That(reference.NativeFunctionPointerSignatures, Has.Length.EqualTo(1));
+    }
+
+    [Test]
+    public void StandardTrRmRoundTripsImportedNativeCallableAddressAndIndirectCall()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 GetAnswer(int32 value) { return value; }
+            """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.Emit(
+            providerCompilation.Program!, "native-callable-provider");
+        var reference = TrRmExecutableCompiler.CreateReference(providerArtifact);
+        var imported = reference.Functions.Single(static function => function.Name == "GetAnswer");
+        Assert.That(imported.ModuleImport?.ProducerIdentity, Is.EqualTo("native-callable-provider"));
+        Assert.That(imported.ModuleImport?.ExportKey, Is.EqualTo("GetAnswer"));
+
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> callback = &GetAnswer;
+                    return callback(42);
+                }
+            }
+            """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(
+            consumerCompilation.Program!, "native-callable-consumer");
+        var artifactIndex = new TrRmArtifactIndex(artifact);
+        Assert.That(artifactIndex.TryGetSection(0x10, out _, out var moduleRefCount), Is.True);
+        Assert.That(moduleRefCount, Is.EqualTo(1));
+        Assert.That(artifactIndex.TryGetSection(0x1C, out _, out var importCount), Is.True);
+        Assert.That(importCount, Is.EqualTo(1));
+        Assert.That(artifactIndex.TryGetSection(0x31, out _, out _), Is.False);
+
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loadedImported = loaded.Functions.Single(static function => function.Name == "GetAnswer");
+        Assert.That(loadedImported.IsExternal, Is.True);
+        Assert.That(loadedImported.ModuleImport?.ProducerIdentity, Is.EqualTo("native-callable-provider"));
+        Assert.That(loadedImported.ModuleImport?.ExportKey, Is.EqualTo("GetAnswer"));
+
+        var main = loaded.Functions.Single(static function => function.Name == "Main");
+        var operations = main.IndexedBody!.Blocks.SelectMany(static block => block.Operations).ToArray();
+        var address = operations.OfType<BoundLocal>()
+            .Select(static local => local.Initializer)
+            .OfType<BoundNativeFunctionAddress>()
+            .Single();
+        Assert.That(loaded.Functions[address.Function].ModuleImport,
+            Is.EqualTo(loadedImported.ModuleImport));
+        Assert.That(operations.OfType<BoundLocal>()
+            .Any(static local => local.Initializer is BoundIndirectCall), Is.True);
+    }
+
+    [Test]
+    public void StandardTrRmMapsMethodDefRowsPastSignatureAnchors()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [NoThrow]
+            int32 Unused(int32 value) { return 10; }
+
+            int32 Chosen(int32 value) { return 20; }
+
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            int32 CallbackChosen(int32 value) { return 20; }
+
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            int32 CallbackDecoy(int32 value) { return 30; }
+
+            int32 Fill(init ref<int32> output) {
+                output = 0;
+                return Chosen(1);
+            }
+
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> callback = &CallbackChosen;
+                    int32 result = callback(3);
+                    return Chosen(result);
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
+            "method-row-function-pointer");
+        var reordered = MoveNativeFunctionPointerSignatureAnchorFirst(artifact);
+        var loaded = TrRmExecutableCompiler.Load(reordered);
+
+        var callbackIndex = Enumerable.Range(0, loaded.Functions.Length)
+            .Single(index => loaded.Functions[index].Name == "CallbackChosen");
+        var chosenIndex = Enumerable.Range(0, loaded.Functions.Length)
+            .Single(index => loaded.Functions[index].Name == "Chosen");
+        var main = loaded.Functions.Single(static function => function.Name == "Main");
+        var mainOperations = main.IndexedBody!.Blocks.SelectMany(static block => block.Operations)
+            .ToArray();
+        var address = mainOperations
+            .OfType<BoundLocal>()
+            .Select(static local => local.Initializer)
+            .OfType<BoundNativeFunctionAddress>()
+            .Single();
+        Assert.That(address.Function, Is.EqualTo(callbackIndex));
+        Assert.That(mainOperations.OfType<BoundLocal>()
+            .Select(static local => local.Initializer)
+            .OfType<BoundCall>()
+            .Single().Function, Is.EqualTo(chosenIndex));
+
+        var fill = loaded.Functions.Single(static function => function.Name == "Fill");
+        var outputCall = fill.Body.Statements.OfType<BoundLocal>()
+            .Select(static local => local.Initializer)
+            .OfType<BoundCall>()
+            .Single();
+        Assert.That(outputCall.Function, Is.EqualTo(chosenIndex));
+    }
+
+    [Test]
+    public async Task StandardTrRmCallableImportBindsAndRunsOnlyWithItsSelectedProviderAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 GetAnswer(int32 value) { return value; }
+            """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.Emit(
+            providerCompilation.Program!, "NativeCallableProvider");
+        var reference = TrRmExecutableCompiler.CreateReference(providerArtifact);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> callback = &GetAnswer;
+                    return callback(42);
+                }
+            }
+            """), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+
+        var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["GetAnswer"], "NativeCallableProvider", NativeRuntimePolicy.FailFast);
+        var wrongProvider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["GetAnswer"], "WrongNativeCallableProvider", NativeRuntimePolicy.FailFast);
+        var secondCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Other() { return 0; }
+            """));
+        Assert.That(secondCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, secondCompilation.Diagnostics));
+        var secondProvider = NativeModuleCompiler.CreateProducer(secondCompilation.Program!,
+            ["Other"], "NativeCallableSecond", NativeRuntimePolicy.FailFast);
+        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, wrongProvider, NativeRuntimePolicy.FailFast));
+        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateConsumerSet(
+            consumerCompilation.Program!, [wrongProvider, secondProvider], NativeRuntimePolicy.FailFast));
+        Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateGraphConsumer(
+            consumerCompilation.Program!, [wrongProvider], NativeRuntimePolicy.FailFast));
+
+        var consumer = NativeModuleCompiler.CreateConsumer(consumerCompilation.Program!,
+            provider, NativeRuntimePolicy.FailFast);
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, provider,
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true),
+            Is.EqualTo(42));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(consumerCompilation.Program!,
+            [provider], NativeRuntimePolicy.FailFast);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(graphConsumer, [provider],
+            TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast).ConfigureAwait(true),
+            Is.EqualTo(42));
     }
 
     [Test]
@@ -829,6 +1451,339 @@ public sealed class NativeFunctionPointerTests
         Assert.That(reader.ReadInt32(), Is.Zero, "The fixture has no classes.");
         Assert.That(reader.ReadInt32(), Is.Zero, "The fixture has no imported structures.");
         return checked((int)stream.Position);
+    }
+
+    private static int FindSectionOffset(byte[] artifact, ushort sectionKind)
+    {
+        var count = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(12, 4)));
+        for (var index = 0; index < count; index++)
+        {
+            var entry = artifact.AsSpan(32 + checked((int)index * 16), 16);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(entry) == sectionKind)
+            {
+                return checked((int)BinaryPrimitives.ReadUInt32LittleEndian(entry[8..]));
+            }
+        }
+
+        throw new InvalidDataException($"TRRM section 0x{sectionKind:X4} was not found.");
+    }
+
+    private static byte[] MoveNativeFunctionPointerSignatureAnchorFirst(byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        if (!index.TryGetSection(0x0033, out var signatureBytes, out var signatureCount)
+            || signatureCount != 1
+            || !index.TryGetSection(0x0016, out var methodBytes, out var methodCount))
+        {
+            throw new InvalidDataException("Expected one native function-pointer signature anchor.");
+        }
+
+        var anchorRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(signatureBytes));
+        if (anchorRow != methodCount || methodCount < 3)
+        {
+            throw new InvalidDataException("The signature anchor is not the final MethodDef row.");
+        }
+
+        var methodRowMap = new int[methodCount + 1];
+        methodRowMap[anchorRow] = 1;
+        methodRowMap[1] = methodCount;
+        for (var row = 2; row < anchorRow; row++)
+        {
+            methodRowMap[row] = row;
+        }
+
+        var reorderedMethods = new byte[methodBytes.Length];
+        for (var oldRow = 1; oldRow <= methodCount; oldRow++)
+        {
+            methodBytes.Slice((oldRow - 1) * 28, 28).CopyTo(
+                reorderedMethods.AsSpan((methodRowMap[oldRow] - 1) * 28, 28));
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags, out var sectionBytes,
+                out var recordCount);
+            var bytes = sectionBytes.ToArray();
+            if (kind == 0x0016)
+            {
+                bytes = reorderedMethods;
+            }
+            else if (kind == 0x0001)
+            {
+                for (var row = 0; row < recordCount; row++)
+                {
+                    var entryPoint = BinaryPrimitives.ReadUInt32LittleEndian(
+                        bytes.AsSpan((row * 44) + 12));
+                    if (entryPoint != 0)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan((row * 44) + 12),
+                            (uint)RemapMethodRow(entryPoint, methodRowMap));
+                    }
+                }
+            }
+            else if (kind == 0x001B)
+            {
+                var dataOffset = (recordCount + 1) * sizeof(uint);
+                for (var row = 0; row < recordCount; row++)
+                {
+                    var start = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        bytes.AsSpan(row * sizeof(uint))));
+                    var owner = BinaryPrimitives.ReadUInt32LittleEndian(
+                        bytes.AsSpan(dataOffset + start));
+                    BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(dataOffset + start),
+                        RemapMethodDefinitionId(owner, methodRowMap));
+                }
+            }
+            else if (kind is 0x001C or 0x001D)
+            {
+                var stride = kind == 0x001C ? 12 : 8;
+                var definitionOffset = kind == 0x001C ? 8 : 0;
+                for (var row = 0; row < recordCount; row++)
+                {
+                    var offset = (row * stride) + definitionOffset;
+                    var definition = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset));
+                    BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset),
+                        RemapMethodDefinitionId(definition, methodRowMap));
+                }
+            }
+            else if (kind is 0x0030 or 0x0031 or 0x0032 or 0x0033)
+            {
+                var stride = kind is 0x0030 or 0x0032 ? 16 : 8;
+                for (var row = 0; row < recordCount; row++)
+                {
+                    var offset = row * stride;
+                    var methodRow = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset));
+                    BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset),
+                        (uint)RemapMethodRow(methodRow, methodRowMap));
+                }
+                if (kind != 0x0033)
+                {
+                    var rows = new List<byte[]>(recordCount);
+                    for (var row = 0; row < recordCount; row++)
+                    {
+                        rows.Add(bytes.AsSpan(row * stride, stride).ToArray());
+                    }
+                    rows.Sort(static (left, right) =>
+                        BinaryPrimitives.ReadUInt32LittleEndian(left)
+                            .CompareTo(BinaryPrimitives.ReadUInt32LittleEndian(right)));
+                    bytes = rows.SelectMany(static row => row).ToArray();
+                }
+            }
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount, bytes));
+        }
+
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static uint RemapMethodDefinitionId(uint definition, int[] methodRowMap)
+    {
+        if (definition >> 24 != 0x16)
+        {
+            return definition;
+        }
+
+        var row = (int)(definition & 0x00FF_FFFF);
+        return 0x1600_0000u | (uint)RemapMethodRow((uint)row, methodRowMap);
+    }
+
+    private static int RemapMethodRow(uint row, int[] methodRowMap)
+    {
+        var methodRow = checked((int)row);
+        if (methodRow <= 0 || methodRow >= methodRowMap.Length)
+        {
+            throw new InvalidDataException("A MethodDef reference is outside the fixture map.");
+        }
+
+        return methodRowMap[methodRow];
+    }
+
+    private static int FindIndexedOperationTargetOffset(byte[] artifact, byte opcode)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        if (!index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount))
+        {
+            throw new InvalidDataException("TRRM fixture is missing its Body section.");
+        }
+
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var bodySectionOffset = FindSectionOffset(artifact, 0x0020);
+        var bodyDataOffset = bodySectionOffset + ((bodyCount + 1) * sizeof(uint));
+        var matches = new List<int>();
+        for (var bodyRow = 1; bodyRow <= bodyCount; bodyRow++)
+        {
+            var body = bodies.GetRow(bodyRow);
+            if (body.IsEmpty || (body[0] & 0xFC) != 0x08 || (body[0] & 3) == 3)
+            {
+                continue;
+            }
+
+            var bodyStart = bodyDataOffset + checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(bodySectionOffset + ((bodyRow - 1) * sizeof(uint)))));
+            var operation = body.IndexOf(opcode);
+            if (operation >= 0)
+            {
+                matches.Add(bodyStart + operation + 2);
+            }
+        }
+
+        if (matches.Count != 1)
+        {
+            throw new InvalidDataException("TRRM fixture does not contain one function-address operation.");
+        }
+
+        return matches[0];
+    }
+
+    private static void RemoveIndexedUnsafeAuthorization(byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        if (!index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount))
+        {
+            throw new InvalidDataException("TRRM fixture is missing its Body section.");
+        }
+
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        var bodySectionOffset = FindSectionOffset(artifact, 0x0020);
+        var bodyDataOffset = bodySectionOffset + ((bodyCount + 1) * sizeof(uint));
+        var changedRegions = 0;
+        for (var bodyRow = 1; bodyRow <= bodyCount; bodyRow++)
+        {
+            var body = bodies.GetRow(bodyRow);
+            if (body.IsEmpty || (body[0] & 0xFC) != 0x08 || (body[0] & 3) == 3)
+            {
+                continue;
+            }
+
+            var width = 1 << (body[0] & 3);
+            var position = 1;
+            _ = ReadIndexedValue(body, ref position, width);
+            _ = ReadIndexedValue(body, ref position, width);
+            var regionCount = ReadIndexedValue(body, ref position, width);
+            var typeCount = ReadIndexedValue(body, ref position, width);
+            position += typeCount * sizeof(uint);
+            var bodyStart = bodyDataOffset + checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                artifact.AsSpan(bodySectionOffset + ((bodyRow - 1) * sizeof(uint)))));
+            for (var region = 0; region < regionCount; region++)
+            {
+                if (body[position] == 6)
+                {
+                    artifact[bodyStart + position] = 1;
+                    changedRegions++;
+                }
+                position += 1 + (4 * width);
+            }
+        }
+
+        if (changedRegions == 0)
+        {
+            throw new InvalidDataException("TRRM fixture does not contain an unsafe indexed region.");
+        }
+    }
+
+    private static int ReadIndexedValue(ReadOnlySpan<byte> bytes, ref int position, int width)
+    {
+        var value = width switch
+        {
+            1 => bytes[position],
+            2 => BinaryPrimitives.ReadUInt16LittleEndian(bytes[position..]),
+            4 => checked((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[position..])),
+            _ => throw new InvalidDataException("Invalid indexed Body width."),
+        };
+        position += width;
+        return value;
+    }
+
+    private static byte[] SplitSignatureAnchorModule(byte[] artifact, bool includeRootlessFeature)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        if (!index.TryGetSection(0x0016, out var methodBytes, out _))
+        {
+            throw new InvalidOperationException("Missing MethodDef section.");
+        }
+        var methodNameRow = BinaryPrimitives.ReadUInt32LittleEndian(methodBytes[4..]);
+
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags, out var sectionBytes,
+                out var recordCount);
+            var bytes = sectionBytes.ToArray();
+            if (kind == 0x0001)
+            {
+                var modules = new byte[bytes.Length + 44];
+                bytes.CopyTo(modules, 0);
+                bytes.CopyTo(modules, bytes.Length);
+                var firstModule = modules.AsSpan(0, 44);
+                var secondModule = modules.AsSpan(44, 44);
+                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[20..],
+                    includeRootlessFeature ? 4u : 1u);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule, methodNameRow);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[12..], 0);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[16..], 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[20..], 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[36..], 2);
+                bytes = modules;
+                recordCount++;
+            }
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount, bytes));
+        }
+
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] ReverseNativeFunctionPointerSignatureRows(byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        if (!index.TryGetSection(0x0033, out var signatureBytes, out var signatureCount)
+            || signatureCount < 2)
+        {
+            throw new InvalidOperationException("TRRM fixture does not contain nested function-pointer signatures.");
+        }
+
+        var signatureMapping = new int[signatureCount + 1];
+        for (var row = 1; row <= signatureCount; row++)
+        {
+            signatureMapping[row] = signatureCount + 1 - row;
+        }
+        var reorderedSignatures = new byte[signatureBytes.Length];
+        for (var row = 1; row <= signatureCount; row++)
+        {
+            signatureBytes.Slice((row - 1) * 8, 8).CopyTo(
+                reorderedSignatures.AsSpan((signatureMapping[row] - 1) * 8, 8));
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags, out var sectionBytes, out var recordCount);
+            var bytes = sectionBytes.ToArray();
+            if (kind == 0x0033)
+            {
+                bytes = reorderedSignatures;
+            }
+            else if (kind == 0x0011)
+            {
+                var dataOffset = checked(((int)recordCount + 1) * sizeof(uint));
+                for (var row = 1; row <= recordCount; row++)
+                {
+                    var start = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        bytes.AsSpan((row - 1) * sizeof(uint))));
+                    var end = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        bytes.AsSpan(row * sizeof(uint))));
+                    var type = bytes.AsSpan(dataOffset + start, end - start);
+                    if (type.Length == 6 && type[0] == 0x0D && type[1] == 0)
+                    {
+                        var signatureRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(type[2..]));
+                        BinaryPrimitives.WriteUInt32LittleEndian(type[2..],
+                            checked((uint)signatureMapping[signatureRow]));
+                    }
+                }
+            }
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount, bytes));
+        }
+
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static void SkipString(BinaryReader reader)

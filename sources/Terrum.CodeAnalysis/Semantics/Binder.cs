@@ -727,42 +727,11 @@ internal sealed partial class Binder
             && DirectNativeImportContract.IsValidExportName(exportName);
     }
 
-    private static bool TryDecodeNativeOutputAttribute(SyntaxNode attribute, out int parameterIndex)
-    {
-        parameterIndex = -1;
-        var children = attribute.Children;
-        if (children.Length != 10
-            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
-            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
-            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
-            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
-            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
-            || children[5] is not SyntaxTokenElement { Token.Name: "NativeOutput" }
-            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
-            || children[7] is not SyntaxTokenElement index
-            || index.Token.Kind != TokenKind.NumericLiteral
-            || !ScannerHost.TryParseIntegerMagnitude(index.Token.Text.AsSpan(), out var magnitude)
-            || magnitude > int.MaxValue
-            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
-            || children[9] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
-        {
-            return false;
-        }
-
-        parameterIndex = (int)magnitude;
-        return true;
-    }
-
     private static bool TryDecodeDirectNativeOutputAttribute(SyntaxNode attribute,
         out int parameterIndex, out uint resultCondition)
     {
-        resultCondition = 0;
-        if (TryDecodeNativeOutputAttribute(attribute, out parameterIndex))
-        {
-            return true;
-        }
-
         parameterIndex = -1;
+        resultCondition = 0;
         var children = attribute.Children;
         if (children.Length != 12
             || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
@@ -777,10 +746,9 @@ internal sealed partial class Binder
             || !ScannerHost.TryParseIntegerMagnitude(index.Token.Text.AsSpan(), out var magnitude)
             || magnitude > int.MaxValue
             || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
-            || children[9] is not SyntaxTokenElement {
-                Token.Name: "NonNegative",
-                Token.Kind: TokenKind.Identifier,
-            }
+            || children[9] is not SyntaxTokenElement condition
+            || condition.Token.Kind != TokenKind.Identifier
+            || condition.Token.Name is not ("NonZero" or "NonNegative")
             || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
             || children[11] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
         {
@@ -788,7 +756,9 @@ internal sealed partial class Binder
         }
 
         parameterIndex = (int)magnitude;
-        resultCondition = DirectNativeImportContract.Int32NonNegativeResultCondition;
+        resultCondition = condition.Token.Name == "NonNegative"
+            ? DirectNativeImportContract.Int32NonNegativeResultCondition
+            : DirectNativeImportContract.Int32NonZeroResultCondition;
         return true;
     }
 
@@ -1716,7 +1686,7 @@ internal sealed partial class Binder
                         || !nativeOutputParameterIndexes.Add(outputParameterIndex))
                     {
                         Report("TRM3030",
-                            "NativeOutput requires one distinct parameter ordinal and an optional supported result condition.",
+                            "NativeOutput requires one distinct parameter ordinal and an explicit supported result condition.",
                             attribute.Span);
                     }
                     else
@@ -1872,14 +1842,13 @@ internal sealed partial class Binder
         if (isNativeVTableMethod
             && (!isExternal || containingType is not null || nativeImportAttribute is not null
                 || nativeLibraryName is not null
-                || nativeOutputParameterIndexes.Count != 0
                 || constructor || property || operatorDeclaration || isCleanup || doesNotReturn
                 || isNativeCallable
                 || declaration.Children.OfType<SyntaxNode>().Any(static child =>
                     child.Kind is SyntaxKind.TypeParameterList or SyntaxKind.ConstraintClause)))
         {
             Report("TRM3030",
-                "NativeVTableMethod requires a top-level, non-generic extern function without import or output-effect metadata.",
+                "NativeVTableMethod requires a top-level, non-generic extern function without a direct import or unrelated output effects.",
                 nativeVTableMethodAttribute?.Span ?? declaration.Span);
         }
         else if (nativeVTableMethodAttribute is not null && !isNativeVTableMethod)
@@ -2060,15 +2029,17 @@ internal sealed partial class Binder
             PrimitiveType? nativePointeeType = null;
             PrimitiveType type;
             var parameterIndex = declared.Count;
-            if (nativeLibraryName is not null
-                && TryBindDirectNativePointerType(typeNode, out var pointeeType, out var isWritablePointer)
-                && nativeOutputParameterIndexes.Contains(parameterIndex) && isWritablePointer)
+            if (nativeOutputParameterIndexes.Contains(parameterIndex)
+                && (nativeLibraryName is not null || isNativeVTableMethod)
+                && TryBindDirectNativePointerType(typeNode,
+                    out var outputPointeeType, out var isWritableOutputPointer)
+                && isWritableOutputPointer)
             {
                 type = PrimitiveType.NativeStorageAddress;
-                nativePointeeType = pointeeType;
+                nativePointeeType = outputPointeeType;
             }
             else if (nativeLibraryName is not null
-                && TryBindDirectNativePointerType(typeNode, out pointeeType, out isWritablePointer)
+                && TryBindDirectNativePointerType(typeNode, out var pointeeType, out var isWritablePointer)
                 && nativeParameters.ContainsKey(parameterIndex + 1) && !isWritablePointer)
             {
                 type = PrimitiveType.NativeRawPointer;
@@ -2187,18 +2158,15 @@ internal sealed partial class Binder
                         nativeImportAttribute?.Span ?? declaration.Span);
                     continue;
                 }
-                var resultCondition = nativeOutputResultConditions[outputIndex];
-                if (resultCondition != 0
-                    && !DirectNativeImportContract.IsValidResultCondition(returnType, resultCondition))
+                var resultCondition = DirectNativeImportContract.ResolveResultCondition(
+                    returnType, nativeOutputResultConditions[outputIndex]);
+                if (!DirectNativeImportContract.IsValidResultCondition(returnType, resultCondition))
                 {
                     Report("TRM3030",
                         "NativeOutput result conditions must be compatible with the callable result type.",
                         nativeImportAttribute?.Span ?? declaration.Span);
                 }
-                nativeOutputs.Add(new DirectNativeOutput(outputIndex, outputType,
-                    resultCondition != 0 ? resultCondition
-                        : DirectNativeImportContract.DefaultResultCondition(returnType),
-                    1));
+                nativeOutputs.Add(new DirectNativeOutput(outputIndex, outputType, resultCondition, 1));
             }
             foreach (var (ordinal, nativeParameter) in nativeParameters.OrderBy(
                 static pair => pair.Key))
@@ -2267,6 +2235,12 @@ internal sealed partial class Binder
         if (isNativeVTableMethod)
         {
             var nativeVTableParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>();
+            var nativeVTableOutputs = ImmutableArray.CreateBuilder<DirectNativeOutput>();
+            if (nativeLibraryName is not null)
+            {
+                Report("TRM3030", "NativeVTableMethod cannot also declare a direct NativeImport.",
+                    nativeImportAttribute?.Span ?? declaration.Span);
+            }
             if (declared.Count == 0 || declared[0].IsOut || declared[0].IsInit
                 || declared[0].IsImplicitRef
                 || (declared[0].Type is not (PrimitiveType.NativeRawPointer
@@ -2283,6 +2257,7 @@ internal sealed partial class Binder
                 if (parameterIndex <= 0 || parameterIndex >= declared.Count
                     || declared[parameterIndex].Type != PrimitiveType.NativeRawPointer
                     || declared[parameterIndex].IsOut
+                    || nativeOutputParameterIndexes.Contains(parameterIndex)
                     || declared[parameterIndex].NativePointeeType is not PrimitiveType pointeeType
                     || !DirectNativeImportContract.IsInputPointee(pointeeType, _structs))
                 {
@@ -2293,6 +2268,40 @@ internal sealed partial class Binder
                 }
                 nativeVTableParameters.Add(new DirectNativeParameter(parameterIndex, pointeeType,
                     nativeParameter.Access, nativeParameter.Retention, nativeParameter.Extent));
+            }
+            foreach (var outputIndex in nativeOutputParameterIndexes.Order())
+            {
+                if (outputIndex <= 0 || outputIndex >= declared.Count
+                    || declared[outputIndex].Type != PrimitiveType.NativeStorageAddress
+                    || declared[outputIndex].NativePointeeType is not PrimitiveType outputType)
+                {
+                    Report("TRM3030",
+                        "NativeOutput must identify a writable pointer parameter after the vtable receiver.",
+                        nativeVTableMethodAttribute?.Span ?? declaration.Span);
+                    continue;
+                }
+
+                var resultCondition = DirectNativeImportContract.ResolveResultCondition(
+                    returnType, nativeOutputResultConditions[outputIndex]);
+                if (!DirectNativeImportContract.IsValidResultCondition(returnType, resultCondition))
+                {
+                    Report("TRM3030",
+                        "NativeOutput result conditions must be compatible with the callable result type.",
+                        nativeVTableMethodAttribute?.Span ?? declaration.Span);
+                }
+                nativeVTableOutputs.Add(new DirectNativeOutput(outputIndex, outputType, resultCondition, 1));
+            }
+            if (nativeOutputParameterIndexes.Count != nativeVTableOutputs.Count)
+            {
+                Report("TRM3030",
+                    "Every NativeOutput ordinal must resolve to one supported vtable pointer parameter.",
+                    declaration.Span);
+            }
+            if (nativeVTableOutputs.Count > 0
+                && returnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
+            {
+                Report("TRM3030", "NativeOutput currently requires an int32 or uint32 result.",
+                    declaration.Span);
             }
             if (returnType != PrimitiveType.Void
                 && !DirectNativeImportContract.IsValueParameter(returnType,
@@ -2305,10 +2314,22 @@ internal sealed partial class Binder
             for (var index = 0; index < declared.Count; index++)
             {
                 var parameter = declared[index];
-                if (parameter.IsInit || parameter.IsImplicitRef
-                    || (parameter.Type != PrimitiveType.NativeRawPointer
-                        && !DirectNativeImportContract.IsValueParameter(parameter.Type,
-                            [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes])))
+                if (nativeOutputParameterIndexes.Contains(index))
+                {
+                    if (parameter.Type != PrimitiveType.NativeStorageAddress || parameter.IsInit)
+                    {
+                        Report("TRM3030",
+                            "NativeOutput requires a writable pointer parameter.",
+                            parameter.Span);
+                    }
+                }
+                else if (parameter.IsInit || parameter.IsImplicitRef
+                    || (parameter.IsOut
+                        ? !DirectNativeImportContract.IsValueParameter(parameter.Type,
+                            [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes])
+                        : parameter.Type != PrimitiveType.NativeRawPointer
+                            && !DirectNativeImportContract.IsValueParameter(parameter.Type,
+                                [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes])))
                 {
                     Report("TRM3030",
                         "NativeVTableMethod parameters require direct native scalar or pointer representations.",
@@ -2316,7 +2337,10 @@ internal sealed partial class Binder
                 }
             }
             nativeVTableMethod = new NativeVTableMethodDefinition(nativeVTableSlot,
-                nativeVTableParameters.ToImmutable());
+                nativeVTableParameters.ToImmutable())
+            {
+                Outputs = nativeVTableOutputs.ToImmutable(),
+            };
         }
         else if (!isNativeVTableMethod && nativeLibraryName is null
             && nativeOutputParameterIndexes.Count != 0)
@@ -2348,8 +2372,11 @@ internal sealed partial class Binder
             externalFunction = new BoundFunction(qualifiedName, classConstructor ? PrimitiveType.Void : returnType,
                 [.. boundParameters.Select((parameter, index) => new BoundVariable(
                     parameter.Name, parameter.Type, false, parameter.Span) {
-                    IsOut = parameter.IsOut || directNativeImport?.Outputs.Any(
-                        output => output.ParameterIndex == index) == true,
+                    IsOut = parameter.IsOut
+                        || directNativeImport?.Outputs.Any(
+                            output => output.ParameterIndex == index) == true
+                        || nativeVTableMethod?.Outputs.Any(
+                            output => output.ParameterIndex == index) == true,
                     IsInit = parameter.IsInit,
                     IsImplicitRef = parameter.IsImplicitRef,
                 })], boundParameters.Length, new BoundBlock([], declaration.Span), declaration.Span) {
@@ -5605,7 +5632,11 @@ internal sealed partial class Binder
             if (expectedParameter?.IsOut == true
                 && !(signature?.External?.DirectNativeImport is DirectNativeImport directOutputImport
                     && position >= 0
-                    && directOutputImport.Outputs.Any(output => output.ParameterIndex == position)))
+                    && directOutputImport.Outputs.Any(output => output.ParameterIndex == position))
+                && !(signature?.External is BoundFunction outputVTableFunction
+                    && position >= 0
+                    && NativeVTableCallContract.OutputForParameter(
+                        outputVTableFunction, position) is not null))
             {
                 Report("TRM3011", "An output parameter requires the matching out or init argument.", argument.Span);
             }
@@ -5689,6 +5720,14 @@ internal sealed partial class Binder
                         output.ParameterIndex == position) is DirectNativeOutput nativeOutput)
                 {
                     bound.Add(BindDirectNativeOutputAddress(value, nativeOutput, argument.Span));
+                }
+                else if (signature?.External is BoundFunction nativeVTableOutputFunction
+                    && nativeVTableOutputFunction.NativeVTableMethod is not null
+                    && position >= 0
+                    && NativeVTableCallContract.OutputForParameter(
+                        nativeVTableOutputFunction, position) is DirectNativeOutput vtableOutput)
+                {
+                    bound.Add(BindDirectNativeOutputAddress(value, vtableOutput, argument.Span));
                 }
                 else if (signature?.External is BoundFunction directParameterFunction
                     && directParameterFunction.DirectNativeImport is not null
@@ -6507,61 +6546,203 @@ internal sealed partial class Binder
 
     private static BoundConstant ErrorExpression(TextSpan span) => new(0, PrimitiveType.Int32, span);
 
-    private string TypeName(PrimitiveType type) => type switch {
-        PrimitiveType.Int32 => "int32",
-        PrimitiveType.UInt32 => "uint32",
-        PrimitiveType.Int64 => "int64",
-        PrimitiveType.UInt64 => "uint64",
-        PrimitiveType.Float32 => "float32",
-        PrimitiveType.Float64 => "float64",
-        PrimitiveType.Char16 => "char16",
-        PrimitiveType.Bool => "bool",
-        PrimitiveType.Void => "void",
-        PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName,
-        PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
-        PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
-        PrimitiveType.TokenSpan => "Span<Token>",
-        PrimitiveType.NativeUtf16ZPointer => "ptr<char16>",
-        PrimitiveType.NativeUtf8ZPointer => "ptr<char8>",
-        PrimitiveType.NativeRawPointer => "ptr<void>",
-        _ when NativePointerTypes.IsType(type) => NativePointerTypeName(type),
-        _ when NativeFunctionPointerTypes.IsType(type) => NativeFunctionPointerTypeName(type),
-        PrimitiveType.NativeStorageAddress => "native address",
-        PrimitiveType.ManagedNode => "ManagedNode",
-        PrimitiveType.WriteManagedNode => "write ManagedNode",
-        PrimitiveType.OptionalManagedNode => "ManagedNode?",
-        PrimitiveType.OptionalWriteManagedNode => "write ManagedNode?",
-        _ when ManagedClassTypes.IsOptional(type) =>
-            (ManagedClassTypes.IsWritable(type) ? "write " : "")
-                + _classes[ManagedClassTypes.ClassIndex(type)].Name + "?",
-        _ when IsClass(type) => (ManagedClassTypes.IsWritable(type) ? "write " : "")
-            + _classes[ManagedClassTypes.ClassIndex(type)].Name,
-        _ when IsStruct(type) => _structs[(int)type - 100].Name,
-        _ => throw new ArgumentOutOfRangeException(nameof(type)),
-    };
+    private const int MaximumDiagnosticTypeNameLength = 384;
+    private const int MaximumDiagnosticTypeNameNodes = 256;
+    private const int MaximumDiagnosticTypeNameDepth = 32;
 
-    private string NativeFunctionPointerTypeName(PrimitiveType type)
+    private string TypeName(PrimitiveType type)
+    {
+        var builder = new StringBuilder(MaximumDiagnosticTypeNameLength);
+        var remainingCharacters = MaximumDiagnosticTypeNameLength;
+        var remainingNodes = MaximumDiagnosticTypeNameNodes;
+        AppendTypeName(type, builder, ref remainingCharacters, ref remainingNodes, 0);
+        return builder.ToString();
+    }
+
+    private void AppendTypeName(PrimitiveType type, StringBuilder builder, ref int remainingCharacters,
+        ref int remainingNodes, int depth)
+    {
+        if (remainingCharacters <= 0)
+        {
+            return;
+        }
+        if (depth > MaximumDiagnosticTypeNameDepth || --remainingNodes < 0)
+        {
+            AppendTypeNameText(builder, "...", ref remainingCharacters);
+            return;
+        }
+        switch (type)
+        {
+            case PrimitiveType.Int32:
+                AppendTypeNameText(builder, "int32", ref remainingCharacters);
+                break;
+            case PrimitiveType.UInt32:
+                AppendTypeNameText(builder, "uint32", ref remainingCharacters);
+                break;
+            case PrimitiveType.Int64:
+                AppendTypeNameText(builder, "int64", ref remainingCharacters);
+                break;
+            case PrimitiveType.UInt64:
+                AppendTypeNameText(builder, "uint64", ref remainingCharacters);
+                break;
+            case PrimitiveType.Float32:
+                AppendTypeNameText(builder, "float32", ref remainingCharacters);
+                break;
+            case PrimitiveType.Float64:
+                AppendTypeNameText(builder, "float64", ref remainingCharacters);
+                break;
+            case PrimitiveType.Char16:
+                AppendTypeNameText(builder, "char16", ref remainingCharacters);
+                break;
+            case PrimitiveType.Bool:
+                AppendTypeNameText(builder, "bool", ref remainingCharacters);
+                break;
+            case PrimitiveType.Void:
+                AppendTypeNameText(builder, "void", ref remainingCharacters);
+                break;
+            case PrimitiveType.OwnedInt32Buffer:
+                AppendTypeNameText(builder, NativeBufferIntrinsics.TypeName, ref remainingCharacters);
+                break;
+            case PrimitiveType.ReadonlyInt32BufferView:
+                AppendTypeNameText(builder, "ReadonlyInt32BufferView", ref remainingCharacters);
+                break;
+            case PrimitiveType.MutableInt32BufferView:
+                AppendTypeNameText(builder, "MutableInt32BufferView", ref remainingCharacters);
+                break;
+            case PrimitiveType.TokenSpan:
+                AppendTypeNameText(builder, "Span<Token>", ref remainingCharacters);
+                break;
+            case PrimitiveType.NativeUtf16ZPointer:
+                AppendTypeNameText(builder, "ptr<char16>", ref remainingCharacters);
+                break;
+            case PrimitiveType.NativeUtf8ZPointer:
+                AppendTypeNameText(builder, "ptr<char8>", ref remainingCharacters);
+                break;
+            case PrimitiveType.NativeRawPointer:
+                AppendTypeNameText(builder, "ptr<void>", ref remainingCharacters);
+                break;
+            case PrimitiveType.NativeStorageAddress:
+                AppendTypeNameText(builder, "native address", ref remainingCharacters);
+                break;
+            case PrimitiveType.ManagedNode:
+                AppendTypeNameText(builder, "ManagedNode", ref remainingCharacters);
+                break;
+            case PrimitiveType.WriteManagedNode:
+                AppendTypeNameText(builder, "write ManagedNode", ref remainingCharacters);
+                break;
+            case PrimitiveType.OptionalManagedNode:
+                AppendTypeNameText(builder, "ManagedNode?", ref remainingCharacters);
+                break;
+            case PrimitiveType.OptionalWriteManagedNode:
+                AppendTypeNameText(builder, "write ManagedNode?", ref remainingCharacters);
+                break;
+            default:
+                if (NativePointerTypes.IsType(type))
+                {
+                    AppendNativePointerTypeName(type, builder, ref remainingCharacters, ref remainingNodes, depth);
+                }
+                else if (NativeFunctionPointerTypes.IsType(type))
+                {
+                    AppendNativeFunctionPointerTypeName(type, builder, ref remainingCharacters,
+                        ref remainingNodes, depth);
+                }
+                else if (ManagedClassTypes.IsOptional(type))
+                {
+                    if (ManagedClassTypes.IsWritable(type))
+                    {
+                        AppendTypeNameText(builder, "write ", ref remainingCharacters);
+                    }
+                    AppendTypeNameText(builder, _classes[ManagedClassTypes.ClassIndex(type)].Name,
+                        ref remainingCharacters);
+                    AppendTypeNameText(builder, "?", ref remainingCharacters);
+                }
+                else if (IsClass(type))
+                {
+                    if (ManagedClassTypes.IsWritable(type))
+                    {
+                        AppendTypeNameText(builder, "write ", ref remainingCharacters);
+                    }
+                    AppendTypeNameText(builder, _classes[ManagedClassTypes.ClassIndex(type)].Name,
+                        ref remainingCharacters);
+                }
+                else if (IsStruct(type))
+                {
+                    AppendTypeNameText(builder, _structs[(int)type - 100].Name, ref remainingCharacters);
+                }
+                else
+                {
+                    throw new ArgumentOutOfRangeException(nameof(type));
+                }
+                break;
+        }
+    }
+
+    private void AppendNativeFunctionPointerTypeName(PrimitiveType type, StringBuilder builder,
+        ref int remainingCharacters, ref int remainingNodes, int depth)
     {
         var index = NativeFunctionPointerTypes.Index(type);
         if ((uint)index >= (uint)_nativeFunctionPointerSignatures.Count)
         {
-            return $"fnptr<{index}>";
+            AppendTypeNameText(builder, $"fnptr<{index}>", ref remainingCharacters);
+            return;
         }
         var signature = _nativeFunctionPointerSignatures[index];
-        var parameters = signature.ParameterTypes.Select(TypeName).Append(TypeName(signature.ReturnType));
-        return $"fnptr<NativeAbi, {string.Join(", ", parameters)}>";
+        AppendTypeNameText(builder, "fnptr<NativeAbi, ", ref remainingCharacters);
+        foreach (var parameterType in signature.ParameterTypes)
+        {
+            if (remainingCharacters <= 3 || remainingNodes <= 0)
+            {
+                AppendTypeNameText(builder, "...", ref remainingCharacters);
+                return;
+            }
+            AppendTypeName(parameterType, builder, ref remainingCharacters, ref remainingNodes, depth + 1);
+            AppendTypeNameText(builder, ", ", ref remainingCharacters);
+        }
+        if (remainingCharacters <= 3 || remainingNodes <= 0)
+        {
+            AppendTypeNameText(builder, "...", ref remainingCharacters);
+            return;
+        }
+        AppendTypeName(signature.ReturnType, builder, ref remainingCharacters, ref remainingNodes, depth + 1);
+        AppendTypeNameText(builder, ">", ref remainingCharacters);
     }
 
-    private string NativePointerTypeName(PrimitiveType type)
+    private void AppendNativePointerTypeName(PrimitiveType type, StringBuilder builder,
+        ref int remainingCharacters, ref int remainingNodes, int depth)
     {
         var index = NativePointerTypes.Index(type);
         if ((uint)index >= (uint)_nativePointerTypes.Count)
         {
-            return $"ptr<{index}>";
+            AppendTypeNameText(builder, $"ptr<{index}>", ref remainingCharacters);
+            return;
         }
         var pointerType = _nativePointerTypes[index];
-        var modifier = pointerType.IsWritable ? "write " : string.Empty;
-        return $"{modifier}ptr<{TypeName(pointerType.PointeeType)}>";
+        if (pointerType.IsWritable)
+        {
+            AppendTypeNameText(builder, "write ", ref remainingCharacters);
+        }
+        AppendTypeNameText(builder, "ptr<", ref remainingCharacters);
+        AppendTypeName(pointerType.PointeeType, builder, ref remainingCharacters, ref remainingNodes, depth + 1);
+        AppendTypeNameText(builder, ">", ref remainingCharacters);
+    }
+
+    private static void AppendTypeNameText(StringBuilder builder, string text, ref int remainingCharacters)
+    {
+        if (remainingCharacters <= 0)
+        {
+            return;
+        }
+        if (text.Length <= remainingCharacters)
+        {
+            _ = builder.Append(text.AsSpan());
+            remainingCharacters -= text.Length;
+            return;
+        }
+        var ellipsisLength = Math.Min(remainingCharacters, 3);
+        var contentLength = remainingCharacters - ellipsisLength;
+        _ = builder.Append(text.AsSpan(0, contentLength));
+        _ = builder.Append("...".AsSpan(0, ellipsisLength));
+        remainingCharacters = 0;
     }
 
     private void Report(string code, string message, TextSpan span)
