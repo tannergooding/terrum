@@ -37,9 +37,9 @@ public sealed partial class CliTests
     public async Task NativeVoidMatchesHostedScannerPeAndJitAsync(string body, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"void-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"void-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"void-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             var source = Encoding.UTF8.GetBytes($"void Main() {{ {body} }}");
@@ -97,7 +97,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() {}")]
     public async Task NativeVoidRejectsUnsupportedSourceAndRetainsPeAsync(string text)
     {
-        var path = Path.Combine(RepositoryRoot(), $"void-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -125,8 +125,8 @@ public sealed partial class CliTests
     public async Task NativeVoidPreservesNormalizedExportAndZeroThroughThreeParameterAbiAsync(string parameters, string body)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"void-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"void-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"public void @await({parameters}) {{ {body} }}");
@@ -183,8 +183,8 @@ public sealed partial class CliTests
     public async Task NativeVoidNonFallthroughCompileOnlyAsync(string body)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"void-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"void-{Guid.NewGuid():N}.hosted.exe");
+        var native = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             var source = Encoding.UTF8.GetBytes($"void Main() {{ {body} }}");

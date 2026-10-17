@@ -49,9 +49,9 @@ public sealed partial class CliTests
         Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length <= 64, Is.True);
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.hosted.exe");
-        var scannerPath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.scanner.exe");
+        var nativePath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.hosted.exe");
+        var scannerPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -109,7 +109,7 @@ public sealed partial class CliTests
     public async Task StandaloneBlocksRejectInvalidOrUnsupportedSourceAtomicallyAsync(string source)
     {
         var root = RepositoryRoot();
-        var path = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -136,8 +136,8 @@ public sealed partial class CliTests
     public async Task StandaloneBlocksPreserveCheckedFailureStatusAsync(string source, int expected)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -170,8 +170,8 @@ public sealed partial class CliTests
     public async Task StandaloneBlocksExportAllSixScalarWidthsAsync(string type, string value, int expected)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes($"public {type} Value() {{ {{ {type} x = {value}; return x; }} }}");
@@ -238,8 +238,8 @@ public sealed partial class CliTests
     public async Task StandaloneBlocksNonFallthroughBuildWithoutExecutingAsync(string body, int nodes)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             var input = Encoding.UTF8.GetBytes($"int32 Main() {{ {body} }}");
@@ -285,9 +285,9 @@ public sealed partial class CliTests
         Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length, Is.EqualTo(count));
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"blocks-window-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"blocks-window-{Guid.NewGuid():N}.hosted.exe");
-        var scannerPath = Path.Combine(root, $"blocks-window-{Guid.NewGuid():N}.scanner.exe");
+        var nativePath = CreateTestArtifactPath($"blocks-window-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"blocks-window-{Guid.NewGuid():N}.hosted.exe");
+        var scannerPath = CreateTestArtifactPath($"blocks-window-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -369,8 +369,8 @@ public sealed partial class CliTests
     public async Task StandaloneBlocksPreserveThreeParameterExportIdentityAsync()
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"blocks-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(

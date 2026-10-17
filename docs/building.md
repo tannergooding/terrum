@@ -31,6 +31,11 @@ not build or restore. Combine switches when those prerequisites are needed.
 Additional arguments pass through to MSBuild. `-solution` selects a solution
 or project instead of `Terrum.slnx`.
 
+Tests that emit executable or library files keep them in a shared subdirectory
+of the test assembly output directory (`AppContext.BaseDirectory`); they must
+not write outputs into the repository root. Keep test logs and results under
+`artifacts\tst`.
+
 `-architecture` installs the exact `global.json` SDK into `artifacts\dotnet`
 and selects it for that invocation, without changing the machine installation.
 `scripts\cibuild.cmd` enables restore, build, test and local packaging by

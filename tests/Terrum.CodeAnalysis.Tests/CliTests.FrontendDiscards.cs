@@ -42,9 +42,9 @@ public sealed partial class CliTests
         var source = $"int32 Main() {{ {body} }}";
         Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length <= 64, Is.True);
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"discard-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"discard-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"discard-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -100,7 +100,7 @@ public sealed partial class CliTests
     public async Task ScalarDiscardsRejectInvalidOrUnsupportedSourceAtomicallyAsync(string body)
     {
         var source = $"int32 Main() {{ {body} }}";
-        var path = Path.Combine(RepositoryRoot(), $"discard-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -132,8 +132,8 @@ public sealed partial class CliTests
     public async Task ScalarDiscardsPreserveAllSixLibraryExportsAsync(string type, string value, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"discard-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"discard-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"public {type} Value() {{ _ = {value}; return {value}; }}");
@@ -179,7 +179,7 @@ public sealed partial class CliTests
     public async Task ScalarDiscardsDoNotEliminateCheckedFailuresAsync(string expression, int expected)
     {
         var source = Encoding.UTF8.GetBytes($"int32 Main() {{ _ = {expression}; return 42; }}");
-        var path = Path.Combine(RepositoryRoot(), $"discard-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -288,7 +288,7 @@ public sealed partial class CliTests
     [Test]
     public async Task ScalarDiscardsPreserveNormalizedThreeParameterExportAsync()
     {
-        var path = Path.Combine(RepositoryRoot(), $"discard-{Guid.NewGuid():N}.dll");
+        var path = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(
@@ -321,7 +321,7 @@ public sealed partial class CliTests
     [TestCase("do { _ = true; continue; } while (true);")]
     public async Task ScalarDiscardsNonFallthroughCompileWithoutExecutingAsync(string body)
     {
-        var path = Path.Combine(RepositoryRoot(), $"discard-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"discard-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

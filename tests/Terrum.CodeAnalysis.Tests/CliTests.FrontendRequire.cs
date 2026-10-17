@@ -46,9 +46,9 @@ public sealed partial class CliTests
         var source = $"int32 Main() {{ {body} }}";
         Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length <= 64, Is.True);
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"require-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"require-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"require-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -98,9 +98,9 @@ public sealed partial class CliTests
     {
         var source = $"int32 Main() {{ {body} }}";
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"static-proof-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"static-proof-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"static-proof-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"static-proof-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"static-proof-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"static-proof-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -164,7 +164,7 @@ public sealed partial class CliTests
     [TestCase("require true; return 42; } int32 Unused() { require 1;")]
     public async Task NativeScalarRequireRejectsUnsupportedTypingContextsAndRetainsPriorPeAsync(string body)
     {
-        var path = Path.Combine(RepositoryRoot(), $"require-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -196,8 +196,8 @@ public sealed partial class CliTests
     public async Task NativeScalarRequireNonFallthroughCompileOnlyAsync(string body)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"require-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"require-{Guid.NewGuid():N}.hosted.exe");
+        var native = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -227,8 +227,8 @@ public sealed partial class CliTests
     public async Task NativeScalarRequirePreservesAllSixNormalizedLibraryExportsAsync(string type, string value, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"require-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"require-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"public {type} @await() {{ require true; return {value}; }}");
@@ -272,8 +272,8 @@ public sealed partial class CliTests
     [Test]
     public async Task NativeScalarRequirePreservesThreeParameterAbiAsync()
     {
-        var native = Path.Combine(RepositoryRoot(), $"require-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(RepositoryRoot(), $"require-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.dll");
+        var hosted = CreateTestArtifactPath($"require-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes("public int32 @await(int32 a, int32 b, int32 c) { require a + b + c == 42; return a + b + c; }");

@@ -37,9 +37,9 @@ public sealed partial class CliTests
     public async Task NativeVoidExpressionMatchesHostedScannerPeAndJitAsync(string statement, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"void-expression-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"void-expression-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"void-expression-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             var source = Encoding.UTF8.GetBytes($"void Main() => {statement} /*trailing*/");
@@ -102,7 +102,7 @@ public sealed partial class CliTests
     [TestCase("void Main() => _ =true;")]
     public async Task NativeVoidExpressionRejectsUnsupportedSourceAndRetainsPeAsync(string text)
     {
-        var path = Path.Combine(RepositoryRoot(), $"void-expression-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -130,8 +130,8 @@ public sealed partial class CliTests
     public async Task NativeVoidExpressionPreservesNormalizedExportAndPrimitiveParameterAbiAsync(string parameters, string statement)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"void-expression-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"void-expression-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"public void @await({parameters}) => {statement}");
@@ -200,8 +200,8 @@ public sealed partial class CliTests
     public async Task NativeVoidExpressionNonFallthroughCompileOnlyAsync(string statement)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"void-expression-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"void-expression-{Guid.NewGuid():N}.hosted.exe");
+        var native = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"void-expression-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

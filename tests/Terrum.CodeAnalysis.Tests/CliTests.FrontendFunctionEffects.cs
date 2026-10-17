@@ -37,9 +37,9 @@ public sealed partial class CliTests
     public async Task NativeFunctionEffectsMatchHostedScannerPeAndJitAsync(string text, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"effects-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             var source = Encoding.UTF8.GetBytes($"/*\U0001F600*/ {text} //tail");
@@ -100,7 +100,7 @@ public sealed partial class CliTests
     [TestCase("[DoesNotReturn] void Main() { require false; Missing(); }")]
     public async Task NativeFunctionEffectsRejectInvalidEffectsAndRetainPeAsync(string text)
     {
-        var path = Path.Combine(RepositoryRoot(), $"effects-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -131,8 +131,8 @@ public sealed partial class CliTests
     public async Task NativeFunctionEffectsPreserveNormalizedSixScalarAndVoidExportsAsync(string type, string expression, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"[NoThrow] public {type} @await() => {expression};");
@@ -186,8 +186,8 @@ public sealed partial class CliTests
         const string text = "[NoThrow] public int32 Identity(int32 value) { return value; }";
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
@@ -239,8 +239,8 @@ public sealed partial class CliTests
         const string text = "[DoesNotReturn] public void Stop(int32 value) { require false; }";
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
@@ -280,8 +280,8 @@ public sealed partial class CliTests
     public async Task NativeFunctionEffectsNonFallthroughCompileOnlyAsync(string text)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.exe");
+        var native = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -325,8 +325,8 @@ public sealed partial class CliTests
     public async Task NativeFunctionEffectsPreserveZeroThroughThreeParameterAbiAsync(bool isVoid, int count)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"effects-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"effects-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"effects-{Guid.NewGuid():N}.hosted.dll");
         var parameters = isVoid ? count switch {
             0 => "",
             1 => "bool a",

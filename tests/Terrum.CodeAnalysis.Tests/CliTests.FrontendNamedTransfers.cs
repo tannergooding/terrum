@@ -35,9 +35,9 @@ public sealed partial class CliTests
         var source = $"int32 Main() {{ {body} }}";
         Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length <= 64, Is.True);
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -89,7 +89,7 @@ public sealed partial class CliTests
     [TestCase("a: while (true) { break a; } return 42; } int32 Unused() { while (true) { break a; }")]
     public async Task NativeNamedTransfersRejectInvalidTargetsAndPreservePriorPeAsync(string body)
     {
-        var path = Path.Combine(RepositoryRoot(), $"native-named-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -118,8 +118,8 @@ public sealed partial class CliTests
     public async Task NativeNamedNonFallthroughLoopsCompileOnlyAsync(string body)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.hosted.exe");
+        var native = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -149,8 +149,8 @@ public sealed partial class CliTests
     public async Task NativeNamedTransfersPreserveAllSixNormalizedLibraryExportsAsync(string type, string value, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"public {type} @await() {{ a: do {{ while (true) {{ break a; }} }} while (false); return {value}; }}");
@@ -195,8 +195,8 @@ public sealed partial class CliTests
     public async Task NativeNamedTransfersPreserveThreeParameterLibraryAbiAsync()
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"native-named-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"native-named-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes("public int32 @await(int32 a, int32 b, int32 c) { @const: do { while (true) { break const; } } while (false); return a + b + c; }");

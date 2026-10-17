@@ -100,8 +100,8 @@ public sealed partial class CliTests
     public async Task FrontendEveryIntegerUpdateFormMatchesHostedLibraryAsync(string type)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -158,8 +158,8 @@ public sealed partial class CliTests
     public async Task FrontendShiftExpressionBodyMatchesHostedLibraryAsync(string type)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -227,8 +227,8 @@ public sealed partial class CliTests
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -279,7 +279,7 @@ public sealed partial class CliTests
         string type, string initial, string mutation, int expected)
     {
         var root = RepositoryRoot();
-        var path = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -329,7 +329,7 @@ public sealed partial class CliTests
     public async Task FrontendInvalidMutationRetainsOutputAsync(string source)
     {
         var root = RepositoryRoot();
-        var path = Path.Combine(root, $"mutations-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

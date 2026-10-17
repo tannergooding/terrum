@@ -37,8 +37,8 @@ public sealed partial class CliTests
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"scoped-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"scoped-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -139,8 +139,8 @@ public sealed partial class CliTests
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"lifetime-end-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"lifetime-end-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"lifetime-end-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"lifetime-end-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -192,8 +192,8 @@ public sealed partial class CliTests
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"checked-catch-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"checked-catch-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"checked-catch-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"checked-catch-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -303,8 +303,8 @@ public sealed partial class CliTests
     public async Task ScopedLocalsPreserveCheckedFailureStatusAsync(string source, int expected)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"scoped-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"scoped-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -364,7 +364,7 @@ public sealed partial class CliTests
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var path = Path.Combine(root, $"scoped-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -423,8 +423,8 @@ public sealed partial class CliTests
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"scoped-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"scoped-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

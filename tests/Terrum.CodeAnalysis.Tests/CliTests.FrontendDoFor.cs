@@ -59,8 +59,8 @@ public sealed partial class CliTests
     {
         var root = RepositoryRoot();
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -117,8 +117,8 @@ public sealed partial class CliTests
     public async Task NativeLoopsRetainCheckedFailureStatusAsync(string source, int expected)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -162,7 +162,7 @@ public sealed partial class CliTests
     public async Task NativeLoopUnsupportedShapesRejectWithoutReplacingOutputAsync(string source)
     {
         var root = RepositoryRoot();
-        var path = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -193,7 +193,7 @@ public sealed partial class CliTests
     public async Task NativeLoopRejectsUnresolvedInferredLocalRecordsWithoutReplacingOutputAsync()
     {
         var root = RepositoryRoot();
-        var path = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -230,8 +230,8 @@ public sealed partial class CliTests
     public async Task NativeDoForExportAllSixScalarWidthsAsync(string type, string value, int expected)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = $"public {type} Value() {{ for (;;) {{ do {{ return {value}; }} while (false); }} }}";
@@ -282,8 +282,8 @@ public sealed partial class CliTests
     public async Task NativeDoForNonFallthroughNeedsNoSyntheticReturnAsync(string body, int nodes)
     {
         var root = RepositoryRoot();
-        var nativePath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             var input = Encoding.UTF8.GetBytes($"int32 Main() {{ {body} }}");
@@ -315,7 +315,7 @@ public sealed partial class CliTests
     {
         const string source = "public int32 Value(int32 a, int32 b, int32 c) { do { return a + b + c; } while (false); }";
         var root = RepositoryRoot();
-        var output = Path.Combine(root, $"do-for-{Guid.NewGuid():N}.dll");
+        var output = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.dll");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

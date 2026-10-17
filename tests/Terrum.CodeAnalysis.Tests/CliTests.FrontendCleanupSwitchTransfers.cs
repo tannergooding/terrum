@@ -57,8 +57,8 @@ public sealed partial class CliTests
                 source += pick;
                 equivalent += pick;
             }
-            var native = Path.Combine(root, $"cleanup-switch-{Guid.NewGuid():N}.native.exe");
-            var hosted = Path.Combine(root, $"cleanup-switch-{Guid.NewGuid():N}.hosted.exe");
+            var native = CreateTestArtifactPath($"cleanup-switch-{Guid.NewGuid():N}.native.exe");
+            var hosted = CreateTestArtifactPath($"cleanup-switch-{Guid.NewGuid():N}.hosted.exe");
             try
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -95,7 +95,7 @@ public sealed partial class CliTests
                 return 42;
             }
             """;
-        var path = Path.Combine(RepositoryRoot(), $"cleanup-nested-switch-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"cleanup-nested-switch-{Guid.NewGuid():N}.exe");
         try
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -133,7 +133,7 @@ public sealed partial class CliTests
             "public int32 Main() { try {} finally { switch (1) { 1 => { Stop(); continue _; }, _ => {} } } return 42; } [NoThrow][DoesNotReturn] void Stop() { while (true) {} }",
             "public int32 Main() { try {} finally { var value = 1 switch { 1 => { continue _; }, _ => 0 }; } return 42; }",
         };
-        var path = Path.Combine(RepositoryRoot(), $"cleanup-switch-rejected-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"cleanup-switch-rejected-{Guid.NewGuid():N}.exe");
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         try
         {

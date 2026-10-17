@@ -484,8 +484,8 @@ public sealed partial class CliTests
         string source, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"current-program-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"current-program-{Guid.NewGuid():N}.hosted.exe");
+        var native = CreateTestArtifactPath($"current-program-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"current-program-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

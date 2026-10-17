@@ -25,8 +25,8 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"while-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"while-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"while-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"while-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -75,8 +75,8 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"while-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"while-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"while-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"while-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -133,7 +133,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var path = Path.Combine(root, $"while-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"while-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -183,7 +183,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var path = Path.Combine(root, $"while-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"while-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

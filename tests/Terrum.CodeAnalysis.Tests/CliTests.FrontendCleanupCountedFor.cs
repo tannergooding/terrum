@@ -38,7 +38,7 @@ public sealed partial class CliTests
         // existing 12-statement budget, including the local-continue shape.
         foreach (var testCase in cases)
         {
-            var path = Path.Combine(root, $"cleanup-counted-for-{Guid.NewGuid():N}.exe");
+            var path = CreateTestArtifactPath($"cleanup-counted-for-{Guid.NewGuid():N}.exe");
             try
             {
                 var source = "public int32 Main() { mut int32 value = 0; Clean(out value); return value; } "
@@ -99,7 +99,7 @@ public sealed partial class CliTests
         };
         var root = RepositoryRoot();
         var directory = Path.Combine(root, "self-host");
-        var path = Path.Combine(root, $"cleanup-counted-for-rejected-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"cleanup-counted-for-rejected-{Guid.NewGuid():N}.exe");
         try
         {
             var (initial, initialOutput, initialError) = await RunAsync(
@@ -139,7 +139,7 @@ public sealed partial class CliTests
             ("[NoThrow] public int32 Main() { for (mut int32 i = 0; i < 4; i = i + 1) {} return 3; }", false),
         };
         var root = RepositoryRoot();
-        var path = Path.Combine(root, $"cleanup-counted-for-ordinary-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"cleanup-counted-for-ordinary-{Guid.NewGuid():N}.exe");
         try
         {
             var image = Array.Empty<byte>();

@@ -256,8 +256,8 @@ public sealed partial class CliTests
         var directory = Path.Combine(root, "self-host");
         foreach (var testCase in cases)
         {
-            var native = Path.Combine(root, $"switch-transfer-{Guid.NewGuid():N}.native.exe");
-            var hosted = Path.Combine(root, $"switch-transfer-{Guid.NewGuid():N}.hosted.exe");
+            var native = CreateTestArtifactPath($"switch-transfer-{Guid.NewGuid():N}.native.exe");
+            var hosted = CreateTestArtifactPath($"switch-transfer-{Guid.NewGuid():N}.hosted.exe");
             try
             {
                 var input = Encoding.UTF8.GetBytes(testCase.Source);
@@ -306,7 +306,7 @@ public sealed partial class CliTests
                     }
                 }
                 """;
-            var path = Path.Combine(RepositoryRoot(), $"switch-target-{Guid.NewGuid():N}.exe");
+            var path = CreateTestArtifactPath($"switch-target-{Guid.NewGuid():N}.exe");
             try
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -343,7 +343,7 @@ public sealed partial class CliTests
             "int32 Main() { init int32 x; switch (1) { 1 => { continue _; }, _ => {} } return x; }",
             "int32 Main() { switch (1) { 1 => { continue _; }, _ => {} } }",
         };
-        var path = Path.Combine(RepositoryRoot(), $"switch-invalid-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"switch-invalid-{Guid.NewGuid():N}.exe");
         var directory = Path.Combine(RepositoryRoot(), "self-host");
         try
         {

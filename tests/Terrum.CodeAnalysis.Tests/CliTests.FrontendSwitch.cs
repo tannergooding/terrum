@@ -42,8 +42,8 @@ public sealed partial class CliTests
         var directory = Path.Combine(root, "self-host");
         var input = Encoding.UTF8.GetBytes(source);
         var equivalentInput = Encoding.UTF8.GetBytes(hostedEquivalent);
-        var nativePath = Path.Combine(root, $"switch-{Guid.NewGuid():N}.native.exe");
-        var hostedPath = Path.Combine(root, $"switch-{Guid.NewGuid():N}.hosted.exe");
+        var nativePath = CreateTestArtifactPath($"switch-{Guid.NewGuid():N}.native.exe");
+        var hostedPath = CreateTestArtifactPath($"switch-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -302,8 +302,8 @@ public sealed partial class CliTests
                 """;
             var root = RepositoryRoot();
             var directory = Path.Combine(root, "self-host");
-            var nativePath = Path.Combine(root, $"switch-widths-{Guid.NewGuid():N}.native.exe");
-            var hostedPath = Path.Combine(root, $"switch-widths-{Guid.NewGuid():N}.hosted.exe");
+            var nativePath = CreateTestArtifactPath($"switch-widths-{Guid.NewGuid():N}.native.exe");
+            var hostedPath = CreateTestArtifactPath($"switch-widths-{Guid.NewGuid():N}.hosted.exe");
             try
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -354,8 +354,8 @@ public sealed partial class CliTests
                 """;
             var root = RepositoryRoot();
             var directory = Path.Combine(root, "self-host");
-            var nativePath = Path.Combine(root, $"switch-default-{Guid.NewGuid():N}.native.exe");
-            var hostedPath = Path.Combine(root, $"switch-default-{Guid.NewGuid():N}.hosted.exe");
+            var nativePath = CreateTestArtifactPath($"switch-default-{Guid.NewGuid():N}.native.exe");
+            var hostedPath = CreateTestArtifactPath($"switch-default-{Guid.NewGuid():N}.hosted.exe");
             try
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(Encoding.UTF8.GetBytes(source),

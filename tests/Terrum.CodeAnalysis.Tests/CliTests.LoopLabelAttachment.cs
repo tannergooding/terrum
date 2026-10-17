@@ -36,7 +36,7 @@ public sealed partial class CliTests
     public async Task LoopLabelRejectionPreservesPeAcrossHostedScannerAndNativeAsync(string valid, string invalid)
     {
         var root = RepositoryRoot();
-        var path = Path.Combine(root, $"loop-label-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"loop-label-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

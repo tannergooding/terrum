@@ -43,9 +43,9 @@ public sealed partial class CliTests
     public async Task NativeElseIfMatchesHostedScannerPeAndJitAsync(string type, string body, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.hosted.exe");
-        var scanner = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.scanner.exe");
+        var native = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.scanner.exe");
         try
         {
             var text = $"/*\U0001F600*/ {type} Main() {{ {body} }} //tail";
@@ -94,7 +94,7 @@ public sealed partial class CliTests
     [TestCase("void Main() => if (false) {} else if (true) {}")]
     public async Task NativeElseIfRejectsUnsupportedInactiveSourceAndRetainsPeAsync(string text)
     {
-        var path = Path.Combine(RepositoryRoot(), $"else-if-{Guid.NewGuid():N}.exe");
+        var path = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -124,8 +124,8 @@ public sealed partial class CliTests
     public async Task NativeElseIfPreservesSixNormalizedScalarExportsAsync(string type, string value, int expected)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"public {type} @await() {{ if (false) {{ return {value}; }} else if (true) {{ return {value}; }} else {{ return {value}; }} }}");
@@ -173,8 +173,8 @@ public sealed partial class CliTests
     public async Task NativeElseIfPreservesParameterAbiAndVoidExportAsync(string type, string parameters, string body, int count)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.native.dll");
-        var hosted = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.hosted.dll");
+        var native = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.native.dll");
+        var hosted = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             var source = Encoding.UTF8.GetBytes($"public {type} @await({parameters}) {{ {body} }}");
@@ -227,8 +227,8 @@ public sealed partial class CliTests
     public async Task NativeElseIfNonFallthroughCompileOnlyAsync(string type, string body)
     {
         var root = RepositoryRoot();
-        var native = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.native.exe");
-        var hosted = Path.Combine(root, $"else-if-{Guid.NewGuid():N}.hosted.exe");
+        var native = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"else-if-{Guid.NewGuid():N}.hosted.exe");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })

@@ -37,8 +37,8 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var nativePath = Path.Combine(root, $"tree-frontend-{Guid.NewGuid():N}.native.dll");
-        var hostedPath = Path.Combine(root, $"tree-frontend-{Guid.NewGuid():N}.hosted.dll");
+        var nativePath = CreateTestArtifactPath($"tree-frontend-{Guid.NewGuid():N}.native.dll");
+        var hostedPath = CreateTestArtifactPath($"tree-frontend-{Guid.NewGuid():N}.hosted.dll");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -195,7 +195,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");
-        var output = Path.Combine(root, $"tree-frontend-{Guid.NewGuid():N}.dll");
+        var output = CreateTestArtifactPath($"tree-frontend-{Guid.NewGuid():N}.dll");
         try
         {
             var (success, _, _) = await RunAsync(Encoding.UTF8.GetBytes(
