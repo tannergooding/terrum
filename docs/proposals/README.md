@@ -174,6 +174,9 @@ be updated together after consolidation.
   construction to verified ordinary operations. Candidate allocations remain
   unapproved; associated constants, qualified-self projections, and complete
   output/failure/ownership persistence remain explicit gates.
+- [Bootstrap and scalar-frontend profile decisions](bootstrap-frontend-profiles.md)
+  records unapproved bounded source, projection, invocation and persistence
+  choices without changing accepted grammar, ABI or metadata contracts.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md) is
   deferred until an integrated compiler path needs it and its full-file
   size/resource policy is defined; revision-76 support remains provisional.
