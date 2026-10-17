@@ -168,6 +168,12 @@ be updated together after consolidation.
   are **unapproved**, not a canonical registration. Missing current records
   motivate the extension rather than permanent deferral; review defects,
   metadata design and final-revision evidence have separate dispositions.
+- [Generic nominal and construction metadata](generic-nominal-construction-metadata.md)
+  recommends reusing existing generic TypeDef/TypeSpec rows, adding required
+  nominal witness and builder-registration records, and lowering eager
+  construction to verified ordinary operations. Candidate allocations remain
+  unapproved; associated constants, qualified-self projections, and complete
+  output/failure/ownership persistence remain explicit gates.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md) is
   deferred until an integrated compiler path needs it and its full-file
   size/resource policy is defined; revision-76 support remains provisional.

@@ -1,0 +1,69 @@
+// DESIGN ONLY: signatures across native and managed support tiers, not one
+// required module. Carrier layouts, provider constraints and registration are open.
+namespace Terrum;
+
+// One explicit encoding family: char8/char16/char32 and erased void.
+// The void member retains actual encoding; it is not a TextCodeUnit constraint.
+// Erasure transfers unique ownership and all lease obligations without copying.
+public mut unique struct OwnedText<TCodeUnit = void> : IFormattable
+{
+    public TextSpan<TCodeUnit> AsSpan();
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
+    public mut void Dispose();
+}
+
+// Managed immutable Text is declared in application.api.terrum.
+// This candidate carrier owns mutable construction state, not a mutable Text.
+// Its exact IBuilder/IBuilderFactory witness is not established by these names.
+public mut unique class TextBuilder<TCodeUnit>
+    where TCodeUnit : [TextCodeUnit]
+{
+    public TextBuilder();
+    public TextBuilder(nuint capacityHint);
+    public nuint Length { get; }
+    public nuint Capacity { get; }
+    public mut void EnsureCapacity(nuint minimumCapacity);
+    public mut bool TryEnsureCapacity(nuint minimumCapacity);
+    public mut void Append(TextSpan source);
+    public mut void AppendScalar(UnicodeScalar value);
+    public mut bool TryAppend(TextSpan source);
+    public mut bool TryAppendScalar(UnicodeScalar value);
+
+    public static bool TryBuild(TextBuilder<TCodeUnit> builder, init ref<Text> result);
+    public mut bool TryDrain(init ref<Text> result);
+    public bool TryCopy(init ref<Text> result);
+    public mut void Clear();
+}
+
+// Only eligible explicit allocation-provider members are proposed; exact
+// nominal capability syntax remains open, not an invented allocator attribute.
+// Native members need no mandatory collector. Each result retains its actual
+// allocation/release lease and provider lifetime, not just this context handle.
+public mut unique struct TextBuilder<TCodeUnit, TAllocator>
+    where TCodeUnit : [TextCodeUnit]
+{
+    public TextBuilder(TAllocator allocator, nuint capacityHint);
+    public nuint Length { get; }
+    public nuint Capacity { get; }
+    public mut void EnsureCapacity(nuint minimumCapacity);
+    public mut bool TryEnsureCapacity(nuint minimumCapacity);
+    public mut void Append(TextSpan source);
+    public mut void AppendScalar(UnicodeScalar value);
+    public mut bool TryAppend(TextSpan source);
+    public mut bool TryAppendScalar(UnicodeScalar value);
+
+    public static bool TryBuild(TextBuilder<TCodeUnit, TAllocator> builder,
+        init ref<OwnedText<TCodeUnit>> result);
+    public mut bool TryDrain(init ref<OwnedText<TCodeUnit>> result);
+    public mut bool TryCopy(init ref<OwnedText<TCodeUnit>> result);
+    public mut void Clear();
+}
+
+// TryBuild consumes and transfers backing; residual state retires on every exit.
+// TryDrain leaves a valid reusable empty builder; TryCopy preserves its contents.
+// Those alternative names/failure-state contracts remain candidates. No mode
+// guarantees allocation-free completion; drain does not promise retained capacity.
+// Results are immutable, and live derived views block conflicting release.
+// Separate arity versus default-void relation is open. A void allocator member,
+// if declared, selects managed policy, not encoding erasure or ambient context.
