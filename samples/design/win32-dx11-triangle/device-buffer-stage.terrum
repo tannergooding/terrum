@@ -1,0 +1,98 @@
+namespace Triangle.Interop;
+
+[Terrum.Interop.NativeImport("windows-x64.system32.d3d11.D3D11CreateDeviceAndSwapChain")]
+[NoThrow]
+extern int32 D3D11CreateDeviceAndSwapChain(
+    Terrum.Interop.Windows.NativeNullPointer adapter,
+    int32 driverType,
+    Terrum.Interop.Windows.NativeNullPointer software,
+    uint32 flags,
+    Terrum.Interop.NativeStorageAddress featureLevels,
+    uint32 featureLevelCount,
+    uint32 sdkVersion,
+    Terrum.Interop.NativeStorageAddress swapChainDescription,
+    out Terrum.Interop.Dx11.ProvisionalSwapChainOwner swapChain,
+    out Terrum.Interop.Dx11.ProvisionalDeviceOwner device,
+    Terrum.Interop.NativeStorageAddress selectedFeatureLevel,
+    out Terrum.Interop.Dx11.ProvisionalContextOwner immediateContext);
+
+[Layout(Sequential)]
+struct ModeDescription {
+    uint32 Width;
+    uint32 Height;
+    uint32 RefreshNumerator;
+    uint32 RefreshDenominator;
+    uint32 Format;
+    uint32 ScanlineOrdering;
+    uint32 Scaling;
+
+    public ModeDescription(uint32 width, uint32 height, uint32 refreshNumerator,
+        uint32 refreshDenominator, uint32 format, uint32 scanlineOrdering, uint32 scaling) {
+        Width = width;
+        Height = height;
+        RefreshNumerator = refreshNumerator;
+        RefreshDenominator = refreshDenominator;
+        Format = format;
+        ScanlineOrdering = scanlineOrdering;
+        Scaling = scaling;
+    }
+}
+
+[Layout(Sequential)]
+struct SampleDescription {
+    uint32 Count;
+    uint32 Quality;
+
+    public SampleDescription(uint32 count, uint32 quality) {
+        Count = count;
+        Quality = quality;
+    }
+}
+
+[Layout(Sequential)]
+struct SwapChainDescription {
+    ModeDescription BufferDescription;
+    SampleDescription SampleDescription;
+    uint32 BufferUsage;
+    uint32 BufferCount;
+    Terrum.Interop.Windows.HWND OutputWindow;
+    int32 Windowed;
+    uint32 SwapEffect;
+    uint32 Flags;
+
+    public SwapChainDescription(ModeDescription bufferDescription,
+        SampleDescription sampleDescription, uint32 bufferUsage, uint32 bufferCount,
+        Terrum.Interop.Windows.HWND outputWindow, int32 windowed, uint32 swapEffect, uint32 flags) {
+        BufferDescription = bufferDescription;
+        SampleDescription = sampleDescription;
+        BufferUsage = bufferUsage;
+        BufferCount = bufferCount;
+        OutputWindow = outputWindow;
+        Windowed = windowed;
+        SwapEffect = swapEffect;
+        Flags = flags;
+    }
+}
+
+int32 Main() {
+    InlineArray<uint32, 1> featureLevels = [45056];
+    mut InlineArray<uint32, 1> selectedFeatureLevel = [0];
+    SwapChainDescription description = new SwapChainDescription(
+        new ModeDescription(1, 1, 0, 0, 28, 0, 0),
+        new SampleDescription(1, 0), 32, 1,
+        Terrum.Interop.Windows.HWND.NoOwner, 1, 0, 0);
+    int32 status = D3D11CreateDeviceAndSwapChain(
+        null, 5, null, 0, &featureLevels[0], 1, 7, &description,
+        out var swapChain, out var device, &selectedFeatureLevel[0], out var context);
+    if (status >= 0) {
+        InlineArray<uint32, 1> vertices = [0];
+        Terrum.Interop.Dx11.BufferDesc bufferDescription =
+            bufferdesc(&vertices[0], 4, 1, 1, 0, 0, 0);
+        Terrum.Interop.Dx11.SubresourceData initialData =
+            subresourcedata(&vertices[0], 0, 0);
+        if (device.CreateBuffer(&bufferDescription, &initialData, out var buffer)) {
+            return 0;
+        }
+    }
+    return 1;
+}
