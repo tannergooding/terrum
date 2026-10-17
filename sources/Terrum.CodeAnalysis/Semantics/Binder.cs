@@ -1303,9 +1303,9 @@ internal sealed partial class Binder
         }
 
         var unsupportedMember = declaration.Children.OfType<SyntaxNode>().FirstOrDefault(static child =>
-            child.Kind is SyntaxKind.OperatorDeclaration or SyntaxKind.PropertyDeclaration
-            || child.Kind is SyntaxKind.FunctionDeclaration or SyntaxKind.ConstructorDeclaration
-                && HasGenericTypeParameters(child));
+            (child.Kind is SyntaxKind.OperatorDeclaration or SyntaxKind.PropertyDeclaration)
+            || ((child.Kind is SyntaxKind.FunctionDeclaration or SyntaxKind.ConstructorDeclaration)
+                && HasGenericTypeParameters(child)));
         if (unsupportedMember is not null)
         {
             Report("TRM3005",
