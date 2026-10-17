@@ -197,7 +197,7 @@ public sealed class AggregateAbiTests
 
     private static async Task ExecuteAotAsync(BoundProgram program, int expected)
     {
-        var executable = Path.Combine(AppContext.BaseDirectory, $"aggregate-{Guid.NewGuid():N}.exe");
+        var executable = Path.Combine(TestArtifactPaths.DirectoryPath, $"aggregate-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(executable,
@@ -212,7 +212,7 @@ public sealed class AggregateAbiTests
 
     private static async Task ExecuteBothAsync(BoundProgram program, int expected)
     {
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"aggregate-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"aggregate-{Guid.NewGuid():N}");
         var executable = prefix + ".exe";
         var consumer = prefix + ".consumer.trm";
         var producer = prefix + ".producer.trm";

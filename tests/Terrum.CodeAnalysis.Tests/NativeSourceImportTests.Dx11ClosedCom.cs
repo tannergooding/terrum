@@ -17,7 +17,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-closed-com-sdk-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-closed-com-sdk-");
         var native = Path.Combine(root, "tests", "native");
         var comspec = Environment.GetEnvironmentVariable("ComSpec")
             ?? throw new InvalidOperationException("ComSpec is unset.");

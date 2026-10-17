@@ -32,7 +32,7 @@ public sealed class FixtureTests
     public void InitialSelfHostCandidateHasSupportedSyntaxOnly(string name)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var path = Path.Combine(root, "self-host", name);
+        var path = SelfHostPaths.ResolveFile(root, name);
         var text = File.ReadAllText(path);
         var tree = SyntaxTree.Parse(text, path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));

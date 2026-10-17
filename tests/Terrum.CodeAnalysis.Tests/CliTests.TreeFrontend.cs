@@ -36,7 +36,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"tree-frontend-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"tree-frontend-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -69,7 +69,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -104,7 +104,7 @@ public sealed partial class CliTests
             + " int32 Main() => 42;")).HasErrors, Is.True);
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", frontend, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -124,7 +124,7 @@ public sealed partial class CliTests
         var source = "int32 Main() => " + new string('(', 17) + "42"
             + new string(')', 17) + ";";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(root, "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
             "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
@@ -143,7 +143,7 @@ public sealed partial class CliTests
         var source = "public int32 Value(int32 x) => "
             + string.Join(" + ", operands) + ";";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(root, "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
             "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
@@ -159,7 +159,7 @@ public sealed partial class CliTests
             "..", "..", "..", "..", "..", ".."));
         var source = "public int32 Value(int32 x) => x + (x * 2);";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(root, "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
             "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
@@ -194,7 +194,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var output = CreateTestArtifactPath($"tree-frontend-{Guid.NewGuid():N}.dll");
         try
         {

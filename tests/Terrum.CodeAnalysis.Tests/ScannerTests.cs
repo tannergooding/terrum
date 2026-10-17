@@ -1028,7 +1028,7 @@ public sealed class ScannerTests
 
     internal static async Task<string> ReadScannerSourceAsync(string root)
     {
-        var selfHostDirectory = Path.Combine(root, "self-host");
+        var selfHostDirectory = SelfHostPaths.SourceDirectory(root);
         var sourceRange = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "SourceRange.terrum"))
             .ConfigureAwait(true);
         var characterFacts = await File.ReadAllTextAsync(Path.Combine(selfHostDirectory, "CharacterFacts.terrum"))
@@ -1080,9 +1080,7 @@ public sealed class ScannerTests
     private static async Task ExecuteAsync(BoundProgram program, int expected)
     {
         var image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "artifacts", "scanner-tests");
-        _ = Directory.CreateDirectory(directory);
+        var directory = TestArtifactPaths.CreateDirectory("scanner-tests");
         var path = Path.Combine(directory, $"terrum-scanner-{Guid.NewGuid():N}.exe");
         try
         {

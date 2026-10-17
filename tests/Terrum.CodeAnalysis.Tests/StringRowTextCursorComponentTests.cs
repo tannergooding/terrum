@@ -224,7 +224,7 @@ public sealed class StringRowTextCursorComponentTests
         var components = new SyntaxTree[names.Length];
         for (var index = 0; index < names.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", names[index]);
+            var path = SelfHostPaths.ResolveFile(root, names[index]);
             components[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(components[index].HasErrors, Is.False, string.Join(Environment.NewLine, components[index].Diagnostics));
         }
@@ -240,7 +240,7 @@ public sealed class StringRowTextCursorComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"string-row-text-cursor-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"string-row-text-cursor-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);

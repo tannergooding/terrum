@@ -68,7 +68,7 @@ public sealed class Utf16ScalarModuleTests
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
             Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
@@ -196,7 +196,7 @@ public sealed class Utf16ScalarModuleTests
     public async Task Utf16CodeUnitsModuleDecodesScalarsAndWidthsWithoutHostSource(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "Utf16CodeUnits.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "Utf16CodeUnits.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var componentTree = SyntaxTree.Parse(componentText, componentPath);
         Assert.That(componentTree.HasErrors, Is.False, string.Join(Environment.NewLine, componentTree.Diagnostics));

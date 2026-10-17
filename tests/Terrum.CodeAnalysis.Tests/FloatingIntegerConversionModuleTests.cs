@@ -28,7 +28,7 @@ public sealed class FloatingIntegerConversionModuleTests
         BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var path = Path.Combine(root, "self-host", "FloatingIntegerConversion.terrum");
+        var path = SelfHostPaths.ResolveFile(root, "FloatingIntegerConversion.terrum");
         var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var component = SyntaxTree.Parse(text, path);
         Assert.That(component.HasErrors, Is.False, string.Join(Environment.NewLine, component.Diagnostics));

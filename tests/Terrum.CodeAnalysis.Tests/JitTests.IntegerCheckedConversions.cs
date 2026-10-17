@@ -19,7 +19,7 @@ public sealed partial class JitTests
     public async Task CheckedChar16WideningsAlwaysPublishCodeUnitAcrossAotAndJitAsync(ushort codeUnit)
     {
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerCheckedConversions.terrum"))
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerCheckedConversions.terrum"))
             .ConfigureAwait(true);
         var source = component + $$"""
 

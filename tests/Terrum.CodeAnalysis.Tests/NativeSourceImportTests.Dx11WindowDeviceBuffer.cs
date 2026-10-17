@@ -43,7 +43,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(image.AsSpan().IndexOf("D3D11CreateDeviceAndSwapChain"u8) >= 0, Is.True);
         Assert.That(image.AsSpan().IndexOf("NativeFfi"u8) < 0, Is.True);
 
-        var directory = Directory.CreateTempSubdirectory("terrum-window-device-buffer-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-window-device-buffer-");
         var executablePath = Path.Combine(directory, "window-device-buffer.exe");
         try
         {

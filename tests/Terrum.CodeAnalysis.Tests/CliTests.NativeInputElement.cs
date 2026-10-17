@@ -16,7 +16,7 @@ public sealed partial class CliTests
     [TestCase("build-native-import", "checked-exceptions")]
     public async Task CliRejectsTestOnlyInputElementDescriptorsAsync(string command, string runtimePolicy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-test-input-element-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-test-input-element-{Guid.NewGuid():N}.exe");
         try
         {
             var (exit, output, error) = await RunAsync(

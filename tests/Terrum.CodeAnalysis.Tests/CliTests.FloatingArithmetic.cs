@@ -36,7 +36,7 @@ public sealed partial class CliTests
         Assert.That(oracleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
         var oracleProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = oracleCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
 
-        var oraclePath = Path.Combine(Path.GetTempPath(), $"terrum-floating-arithmetic-abi-{Guid.NewGuid():N}.dll");
+        var oraclePath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-floating-arithmetic-abi-{Guid.NewGuid():N}.dll");
         IntPtr oracleHandle = IntPtr.Zero;
         try
         {

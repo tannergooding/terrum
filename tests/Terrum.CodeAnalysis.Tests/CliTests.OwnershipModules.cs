@@ -22,7 +22,7 @@ public sealed partial class CliTests
     public async Task ModuleCommandsReportThePersistedOwnershipProfileAsync(
         string policy, bool exportOwner, bool transferOwner, string profile)
     {
-        var directory = Directory.CreateTempSubdirectory("terrum-owner-profile-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-owner-profile-");
         var source = Path.Combine(directory, "provider.terrum");
         var consumerSource = Path.Combine(directory, "consumer.terrum");
         var provider = Path.Combine(directory, "provider.trm");

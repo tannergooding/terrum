@@ -22,7 +22,7 @@ public sealed class ManagedTokenChainModuleTests
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, componentNames[index] + ".terrum");
             trees[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }
@@ -109,7 +109,7 @@ public sealed class ManagedTokenChainModuleTests
         var consumer = ModuleCompiler.CreateConsumer(
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
 
-        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"managed-token-chain-{Guid.NewGuid():N}.trm");
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"managed-token-chain-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try
         {

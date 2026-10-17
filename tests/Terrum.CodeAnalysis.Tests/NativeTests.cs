@@ -92,7 +92,7 @@ public sealed partial class NativeTests
     public async Task SelfHostAdditionPredicateAgreesWithWidenedBoundaryArithmeticAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var source = new StringBuilder(await File.ReadAllTextAsync(Path.Combine(root, "self-host", "IntegerFacts.terrum")).ConfigureAwait(true));
+        var source = new StringBuilder(await File.ReadAllTextAsync(SelfHostPaths.ResolveFile(root, "IntegerFacts.terrum")).ConfigureAwait(true));
         _ = source.Append("int32 Main() { const bool staticOverflow = !CanAddInt32(2147483647, 1); "
             + "if (!staticOverflow || CanAddInt32(2147483647, 1)) { return 2; }");
         int[] values = [int.MinValue, int.MinValue + 1, -65536, -1, 0, 1, 65536, int.MaxValue - 1, int.MaxValue];
@@ -205,7 +205,7 @@ public sealed partial class NativeTests
     private static async Task<int> ExecuteAsync(byte[] image)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True, "Native execution tests require Windows x64.");
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-native-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-native-{Guid.NewGuid():N}.exe");
 
         try
         {

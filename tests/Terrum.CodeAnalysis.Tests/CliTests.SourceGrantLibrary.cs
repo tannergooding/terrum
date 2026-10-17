@@ -20,8 +20,8 @@ public sealed partial class CliTests
     public async Task BuildLibraryEmitsSourceGrantManifestFromSelectedExportsAsync(string runtime)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
-        var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-cli-{Guid.NewGuid():N}");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var temporaryDirectory = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-cli-{Guid.NewGuid():N}");
         _ = Directory.CreateDirectory(temporaryDirectory);
         var imagePath = Path.Combine(temporaryDirectory, "compiler-primitives.dll");
         var manifestPath = Path.Combine(temporaryDirectory, "compiler-primitives.abi.json");
@@ -93,7 +93,7 @@ public sealed partial class CliTests
     public async Task FailedSourceGrantArtifactReplacementPreservesTheExistingPairAsync(string lockedArtifact)
     {
         Assert.That(OperatingSystem.IsWindows(), Is.True);
-        var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-pair-{Guid.NewGuid():N}");
+        var temporaryDirectory = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-pair-{Guid.NewGuid():N}");
         _ = Directory.CreateDirectory(temporaryDirectory);
         var sourcePath = Path.Combine(temporaryDirectory, "library.terrum");
         var imagePath = Path.Combine(temporaryDirectory, "library.dll");

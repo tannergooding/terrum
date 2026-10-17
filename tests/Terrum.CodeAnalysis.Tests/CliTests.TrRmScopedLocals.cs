@@ -19,7 +19,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedScopedLocalsRunAndBuildFromSourceFreeArtifactAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-scoped-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-scoped-cli-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         const string source = """
@@ -64,7 +64,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedScopedLibraryBuildsAndExportsAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-scoped-export-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-scoped-export-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var library = prefix + ".dll";
         const string source = """
@@ -107,7 +107,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { if (true) { int32 local = 42; Fail(local); return local; } return 0; } void Fail(int32 value) { int32 fault = value / 0; }")]
     public async Task ScopedCheckedFailureIsObservedOnlyInSubprocessAsync(string source)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-scoped-failure-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-scoped-failure-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         const int status = unchecked((int)0xE0540002);

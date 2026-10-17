@@ -320,7 +320,7 @@ behavior. These records do not establish namespaces/imports, members,
 templates, external bindings, callable values, general reference arguments,
 default/params arguments or standalone compilation. Supported aliases and
 the scalar expression domain are tracked in the
-[self-host inventory](../../self-host/README.md).
+[self-host inventory](self-host.md).
 Source-free TRRM has its separate fail-fast indexed routing/Body contract;
 frontend projection support does not extend it.
 
@@ -712,7 +712,7 @@ early rejection, checked unwinding after an owner move and checked allocation
 failure with no live block. The probe does not expose an owner in the DLL
 export ABI.
 
-The [owned source-line index](../../self-host/SourceLineIndex.terrum) builds a
+The [owned source-line index](../../sources/self-host/SourceLineIndex.terrum) builds a
 line-start table with exactly one word per line start and publishes a unique immutable index.
 Its position queries use binary search over initialized words, without a
 retained source pointer or a general span/allocator API.
@@ -721,9 +721,10 @@ retained source pointer or a general span/allocator API.
 
 ```powershell
 .\build.cmd -restore
+New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll analyze samples\native\control-flow.terrum --json
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\native\control-flow.terrum -o artifacts\control-flow.exe --runtime fail-fast --json
-.\artifacts\control-flow.exe
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\native\control-flow.terrum -o artifacts\bin\samples\control-flow.exe --runtime fail-fast --json
+.\artifacts\bin\samples\control-flow.exe
 $LASTEXITCODE # 45
 ```
 
@@ -750,7 +751,8 @@ Single-source JSON remains schema 1. Source sets use schema 2 with input-ordered
 diagnostic; a successful build adds the same `artifact` object.
 
 ```powershell
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\native\modules\wide-entry.terrum --source self-host\WideIntegerFacts.terrum --source self-host\WideIntegerTests.terrum -o artifacts\wide.exe --runtime fail-fast
+New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\native\modules\wide-entry.terrum --source sources\self-host\WideIntegerFacts.terrum --source tests\self-host\WideIntegerTests.terrum -o artifacts\bin\samples\wide.exe --runtime fail-fast
 ```
 
 This compiles source together; it does not replace the persisted, independently
@@ -763,7 +765,8 @@ artifact JSON additionally identifies `kind: "dynamic-library"`. Invalid native
 exports produce `TRM4002`; source visibility alone never exports a declaration.
 
 ```powershell
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-library self-host\SourceRange.terrum --export Terrum.CodeAnalysis.SourceRange.TryCreate --export Terrum.CodeAnalysis.SourceRange.GetEnd -o artifacts\ranges.dll --runtime fail-fast
+New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-library sources\self-host\SourceRange.terrum --export Terrum.CodeAnalysis.SourceRange.TryCreate --export Terrum.CodeAnalysis.SourceRange.GetEnd -o artifacts\bin\samples\ranges.dll --runtime fail-fast
 ```
 
 ### Contract-checked native packages
@@ -777,10 +780,11 @@ combined input; package reads are bounded to 16 MiB.
 
 ```powershell
 $cli = "artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll"
-dotnet $cli compile-native producer self-host\WideIntegerFacts.terrum CompilerValues --export Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\wide-provider.trmn --runtime fail-fast
-dotnet $cli compile-native consumer self-host\WideIntegerTests.terrum artifacts\wide-provider.trmn --source samples\native\modules\wide-entry.terrum -o artifacts\wide-consumer.trmn --runtime fail-fast
-dotnet $cli validate-native artifacts\wide-consumer.trmn artifacts\wide-provider.trmn --json
-dotnet $cli run-native artifacts\wide-consumer.trmn artifacts\wide-provider.trmn --runtime fail-fast
+New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
+dotnet $cli compile-native producer sources\self-host\WideIntegerFacts.terrum CompilerValues --export Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\bin\modules\wide-provider.trmn --runtime fail-fast
+dotnet $cli compile-native consumer tests\self-host\WideIntegerTests.terrum artifacts\bin\modules\wide-provider.trmn --source samples\native\modules\wide-entry.terrum -o artifacts\bin\modules\wide-consumer.trmn --runtime fail-fast
+dotnet $cli validate-native artifacts\bin\modules\wide-consumer.trmn artifacts\bin\modules\wide-provider.trmn --json
+dotnet $cli run-native artifacts\bin\modules\wide-consumer.trmn artifacts\bin\modules\wide-provider.trmn --runtime fail-fast
 ```
 
 `validate-native` checks the selected pair without executing it. `run-native`
@@ -1136,7 +1140,7 @@ fields, conditional outputs and persisted modules. Widening a signed negative
 value preserves its sign; narrowing or crossing signedness checks the numeric
 range rather than reinterpreting bits. The same signed-minimum division and
 remainder rules apply at both signed widths. The
-[wide integer candidate](../../self-host/WideIntegerFacts.terrum) uses these rules
+[wide integer candidate](../../sources/self-host/WideIntegerFacts.terrum) uses these rules
 for non-overflowing signed-addition checks and bounded decimal accumulation
 through `uint64.MaxValue`, with true-only output publication.
 
@@ -1172,10 +1176,10 @@ same verified scratch/publication and native output ABI. Exported init
 contracts remain distinct from out contracts. General references and
 predicate-based postconditions remain scheduled.
 
-[`self-host/SourceRange`](../../self-host/SourceRange.terrum),
-[`CharacterFacts`](../../self-host/CharacterFacts.terrum),
-[`RangeTests`](../../self-host/RangeTests.terrum) and
-[`Token`](../../self-host/Token.terrum) execute through this profile.
+[`self-host/SourceRange`](../../sources/self-host/SourceRange.terrum),
+[`CharacterFacts`](../../sources/self-host/CharacterFacts.terrum),
+[`RangeTests`](../../tests/self-host/RangeTests.terrum) and
+[`Token`](../../sources/self-host/Token.terrum) execute through this profile.
 The [scanner component](../scanner.md) additionally uses fixed checked buffers;
 this does not implement a general span ABI or a complete lifetime checker.
 
@@ -1287,8 +1291,9 @@ by having Terrum call itself. From an x64 Visual Studio developer shell at the
 repository root:
 
 ```powershell
-ml64 /nologo /c /Foartifacts\abi-carrier.obj tests\native\abi-carrier.asm
-cl /nologo /W4 /WX /O2 /TC tests\native\abi-probe.c /Foartifacts\abi-probe.obj /Feartifacts\abi-probe.exe /link artifacts\abi-carrier.obj /INCREMENTAL:NO
+New-Item -ItemType Directory -Force artifacts\obj\native-probes\native-abi, artifacts\bin\native-probes\native-abi | Out-Null
+ml64 /nologo /c /Foartifacts\obj\native-probes\native-abi\abi-carrier.obj tests\native\abi-carrier.asm
+cl /nologo /W4 /WX /O2 /TC tests\native\abi-probe.c /Foartifacts\obj\native-probes\native-abi\abi-probe.obj /Feartifacts\bin\native-probes\native-abi\abi-probe.exe /link artifacts\obj\native-probes\native-abi\abi-carrier.obj /INCREMENTAL:NO
 dotnet run --file scripts\check-native-abi.cs
 ```
 

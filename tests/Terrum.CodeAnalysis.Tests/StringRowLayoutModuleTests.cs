@@ -100,7 +100,7 @@ public sealed class StringRowLayoutModuleTests
         ]);
 
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "StringRowLayout.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "StringRowLayout.terrum");
         var component = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
         Assert.That(component.HasErrors, Is.False, string.Join(System.Environment.NewLine, component.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "string-row-layout-module.terrum");
@@ -120,7 +120,7 @@ public sealed class StringRowLayoutModuleTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"string-row-layout-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"string-row-layout-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);

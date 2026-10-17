@@ -111,7 +111,7 @@ public sealed class BasedIntegerFloatLiteralModuleTests
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
             Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));

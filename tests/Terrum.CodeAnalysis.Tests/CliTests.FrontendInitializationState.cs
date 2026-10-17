@@ -34,7 +34,7 @@ public sealed partial class CliTests
         string text, int projectionVersion, int expectedCurrentProjectionVersion,
         int expected, int expectedInitializationTests)
     {
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var input = Encoding.UTF8.GetBytes(text);
         foreach (var runtime in new[] { "fail-fast", "checked-exceptions" })
         {
@@ -84,7 +84,7 @@ public sealed partial class CliTests
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-init-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-init-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(input,

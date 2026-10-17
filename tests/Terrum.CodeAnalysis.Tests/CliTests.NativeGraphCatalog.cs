@@ -14,7 +14,7 @@ public sealed partial class CliTests
     [Test]
     public async Task GraphCatalogCliReportsOnlyUniqueSnapshotSelectionAsync()
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-catalog-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var source = Path.Combine(directory, "leaf.terrum");

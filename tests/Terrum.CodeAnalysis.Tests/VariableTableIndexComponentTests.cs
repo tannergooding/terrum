@@ -138,7 +138,7 @@ public sealed class VariableTableIndexComponentTests
         cases.Add(Rejected(emptyBody, 2, 1, 1, 1));
 
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "VariableTableIndex.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "VariableTableIndex.terrum");
         var component = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
         Assert.That(component.HasErrors, Is.False, string.Join(Environment.NewLine, component.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "variable-table-index-component.terrum");
@@ -177,7 +177,7 @@ public sealed class VariableTableIndexComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"variable-table-index-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"variable-table-index-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);

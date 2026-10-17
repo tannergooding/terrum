@@ -19,7 +19,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedDoAndForExecuteWithoutSourceAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-do-for-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-do-for-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         const string source = """
@@ -65,7 +65,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedDoForLibraryExecutesIndependentExportAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-do-for-export-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-do-for-export-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var library = prefix + ".dll";
         const string source = """
@@ -118,7 +118,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { mut int32 x = 0; do { x++; continue; } while (Divide(0) == 0); return x; } int32 Divide(int32 x) { return 1 / x; }",        unchecked((int)0xE0540002))]
     public async Task PersistedLoopFailureHasExactStatusAsync(string source, int expected)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-do-for-failure-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-do-for-failure-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -147,7 +147,7 @@ public sealed partial class CliTests
     [Test]
     public async Task UnsupportedTransferDoesNotReplaceCompiledArtifactAsync()
     {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-do-for-retained-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-do-for-retained-{Guid.NewGuid():N}.trrm");
         byte[] retained = [0xAB, 0xCD, 0xEF];
         const string source = """
             int32 Main() {

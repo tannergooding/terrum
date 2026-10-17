@@ -20,7 +20,7 @@ public sealed class IntegerFactsModuleTests
     public async Task IntegerFactsPersistedConsumerMatchesBoundaryMasks(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "IntegerFacts.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "IntegerFacts.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var componentTree = SyntaxTree.Parse(componentText, componentPath);
         Assert.That(componentTree.HasErrors, Is.False, string.Join(Environment.NewLine, componentTree.Diagnostics));

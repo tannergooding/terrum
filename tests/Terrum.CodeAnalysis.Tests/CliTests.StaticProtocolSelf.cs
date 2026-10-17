@@ -26,7 +26,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task FreshSelfBoundSourceExecutesThroughCliBuildAndJitAsync(string policy)
     {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-self-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-self-{Guid.NewGuid():N}.exe");
         try
         {
             var input = Encoding.UTF8.GetBytes(StaticProtocolSelfTests.Source);

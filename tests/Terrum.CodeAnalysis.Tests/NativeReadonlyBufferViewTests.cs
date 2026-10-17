@@ -783,7 +783,7 @@ public sealed class NativeReadonlyBufferViewTests
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var image = NativeEmitter.Emit(program, nativePolicy);
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-view-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-view-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

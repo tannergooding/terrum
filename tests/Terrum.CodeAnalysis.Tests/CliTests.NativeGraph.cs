@@ -14,7 +14,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NativeGraphCliPreservesIntermediateAndRootArtifactsOnFailuresAsync()
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-cli-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var leafSource = Path.Combine(directory, "leaf.terrum");

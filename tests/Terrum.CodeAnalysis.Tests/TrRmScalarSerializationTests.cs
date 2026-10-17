@@ -194,7 +194,7 @@ public sealed class TrRmScalarSerializationTests
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(program, "scalar-service"));
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var path = Path.Combine(root, "artifacts", $"trrm-scalar-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-scalar-{Guid.NewGuid():N}.dll");
         try
         {
             foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })

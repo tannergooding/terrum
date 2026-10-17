@@ -163,9 +163,7 @@ public sealed partial class JitTests
         var compilation = Compilation.Create(await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-        var root = RepositoryRoot();
-        var directory = Path.Combine(root, "artifacts", "jit-tests");
-        _ = Directory.CreateDirectory(directory);
+        var directory = TestArtifactPaths.CreateDirectory("jit-tests");
         var image = Path.Combine(directory, $"jit-{Guid.NewGuid():N}.exe");
 
         try
@@ -242,8 +240,7 @@ public sealed partial class JitTests
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
-        var directory = Path.Combine(RepositoryRoot(), "artifacts", "jit-tests");
-        _ = Directory.CreateDirectory(directory);
+        var directory = TestArtifactPaths.CreateDirectory("jit-tests");
         var image = Path.Combine(directory, $"checked-{Guid.NewGuid():N}.exe");
         try
         {
@@ -290,8 +287,7 @@ public sealed partial class JitTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Source", PrimitiveType.Char16, [97], false)], BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var directory = Path.Combine(RepositoryRoot(), "artifacts", "jit-tests");
-        _ = Directory.CreateDirectory(directory);
+        var directory = TestArtifactPaths.CreateDirectory("jit-tests");
         var image = Path.Combine(directory, $"checked-bounds-{Guid.NewGuid():N}.exe");
         try
         {
@@ -384,7 +380,7 @@ public sealed partial class JitTests
     public async Task ScannerWorkerReturnsCopiedWritableTokenDataAsync(string source, int identifierLength, int integerStart, int sourceLength)
     {
         AssertWindowsX64();
-        var scanner = Path.Combine(RepositoryRoot(), "self-host");
+        var scanner = SelfHostPaths.SourceDirectory(RepositoryRoot());
         (var exit, var output, var error) = await RunAsync(
             CliStart("scan-component", scanner, "-", "--runtime", "fail-fast", "--json"),
             Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
@@ -416,7 +412,7 @@ public sealed partial class JitTests
     public async Task ScannerWorkerReportsLexicalDiagnosticsAndTokenSpansAsync(string source)
     {
         var expected = Lexer.Lex(SourceText.From(source));
-        var scanner = Path.Combine(RepositoryRoot(), "self-host");
+        var scanner = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(
             CliStart("scan-component", scanner, "-", "--runtime", "fail-fast", "--json"),
             Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);

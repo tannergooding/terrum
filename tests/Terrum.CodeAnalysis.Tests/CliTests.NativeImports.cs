@@ -15,9 +15,9 @@ public sealed partial class CliTests
     public async Task BuildNativeImportCompilesDirectMessageBoxWithoutExecutingItAsync(string runtimePolicy)
     {
         var sample = Path.Combine(RepositoryRoot(), "samples", "native", "message-box.terrum");
-        var standardOutput = Path.Combine(Path.GetTempPath(),
+        var standardOutput = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-message-box-standard-{runtimePolicy}-{Guid.NewGuid():N}.exe");
-        var nativeImportOutput = Path.Combine(Path.GetTempPath(),
+        var nativeImportOutput = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-message-box-native-{runtimePolicy}-{Guid.NewGuid():N}.exe");
         try
         {
@@ -58,7 +58,7 @@ public sealed partial class CliTests
         var sample = Path.Combine(RepositoryRoot(), "samples", "design", "win32-dx11-triangle", sourceName);
         var interop = Path.Combine(Path.GetDirectoryName(sample)!, "dx11-api.terrum");
         var windowsInterop = Path.Combine(Path.GetDirectoryName(sample)!, "win32-api.terrum");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-dx11-{Guid.NewGuid():N}.exe");
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-dx11-{Guid.NewGuid():N}.exe");
         try
         {
             var (exitCode, result, error) = await RunAsync([], "build-native-import", sample, "--source", interop,

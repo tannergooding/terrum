@@ -253,7 +253,7 @@ public sealed partial class CliTests
                 policy == "checked-exceptions" ? 42 : unchecked((int)0xE0540003)),
         };
         var root = RepositoryRoot();
-        var directory = Path.Combine(root, "self-host");
+        var directory = SelfHostPaths.SourceDirectory(root);
         foreach (var testCase in cases)
         {
             var native = CreateTestArtifactPath($"switch-transfer-{Guid.NewGuid():N}.native.exe");
@@ -310,7 +310,7 @@ public sealed partial class CliTests
             try
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-",
+                    "frontend-build", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-",
                     "-o", path, "--runtime", policy, "--json");
                 Assert.That(exit == 0, Is.True, $"{type} {target} {policy}: {exit}: {output}{error}");
                 Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(42));
@@ -344,7 +344,7 @@ public sealed partial class CliTests
             "int32 Main() { switch (1) { 1 => { continue _; }, _ => {} } }",
         };
         var path = CreateTestArtifactPath($"switch-invalid-{Guid.NewGuid():N}.exe");
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         try
         {
             var (initial, initialOutput, initialError) = await RunAsync(
@@ -373,7 +373,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task ScalarFrontendSwitchTransferKeepsLabelDiagnosticAndCapacityAsync(string policy)
     {
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         const string missingLabel = "void Main() { const int32 N = 1; while (false) { switch (1) { 1 => { continue N; }, _ => {} } } }";
         var (labelExit, labelOutput, labelError) = await RunAsync(Encoding.UTF8.GetBytes(missingLabel),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
@@ -425,14 +425,14 @@ public sealed partial class CliTests
             }
             """;
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-",
             "--runtime", policy, "--json");
         Assert.That(exit == 0, Is.True, $"{exit}: {output}{error}");
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
         Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
         var (runExit, runOutput, runError) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-run", Path.Combine(RepositoryRoot(), "self-host"), "-",
+            "frontend-run", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-",
             "--runtime", policy, "--json");
         Assert.That(runExit == 42, Is.True, $"{runExit}: {runOutput}{runError}");
     }

@@ -116,7 +116,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>();
-        var path = Path.Combine(root, "self-host", "ArtifactDirectoryValidation.terrum");
+        var path = SelfHostPaths.ResolveFile(root, "ArtifactDirectoryValidation.terrum");
         var source = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var tree = SyntaxTree.Parse(source, path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
@@ -479,7 +479,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"artifact-directory-validation-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"artifact-directory-validation-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);

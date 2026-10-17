@@ -3842,7 +3842,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
         Assert.That(File.Exists(environment), Is.True, "Visual Studio x64 C build tools are required for the unwind probe.");
 
-        var directory = Directory.CreateTempSubdirectory("terrum-bootstrap-unwind-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-bootstrap-unwind-");
         var imagePath = Path.Combine(directory, "bootstrap.exe");
         var executablePath = Path.Combine(directory, "bootstrap-unwind-probe.exe");
         var objectPath = Path.Combine(directory, "bootstrap-unwind-probe.obj");
@@ -4079,7 +4079,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
 
     private static async Task<int> ExecuteImageAsync(byte[] image)
     {
-        var path = Path.Combine(Path.GetTempPath(),
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"bootstrap-int32-main-image-{Guid.NewGuid():N}.exe");
         try
         {
@@ -4995,7 +4995,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
         var components = new List<SyntaxTree>();
         foreach (var name in componentNames)
         {
-            var path = Path.Combine(root, "self-host", name + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, name + ".terrum");
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
@@ -5018,7 +5018,7 @@ public sealed class BootstrapInt32MainReturnComponentTests
     private static async Task<int> ExecuteAotAsync(
         BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(),
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"bootstrap-int32-main-return-{Guid.NewGuid():N}.exe");
         try
         {

@@ -15,7 +15,7 @@ public sealed partial class CliTests
     public async Task ExpressionBodiesSurviveScannerAndPersistedConsumersAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "artifacts", $"expression-bodies-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"expression-bodies-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         var producerSource = Path.Combine(directory, "producer.terrum");
         var consumerSource = Path.Combine(directory, "consumer.terrum");
@@ -66,7 +66,7 @@ public sealed partial class CliTests
                 "--runtime", policy, "--json");
             Assert.That(result == 0, Is.True, output + error);
             (result, output, error) = await RunAsync(bytes, "build-component",
-                Path.Combine(root, "self-host"), "-", "-o", scannedImage,
+                SelfHostPaths.SourceDirectory(root), "-", "-o", scannedImage,
                 "--runtime", policy, "--json");
             Assert.That(result == 0, Is.True, output + error);
             Assert.That(await File.ReadAllBytesAsync(scannedImage), Is.EqualTo(await File.ReadAllBytesAsync(hostedImage)));

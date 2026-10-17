@@ -443,7 +443,7 @@ public sealed class NativeOwnedBufferTests
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var image = NativeEmitter.Emit(program, nativePolicy);
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-buffer-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-buffer-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

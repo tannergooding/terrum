@@ -18,7 +18,7 @@ public sealed class SourceRangeModuleTests
     public async Task SourceRangeExecutesAcrossPersistedSemanticModulesAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "SourceRange.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "SourceRange.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var producerTree = SyntaxTree.Parse(componentText + """
 
@@ -67,7 +67,7 @@ public sealed class SourceRangeModuleTests
         var consumer = ModuleCompiler.CreateConsumer(
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
 
-        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"source-range-{Guid.NewGuid():N}.trm");
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"source-range-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try
         {

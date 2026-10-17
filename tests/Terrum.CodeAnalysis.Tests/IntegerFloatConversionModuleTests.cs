@@ -21,7 +21,7 @@ public sealed class IntegerFloatConversionModuleTests
         var trees = new SyntaxTree[dependencyNames.Length + 1];
         for (var index = 0; index < dependencyNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", dependencyNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, dependencyNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
             Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));

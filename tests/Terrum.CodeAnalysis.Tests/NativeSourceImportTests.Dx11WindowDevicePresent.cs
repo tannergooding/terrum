@@ -611,7 +611,7 @@ public sealed partial class NativeSourceImportTests
         var program = CompileDirectWindowDevicePresent();
         Assert.That(NativeDx11DirectPresentationContract.MatchesProgram(program), Is.True);
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.CheckedExceptions);
-        var directory = Directory.CreateTempSubdirectory("terrum-window-device-present-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-window-device-present-");
         var executablePath = Path.Combine(directory, "window-device-present.exe");
         try
         {

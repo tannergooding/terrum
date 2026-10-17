@@ -57,6 +57,6 @@ audit distinct. No hosted parsing substitute, precomputed/captured publication,
 scanner-only success or source-free bootstrap-compiler claim is permitted.
 
 Source-grant adapters are temporary bootstrap/test infrastructure documented
-in the [implementation inventory](../../self-host/README.md#source-and-managed-component-contracts),
+in the [implementation inventory](../implementation/self-host.md#source-and-managed-component-contracts),
 not a public ABI promotion worklist. Prefer ordinary explicit inputs and proper
 unit tests as compiler support develops; no external source grant is selected.

@@ -15,7 +15,7 @@ public sealed partial class CliTests
     [TestCase(true)]
     public async Task IndependentCallBytesRunAndBuildWithoutSourceAsync(bool indexed)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-raw-call-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-raw-call-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -47,7 +47,7 @@ public sealed partial class CliTests
     [Test]
     public async Task InvalidPersistedCallCannotReplaceAnExistingNativeImageAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-invalid-call-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-invalid-call-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try

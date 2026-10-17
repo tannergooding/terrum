@@ -50,8 +50,8 @@ public sealed partial class NativeSourceImportTests
         Assert.That(NativeDx11DirectPipelineContract.MatchesCompatibleProgram(program), Is.True);
         AssertWindowsSystemImportsOnly(DirectWindowDeviceShaderCode(program));
 
-        var directory = Directory.CreateTempSubdirectory(hardware
-            ? "terrum-dx11-mapped-pixels-hardware-" : "terrum-dx11-mapped-pixels-warp-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory(hardware
+            ? "terrum-dx11-mapped-pixels-hardware-" : "terrum-dx11-mapped-pixels-warp-");
         try
         {
             var executable = Path.Combine(directory, "mapped-pixel-evidence.exe");

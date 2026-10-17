@@ -14,7 +14,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NativePackagesRunAnUnchangedConsumerWithAValidatedReplacementAsync()
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-native-package-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-native-package-cli-{Guid.NewGuid():N}");
         var source = prefix + ".producer.terrum";
         var helper = prefix + ".helper.terrum";
         var entry = prefix + ".consumer.terrum";
@@ -105,7 +105,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NativePackageInputsAreBoundedAndCannotBeOverwrittenAsync()
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-native-input-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-native-input-cli-{Guid.NewGuid():N}");
         var source = prefix + ".source.trmn";
         var oversized = prefix + ".oversized.trmn";
         var output = prefix + ".output.trmn";
@@ -146,7 +146,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NativePackageSourceFailuresRemainLocatedAndPreserveArtifactsAsync()
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-native-source-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-native-source-cli-{Guid.NewGuid():N}");
         var source = prefix + ".terrum";
         var helper = prefix + ".helper.terrum";
         var producer = prefix + ".trmn";

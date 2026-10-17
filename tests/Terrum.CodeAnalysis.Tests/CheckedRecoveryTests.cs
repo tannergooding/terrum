@@ -127,7 +127,7 @@ public sealed class CheckedRecoveryTests
             """), reference, BoundRuntimePolicy.CheckedExceptions);
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = client.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
-        var directory = Path.Combine(AppContext.BaseDirectory, $"checked-module-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"checked-module-{Guid.NewGuid():N}");
         _ = Directory.CreateDirectory(directory);
         try
         {
@@ -296,7 +296,7 @@ public sealed class CheckedRecoveryTests
             "code" => 0x55,
             _ => (byte)(image[offset] ^ 1),
         };
-        var executable = Path.Combine(AppContext.BaseDirectory, $"checked-identity-{Guid.NewGuid():N}.exe");
+        var executable = Path.Combine(TestArtifactPaths.DirectoryPath, $"checked-identity-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(executable, image);

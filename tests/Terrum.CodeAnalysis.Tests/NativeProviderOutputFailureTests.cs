@@ -19,7 +19,7 @@ public sealed class NativeProviderOutputFailureTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
 
         var root = FindRepositoryRoot();
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-failure-outputs-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-failure-outputs-");
         try
         {
             var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),

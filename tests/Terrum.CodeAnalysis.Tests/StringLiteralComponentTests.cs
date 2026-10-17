@@ -768,7 +768,7 @@ public sealed class StringLiteralComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(RepositoryRoot(), "artifacts", $"string-literals-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"string-literals-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
@@ -873,7 +873,7 @@ public sealed class StringLiteralComponentTests
         };
         foreach (var name in includeTests ? [.. names, "StringLiteralTests.terrum"] : names)
         {
-            var path = Path.Combine(RepositoryRoot(), "self-host", name);
+            var path = SelfHostPaths.ResolveFile(RepositoryRoot(), name);
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             var tree = SyntaxTree.Parse(text, path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));

@@ -143,7 +143,7 @@ public sealed class TrRmControlFlowTests
         var loaded = TrRmExecutableCompiler.Load(
             TrRmExecutableCompiler.Emit(Compile(source, true), "indexed-library"));
         var image = NativeEmitter.EmitLibrary(loaded, ["Choose"], NativeRuntimePolicy.FailFast);
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-indexed-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-indexed-{Guid.NewGuid():N}.dll");
         try
         {
             File.WriteAllBytes(path, image);

@@ -566,7 +566,7 @@ public sealed partial class NativeSourceImportTests
     {
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-shader-abi-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-shader-abi-");
         try
         {
             var sdk = Path.Combine(root, "tests", "native", "dx11-direct-shader-sdk-probe.c");

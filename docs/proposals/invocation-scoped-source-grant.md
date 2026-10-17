@@ -112,7 +112,7 @@ malformed-surrogate and mixed-line-break snapshots. They compare the facade
 with hosted `SourceText`, check output vacancy and invocation-relative
 end-index reads, reject invalid grants and preserve host-neutral behavior.
 
-The [self-host inventory](../../self-host/README.md) records decoder, line,
+The [self-host inventory](../implementation/self-host.md) records decoder, line,
 numeric and string-row support with their component boundaries. The associated
 module regressions compare observable results with independent host oracles
 under both runtime policies. That coverage does not accept the proposal,

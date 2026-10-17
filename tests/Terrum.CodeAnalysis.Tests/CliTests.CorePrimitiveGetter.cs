@@ -13,7 +13,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task CorePrimitiveGetterSurvivesPersistedModuleAndNativeReplacementAsync(string policy)
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, $"core-getter-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"core-getter-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         var source = Path.Combine(directory, "core.terrum");
         var caller = Path.Combine(directory, "caller.terrum");

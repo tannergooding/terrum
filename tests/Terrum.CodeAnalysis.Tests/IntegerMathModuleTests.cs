@@ -20,7 +20,7 @@ public sealed class IntegerMathModuleTests
     public async Task IntegerMathCandidatesPersistAndMatchBoundaryOraclesAsync(
         BoundRuntimePolicy policy)
     {
-        var path = Path.Combine(RepositoryRoot(), "self-host", "IntegerMath.terrum");
+        var path = SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerMath.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
 

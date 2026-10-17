@@ -21,8 +21,8 @@ public sealed class FloatingArithmeticModuleTests
     public async Task FloatingBinaryArithmeticMatchesHostedEmitterAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var arithmeticPath = Path.Combine(root, "self-host", "FloatingArithmetic.terrum");
-        var componentTestsPath = Path.Combine(root, "self-host", "FloatingArithmeticTests.terrum");
+        var arithmeticPath = SelfHostPaths.ResolveFile(root, "FloatingArithmetic.terrum");
+        var componentTestsPath = SelfHostPaths.ResolveFile(root, "FloatingArithmeticTests.terrum");
         var arithmetic = SyntaxTree.Parse(
             await File.ReadAllTextAsync(arithmeticPath).ConfigureAwait(true), arithmeticPath);
         var componentTests = SyntaxTree.Parse(
@@ -44,7 +44,7 @@ public sealed class FloatingArithmeticModuleTests
         var oracleCompilation = Compilation.CreateLibrary(oracleSyntaxTree);
         Assert.That(oracleCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, oracleCompilation.Diagnostics));
         var oracleProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = oracleCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-        var oraclePath = Path.Combine(Path.GetTempPath(), $"terrum-floating-arithmetic-{Guid.NewGuid():N}.dll");
+        var oraclePath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-floating-arithmetic-{Guid.NewGuid():N}.dll");
         var oracleLibrary = IntPtr.Zero;
         try
         {

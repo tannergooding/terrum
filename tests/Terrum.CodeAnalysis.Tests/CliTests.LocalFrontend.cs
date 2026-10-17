@@ -31,7 +31,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -82,7 +82,7 @@ public sealed partial class CliTests
             """;
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -123,7 +123,7 @@ public sealed partial class CliTests
             """;
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -168,7 +168,7 @@ public sealed partial class CliTests
         var source = $"unsafe int32 Danger() {{ return 41; }} public int32 Value() {{ {body} }}";
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -215,7 +215,7 @@ public sealed partial class CliTests
         const string invalidSource = "unsafe int32 Danger() { return 41; } public int32 Value() { return Danger(); }";
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var outputPath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.dll");
         var missingPath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.dll");
         try
@@ -287,7 +287,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.exe");
         var hostedPath = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -333,7 +333,7 @@ public sealed partial class CliTests
             "..", "..", "..", "..", "..", ".."));
         var input = Encoding.UTF8.GetBytes(source);
         var (nativeExit, _, _) = await RunAsync(input, "frontend-run",
-            Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
+            SelfHostPaths.SourceDirectory(root), "-", "--runtime", policy, "--json");
         var (hostedExit, _, _) = await RunAsync(input, "jit", "-",
             "--runtime", policy, "--json");
         Assert.That(nativeExit, Is.Not.EqualTo(0));
@@ -357,7 +357,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(root, "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
             "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
@@ -375,7 +375,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(root, "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
             "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
@@ -403,7 +403,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(root, "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
             "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
@@ -417,7 +417,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var output = CreateTestArtifactPath($"local-frontend-{Guid.NewGuid():N}.dll");
         try
         {

@@ -388,7 +388,7 @@ public sealed class NativeVTableCallTests
         Assert.That(consumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, consumer.Diagnostics));
 
-        var libraryPath = Path.Combine(Path.GetTempPath(), $"terrum-trrm-vtable-{Guid.NewGuid():N}.dll");
+        var libraryPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-vtable-{Guid.NewGuid():N}.dll");
         var handle = IntPtr.Zero;
         var vtable = IntPtr.Zero;
         var receiver = IntPtr.Zero;
@@ -501,7 +501,7 @@ public sealed class NativeVTableCallTests
         Assert.That(privateConsumer.HasErrors, Is.False,
             string.Join(Environment.NewLine, privateConsumer.Diagnostics));
 
-        var libraryPath = Path.Combine(Path.GetTempPath(), $"terrum-trrm-vtable-output-{Guid.NewGuid():N}.dll");
+        var libraryPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-vtable-output-{Guid.NewGuid():N}.dll");
         var handle = IntPtr.Zero;
         var vtable = IntPtr.Zero;
         var receiver = IntPtr.Zero;

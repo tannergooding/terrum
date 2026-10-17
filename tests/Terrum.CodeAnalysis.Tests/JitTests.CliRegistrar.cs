@@ -14,7 +14,7 @@ public sealed partial class JitTests
     [TestCase("checked-exceptions")]
     public async Task ScannerApphostRegistersCleanupContinuationsAsync(string policy)
     {
-        var scanner = Path.Combine(AppContext.BaseDirectory, $"registrar-scanner-{Guid.NewGuid():N}.terrum");
+        var scanner = Path.Combine(TestArtifactPaths.DirectoryPath, $"registrar-scanner-{Guid.NewGuid():N}.terrum");
         try
         {
             await File.WriteAllTextAsync(scanner, """

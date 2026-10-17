@@ -257,7 +257,7 @@ public sealed partial class NativeSourceImportTests
     {
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-warp-abi-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-warp-abi-");
         try
         {
             var fixture = Path.Combine(root, "tests", "native", "native-dx11-direct-acquisition-probe.c");
@@ -445,7 +445,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(image.AsSpan().IndexOf("NativeFfi"u8) < 0, Is.True);
         Assert.That(program.Structures.Count(static structure =>
             NativeDx11WarpAcquisitionContract.IsOwnerName(structure.Name)), Is.EqualTo(3));
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-warp-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-warp-");
         try
         {
             var executable = Path.Combine(directory, "direct-warp.exe");

@@ -49,8 +49,8 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { return Select('A'); } int32 Select(char16 value) { return int32(value); }",65)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -70,8 +70,8 @@ public sealed partial class CliTests
     [Test]
     public async Task FrontendRunRejectsUnsupportedEntryAsync()
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(
             Encoding.UTF8.GetBytes("int32 Other() { return 42; }"),
             "frontend-run", directory, "-", "--runtime", "fail-fast", "--json");
@@ -88,8 +88,8 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var sourceDirectory = Path.Combine(root, "self-host");
-        var directory = Path.Combine(Path.GetTempPath(), $"terrum-frontend-sources-{Guid.NewGuid():N}");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(root);
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-sources-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {
@@ -173,8 +173,8 @@ public sealed partial class CliTests
     public async Task FrontendGroupedExpressionsPreserveSourceSpansAndHostedEmissionAsync(
         string source, string groupedExpression, int expected)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (componentExit, componentOutput, componentError) = await RunAsync(
             Encoding.UTF8.GetBytes(source), "frontend-component", directory, "-",
             "--runtime", "fail-fast", "--json");
@@ -248,9 +248,9 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task FrontendBuildRejectsSourceBeyondMaximumLengthAsync(string policy)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
-        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-overlong-{Guid.NewGuid():N}.exe");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-overlong-{Guid.NewGuid():N}.exe");
         var source = new string(' ', ScannerHost.MaximumSourceLength + 1);
         try
         {
@@ -272,9 +272,9 @@ public sealed partial class CliTests
     private static async Task AssertFrontendBuiltExecutableMatchesHostedAndRunsAsync(
         string source, int expectedExitCode = 42)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-native-executable-{Guid.NewGuid():N}");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-native-executable-{Guid.NewGuid():N}");
         var nativePath = prefix + ".native.exe";
         var hostedPath = prefix + ".hosted.exe";
         try
@@ -316,9 +316,9 @@ public sealed partial class CliTests
     public async Task FrontendExecutableRejectsUnsupportedEntryWithoutReplacingOutputAsync(
         string source)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
-        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-entry-{Guid.NewGuid():N}.exe");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-entry-{Guid.NewGuid():N}.exe");
         try
         {
             var (initial, _, initialError) = await RunAsync(
@@ -610,9 +610,9 @@ public sealed partial class CliTests
     [TestCase("public int32 Value() { for (;;) { break; } return 42; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-native-parity-{Guid.NewGuid():N}");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-native-parity-{Guid.NewGuid():N}");
         var nativePath = prefix + ".native.dll";
         var hostedPath = prefix + ".hosted.dll";
         try
@@ -642,9 +642,9 @@ public sealed partial class CliTests
     public async Task FrontendBuiltLibraryExportsPublicScalarAndPreservesOutputOnFailureAsync(
         string policy)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
-        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-native-frontend-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-native-frontend-{Guid.NewGuid():N}.dll");
         try
         {
             var (exit, output, error) = await RunAsync(
@@ -717,8 +717,8 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task FrontendComponentPublishesTypedBranchesAndRejectsInvalidShapesAsync(string policy)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         const string Conditional =
             "int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Conditional),
@@ -806,8 +806,8 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task FrontendComponentPublishesTrailingReturnShapeAsync(string policy)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(
             Encoding.UTF8.GetBytes("int32 Value(bool x) { if (x) { return 42; } return 0; }"),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
@@ -825,8 +825,8 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task FrontendComponentReportsExplicitInternalVisibilityAsync(string policy)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(
             Encoding.UTF8.GetBytes("internal bool Value(bool x) { return x; }"),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
@@ -841,8 +841,8 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task FrontendComponentRejectsConditionalWithoutFallbackAsync(string policy)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(
             Encoding.UTF8.GetBytes("int32 Value(bool x) { if (x) { return 42; } }"),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
@@ -857,7 +857,7 @@ public sealed partial class CliTests
     [Test]
     public async Task FrontendComponentRejectsMissingSourcesWithoutPublishingAResultAsync()
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"terrum-missing-frontend-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-missing-frontend-{Guid.NewGuid():N}");
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Value(int32 x) { return x; }"),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(2));
@@ -869,8 +869,8 @@ public sealed partial class CliTests
     [Test]
     public async Task FrontendComponentRejectsBooleanLiteralWithIncompatibleReturnTypeAsync()
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(
             Encoding.UTF8.GetBytes("public int32 Value() { return true; }"),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
@@ -890,8 +890,8 @@ public sealed partial class CliTests
     public async Task FrontendComponentRejectsCharacterLiteralsWithoutChar16ContextAsync(
         string source)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -911,8 +911,8 @@ public sealed partial class CliTests
     public async Task FrontendExecutesRepresentableCharacterLiteralsAsync(string literal, int expected)
     {
         var source = $"int32 Main() {{ char16 value = {literal}; return int32(value); }}";
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var input = Encoding.UTF8.GetBytes(source);
 
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -943,8 +943,8 @@ public sealed partial class CliTests
                 return int32(Choose({{condition}}));
             }
             """;
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var input = Encoding.UTF8.GetBytes(source);
 
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -974,8 +974,8 @@ public sealed partial class CliTests
     [TestCase("uint32","-1")]
     public async Task FrontendComponentRejectsOutOfRangeIntegerAsync(string type, string literal)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var source = $"public {type} Value() {{ return {literal}; }}";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
@@ -1008,8 +1008,8 @@ public sealed partial class CliTests
     public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source,
         string invalidLiteral)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -1037,8 +1037,8 @@ public sealed partial class CliTests
     [TestCase("uint64 Value() { return -(5); }")]
     public async Task FrontendComponentRejectsUnsupportedScalarLiteralOperatorAsync(string source)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -1057,8 +1057,8 @@ public sealed partial class CliTests
     public async Task FrontendComponentRejectsUnbalancedExpressionGroupAsync(
         string source, string offending)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -1077,8 +1077,8 @@ public sealed partial class CliTests
     public async Task FrontendComponentRejectsInvalidBooleanNegationAsync(
         string source, int expectedError)
     {
-        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));

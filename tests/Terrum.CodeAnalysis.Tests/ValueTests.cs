@@ -208,7 +208,7 @@ public sealed class ValueTests
         var trees = new SyntaxTree[paths.Length + 1];
         for (var i = 0; i < paths.Length; i++)
         {
-            trees[i] = SyntaxTree.Parse(await File.ReadAllTextAsync(Path.Combine(root, "self-host", paths[i])).ConfigureAwait(true));
+            trees[i] = SyntaxTree.Parse(await File.ReadAllTextAsync(SelfHostPaths.ResolveFile(root, paths[i])).ConfigureAwait(true));
         }
 
         trees[^1] = SyntaxTree.Parse("""
@@ -551,7 +551,7 @@ public sealed class ValueTests
     private static async Task<int> RunNativeAsync(byte[] image)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-value-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-value-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

@@ -58,7 +58,7 @@ public sealed partial class CliTests
     public async Task NativeDoForMatchesHostedAotAndJitAsync(string source)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"do-for-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -125,7 +125,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", nativePath,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", nativePath,
                     "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
@@ -169,12 +169,12 @@ public sealed partial class CliTests
             {
                 var (initial, _, _) = await RunAsync(
                     Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(initial, Is.EqualTo(0));
                 var original = await File.ReadAllBytesAsync(path);
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(exit == 1, Is.True, $"{policy}: {source}: {exit}: {output}{error}");
                 using var diagnostic = JsonDocument.Parse(output);
@@ -200,13 +200,13 @@ public sealed partial class CliTests
             {
                 var (initial, _, _) = await RunAsync(
                     Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(initial, Is.EqualTo(0));
                 var original = await File.ReadAllBytesAsync(path);
                 var (exit, output, error) = await RunAsync(
                     Encoding.UTF8.GetBytes("int32 Main() { for (init var x; false;) { } return 42; }"),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(exit == 1, Is.True, $"{policy}: {exit}: {output}{error}");
                 using var diagnostic = JsonDocument.Parse(output);
@@ -239,7 +239,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o",
+                    "frontend-build-library", SelfHostPaths.SourceDirectory(root), "-", "-o",
                     nativePath, "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build-library", "-", "--export", "Value", "-o", hostedPath,
@@ -290,7 +290,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (exit, output, error) = await RunAsync(input, "frontend-build",
-                    Path.Combine(root, "self-host"), "-", "-o", nativePath, "--runtime", policy, "--json");
+                    SelfHostPaths.SourceDirectory(root), "-", "-o", nativePath, "--runtime", policy, "--json");
                 Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
                 using var projection = JsonDocument.Parse(output);
                 var result = projection.RootElement.GetProperty("result");
@@ -321,7 +321,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (exit, json, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o",
+                    "frontend-build-library", SelfHostPaths.SourceDirectory(root), "-", "-o",
                     output, "--runtime", policy, "--json");
                 Assert.That(exit == 0, Is.True, $"{policy}: {json}{error}");
                 var handle = NativeLibrary.Load(output);
@@ -346,7 +346,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NativeStructuralBoundsStayFixedAndProvisionalNodeCapacityIs64Async()
     {
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var sixLevels = "int32 Main() { "
             + string.Concat(Enumerable.Repeat("do { ", 6))
             + "return 42; "

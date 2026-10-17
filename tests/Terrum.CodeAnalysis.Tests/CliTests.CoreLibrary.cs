@@ -20,7 +20,7 @@ public sealed partial class CliTests
                 public static int32 AddOne(int32 input) { return input + 1; }
             }
             """;
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-corelib-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-corelib-{Guid.NewGuid():N}.dll");
         try
         {
             var (rejected, rejectedOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(Source),
@@ -52,7 +52,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task CoreLibraryModuleSwitchPersistsPrimitiveApiAcrossSeparateCompilationAsync(string policy)
     {
-        var directory = Directory.CreateTempSubdirectory("terrum-core-module-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-core-module-");
         var source = Path.Combine(directory, "core.terrum");
         var additionalSource = Path.Combine(directory, "unsigned.terrum");
         var caller = Path.Combine(directory, "caller.terrum");

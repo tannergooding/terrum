@@ -114,7 +114,7 @@ public sealed class NativeSourceGrantExperimentTests
         var image = emitted.Image;
         var code = emitted.Code;
         InspectArtifact(program, image, code, policy);
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-experiment-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-experiment-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, image);
         try
         {
@@ -307,7 +307,7 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.Throws<NotSupportedException>(() =>
             NativeEmitter.EmitLibrary(sourceFreeProgram, [FlowExport], (NativeRuntimePolicy)policy));
 
-        var sourceFreePath = Path.Combine(Path.GetTempPath(),
+        var sourceFreePath = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-source-grant-binding-free-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(sourceFreePath, sourceFree.Image);
         try
@@ -337,7 +337,7 @@ public sealed class NativeSourceGrantExperimentTests
         Assert.Throws<NotSupportedException>(() =>
             NativeEmitter.EmitLibrary(sourceDependentProgram, [FlowExport], (NativeRuntimePolicy)policy));
 
-        var sourceDependentPath = Path.Combine(Path.GetTempPath(),
+        var sourceDependentPath = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-source-grant-binding-dependent-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(sourceDependentPath, sourceDependent.Image);
         try
@@ -529,7 +529,7 @@ public sealed class NativeSourceGrantExperimentTests
         var lineExtentExport = global::System.Linq.Enumerable.Single(emitted.Exports, static export => export.Name == LineExtentExport);
         Assert.That(lineExtentExport.SourceDependent, Is.True);
         Assert.That(global::System.Linq.Enumerable.Single(lineExtentExport.ParameterTypes), Is.EqualTo(PrimitiveType.Int32));
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-lines-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-lines-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, emitted.Image);
         try
         {
@@ -699,7 +699,7 @@ public sealed class NativeSourceGrantExperimentTests
         var expected = NativeJit.ExecuteWithSourceGrant(referenceProgram, [grant], (NativeRuntimePolicy)policy);
         Assert.That(expected, Is.EqualTo(source[at]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-cycle-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-cycle-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, image);
         try
         {
@@ -728,7 +728,7 @@ public sealed class NativeSourceGrantExperimentTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var trees = new[] { "Utf16CodeUnits", "Utf16Scalar" }.Select(name => {
-            var path = Path.Combine(root, "self-host", name + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, name + ".terrum");
             return SyntaxTree.Parse(File.ReadAllText(path), path);
         }).Append(SyntaxTree.Parse((recursiveEntryPoint
             ? Adapter.Replace("int32 Main() { return 0; }",

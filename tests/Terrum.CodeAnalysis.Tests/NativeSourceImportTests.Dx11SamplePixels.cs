@@ -37,8 +37,8 @@ public sealed partial class NativeSourceImportTests
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(true);
         var driver = hardware ? "hardware" : "warp";
         var driverLabel = hardware ? "hardware" : "WARP";
-        var directory = Directory.CreateTempSubdirectory(hardware
-            ? "terrum-dx11-sample-pixels-hardware-" : "terrum-dx11-sample-pixels-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory(hardware
+            ? "terrum-dx11-sample-pixels-hardware-" : "terrum-dx11-sample-pixels-");
         try
         {
             var fixture = Path.Combine(root, "tests", "native", "native-dx11-sample-pixels-probe.c");

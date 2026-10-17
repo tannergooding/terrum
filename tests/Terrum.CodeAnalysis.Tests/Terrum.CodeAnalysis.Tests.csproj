@@ -4,6 +4,7 @@
 
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
+    <RunSettingsFilePath>$(MSBuildProjectDirectory)\Terrum.CodeAnalysis.Tests.runsettings</RunSettingsFilePath>
   </PropertyGroup>
 
   <ItemGroup>

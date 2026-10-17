@@ -415,7 +415,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-shader-compile-fixture-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-shader-compile-fixture-");
         var fixture = Path.Combine(root, "tests", "native", "native-shader-compile-probe.c");
         var sdk = Path.Combine(root, "tests", "native", "dx11-sdk-layout-probe.c");
         var assembly = Path.Combine(directory, "shader-sdk.asm");

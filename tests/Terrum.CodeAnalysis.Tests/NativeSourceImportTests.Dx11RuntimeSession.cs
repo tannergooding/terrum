@@ -204,7 +204,7 @@ public sealed partial class NativeSourceImportTests
     {
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(true);
-        var directory = Directory.CreateTempSubdirectory("terrum-d3d11-session-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-d3d11-session-");
         try
         {
             var dll = Path.Combine(directory, "native-dx11-runtime-session-probe.dll");

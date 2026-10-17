@@ -18,8 +18,8 @@ public sealed class FloatingComparisonModuleTests
     public async Task FloatingComparisonMatchesHostedIeeeOperatorsAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var comparisonPath = Path.Combine(root, "self-host", "FloatingComparison.terrum");
-        var componentTestsPath = Path.Combine(root, "self-host", "FloatingComparisonTests.terrum");
+        var comparisonPath = SelfHostPaths.ResolveFile(root, "FloatingComparison.terrum");
+        var componentTestsPath = SelfHostPaths.ResolveFile(root, "FloatingComparisonTests.terrum");
         var comparison = SyntaxTree.Parse(
             await File.ReadAllTextAsync(comparisonPath).ConfigureAwait(true), comparisonPath);
         var componentTests = SyntaxTree.Parse(

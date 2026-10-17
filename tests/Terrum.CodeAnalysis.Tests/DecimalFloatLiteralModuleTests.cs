@@ -102,7 +102,7 @@ public sealed class DecimalFloatLiteralModuleTests
     public async Task DecimalFloatLiteralModuleMatchesHostedTargetRoundingAsync(BoundRuntimePolicy policy)
     {
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "DecimalFloatLiteral.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "DecimalFloatLiteral.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var componentTree = SyntaxTree.Parse(componentText, componentPath);
         Assert.That(componentTree.HasErrors, Is.False, string.Join(Environment.NewLine, componentTree.Diagnostics));
@@ -192,7 +192,7 @@ public sealed class DecimalFloatLiteralModuleTests
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "DecimalFloatLiteral.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "DecimalFloatLiteral.terrum");
         var componentTree = SyntaxTree.Parse(File.ReadAllText(componentPath), componentPath);
         var sourceBuffer = new HostBuffer("Source", PrimitiveType.Char16, [], false) {
             IsInvocationScoped = true,
@@ -211,7 +211,7 @@ public sealed class DecimalFloatLiteralModuleTests
             Assert.That(descriptor.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
         }
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-decimal-float-source-grant-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-decimal-float-source-grant-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {

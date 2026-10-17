@@ -174,7 +174,7 @@ public sealed class NoThrowModuleTests
 
     private static async Task<int> ExecuteAsync(byte[] image)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, $"nothrow-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"nothrow-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

@@ -479,7 +479,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-create-buffer-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-create-buffer-");
         var fixture = Path.Combine(root, "tests", "native", "native-dx11-create-buffer-probe.c");
         var sdk = Path.Combine(root, "tests", "native", "dx11-sdk-layout-probe.c");
         var assembly = Path.Combine(directory, "dx11-sdk.asm");

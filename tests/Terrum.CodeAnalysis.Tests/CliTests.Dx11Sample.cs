@@ -23,7 +23,7 @@ public sealed partial class CliTests
     [TestCase("window-device-hardware-resize-mapped-pixel-evidence.terrum")]
     public async Task BuildNativeImportCompilesDirectDx11PipelineWithoutPrivateImportsAsync(string sourceName)
     {
-        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-dx11-{Guid.NewGuid():N}.exe");
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-dx11-{Guid.NewGuid():N}.exe");
         try
         {
             await BuildDx11PipelineAsync(sourceName, outputPath);
@@ -117,7 +117,7 @@ public sealed partial class CliTests
     public async Task BuildNativeImportRejectsFailFastDx11SampleAsync(string sourceName)
     {
         var source = Path.Combine(RepositoryRoot(), "samples", "design", "win32-dx11-triangle", sourceName);
-        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-dx11-fail-fast-{Guid.NewGuid():N}.exe");
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-dx11-fail-fast-{Guid.NewGuid():N}.exe");
         try
         {
             var (exitCode, output, error) = await RunAsync([], "build-native-import", source,
@@ -142,7 +142,7 @@ public sealed partial class CliTests
     [Category("InteractiveWindow")]
     public async Task BuildNativeImportDx11SampleRunsWarpResizeAndClosesNormallyAsync()
     {
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-sample-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-sample-");
         try
         {
             var executable = Path.Combine(directory, "triangle.exe");

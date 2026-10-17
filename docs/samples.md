@@ -48,7 +48,8 @@ only when the user dismisses the dialog with OK. Unattended tests inspect the
 image without displaying the dialog.
 
 ```powershell
-terrumc build-native-import samples\native\message-box.terrum -o artifacts\message-box.exe --runtime fail-fast
+New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
+terrumc build-native-import samples\native\message-box.terrum -o artifacts\bin\samples\message-box.exe --runtime fail-fast
 ```
 
 The [nested struct-receiver sample](../samples/native/nested-struct-receiver.terrum)
@@ -67,7 +68,7 @@ a shared writable referent through an alias. This is not inheritance, optional
 reference fields, a public managed-handle ABI or a general collection library.
 The [optional-cycle sample](../samples/native/managed-optional-cycle.terrum)
 adds explicitly initialized optional edges, source-defined cycles and non-null
-presence snapshots. The [managed token-chain candidate](../self-host/ManagedTokenChain.terrum)
+presence snapshots. The [managed token-chain candidate](../sources/self-host/ManagedTokenChain.terrum)
 uses these edges and compact inline Copy fields for bounded linked storage of
 complete tokens, with checked count/version updates and independent copied results.
 The [private managed-node leaf](../samples/native/graph/managed-node-leaf.terrum)

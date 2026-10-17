@@ -19,7 +19,7 @@ public sealed partial class CliTests
     [TestCase("uint64")]
     public async Task FrontendAllIntegerCompoundsAndShiftsExecuteAcrossPoliciesAsync(string type)
     {
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var cases = new (string Operator, string Operand, int Expected)[] {
             ("+=", "4", 44), ("-=", "2", 38), ("*=", "2", 80),
             ("/=", "2", 20), ("%=", "6", 4), ("&=", "7", 0),
@@ -115,7 +115,7 @@ public sealed partial class CliTests
                         $"public {type} Value() {{ mut {type} x = 4; var old = {expression};"
                         + $" return old == {old} && x == {current} ? x : 0; }}");
                     var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                        "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o",
+                        "frontend-build-library", SelfHostPaths.SourceDirectory(root), "-", "-o",
                         nativePath, "--runtime", policy, "--json");
                     var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                         "build-library", "-", "--export", "Value", "-o",
@@ -167,7 +167,7 @@ public sealed partial class CliTests
                 var input = Encoding.UTF8.GetBytes(
                     $"public {type} Value({type} x, int32 count) => x >>> count;");
                 var (projectionExit, projectionOutput, projectionError) = await RunAsync(input,
-                    "frontend-component", Path.Combine(root, "self-host"), "-",
+                    "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
                     "--runtime", policy, "--json");
                 Assert.That(projectionExit == 0, Is.True, $"{type} {policy}: {projectionExit}: {projectionOutput}{projectionError}");
                 Assert.That(projectionError, Is.Empty);
@@ -176,7 +176,7 @@ public sealed partial class CliTests
                 Assert.That(result.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
                 Assert.That(result.GetProperty("expressionBody").GetBoolean(), Is.True);
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o",
+                    "frontend-build-library", SelfHostPaths.SourceDirectory(root), "-", "-o",
                     nativePath, "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build-library", "-", "--export", "Value", "-o",
@@ -226,7 +226,7 @@ public sealed partial class CliTests
     public async Task FrontendUpdateSnapshotsAndControlFlowMatchHostedAsync(string source, int expected)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"mutations-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -293,7 +293,7 @@ public sealed partial class CliTests
                 var input = Encoding.UTF8.GetBytes(
                     $"int32 Main() {{ mut {type} x = {initial}; {statement} }}");
                 var (exit, output, error) = await RunAsync(input,
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(exit == 0, Is.True, $"{type} {mutation} {policy}: {exit}: {output}{error}");
                 Assert.That(error, Is.Empty);
@@ -336,13 +336,13 @@ public sealed partial class CliTests
             {
                 var (initial, initialOutput, initialError) = await RunAsync(
                     Encoding.UTF8.GetBytes("int32 Main() { mut int32 x = 1; return x++; }"),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(initial == 0, Is.True, $"{initial}: {initialOutput}{initialError}");
                 Assert.That(initialError, Is.Empty);
                 var original = await File.ReadAllBytesAsync(path);
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(exit == 1, Is.True, $"{source}: {exit}: {output}{error}");
                 Assert.That(error, Is.Empty);
@@ -363,7 +363,7 @@ public sealed partial class CliTests
     public async Task FrontendMutationErrorsRetainDiagnosticKindAndSpanAsync(
         string source, int expectedCode, string offending)
     {
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -384,7 +384,7 @@ public sealed partial class CliTests
     [Test]
     public async Task FrontendMutationsKeepStatementAndNodeEnvelopesAsync()
     {
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var withinStatements = "int32 Main() { mut int32 x = 0; "

@@ -359,7 +359,7 @@ public sealed class NestedValueTests
 
     private static async Task ExecuteBothAsync(BoundProgram program, int expected)
     {
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"nested-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"nested-{Guid.NewGuid():N}");
         var executable = prefix + ".exe";
         var consumer = prefix + ".consumer.trm";
         var producer = prefix + ".producer.trm";

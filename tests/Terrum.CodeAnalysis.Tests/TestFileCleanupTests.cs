@@ -15,7 +15,7 @@ public sealed class TestFileCleanupTests
             return;
         }
 
-        var path = Path.Combine(Path.GetTempPath(), $"test-file-cleanup-{Guid.NewGuid():N}.tmp");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"test-file-cleanup-{Guid.NewGuid():N}.tmp");
         await File.WriteAllBytesAsync(path, Array.Empty<byte>()).ConfigureAwait(true);
         Task deletion;
         bool waitedForLock;
@@ -39,7 +39,7 @@ public sealed class TestFileCleanupTests
             return;
         }
 
-        var directory = Path.Combine(Path.GetTempPath(), $"test-directory-cleanup-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"test-directory-cleanup-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "locked.tmp");
         await File.WriteAllBytesAsync(path, Array.Empty<byte>()).ConfigureAwait(true);

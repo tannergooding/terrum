@@ -266,7 +266,7 @@ public sealed partial class GenericControlFlowModuleTests
         Assert.That(global::System.Linq.Enumerable.Any(reference.Functions,static function =>
             function.Name.Contains("Power<", StringComparison.Ordinal)),Is.False);
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));
-        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"power-{Guid.NewGuid():N}.consumer.trm");
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"power-{Guid.NewGuid():N}.consumer.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try
         {
@@ -340,7 +340,7 @@ public sealed partial class GenericControlFlowModuleTests
 
     private static async Task<int> ExecuteAsync(byte[] image)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, $"generic-module-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"generic-module-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

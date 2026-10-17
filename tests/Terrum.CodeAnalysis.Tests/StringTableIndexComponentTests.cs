@@ -183,13 +183,13 @@ public sealed class StringTableIndexComponentTests
         validCases.Add(InvalidTable(invalidByte, recordCount));
 
         var root = RepositoryRoot();
-        var componentPath = Path.Combine(root, "self-host", "StringRowLayout.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "StringRowLayout.terrum");
         var layout = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
         Assert.That(layout.HasErrors, Is.False, string.Join(Environment.NewLine, layout.Diagnostics));
-        componentPath = Path.Combine(root, "self-host", "VariableTableIndex.terrum");
+        componentPath = SelfHostPaths.ResolveFile(root, "VariableTableIndex.terrum");
         var variableIndexTree = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
         Assert.That(variableIndexTree.HasErrors, Is.False, string.Join(Environment.NewLine, variableIndexTree.Diagnostics));
-        componentPath = Path.Combine(root, "self-host", "StringTableIndex.terrum");
+        componentPath = SelfHostPaths.ResolveFile(root, "StringTableIndex.terrum");
         var indexTree = SyntaxTree.Parse(await File.ReadAllTextAsync(componentPath).ConfigureAwait(true), componentPath);
         Assert.That(indexTree.HasErrors, Is.False, string.Join(Environment.NewLine, indexTree.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "string-table-index-component.terrum");
@@ -248,9 +248,9 @@ public sealed class StringTableIndexComponentTests
 
         var root = RepositoryRoot();
         var paths = new[] {
-            Path.Combine(root, "self-host", "StringRowLayout.terrum"),
-            Path.Combine(root, "self-host", "VariableTableIndex.terrum"),
-            Path.Combine(root, "self-host", "StringTableIndex.terrum"),
+            SelfHostPaths.ResolveFile(root, "StringRowLayout.terrum"),
+            SelfHostPaths.ResolveFile(root, "VariableTableIndex.terrum"),
+            SelfHostPaths.ResolveFile(root, "StringTableIndex.terrum"),
         };
         var components = new SyntaxTree[paths.Length];
         for (var index = 0; index < paths.Length; index++)
@@ -279,7 +279,7 @@ public sealed class StringTableIndexComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"string-table-index-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"string-table-index-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);

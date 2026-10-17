@@ -60,7 +60,7 @@ public sealed class NativeLibraryImportTests
         var executableImage = NativeEmitter.EmitWithImports(executable,
             [new NativeImportBinding("Middle", "bridge-middle.dll", "Middle")], nativePolicy);
 
-        var directory = Directory.CreateTempSubdirectory("terrum-library-imports-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-library-imports-");
         var leafPath = Path.Combine(directory, "bridge-leaf.dll");
         var middlePath = Path.Combine(directory, "bridge-middle.dll");
         var executablePath = Path.Combine(directory, "bridge.exe");

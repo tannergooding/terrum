@@ -80,7 +80,7 @@ special-value and boundary behavior. This is internal helper support only,
 not proof that primitive members or generic-math interfaces are implemented.
 No implementation support for other numeric types follows from the accepted
 semantics. Current component and test coverage is summarized in the
-[self-host implementation reference](../../self-host/README.md).
+[self-host implementation reference](../implementation/self-host.md).
 
 ## Separate math contracts
 

@@ -26,7 +26,7 @@ public sealed class WideCandidateTests
         var producer = CreateCandidateLibrary((BoundRuntimePolicy)policy);
         var reference = ModuleCompiler.CreateReference(producer);
         var root = RepositoryRoot();
-        var tests = ReadTree(Path.Combine(root, "self-host", "WideIntegerTests.terrum"));
+        var tests = ReadTree(SelfHostPaths.ResolveFile(root, "WideIntegerTests.terrum"));
         var entry = ReadTree(Path.Combine(root, "samples", "native", "modules", "wide-entry.terrum"));
         var compilation = Compilation.Create([tests, entry], reference, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -166,7 +166,7 @@ public sealed class WideCandidateTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), producer);
         var program = ModuleCompiler.Link(consumer, producer);
-        var image = Path.Combine(AppContext.BaseDirectory, $"float32-math-failure-{Guid.NewGuid():N}.exe");
+        var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"float32-math-failure-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
@@ -218,7 +218,7 @@ public sealed class WideCandidateTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = compilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))(), producer);
         var program = ModuleCompiler.Link(consumer, producer);
-        var image = Path.Combine(AppContext.BaseDirectory, $"float64-math-failure-{Guid.NewGuid():N}.exe");
+        var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"float64-math-failure-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
@@ -267,12 +267,12 @@ public sealed class WideCandidateTests
     public async Task IntegerMathCandidatesPreserveCheckedFailureSemanticsAsync(
         NativeRuntimePolicy policy, string expression, int expected)
     {
-        var component = File.ReadAllText(Path.Combine(RepositoryRoot(), "self-host", "IntegerMath.terrum"));
+        var component = File.ReadAllText(SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerMath.terrum"));
         var compilation = Compilation.Create(SyntaxTree.Parse(
             component + $"\nint32 Main() {{ return {expression}; }}"), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = compilation.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))();
-        var image = Path.Combine(AppContext.BaseDirectory, $"integer-math-failure-{Guid.NewGuid():N}.exe");
+        var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"integer-math-failure-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
@@ -883,7 +883,7 @@ public sealed class WideCandidateTests
 
     private static byte[] CreateCandidateLibrary(BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
-        var path = Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum");
+        var path = SelfHostPaths.ResolveFile(RepositoryRoot(), "WideIntegerFacts.terrum");
         var compilation = Compilation.CreateLibrary(ReadTree(path), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual25 = compilation.Program; Assert.That(__nunitActual25, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual25!; }))(), [
@@ -901,7 +901,7 @@ public sealed class WideCandidateTests
 
     private static byte[] CreateNumericsLibrary(string name, NativeRuntimePolicy policy, params string[] exports)
     {
-        var source = ReadTree(Path.Combine(RepositoryRoot(), "self-host", name));
+        var source = ReadTree(SelfHostPaths.ResolveFile(RepositoryRoot(), name));
         var compilation = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))(), exports);
@@ -911,8 +911,8 @@ public sealed class WideCandidateTests
     {
         var root = RepositoryRoot();
         var trees = new[] {
-            ReadTree(Path.Combine(root, "self-host", "WideIntegerFacts.terrum")),
-            ReadTree(Path.Combine(root, "self-host", "IntegerFormatting.terrum")),
+            ReadTree(SelfHostPaths.ResolveFile(root, "WideIntegerFacts.terrum")),
+            ReadTree(SelfHostPaths.ResolveFile(root, "IntegerFormatting.terrum")),
         };
         var compilation = Compilation.CreateLibrary(trees, (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1478,7 +1478,7 @@ public sealed class WideCandidateTests
     private static async Task ExecuteBothAsync(byte[] consumer, byte[] producer, int expected,
         NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
     {
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"wide-candidate-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"wide-candidate-{Guid.NewGuid():N}");
         var image = prefix + ".exe";
         var consumerPath = prefix + "-consumer.trm";
         var producerPath = prefix + "-producer.trm";

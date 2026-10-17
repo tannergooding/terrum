@@ -18,7 +18,7 @@ public sealed partial class NativeSourceImportTests
     [Test]
     public async Task DirectHardwareAcquisitionMatchesSdkAndCleansEveryInjectedOutputAsync()
     {
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-hardware-abi-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-hardware-abi-");
         try
         {
             var dll = await BuildHardwareFixtureAsync(directory, "direct-acquisition", "user32.lib").ConfigureAwait(true);
@@ -58,7 +58,7 @@ public sealed partial class NativeSourceImportTests
     [Test]
     public async Task DirectHardwarePipelineInterceptionPreservesDrawPumpAndFailureCleanupAsync()
     {
-        var directory = Directory.CreateTempSubdirectory("terrum-hardware-pipeline-abi-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-hardware-pipeline-abi-");
         try
         {
             var dll = await BuildHardwareFixtureAsync(directory, "direct-pipeline", "user32.lib d3d11.lib")
@@ -170,7 +170,7 @@ public sealed partial class NativeSourceImportTests
     {
         var program = CompileDirectHardwarePipeline();
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.CheckedExceptions);
-        var directory = Directory.CreateTempSubdirectory("terrum-real-hardware-pipeline-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-real-hardware-pipeline-");
         try
         {
             File.Copy(Path.Combine(FindRepositoryRoot(), "samples", "design", "win32-dx11-triangle", "triangle.hlsl"),

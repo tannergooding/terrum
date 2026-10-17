@@ -19,7 +19,7 @@ public sealed partial class CliTests
     [TestCase("mut int32 x = 0; outer: while (x < 2) { mut int32 y = 0; while (y++ < 2) { mut int32 z = 0; do { x++; if (x == 2) { break outer; } } while (z++ < 1); } } return x == 2 ? 42 : 0;")]
     public async Task PersistedNamedTransfersRunAndBuildWithoutSourceAsync(string body)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-named-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-named-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -50,7 +50,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedNamedTransfersRetainNormalizedLibraryExportsAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-named-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-named-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var library = prefix + ".dll";
         const string source = "public int32 @await(int32 limit) { mut int32 x = 0; @const: for (; x < limit; x++) { mut int32 y = 0; while (y++ < 2) { if (x == 1) { continue const; } if (x == 2) { break const; } } } return x; }";

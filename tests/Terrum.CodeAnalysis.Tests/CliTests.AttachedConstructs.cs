@@ -16,7 +16,7 @@ public sealed partial class CliTests
     public async Task AttachedConstructsHaveHostedComponentAndNativeFrontendParityAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var scanner = frontend;
         const string Source = "int32 Main(\n) { return int32(\n ( /* grouping */ 42 )\n); }";
         foreach (var arguments in new[] {
@@ -29,7 +29,7 @@ public sealed partial class CliTests
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
         }
-        var prefix = Path.Combine(root, "artifacts", $"attached-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"attached-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
         var component = prefix + ".component.exe";
         var native = prefix + ".frontend.exe";

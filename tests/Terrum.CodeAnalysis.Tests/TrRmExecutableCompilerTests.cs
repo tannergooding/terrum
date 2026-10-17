@@ -1140,7 +1140,7 @@ public sealed class TrRmExecutableCompilerTests
         {
             for (var index = 0; index < images.Length; index++)
             {
-                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                paths[index] = Path.Combine(TestArtifactPaths.DirectoryPath,
                     $"trrm-float-conversion-{Guid.NewGuid():N}-{index}.dll");
                 File.WriteAllBytes(paths[index], images[index]);
                 handles[index] = NativeLibrary.Load(paths[index]);
@@ -1307,7 +1307,7 @@ public sealed class TrRmExecutableCompilerTests
         {
             for (var index = 0; index < images.Length; index++)
             {
-                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                paths[index] = Path.Combine(TestArtifactPaths.DirectoryPath,
                     $"trrm-float-to-integer-{Guid.NewGuid():N}-{index}.dll");
                 File.WriteAllBytes(paths[index], images[index]);
                 handles[index] = NativeLibrary.Load(paths[index]);
@@ -1424,7 +1424,7 @@ public sealed class TrRmExecutableCompilerTests
             unchecked((ulong)BitConverter.DoubleToInt64Bits(1.0)));
         BinaryPrimitives.WriteUInt64LittleEndian(failureBits, replacementBits);
         var malformed = ReplaceBodyConstant(artifact, 2, oneBits, failureBits);
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-float-to-integer-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-float-to-integer-{Guid.NewGuid():N}.trrm");
         try
         {
             File.WriteAllBytes(path, malformed);
@@ -1526,7 +1526,7 @@ public sealed class TrRmExecutableCompilerTests
         {
             for (var index = 0; index < images.Length; index++)
             {
-                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                paths[index] = Path.Combine(TestArtifactPaths.DirectoryPath,
                     $"trrm-char16-float-{Guid.NewGuid():N}-{index}.dll");
                 File.WriteAllBytes(paths[index], images[index]);
                 handles[index] = NativeLibrary.Load(paths[index]);
@@ -1616,7 +1616,7 @@ public sealed class TrRmExecutableCompilerTests
         {
             for (var index = 0; index < images.Length; index++)
             {
-                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                paths[index] = Path.Combine(TestArtifactPaths.DirectoryPath,
                     $"trrm-float-negation-{Guid.NewGuid():N}-{index}.dll");
                 File.WriteAllBytes(paths[index], images[index]);
                 handles[index] = NativeLibrary.Load(paths[index]);
@@ -1720,7 +1720,7 @@ public sealed class TrRmExecutableCompilerTests
         {
             for (var index = 0; index < images.Length; index++)
             {
-                paths[index] = Path.Combine(Directory.GetCurrentDirectory(),
+                paths[index] = Path.Combine(TestArtifactPaths.DirectoryPath,
                     $"trrm-float-arithmetic-{Guid.NewGuid():N}-{index}.dll");
                 File.WriteAllBytes(paths[index], images[index]);
                 handles[index] = NativeLibrary.Load(paths[index]);
@@ -2000,7 +2000,7 @@ public sealed class TrRmExecutableCompilerTests
         var expected = NativeEmitter.EmitLibrary(original, names, NativeRuntimePolicy.FailFast);
         var actual = NativeEmitter.EmitLibrary(loaded, names, NativeRuntimePolicy.FailFast);
         Assert.That(actual, Is.EqualTo(expected));
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-scalar-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-scalar-{Guid.NewGuid():N}.dll");
         try
         {
             File.WriteAllBytes(path, actual);

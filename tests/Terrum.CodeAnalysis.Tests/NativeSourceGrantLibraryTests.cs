@@ -131,7 +131,7 @@ public sealed class NativeSourceGrantLibraryTests
             IsInvocationScoped = true,
         };
 
-        var sourceRangePath = Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum");
+        var sourceRangePath = SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceRange.terrum");
         var rangeCompilation = Compilation.CreateLibrary(
             [SyntaxTree.Parse(File.ReadAllText(sourceRangePath), sourceRangePath)],
             [sourceBuffer], BoundRuntimePolicy.FailFast);
@@ -235,7 +235,7 @@ public sealed class NativeSourceGrantLibraryTests
             ["Terrum.CodeAnalysis.ReadFromSourceEnd"], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-index-from-end-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-index-from-end-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -278,8 +278,8 @@ public sealed class NativeSourceGrantLibraryTests
     public void SourceLineCountMatchesHostedTextLines(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var characterFactsPath = Path.Combine(RepositoryRoot(), "self-host", "CharacterFacts.terrum");
-        var lineCountPath = Path.Combine(RepositoryRoot(), "self-host", "SourceLineCount.terrum");
+        var characterFactsPath = SelfHostPaths.ResolveFile(RepositoryRoot(), "CharacterFacts.terrum");
+        var lineCountPath = SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceLineCount.terrum");
         var compilation = Compilation.CreateLibrary([
             SyntaxTree.Parse(File.ReadAllText(characterFactsPath), characterFactsPath),
             SyntaxTree.Parse(File.ReadAllText(lineCountPath), lineCountPath),
@@ -291,7 +291,7 @@ public sealed class NativeSourceGrantLibraryTests
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual9 = compilation.Program; Assert.That(__nunitActual9, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual9!; }))(), [LineCountExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-line-count-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-line-count-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -324,8 +324,8 @@ public sealed class NativeSourceGrantLibraryTests
     public void SourceTextLengthMatchesHostedTextLength(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var characterFactsPath = Path.Combine(RepositoryRoot(), "self-host", "CharacterFacts.terrum");
-        var sourceLengthPath = Path.Combine(RepositoryRoot(), "self-host", "SourceTextLength.terrum");
+        var characterFactsPath = SelfHostPaths.ResolveFile(RepositoryRoot(), "CharacterFacts.terrum");
+        var sourceLengthPath = SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceTextLength.terrum");
         var compilation = Compilation.CreateLibrary([
             SyntaxTree.Parse(File.ReadAllText(sourceLengthPath), sourceLengthPath),
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
@@ -336,7 +336,7 @@ public sealed class NativeSourceGrantLibraryTests
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))(), [SourceLengthExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-length-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-length-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -369,7 +369,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void SourceCodeUnitPreservesAllUtf16UnitsAndSentinelBounds(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var sourceCodeUnitPath = Path.Combine(sourceDirectory, "SourceCodeUnit.terrum");
         var compilation = Compilation.CreateLibrary([
             SyntaxTree.Parse(File.ReadAllText(sourceCodeUnitPath), sourceCodeUnitPath),
@@ -381,7 +381,7 @@ public sealed class NativeSourceGrantLibraryTests
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))(), [SourceCodeUnitExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-code-unit-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-code-unit-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -439,7 +439,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void SourceRangeValidityMatchesHostedGetSubText(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceRangeValidationPath = Path.Combine(RepositoryRoot(), "self-host", "SourceRangeValidation.terrum");
+        var sourceRangeValidationPath = SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceRangeValidation.terrum");
         var compilation = Compilation.CreateLibrary([
             SyntaxTree.Parse(File.ReadAllText(sourceRangeValidationPath), sourceRangeValidationPath),
         ], [new HostBuffer("Source", PrimitiveType.Char16, [], false) {
@@ -454,7 +454,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.Bool));
         Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-range-validity-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-range-validity-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -486,7 +486,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void PackedStringEscapeMatchesHostedEscapeContract(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
         };
@@ -509,7 +509,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.UInt32));
         Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-escape-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-string-escape-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -584,7 +584,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void CharacterLiteralSourceGrantQueriesMatchHostedLiteralContract(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var componentNames = new[] {
             "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "CharacterLiteralPacked", "CharacterLiteralScalar",
         };
@@ -612,7 +612,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(scalarExport.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(scalarExport.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-character-literal-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-character-literal-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -688,7 +688,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void StringLiteralScalarCountMatchesHostedTryCreate(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
             "StringLiteralScalarCount",
@@ -712,7 +712,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-count-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-string-literal-count-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -795,7 +795,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void StringLiteralScalarAtMatchesHostedTryCreate(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
             "StringLiteralScalarCount", "StringLiteralScalarAt",
@@ -819,7 +819,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(export.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(export.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32, PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-scalar-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-string-literal-scalar-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -898,7 +898,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void StringLiteralLengthsMatchHostEncodersAndRows(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var componentNames = new[] {
             "CharacterFacts", "HexDigitValue", "Utf16CodeUnits", "Utf16Scalar", "StringEscapePacked",
             "StringLiteralScalarCount", "StringLiteralEncodedLength",
@@ -931,7 +931,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(namespaceRowLengthExport.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(namespaceRowLengthExport.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-string-literal-length-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-string-literal-length-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -1116,7 +1116,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void SourceOffsetMatchesHostedTryGetOffset(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
         var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
         var compilation = Compilation.CreateLibrary([
@@ -1130,7 +1130,7 @@ public sealed class NativeSourceGrantLibraryTests
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual18 = compilation.Program; Assert.That(__nunitActual18, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual18!; }))(), [SourceOffsetExport], (NativeRuntimePolicy)policy);
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports).SourceDependent, Is.True);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-offset-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-offset-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -1164,7 +1164,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void SourcePositionComponentsMatchHostedGetLinePosition(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
         var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
         var sourcePositionPath = Path.Combine(sourceDirectory, "SourcePosition.terrum");
@@ -1194,7 +1194,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceCharacterPositionExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
         Assert.That(global::System.Linq.Enumerable.Single(artifact.Exports, static export => export.Name == SourceOffsetExport).ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32, PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-position-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-position-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -1230,7 +1230,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void SourceLineExtentsMatchHostedContentAndIncludingBreakExtents(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var characterFactsPath = Path.Combine(sourceDirectory, "CharacterFacts.terrum");
         var sourceOffsetPath = Path.Combine(sourceDirectory, "SourceOffset.terrum");
         var sourceLineEndPath = Path.Combine(sourceDirectory, "SourceLineEnd.terrum");
@@ -1255,7 +1255,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(lineEnd.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(lineEnd.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Int32]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-line-end-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-line-end-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {
@@ -1532,7 +1532,7 @@ public sealed class NativeSourceGrantLibraryTests
     public void EmitsTransitiveScalarSourceGrantWithSourceFreeExports(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var sourceDirectory = Path.Combine(RepositoryRoot(), "self-host");
+        var sourceDirectory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var trees = new[] { "Utf16CodeUnits.terrum", "Utf16Scalar.terrum" }
             .Select(file => SyntaxTree.Parse(File.ReadAllText(Path.Combine(sourceDirectory, file)), file))
             .ToImmutableArray();
@@ -1554,7 +1554,7 @@ public sealed class NativeSourceGrantLibraryTests
         Assert.That(decodeDescriptor.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(decodeDescriptor.ParameterTypes.ToArray(), Is.EqualTo([PrimitiveType.Char16, PrimitiveType.Char16]));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-grant-library-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-grant-library-{Guid.NewGuid():N}.dll");
         File.WriteAllBytes(path, artifact.Image);
         try
         {

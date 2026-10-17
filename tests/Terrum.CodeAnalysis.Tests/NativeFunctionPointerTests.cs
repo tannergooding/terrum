@@ -290,7 +290,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(File.Exists(environment), Is.True,
             "Visual Studio x64 build tools are required to build the independent native return fixture.");
 
-        var directory = Directory.CreateTempSubdirectory("terrum-native-narrow-return-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-native-narrow-return-");
         var assemblyPath = Path.Combine(directory, "native-narrow-return.asm");
         var objectPath = Path.Combine(directory, "native-narrow-return.obj");
         var libraryPath = Path.Combine(directory, "native-narrow-return.dll");
@@ -1249,7 +1249,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(File.Exists(environment), Is.True,
             "Visual Studio x64 C build tools are required for the independent C caller.");
 
-        var directory = Directory.CreateTempSubdirectory("terrum-native-callback-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-native-callback-");
         var libraryPath = Path.Combine(directory, "native-callback.dll");
         var objectPath = Path.Combine(directory, "native-callback-caller.obj");
         var executablePath = Path.Combine(directory, "native-callback-caller.exe");

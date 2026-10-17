@@ -499,7 +499,7 @@ public sealed class GetterPropertyTests
 
     private static async Task RunNativeImageAsync(byte[] image, int expected)
     {
-        var executable = Path.Combine(Path.GetTempPath(),
+        var executable = Path.Combine(TestArtifactPaths.DirectoryPath,
             "terrum-getter-" + Guid.NewGuid().ToString("N") + ".exe");
         try
         {

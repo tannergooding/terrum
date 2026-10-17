@@ -26,7 +26,7 @@ public sealed partial class CliTests
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                "scan-component", Path.Combine(RepositoryRoot(), "self-host"),
+                "scan-component", SelfHostPaths.SourceDirectory(RepositoryRoot()),
                 "-", "--runtime", policy, "--json");
             Assert.That(exit, Is.EqualTo(codes.Length == 0 ? 0 : 1));
             Assert.That(error, Is.Empty);
@@ -41,19 +41,19 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task InvalidFenceRetainsNativeFrontendOutputAsync(string policy)
     {
-        var image = Path.Combine(RepositoryRoot(), "artifacts", $"comment-audit-{Guid.NewGuid():N}.exe");
+        var image = Path.Combine(TestArtifactPaths.DirectoryPath, $"comment-audit-{Guid.NewGuid():N}.exe");
         try
         {
             var (built, buildOutput, buildError) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { /** /* */ text **/ return 42; }"),
-                "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", image,
+                "frontend-build", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-", "-o", image,
                 "--runtime", policy, "--json");
             Assert.That(built == 0, Is.True, $"{buildOutput}{buildError}");
             Assert.That(await ExecuteNativeImageAsync(image), Is.EqualTo(42));
             var original = await File.ReadAllBytesAsync(image);
             var (rejected, output, error) = await RunAsync(
                 Encoding.UTF8.GetBytes("int32 Main() { /** ***/ return 42; }"),
-                "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-", "-o", image,
+                "frontend-build", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-", "-o", image,
                 "--runtime", policy, "--json");
             Assert.That(rejected == 1, Is.True, $"{output}{error}");
             Assert.That(await File.ReadAllBytesAsync(image), Is.EqualTo(original));

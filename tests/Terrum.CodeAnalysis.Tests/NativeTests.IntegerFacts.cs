@@ -20,7 +20,7 @@ public sealed partial class NativeTests
     public async Task IntegerFactsPredicatesExecuteNativelyAndMatchBigIntegerBoundariesAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var componentPath = Path.Combine(root, "self-host", "IntegerFacts.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(root, "IntegerFacts.terrum");
         var componentText = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var assertions = new StringBuilder();
         var failureCases = new List<string>();

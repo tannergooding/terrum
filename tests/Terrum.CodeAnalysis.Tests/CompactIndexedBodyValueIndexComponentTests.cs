@@ -1329,7 +1329,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
             "CompactIndexedBodyFraming.terrum", "CompactIndexedBodyValueIndex.terrum",
         })
         {
-            var path = Path.Combine(root, "self-host", name);
+            var path = SelfHostPaths.ResolveFile(root, name);
             var source = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(source.HasErrors, Is.False, string.Join(Environment.NewLine, source.Diagnostics));
             sources.Add(source);
@@ -1344,7 +1344,7 @@ public sealed class CompactIndexedBodyValueIndexComponentTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy), Is.EqualTo(0));
-        var path = Path.Combine(Path.GetTempPath(), $"indexed-value-index-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"indexed-value-index-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, (NativeRuntimePolicy)policy))

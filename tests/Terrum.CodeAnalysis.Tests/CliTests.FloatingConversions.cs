@@ -22,7 +22,7 @@ public sealed partial class CliTests
             """;
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "artifacts", $"integer-floating-conversion-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"integer-floating-conversion-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {
@@ -33,7 +33,7 @@ public sealed partial class CliTests
                 "--runtime", policy, "--json");
             Assert.That(result == 0, Is.True, output + error);
             (result, output, error) = await RunAsync(input, "build-component",
-                Path.Combine(root, "self-host"), "-", "-o", scanned,
+                SelfHostPaths.SourceDirectory(root), "-", "-o", scanned,
                 "--runtime", policy, "--json");
             Assert.That(result == 0, Is.True, output + error);
             Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));

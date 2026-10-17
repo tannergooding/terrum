@@ -43,7 +43,7 @@ public sealed partial class JitTests
         }
 
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFacts.terrum"))
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFacts.terrum"))
             .ConfigureAwait(true);
         foreach (var batch in checks.Chunk(32))
         {
@@ -90,7 +90,7 @@ public sealed partial class JitTests
         }
 
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFacts.terrum"))
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFacts.terrum"))
             .ConfigureAwait(true);
         foreach (var batch in checks.Chunk(32))
         {
@@ -201,7 +201,7 @@ public sealed partial class JitTests
     private static async Task AssertIntegerFactsAsync(List<string> checks, string proofs)
     {
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFacts.terrum"))
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFacts.terrum"))
             .ConfigureAwait(true);
         foreach (var batch in checks.Chunk(32))
         {

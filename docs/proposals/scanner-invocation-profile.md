@@ -132,7 +132,7 @@ gate is claimed.
 - [`ScannerHost.CreateBuffers`](../../sources/Terrum.CodeAnalysis/Lexing/ScannerHost.cs)
   defines the current ten-buffer component boundary and its source-derived
   capacities.
-- [`Scanner.terrum`](../../self-host/Scanner.terrum) writes token, diagnostic,
+- [`Scanner.terrum`](../../sources/self-host/Scanner.terrum) writes token, diagnostic,
   trivia and integer-value records and uses the immutable scanner tables.
 - [`NativeJit.ExecuteWithSourceGrant`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs)
   retains the source-only API; the separate scanner adapter binds the named

@@ -25,7 +25,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NoThrowViolationHasSourceCoordinatesAndPreservesNativeOutputAsync()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-no-throw-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-no-throw-{Guid.NewGuid():N}.exe");
         byte[] original = [1, 2, 3];
         try
         {

@@ -343,7 +343,7 @@ public sealed class FloatingLiteralBindingTests
             + "[NoThrow] public float64 Widen(char16 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual36 = compilation.Program; Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual36!; }))();
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-char16-float-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-char16-float-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
         {
@@ -402,7 +402,7 @@ public sealed class FloatingLiteralBindingTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual37 = compilation.Program; Assert.That(__nunitActual37, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual37!; }))();
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-copy-float-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-copy-float-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
         {
@@ -493,7 +493,7 @@ public sealed class FloatingLiteralBindingTests
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual38 = compilation.Program; Assert.That(__nunitActual38, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual38!; }))();
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-generic-output-float-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-generic-output-float-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
         {
@@ -646,7 +646,7 @@ public sealed class FloatingLiteralBindingTests
         Assert.That(NativeJit.Execute(((global::System.Func<BoundProgram>)(() => { var __nunitActual45 = executableCompilation.Program; Assert.That(__nunitActual45, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual45!; }))(),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-operators-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-operators-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
         {
@@ -744,7 +744,7 @@ public sealed class FloatingLiteralBindingTests
             + "[NoThrow] public float64 Divide64(float64 left, float64 right) { return left / right; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual46 = compilation.Program; Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual46!; }))();
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-mxcsr-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-mxcsr-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         const uint floatingControlMask = 0x03000300;
         var originalControl = ReadFloatingControl();
@@ -802,7 +802,7 @@ public sealed class FloatingLiteralBindingTests
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual47 = compilation.Program; Assert.That(__nunitActual47, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual47!; }))();
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-conversion-mxcsr-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-conversion-mxcsr-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         const uint floatingControlMask = 0x03000300;
         var originalControl = ReadFloatingControl();
@@ -926,7 +926,7 @@ public sealed class FloatingLiteralBindingTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual53 = compilation.Program; Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual53!; }))();
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-conversion-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-conversion-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
         {
@@ -999,7 +999,7 @@ public sealed class FloatingLiteralBindingTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual54 = compilation.Program; Assert.That(__nunitActual54, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual54!; }))();
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-to-integer-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-to-integer-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
         {
@@ -1090,7 +1090,7 @@ public sealed class FloatingLiteralBindingTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual56 = compilation.Program; Assert.That(__nunitActual56, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual56!; }))();
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-float-to-integer-nonfinite-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-to-integer-nonfinite-{Guid.NewGuid():N}.dll");
         var library = IntPtr.Zero;
         try
         {

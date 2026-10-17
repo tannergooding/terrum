@@ -172,9 +172,9 @@ public sealed partial class JitTests
     public async Task GenericConditionalSelectionPublishesWholeTokensAndRangesAsync(bool checkedFailures)
     {
         string[] components = [
-            Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "Token.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "CopyAlgorithms.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceRange.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "Token.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "CopyAlgorithms.terrum"),
         ];
         const string Source = """
             using Terrum;

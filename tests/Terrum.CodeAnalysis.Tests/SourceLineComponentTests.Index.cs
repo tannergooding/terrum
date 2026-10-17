@@ -391,7 +391,7 @@ public sealed partial class SourceLineComponentTests
     private static async Task<ImmutableArray<SyntaxTree>> ReadIndexComponentsAsync()
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
-        var path = Path.Combine(RepositoryRoot(), "self-host", "SourceLineIndex.terrum");
+        var path = SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceLineIndex.terrum");
         var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var tree = SyntaxTree.Parse(text, path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));

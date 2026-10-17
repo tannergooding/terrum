@@ -460,7 +460,7 @@ public sealed class NativeManagedNodeTests
     private static async Task<int> RunAsync(BoundProgram program)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-managed-nodes-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-managed-nodes-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);

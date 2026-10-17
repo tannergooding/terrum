@@ -1,7 +1,7 @@
 # Bootstrap and scalar-frontend composition
 
 This is the current documented support inventory, not an implementation audit
-or adoption of a private format. The [self-host reference](../../self-host/README.md)
+or adoption of a private format. The [self-host reference](self-host.md)
 owns component-level coverage. Only the
 [remaining profile decisions](../proposals/bootstrap-frontend-profiles.md)
 are proposals; the superseded per-increment worklists are removed.

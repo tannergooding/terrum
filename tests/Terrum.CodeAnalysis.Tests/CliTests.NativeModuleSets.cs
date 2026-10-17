@@ -14,7 +14,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NativeSetCliCompilesValidatesAndPreservesOutputOnFailureAsync()
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts", "native-set-cli-" + Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, "native-set-cli-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var first = Path.Combine(directory, "first.trmn");
         var second = Path.Combine(directory, "second.trmn");

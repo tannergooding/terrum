@@ -20,7 +20,7 @@ public sealed class IntegerCheckedArithmeticModuleTests
     public async Task Checked32BitArithmeticPersistsAndMatchesBigIntegerBoundariesAsync(
         BoundRuntimePolicy policy)
     {
-        var path = Path.Combine(RepositoryRoot(), "self-host", "IntegerCheckedArithmetic.terrum");
+        var path = SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerCheckedArithmetic.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
 

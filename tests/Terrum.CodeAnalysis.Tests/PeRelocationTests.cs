@@ -79,7 +79,7 @@ public sealed class PeRelocationTests
     public async Task FreshProcessesExecuteReadOnlyWritableUnwindAndCliJitPathsAsync()
     {
         var program = Compile(Source);
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"relocation-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"relocation-{Guid.NewGuid():N}");
         var executable = prefix + ".exe";
         var failure = prefix + "-failure.exe";
         var consumer = prefix + ".consumer.trm";

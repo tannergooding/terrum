@@ -8,7 +8,7 @@ independently specified; this bounded acceptance does not implement them.
 General view representations and persisted capture metadata remain separate.
 Current
 implementation coverage is tracked separately in the
-[self-host reference](../../self-host/README.md).
+[self-host reference](../implementation/self-host.md).
 
 ## Current boundary
 

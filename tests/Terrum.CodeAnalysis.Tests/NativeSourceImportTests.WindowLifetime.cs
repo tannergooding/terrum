@@ -490,7 +490,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var repositoryRoot = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(repositoryRoot).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-native-window-lifetime-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-native-window-lifetime-");
         var sourcePath = Path.Combine(repositoryRoot, "tests", "native", "native-window-lifetime-probe.c");
         var libraryPath = Path.Combine(directory, "native-window-lifetime-probe.dll");
         var selfTestPath = Path.Combine(directory, "native-window-lifetime-self-test.exe");

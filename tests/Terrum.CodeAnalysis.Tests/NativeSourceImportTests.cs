@@ -196,7 +196,7 @@ public sealed partial class NativeSourceImportTests
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitCode(program,
             NativeRuntimePolicy.FailFast))!;
 
-        var directory = Directory.CreateTempSubdirectory("terrum-source-import-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-source-import-");
         var executablePath = Path.Combine(directory, "source-import.exe");
         try
         {
@@ -299,7 +299,7 @@ public sealed partial class NativeSourceImportTests
         var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
         Assert.That(File.Exists(environment), Is.True, "Visual Studio x64 C++ build tools are required for the C ABI fixture.");
 
-        var directory = Directory.CreateTempSubdirectory("terrum-native-import-abi-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-native-import-abi-");
         var libraryPath = Path.Combine(directory, "native-import-abi-probe.dll");
         var objectPath = Path.Combine(directory, "native-import-abi-probe.obj");
         var executablePath = Path.Combine(directory, "native-import-abi-probe.exe");

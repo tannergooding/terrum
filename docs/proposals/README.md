@@ -235,4 +235,4 @@ other accepted direction lives in the relevant [language](../language.md),
 [memory](../specs/memory-model.md) and [library](../specs/libraries.md) specifications.
 Current support and sequencing are in the [implementation reference](../implementation.md)
 and [roadmap](../roadmap.md); candidate compiler components are in
-[self-host](../../self-host/README.md).
+[self-host](../implementation/self-host.md).

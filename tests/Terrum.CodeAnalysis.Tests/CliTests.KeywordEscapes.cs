@@ -19,7 +19,7 @@ public sealed partial class CliTests
     public async Task KeywordEscapesExecuteAcrossHostedComponentAndFrontendAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var scanner = frontend;
         const string Source = "/// heading\nint32 Main() { mut int32 @const = 0; while (const < 42) { @const += 1; } return const; }";
         foreach (var arguments in new[] {
@@ -32,7 +32,7 @@ public sealed partial class CliTests
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
         }
-        var prefix = Path.Combine(root, "artifacts", $"keyword-escapes-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"keyword-escapes-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
         var component = prefix + ".component.exe";
         var native = prefix + ".frontend.exe";
@@ -97,7 +97,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "/* heading */ @await @const @union @via @out @int32 @ await";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
-            Path.Combine(root, "self-host"), "-", "--runtime", policy, "--json");
+            SelfHostPaths.SourceDirectory(root), "-", "--runtime", policy, "--json");
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);

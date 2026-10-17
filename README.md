@@ -19,7 +19,7 @@ source-free, fail-fast scalar subset. It uses the shared verifier and backend;
 general imported-call linking and checked-exception Body support are not
 implemented.
 
-The bounded [Terrum-authored scalar source frontend](self-host/README.md)
+The bounded [Terrum-authored scalar source frontend](docs/implementation/self-host.md)
 projects one snapshot of global functions with unique names and direct scalar
 calls, including forward calls and recursion. Its source-bound multi-function
 reader audits target identities and void-call statement roots before using
@@ -50,8 +50,9 @@ existing installation; `-architecture x64` installs that SDK under
 .\pack.cmd
 dotnet run --project sources\terrumc -- check samples\syntax\hello.terrum
 dotnet run --project sources\terrumc -- analyze samples\native\factorial.terrum
-dotnet run --project sources\terrumc -- build samples\native\factorial.terrum -o artifacts\factorial.exe --runtime fail-fast
-.\artifacts\factorial.exe
+New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
+dotnet run --project sources\terrumc -- build samples\native\factorial.terrum -o artifacts\bin\samples\factorial.exe --runtime fail-fast
+.\artifacts\bin\samples\factorial.exe
 $LASTEXITCODE # 720
 ```
 
@@ -69,7 +70,7 @@ packages are under `artifacts\obj`, `artifacts\log`, `artifacts\tst` and
 `artifacts\pkg`. On Windows, the solution also builds a native
 compiler-primitives DLL from maintained Terrum sources. That library is not a
 self-host compiler or executable scanner/parser; see
-[self-host components](self-host/README.md).
+[self-host components](docs/implementation/self-host.md).
 
 ## Layout
 
@@ -81,7 +82,7 @@ self-host compiler or executable scanner/parser; see
 | `samples/syntax` | Parser fixtures; not executable Terrum |
 | `samples/native` | Windows x64 executable examples |
 | `samples/design`, `library` | Language and API sketches |
-| `self-host` | Candidate compiler components and their execution gates |
+| `sources/self-host`, `tests/self-host` | Candidate compiler components and their test fixtures |
 
 Read the [language design](docs/language.md), [language contracts](docs/specs/language-contracts.md),
 [lifetime contracts](docs/specs/lifetimes.md), [library design](docs/specs/libraries.md),

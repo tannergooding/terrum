@@ -44,7 +44,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(ValueLayout.Alignment(PrimitiveType.NativeWindowMessage, program.Structures), Is.EqualTo(8));
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.CheckedExceptions);
 
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-window-owner-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-window-owner-");
         var executablePath = Path.Combine(directory, "direct-window-owner.exe");
         try
         {

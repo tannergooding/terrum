@@ -20,7 +20,7 @@ public sealed class IntegerCheckedConversionsModuleTests
     public async Task CheckedConversionHelpersPersistAndPublishOnlyRepresentableValuesAsync(
         BoundRuntimePolicy policy)
     {
-        var path = Path.Combine(RepositoryRoot(), "self-host", "IntegerCheckedConversions.terrum");
+        var path = SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerCheckedConversions.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
 

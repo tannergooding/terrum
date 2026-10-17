@@ -24,9 +24,9 @@ public sealed partial class CliTests
             public float64 Divide64(float64 left, float64 right) { return left / right; }
             public bool NotEqual64(float64 left, float64 right) { return left != right; }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-float-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-float-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-float-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-float-{Guid.NewGuid():N}.dll");
         try
         {
             var (componentExit, componentJson, componentError) = await RunAsync(
@@ -77,7 +77,7 @@ public sealed partial class CliTests
     [TestCase("public char16 Convert(float32 value) { return char16(value); }")]
     public async Task ScalarFrontendRejectsUnapprovedFloatingToChar16ConversionsAsync(string source)
     {
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -100,8 +100,8 @@ public sealed partial class CliTests
     {
         const string Source =
             "[NoThrow] public int32 Convert(float32 value) { return int32(value); }";
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var outputPath = Path.Combine(Path.GetTempPath(),
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-scalar-no-throw-float-to-int-{Guid.NewGuid():N}.dll");
         try
         {
@@ -133,9 +133,9 @@ public sealed partial class CliTests
     public async Task ScalarFrontendProjectsTargetTypedFloatingLiteralAsync(string policy, string source,
         int expectedType, int expectedOperation)
     {
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-float-literal-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-float-literal-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-float-literal-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-float-literal-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -181,9 +181,9 @@ public sealed partial class CliTests
             public float32 AddLiteral32(float32 value) { return value + 0.1; }
             public bool CompareLiteral32(float32 value) { return 0.1 < value; }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-floats-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-floats-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-floats-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-floats-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
@@ -239,7 +239,7 @@ public sealed partial class CliTests
             public float32 BasedBinary32() { return 0b101; }
             public float64 BasedHex64() { return 0x123; }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
         Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
@@ -261,9 +261,9 @@ public sealed partial class CliTests
             public float64 UpperHexInteger() { return 0X123; }
             public float32 DecimalExponent() { return 1.25E-2; }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-float-cases-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-float-cases-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-float-cases-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-float-cases-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
@@ -306,9 +306,9 @@ public sealed partial class CliTests
             public float64 Call64() { return Echo(0.1); }
             public float32 Local32() { float32 value = 0.1; return value; }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-float-contexts-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-float-contexts-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-float-contexts-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-float-contexts-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
@@ -350,9 +350,9 @@ public sealed partial class CliTests
                 return 0.0;
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-float-out-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-float-out-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-float-out-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-float-out-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(Source);
@@ -398,9 +398,9 @@ public sealed partial class CliTests
                 return 0.0;
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -447,9 +447,9 @@ public sealed partial class CliTests
                 return Get(out var value) + value;
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-{floatingType}-out-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-{floatingType}-out-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-{floatingType}-out-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-{floatingType}-out-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -494,9 +494,9 @@ public sealed partial class CliTests
                 return value;
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-{floatingType}-void-out-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-{floatingType}-void-out-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-{floatingType}-void-out-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-{floatingType}-void-out-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -539,9 +539,9 @@ public sealed partial class CliTests
                 return Fill(seed - 1.0, out value);
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-single-{floatingType}-out-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -585,9 +585,9 @@ public sealed partial class CliTests
                 return Fill(seed - 1.0, init value);
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var output = Path.Combine(Path.GetTempPath(), $"terrum-scalar-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
-        var hosted = Path.Combine(Path.GetTempPath(), $"terrum-hosted-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scalar-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
+        var hosted = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-hosted-single-{floatingType}-init-ref-{Guid.NewGuid():N}.dll");
         try
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -732,7 +732,7 @@ public sealed partial class CliTests
                     && Echo64(float64(char16(2))) == 2) ? 42 : 1;
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var source in new[] { StandaloneSource, ProgramSource })
         {
             var input = Encoding.UTF8.GetBytes(source);
@@ -759,7 +759,7 @@ public sealed partial class CliTests
                     && uint64(float64(4.9)) == 4) ? 42 : 1;
             }
             """;
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
             "frontend-run", directory, "-", "--runtime", policy);
         Assert.That(exit == 42, Is.True, $"{policy}: {output}{error}");
@@ -778,7 +778,7 @@ public sealed partial class CliTests
     {
         var source = Encoding.UTF8.GetBytes(
             $"int32 Main() {{ return int32({targetType}({sourceType}(1.0 / 0.0))); }}");
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(source, "frontend-run", directory, "-",
             "--runtime", "fail-fast");
         Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540001)));
@@ -789,8 +789,8 @@ public sealed partial class CliTests
     [Test]
     public async Task ScalarFrontendFloatingConversionsMatchHostedLibrariesAsync()
     {
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
-        var outputDirectory = Path.Combine(Path.GetTempPath(),
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
+        var outputDirectory = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-scalar-float-conversions-{Guid.NewGuid():N}");
         Directory.CreateDirectory(outputDirectory);
         try

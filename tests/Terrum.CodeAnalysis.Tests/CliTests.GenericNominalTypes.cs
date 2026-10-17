@@ -35,7 +35,7 @@ public sealed partial class CliTests
             """;
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "artifacts", $"generic-nominal-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"generic-nominal-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {

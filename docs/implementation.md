@@ -112,7 +112,7 @@ not a bootstrap compiler. The scalar frontend audits source projections before
 passing them to the hosted verifier/emitter. Its support does not imply that
 verification or emission has moved into Terrum. The source-free compiler
 primitives DLL is likewise distinct from source-grant companion profiles.
-See the [self-host component inventory](../self-host/README.md),
+See the [self-host component inventory](implementation/self-host.md),
 [bootstrap/frontend composition inventory](implementation/bootstrap-frontend-composition.md),
 and [scanner boundary](scanner.md).
 

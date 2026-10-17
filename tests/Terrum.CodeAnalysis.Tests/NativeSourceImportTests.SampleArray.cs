@@ -1040,7 +1040,7 @@ public sealed partial class NativeSourceImportTests
 
     private static async Task<int> RunExecutableAsync(byte[] executable)
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"terrum-sample-array-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-sample-array-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "sample-array.exe");
         try

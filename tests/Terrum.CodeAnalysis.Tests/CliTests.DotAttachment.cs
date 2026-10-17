@@ -16,8 +16,8 @@ public sealed partial class CliTests
     public async Task DotAttachmentMatchesHostedAndScannerComponentWithAtomicRetentionAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var scanner = Path.Combine(root, "self-host");
-        var prefix = Path.Combine(root, "artifacts", $"dot-attachment-{Guid.NewGuid():N}");
+        var scanner = SelfHostPaths.SourceDirectory(root);
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"dot-attachment-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
         var component = prefix + ".component.exe";
         try
@@ -70,8 +70,8 @@ public sealed partial class CliTests
     public async Task DotAdoptionPreservesBoundedNativeFrontendExecutionAndLibraryParityAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
-        var prefix = Path.Combine(root, "artifacts", $"dot-scalar-{Guid.NewGuid():N}");
+        var frontend = SelfHostPaths.SourceDirectory(root);
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"dot-scalar-{Guid.NewGuid():N}");
         var executable = prefix + ".exe";
         var library = prefix + ".frontend.dll";
         var hostedLibrary = prefix + ".hosted.dll";

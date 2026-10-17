@@ -49,7 +49,7 @@ public sealed partial class CliTests
                     source += " [NoThrow] void Observe(int32 i) {}";
                 }
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path, "--runtime", policy, "--json");
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path, "--runtime", policy, "--json");
                 Assert.That(exit == 0, Is.True, $"{testCase.Name} {policy}: {exit}: {output}{error}");
                 Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(testCase.Expected));
             }
@@ -98,7 +98,7 @@ public sealed partial class CliTests
             "{ mut int32 i = 0; while (i < 4) { {} i = i + 1; } }",
         };
         var root = RepositoryRoot();
-        var directory = Path.Combine(root, "self-host");
+        var directory = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"cleanup-counted-for-rejected-{Guid.NewGuid():N}.exe");
         try
         {
@@ -146,7 +146,7 @@ public sealed partial class CliTests
             foreach (var testCase in cases)
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(testCase.Source),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path, "--runtime", policy, "--json");
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path, "--runtime", policy, "--json");
                 Assert.That(exit == (testCase.Accepted ? 0 : 1), Is.True, $"{policy}: {testCase.Source}: {exit}: {output}{error}");
                 Assert.That(error, Is.Empty);
                 if (testCase.Accepted)

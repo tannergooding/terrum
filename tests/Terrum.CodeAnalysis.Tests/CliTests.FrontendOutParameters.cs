@@ -21,7 +21,7 @@ public sealed partial class CliTests
     {
         const string accepted = "public bool Try(out int32 value) { value = 41; value++; return true; }";
         const string unassigned = "public bool Try(out int32 value) { return true; }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(accepted),
@@ -44,7 +44,7 @@ public sealed partial class CliTests
     {
         const string recursive = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } mut int32 previous = 0; if (Try(value - 1, out previous)) { result = previous * value; return true; } return false; }";
         const string readOnlyOutput = "public bool Try(int32 value, out int32 result) { return Try(value, out value); }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var source = SourceText.From(recursive);
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
@@ -67,7 +67,7 @@ public sealed partial class CliTests
             var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
             Assert.That(hostedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = hostedCompilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-out-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-out-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -99,7 +99,7 @@ public sealed partial class CliTests
     {
         const string recursive = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } if (Try(value - 1, out var previous)) { result = previous * value; return true; } return false; }";
         const string readsUnassigned = "public bool Try(int32 value, out int32 result) { if (Try(value - 1, out var previous)) { result = previous * value; return true; } result = previous; return false; }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -127,7 +127,7 @@ public sealed partial class CliTests
             var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
             Assert.That(hostedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = hostedCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-outvar-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-outvar-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -158,7 +158,7 @@ public sealed partial class CliTests
     public async Task ScalarFrontendProjectsRecursiveValueCallsAsync()
     {
         const string recursive = "public int32 Sum(int32 value) { if (value == 0) { return 0; } return Sum(value - 1) + value; }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -176,7 +176,7 @@ public sealed partial class CliTests
             var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
             Assert.That(hostedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = hostedCompilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-sum-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-sum-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -206,7 +206,7 @@ public sealed partial class CliTests
     public async Task ScalarFrontendProjectsRecursiveCallStatementsAsync()
     {
         const string recursive = "public int32 Sum(int32 value) { mut int32 remaining = value; if (value > 0) { Sum(value - 1); for (Sum(0); remaining > 0; Sum(0)) { remaining = remaining - 1; } } return value + 42; }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -225,7 +225,7 @@ public sealed partial class CliTests
             var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
             Assert.That(hostedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = hostedCompilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-call-statement-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-call-statement-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -268,7 +268,7 @@ public sealed partial class CliTests
     public async Task ScalarFrontendProjectsRecursiveVoidCallStatementsAsync()
     {
         const string recursive = "public void Stop(int32 value) { if (value > 0) { Stop(value - 1); } }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -288,7 +288,7 @@ public sealed partial class CliTests
             var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
             Assert.That(hostedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = hostedCompilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-void-call-statement-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-void-call-statement-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -319,7 +319,7 @@ public sealed partial class CliTests
     {
         const string recursive = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); mut int32 ignored = 0; Try(value - 1, out ignored); result = value; return true; }";
         const string readsUnpublished = "public bool Try(int32 value, out int32 result) { if (value == 0) { result = 1; return true; } Try(value - 1, out var previous); result = previous; return true; }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -339,7 +339,7 @@ public sealed partial class CliTests
             var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
             Assert.That(hostedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = hostedCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-outvar-call-statement-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-outvar-call-statement-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -379,7 +379,7 @@ public sealed partial class CliTests
     public async Task ScalarFrontendProjectsMultipleRecursiveOutCallStatementsAsync()
     {
         const string recursive = "public bool Pair(int32 value, out int32 first, out int32 second) { if (false) { Pair(value, out var previousFirst, out var previousSecond); } first = value; second = value + 1; return true; }";
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         foreach (var runtimeName in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(recursive),
@@ -399,7 +399,7 @@ public sealed partial class CliTests
             var hostedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(SourceText.From(recursive)), policy);
             Assert.That(hostedCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, hostedCompilation.Diagnostics));
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = hostedCompilation.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))();
-            var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-pair-call-statement-{Guid.NewGuid():N}.dll");
+            var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-pair-call-statement-{Guid.NewGuid():N}.dll");
             try
             {
                 var (buildExit, buildOutput, buildError) = await RunAsync(Encoding.UTF8.GetBytes(recursive),

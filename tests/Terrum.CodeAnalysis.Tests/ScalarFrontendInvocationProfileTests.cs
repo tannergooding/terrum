@@ -221,7 +221,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         var trees = new List<SyntaxTree>(components.Length + 1);
         foreach (var name in components)
         {
-            var path = Path.Combine(root, "self-host", name + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, name + ".terrum");
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             trees.Add(tree);

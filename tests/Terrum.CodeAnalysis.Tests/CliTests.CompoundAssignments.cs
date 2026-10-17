@@ -52,7 +52,7 @@ public sealed partial class CliTests
             """;
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "artifacts", $"compound-assignments-{Guid.NewGuid():N}");
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath, $"compound-assignments-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {
@@ -63,7 +63,7 @@ public sealed partial class CliTests
                 "--runtime", policy, "--json");
             Assert.That(exit == 0, Is.True, $"build {policy} exited {exit}: {output}{error}");
             (exit, output, error) = await RunAsync(input, "build-component",
-                Path.Combine(root, "self-host"), "-", "-o", scanned,
+                SelfHostPaths.SourceDirectory(root), "-", "-o", scanned,
                 "--runtime", policy, "--json");
             Assert.That(exit == 0, Is.True, $"build-component {policy} exited {exit}: {output}{error}");
             Assert.That(await File.ReadAllBytesAsync(scanned), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));

@@ -13,7 +13,7 @@ public sealed partial class CliTests
     [TestCase(true)]
     public async Task HandwrittenDoForExecutesInFreshConsumersAndRejectsTamperingAsync(bool iterator)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-do-for-raw-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-do-for-raw-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try

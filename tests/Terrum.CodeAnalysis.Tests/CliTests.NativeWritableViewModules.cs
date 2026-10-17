@@ -13,7 +13,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task NativeGraphJitServicesWritableViewLeafWithoutRebuildingRootAsync(string policy)
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-writable-view-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var original = Path.Combine(directory, "original.trmn");

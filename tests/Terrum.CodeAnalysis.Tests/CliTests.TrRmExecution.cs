@@ -23,7 +23,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedTrRmRunsAndBuildsWithoutProducerSourceAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-consumer-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-consumer-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -86,7 +86,7 @@ public sealed partial class CliTests
                 return result;
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-init-output-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-init-output-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -190,7 +190,7 @@ public sealed partial class CliTests
                     conditionalFalse, conditionalTrue);
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(),
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-init-output-scalars-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
@@ -242,7 +242,7 @@ public sealed partial class CliTests
                 }
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(),
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-init-output-conditional-failure-{failOnTrue}-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
@@ -303,7 +303,7 @@ public sealed partial class CliTests
                 }
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(),
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-init-output-value-condition-{zeroArgumentCall}-{failOnTrue}-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
@@ -351,7 +351,7 @@ public sealed partial class CliTests
                 return result;
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-init-negate-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-init-negate-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         try
         {
@@ -385,7 +385,7 @@ public sealed partial class CliTests
                 return result;
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-init-convert-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-init-convert-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         try
         {
@@ -419,7 +419,7 @@ public sealed partial class CliTests
                 return result;
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-init-float-convert-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-init-float-convert-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         try
         {
@@ -460,7 +460,7 @@ public sealed partial class CliTests
             }
             bool Fail() { require false; return false; }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-nested-acyclic-breaks-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-nested-acyclic-breaks-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -504,7 +504,7 @@ public sealed partial class CliTests
                 }
             }
             """;
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-unsafe-acyclic-prefix-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-unsafe-acyclic-prefix-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -535,7 +535,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedDirectCallsAgreeAcrossJitAndExecutableAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-calls-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-calls-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -575,7 +575,7 @@ public sealed partial class CliTests
             [NoThrow][DoesNotReturn] void Stop() { Never(); }
             int32 Main() { return Identity(42); }
             """;
-        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-effects-{Guid.NewGuid():N}.trrm");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-effects-{Guid.NewGuid():N}.trrm");
         try
         {
             var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -598,7 +598,7 @@ public sealed partial class CliTests
     public async Task PersistedNonReturningCallKeepsRequirementFailureStatusAsync()
     {
         const string source = "[DoesNotReturn] void Stop() { require false; } int32 Main() { Stop(); }";
-        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-no-return-{Guid.NewGuid():N}.trrm");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-no-return-{Guid.NewGuid():N}.trrm");
         try
         {
             var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
@@ -620,7 +620,7 @@ public sealed partial class CliTests
     [Test]
     public async Task IndexedFailureReasonsMapToTheExistingNativeStatusesAsync()
     {
-        var artifact = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-failure-reasons-{Guid.NewGuid():N}.trrm");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-failure-reasons-{Guid.NewGuid():N}.trrm");
         try
         {
             var (compiled, output, error) = await RunAsync(
@@ -682,7 +682,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedLibraryExportCanCallPrivateSixArgumentHelperAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-calls-library-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-calls-library-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var library = prefix + ".dll";
         try
@@ -724,7 +724,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedTrRmLibraryPublishesTwoIndependentNativeExportsAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-library-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-library-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var library = prefix + ".dll";
         try
@@ -784,7 +784,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { return F(int32.MaxValue + 1, 1 / 0); } int32 F(int32 a, int32 b) { return 42; }",unchecked((int)0xE0540001))]
     public async Task TrRmCheckedFailureKeepsFailFastPolicyAfterPersistenceAsync(string source, int failure)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-failure-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-failure-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -829,7 +829,7 @@ public sealed partial class CliTests
     [TestCase("build-trrm-library")]
     public async Task TrRmRejectsCheckedExceptionsAtEveryExecutionBoundaryAsync(string command)
     {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-policy-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-policy-{Guid.NewGuid():N}.trrm");
         var arguments = command switch {
             "compile-trrm" => new[] { command, "-", "--identity", "policy", "-o", path, "--runtime", "checked-exceptions", "--json" },
             "run-trrm" => [command, path, "--runtime", "checked-exceptions", "--json"],
@@ -850,7 +850,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; init int32 vacant; x = inner + 1; } return x; }")]
     public async Task TrRmSourceRejectionDoesNotOverwritePreviousArtifactAsync(string source)
     {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-reject-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-reject-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, [0xAA, 0x55]);
@@ -872,7 +872,7 @@ public sealed partial class CliTests
     [Test]
     public async Task TrRmIndependentBytesExecuteInFreshProcessAsync()
     {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-independent-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-independent-{Guid.NewGuid():N}.trrm");
         try
         {
             byte[] body = [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
@@ -891,7 +891,7 @@ public sealed partial class CliTests
     [TestCase(true)]
     public async Task TrRmInvalidEffectsPreserveNativeOutputAndRejectExecutionAsync(bool library)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-invalid-effects-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-invalid-effects-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var output = prefix + (library ? ".dll" : ".exe");
         try
@@ -924,7 +924,7 @@ public sealed partial class CliTests
     [Test]
     public async Task TrRmMissingInputHasInputErrorStatusAsync()
     {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-absent-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-absent-{Guid.NewGuid():N}.trrm");
         var (exit, stdout, stderr) = await RunAsync([], "run-trrm", path, "--runtime", "fail-fast", "--json");
         Assert.That(exit == 2, Is.True, $"{stdout}{Environment.NewLine}{stderr}");
         Assert.That(stderr, Is.Empty);
@@ -934,7 +934,7 @@ public sealed partial class CliTests
     [Test]
     public async Task TrRmInvalidUtf8PreservesOutputAndReportsInputFailureAsync()
     {
-        var output = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-invalid-utf8-{Guid.NewGuid():N}.trrm");
+        var output = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-invalid-utf8-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(output, [0xAA, 0x55]);

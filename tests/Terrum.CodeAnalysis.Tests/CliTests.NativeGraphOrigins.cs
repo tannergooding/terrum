@@ -12,7 +12,7 @@ public sealed partial class CliTests
     [Test]
     public async Task NativeGraphCliRetainsOriginAndPreservesOutputOnMissingCleanupProviderAsync()
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-origin-cli-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var leafSource = Path.Combine(directory, "leaf.terrum");

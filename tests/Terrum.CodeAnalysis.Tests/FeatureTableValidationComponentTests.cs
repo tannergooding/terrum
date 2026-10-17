@@ -58,7 +58,7 @@ public sealed class FeatureTableValidationComponentTests
         };
 
         var root = RepositoryRoot();
-        var path = Path.Combine(root, "self-host", "FeatureTableValidation.terrum");
+        var path = SelfHostPaths.ResolveFile(root, "FeatureTableValidation.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         var components = new[] {
@@ -123,8 +123,7 @@ public sealed class FeatureTableValidationComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var directory = Path.Combine(RepositoryRoot(), "artifacts", "feature-table-tests");
-        _ = Directory.CreateDirectory(directory);
+        var directory = TestArtifactPaths.CreateDirectory("feature-table-tests");
         var path = Path.Combine(directory, $"feature-table-validation-{Guid.NewGuid():N}.exe");
         try
         {

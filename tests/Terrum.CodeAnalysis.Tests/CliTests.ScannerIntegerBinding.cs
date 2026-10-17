@@ -28,9 +28,9 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { uint64 bits = 0b_11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111; return int32(bits % 1_000); }")]
     public async Task CompiledIntegerValuesEmitTheSameImageAsHostBuildAsync(string source)
     {
-        var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-decoded-integer-{Guid.NewGuid():N}");
+        var scanner = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-decoded-integer-{Guid.NewGuid():N}");
         var ordinary = prefix + ".exe";
         var compiled = prefix + ".compiled.exe";
         try
@@ -90,9 +90,9 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { uint64 value = 0b10000000000000000000000000000000000000000000000000000000000000000; return 0; }")]
     public async Task CompiledIntegerFailuresRetainHostDiagnosticCodesAndSpansAsync(string source)
     {
-        var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..")), "self-host");
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-decoded-error-{Guid.NewGuid():N}");
+        var scanner = SelfHostPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-decoded-error-{Guid.NewGuid():N}");
         var ordinary = prefix + ".exe";
         var compiled = prefix + ".compiled.exe";
         try
@@ -128,7 +128,7 @@ public sealed partial class CliTests
     [TestCase(true)]
     public async Task InvalidCompiledIntegerRecordsRejectBuildWithoutReplacingArtifactAsync(bool missing)
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-invalid-decoder-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-invalid-decoder-{Guid.NewGuid():N}");
         var scanner = prefix + ".terrum";
         var artifact = prefix + ".exe";
         var record = missing ? "" : """

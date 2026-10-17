@@ -20,7 +20,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-            "frontend-component", Path.Combine(root, "self-host"), "-",
+            "frontend-component", SelfHostPaths.SourceDirectory(root), "-",
             "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
@@ -36,10 +36,8 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "self-host");
-        var outputDirectory = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
-            $"conversion-artifacts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(outputDirectory);
+        var directory = SelfHostPaths.SourceDirectory(root);
+        var outputDirectory = TestArtifactPaths.CreateDirectory("conversion-artifacts");
         try
         {
             var types = new[] { "int32", "uint32", "int64", "uint64", "char16" };
@@ -91,7 +89,7 @@ public sealed partial class CliTests
         }
         finally
         {
-            Directory.Delete(outputDirectory, recursive: true);
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(outputDirectory).ConfigureAwait(true);
         }
     }
     [TestCase("int32 Main() => int32(uint64(42));")]
@@ -108,10 +106,8 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "self-host");
-        var outputDirectory = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
-            $"conversion-artifacts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(outputDirectory);
+        var directory = SelfHostPaths.SourceDirectory(root);
+        var outputDirectory = TestArtifactPaths.CreateDirectory("conversion-artifacts");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -149,7 +145,7 @@ public sealed partial class CliTests
         }
         finally
         {
-            Directory.Delete(outputDirectory, recursive: true);
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(outputDirectory).ConfigureAwait(true);
         }
     }
     [TestCase("int32 Main() => int32(uint64(18446744073709551615));")]
@@ -160,7 +156,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "self-host");
+        var directory = SelfHostPaths.SourceDirectory(root);
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var source = Encoding.UTF8.GetBytes(text);
@@ -181,10 +177,8 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "self-host");
-        var outputDirectory = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
-            $"conversion-artifacts-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(outputDirectory);
+        var directory = SelfHostPaths.SourceDirectory(root);
+        var outputDirectory = TestArtifactPaths.CreateDirectory("conversion-artifacts");
         try
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
@@ -208,7 +202,7 @@ public sealed partial class CliTests
         }
         finally
         {
-            Directory.Delete(outputDirectory, recursive: true);
+            await TestFileCleanup.DeleteDirectoryWithRetryAsync(outputDirectory).ConfigureAwait(true);
         }
     }
 }

@@ -308,8 +308,8 @@ public sealed partial class NativeManagedClassModuleTests
             ?? throw new InvalidOperationException("Missing test configuration directory.");
         var cli = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
             configuration, framework.Name, "terrumc.dll");
-        var consumerPath = Path.GetTempFileName();
-        var producerPath = Path.GetTempFileName();
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"semantic-consumer-{Guid.NewGuid():N}.trm");
+        var producerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"semantic-producer-{Guid.NewGuid():N}.trm");
         try
         {
             await File.WriteAllBytesAsync(consumerPath, consumer).ConfigureAwait(true);

@@ -652,7 +652,7 @@ public sealed class ModuleTests
             ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual39 = compilation.Program; Assert.That(__nunitActual39, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual39!; }))(), producer);
-        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"class-module-{Guid.NewGuid():N}.trm");
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"class-module-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try
         {
@@ -705,55 +705,55 @@ public sealed class ModuleTests
         BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var rangePath = Path.Combine(root, "self-host", "SourceRange.terrum");
-        var factsPath = Path.Combine(root, "self-host", "CharacterFacts.terrum");
-        var factsTestsPath = Path.Combine(root, "self-host", "CharacterFactsTests.terrum");
-        var utf16CodeUnitsPath = Path.Combine(root, "self-host", "Utf16CodeUnits.terrum");
-        var integerFactsPath = Path.Combine(root, "self-host", "IntegerFacts.terrum");
-        var integerFactsExportsPath = Path.Combine(root, "self-host", "IntegerFactsTestExports.terrum");
-        var tokenPath = Path.Combine(root, "self-host", "Token.terrum");
-        var managedTokenChainPath = Path.Combine(root, "self-host", "ManagedTokenChain.terrum");
-        var managedTokenChainTestsPath = Path.Combine(root, "self-host", "ManagedTokenChainTests.terrum");
-        var copyAlgorithmsPath = Path.Combine(root, "self-host", "CopyAlgorithms.terrum");
-        var copyAlgorithmsTestsPath = Path.Combine(root, "self-host", "CopyAlgorithmsTests.terrum");
-        var float32MathSelectionPath = Path.Combine(root, "self-host", "Float32MathSelection.terrum");
-        var float64MathSelectionPath = Path.Combine(root, "self-host", "Float64MathSelection.terrum");
-        var floatMathSelectionTestsPath = Path.Combine(root, "self-host", "FloatMathSelectionTests.terrum");
-        var wideFactsPath = Path.Combine(root, "self-host", "WideIntegerFacts.terrum");
-        var integerFormattingPath = Path.Combine(root, "self-host", "IntegerFormatting.terrum");
-        var integerFormattingTestsPath = Path.Combine(root, "self-host", "IntegerFormattingTests.terrum");
-        var integerFloatConversionPath = Path.Combine(root, "self-host", "IntegerFloatConversion.terrum");
-        var integerFloatConversionTestsPath = Path.Combine(root, "self-host", "IntegerFloatConversionTests.terrum");
-        var floatingIntegerConversionPath = Path.Combine(root, "self-host", "FloatingIntegerConversion.terrum");
-        var floatingIntegerConversionTestsPath = Path.Combine(root, "self-host", "FloatingIntegerConversionTests.terrum");
-        var floatingFormatConversionPath = Path.Combine(root, "self-host", "FloatingFormatConversion.terrum");
-        var floatingFormatConversionTestsPath = Path.Combine(root, "self-host", "FloatingFormatConversionTests.terrum");
-        var floatingNegationPath = Path.Combine(root, "self-host", "FloatingNegation.terrum");
-        var floatingNegationTestsPath = Path.Combine(root, "self-host", "FloatingNegationTests.terrum");
-        var char16FloatConversionPath = Path.Combine(root, "self-host", "Char16FloatConversion.terrum");
-        var char16FloatConversionTestsPath = Path.Combine(root, "self-host", "Char16FloatConversionTests.terrum");
-        var floatingComparisonPath = Path.Combine(root, "self-host", "FloatingComparison.terrum");
-        var floatingComparisonTestsPath = Path.Combine(root, "self-host", "FloatingComparisonTests.terrum");
-        var floatingArithmeticPath = Path.Combine(root, "self-host", "FloatingArithmetic.terrum");
-        var floatingArithmeticTestsPath = Path.Combine(root, "self-host", "FloatingArithmeticTests.terrum");
-        var checkedFactsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmetic.terrum");
-        var integerMathPath = Path.Combine(root, "self-host", "IntegerMath.terrum");
-        var integerSaturationPath = Path.Combine(root, "self-host", "IntegerSaturation.terrum");
-        var integerWrappingPath = Path.Combine(root, "self-host", "IntegerWrapping.terrum");
-        var checkedConversionsPath = Path.Combine(root, "self-host", "IntegerCheckedConversions.terrum");
-        var bitOperationsPath = Path.Combine(root, "self-host", "BitOperations.terrum");
-        var rangeTestsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
-        var tokenTestsPath = Path.Combine(root, "self-host", "TokenTests.terrum");
-        var wideTestsPath = Path.Combine(root, "self-host", "WideIntegerTests.terrum");
-        var checkedTestsPath = Path.Combine(root, "self-host", "IntegerCheckedArithmeticTests.terrum");
-        var integerMathTestsPath = Path.Combine(root, "self-host", "IntegerMathTests.terrum");
-        var integerSaturationTestsPath = Path.Combine(root, "self-host", "IntegerSaturationTests.terrum");
-        var integerWrappingTestsPath = Path.Combine(root, "self-host", "IntegerWrappingTests.terrum");
-        var checkedConversionsTestsPath = Path.Combine(root, "self-host", "IntegerCheckedConversionsTests.terrum");
-        var bitOperationsTestsPath = Path.Combine(root, "self-host", "BitOperationsTests.terrum");
-        var utf16CodeUnitsTestsPath = Path.Combine(root, "self-host", "Utf16CodeUnitsTests.terrum");
-        var integerFactsTestsPath = Path.Combine(root, "self-host", "IntegerFactsTests.terrum");
-        var entryPath = Path.Combine(root, "self-host", "ComponentTestRunner.terrum");
+        var rangePath = SelfHostPaths.ResolveFile(root, "SourceRange.terrum");
+        var factsPath = SelfHostPaths.ResolveFile(root, "CharacterFacts.terrum");
+        var factsTestsPath = SelfHostPaths.ResolveFile(root, "CharacterFactsTests.terrum");
+        var utf16CodeUnitsPath = SelfHostPaths.ResolveFile(root, "Utf16CodeUnits.terrum");
+        var integerFactsPath = SelfHostPaths.ResolveFile(root, "IntegerFacts.terrum");
+        var integerFactsExportsPath = SelfHostPaths.ResolveFile(root, "IntegerFactsTestExports.terrum");
+        var tokenPath = SelfHostPaths.ResolveFile(root, "Token.terrum");
+        var managedTokenChainPath = SelfHostPaths.ResolveFile(root, "ManagedTokenChain.terrum");
+        var managedTokenChainTestsPath = SelfHostPaths.ResolveFile(root, "ManagedTokenChainTests.terrum");
+        var copyAlgorithmsPath = SelfHostPaths.ResolveFile(root, "CopyAlgorithms.terrum");
+        var copyAlgorithmsTestsPath = SelfHostPaths.ResolveFile(root, "CopyAlgorithmsTests.terrum");
+        var float32MathSelectionPath = SelfHostPaths.ResolveFile(root, "Float32MathSelection.terrum");
+        var float64MathSelectionPath = SelfHostPaths.ResolveFile(root, "Float64MathSelection.terrum");
+        var floatMathSelectionTestsPath = SelfHostPaths.ResolveFile(root, "FloatMathSelectionTests.terrum");
+        var wideFactsPath = SelfHostPaths.ResolveFile(root, "WideIntegerFacts.terrum");
+        var integerFormattingPath = SelfHostPaths.ResolveFile(root, "IntegerFormatting.terrum");
+        var integerFormattingTestsPath = SelfHostPaths.ResolveFile(root, "IntegerFormattingTests.terrum");
+        var integerFloatConversionPath = SelfHostPaths.ResolveFile(root, "IntegerFloatConversion.terrum");
+        var integerFloatConversionTestsPath = SelfHostPaths.ResolveFile(root, "IntegerFloatConversionTests.terrum");
+        var floatingIntegerConversionPath = SelfHostPaths.ResolveFile(root, "FloatingIntegerConversion.terrum");
+        var floatingIntegerConversionTestsPath = SelfHostPaths.ResolveFile(root, "FloatingIntegerConversionTests.terrum");
+        var floatingFormatConversionPath = SelfHostPaths.ResolveFile(root, "FloatingFormatConversion.terrum");
+        var floatingFormatConversionTestsPath = SelfHostPaths.ResolveFile(root, "FloatingFormatConversionTests.terrum");
+        var floatingNegationPath = SelfHostPaths.ResolveFile(root, "FloatingNegation.terrum");
+        var floatingNegationTestsPath = SelfHostPaths.ResolveFile(root, "FloatingNegationTests.terrum");
+        var char16FloatConversionPath = SelfHostPaths.ResolveFile(root, "Char16FloatConversion.terrum");
+        var char16FloatConversionTestsPath = SelfHostPaths.ResolveFile(root, "Char16FloatConversionTests.terrum");
+        var floatingComparisonPath = SelfHostPaths.ResolveFile(root, "FloatingComparison.terrum");
+        var floatingComparisonTestsPath = SelfHostPaths.ResolveFile(root, "FloatingComparisonTests.terrum");
+        var floatingArithmeticPath = SelfHostPaths.ResolveFile(root, "FloatingArithmetic.terrum");
+        var floatingArithmeticTestsPath = SelfHostPaths.ResolveFile(root, "FloatingArithmeticTests.terrum");
+        var checkedFactsPath = SelfHostPaths.ResolveFile(root, "IntegerCheckedArithmetic.terrum");
+        var integerMathPath = SelfHostPaths.ResolveFile(root, "IntegerMath.terrum");
+        var integerSaturationPath = SelfHostPaths.ResolveFile(root, "IntegerSaturation.terrum");
+        var integerWrappingPath = SelfHostPaths.ResolveFile(root, "IntegerWrapping.terrum");
+        var checkedConversionsPath = SelfHostPaths.ResolveFile(root, "IntegerCheckedConversions.terrum");
+        var bitOperationsPath = SelfHostPaths.ResolveFile(root, "BitOperations.terrum");
+        var rangeTestsPath = SelfHostPaths.ResolveFile(root, "RangeTests.terrum");
+        var tokenTestsPath = SelfHostPaths.ResolveFile(root, "TokenTests.terrum");
+        var wideTestsPath = SelfHostPaths.ResolveFile(root, "WideIntegerTests.terrum");
+        var checkedTestsPath = SelfHostPaths.ResolveFile(root, "IntegerCheckedArithmeticTests.terrum");
+        var integerMathTestsPath = SelfHostPaths.ResolveFile(root, "IntegerMathTests.terrum");
+        var integerSaturationTestsPath = SelfHostPaths.ResolveFile(root, "IntegerSaturationTests.terrum");
+        var integerWrappingTestsPath = SelfHostPaths.ResolveFile(root, "IntegerWrappingTests.terrum");
+        var checkedConversionsTestsPath = SelfHostPaths.ResolveFile(root, "IntegerCheckedConversionsTests.terrum");
+        var bitOperationsTestsPath = SelfHostPaths.ResolveFile(root, "BitOperationsTests.terrum");
+        var utf16CodeUnitsTestsPath = SelfHostPaths.ResolveFile(root, "Utf16CodeUnitsTests.terrum");
+        var integerFactsTestsPath = SelfHostPaths.ResolveFile(root, "IntegerFactsTests.terrum");
+        var entryPath = SelfHostPaths.ResolveFile(root, "ComponentTestRunner.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
         var facts = SyntaxTree.Parse(await File.ReadAllTextAsync(factsPath).ConfigureAwait(true), factsPath);
         var utf16CodeUnits = SyntaxTree.Parse(await File.ReadAllTextAsync(utf16CodeUnitsPath).ConfigureAwait(true),
@@ -1032,7 +1032,7 @@ public sealed class ModuleTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         { var __nunitItems43 = global::System.Linq.Enumerable.ToArray(compilation.SyntaxTrees); Assert.That(__nunitItems43, Has.Length.EqualTo(13)); Assert.That(__nunitItems43[0], Is.SameAs(rangeTests)); Assert.That(__nunitItems43[1], Is.SameAs(factsTests)); Assert.That(__nunitItems43[2], Is.SameAs(utf16CodeUnitsTests)); Assert.That(__nunitItems43[3], Is.SameAs(integerFactsTests)); Assert.That(__nunitItems43[4], Is.SameAs(tokenTests)); Assert.That(__nunitItems43[5], Is.SameAs(wideTests)); Assert.That(__nunitItems43[6], Is.SameAs(checkedTests)); Assert.That(__nunitItems43[7], Is.SameAs(integerMathTests)); Assert.That(__nunitItems43[8], Is.SameAs(integerSaturationTests)); Assert.That(__nunitItems43[9], Is.SameAs(integerWrappingTests)); Assert.That(__nunitItems43[10], Is.SameAs(checkedConversionsTests)); Assert.That(__nunitItems43[11], Is.SameAs(bitOperationsTests)); Assert.That(__nunitItems43[12], Is.SameAs(entry)); }
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual44 = compilation.Program; Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual44!; }))(), producer);
-        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"self-host-module-{Guid.NewGuid():N}.trm");
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"self-host-module-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try
         {
@@ -1072,7 +1072,7 @@ public sealed class ModuleTests
         var components = new SyntaxTree[componentNames.Length];
         for (var index = 0; index < componentNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, componentNames[index] + ".terrum");
             components[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(components[index].HasErrors, Is.False, string.Join(Environment.NewLine, components[index].Diagnostics));
         }
@@ -1095,7 +1095,7 @@ public sealed class ModuleTests
                 "Terrum.CodeAnalysis.Tests.CheckSourceDiagnosticLocation",
                 "Terrum.CodeAnalysis.TryGetSourceDiagnosticLocation"]);
 
-        var runnerPath = Path.Combine(root, "self-host", "SourceLineIndexComponentTestRunner.terrum");
+        var runnerPath = SelfHostPaths.ResolveFile(root, "SourceLineIndexComponentTestRunner.terrum");
         var runner = SyntaxTree.Parse(await File.ReadAllTextAsync(runnerPath).ConfigureAwait(true), runnerPath);
         var compilation = Compilation.Create(runner, ModuleCompiler.CreateReference(producer), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1169,7 +1169,7 @@ public sealed class ModuleTests
     public async Task FailedRangeInitCannotPublishFieldsAsync(string read)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var source = Path.Combine(root, "self-host", "SourceRange.terrum");
+        var source = SelfHostPaths.ResolveFile(root, "SourceRange.terrum");
         var range = SyntaxTree.Parse(await File.ReadAllTextAsync(source).ConfigureAwait(true), source);
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
@@ -1188,15 +1188,15 @@ public sealed class ModuleTests
     public async Task CliBuildsMultiSourceSelfHostLibraryAndConsumerAsync(bool tokens)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"self-host-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"self-host-cli-{Guid.NewGuid():N}");
         var producer = prefix + "-producer.trm";
         var consumer = prefix + "-consumer.trm";
         var image = prefix + ".exe";
         try
         {
             var arguments = new List<string> { "compile-module", "producer",
-                Path.Combine(root, "self-host", "SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
-                "--source", Path.Combine(root, "self-host", tokens ? "Token.terrum" : "CharacterFacts.terrum"),
+                SelfHostPaths.ResolveFile(root, "SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
+                "--source", SelfHostPaths.ResolveFile(root, tokens ? "Token.terrum" : "CharacterFacts.terrum"),
                 "--export", "Terrum.CodeAnalysis.SourceRange.GetEnd",
                 "--export", "Terrum.CodeAnalysis.SourceRange.#get:End",
             };
@@ -1208,7 +1208,7 @@ public sealed class ModuleTests
             Assert.That(libraryExit, Is.EqualTo(0));
             Assert.That(libraryError, Is.Empty);
             var (consumerExit, consumerError) = await RunCliAsync("compile-module", "consumer",
-                Path.Combine(root, "self-host", tokens ? "TokenTests.terrum" : "RangeTests.terrum"), producer,
+                SelfHostPaths.ResolveFile(root, tokens ? "TokenTests.terrum" : "RangeTests.terrum"), producer,
                 "--source", Path.Combine(root, "samples", "native", "modules", tokens ? "token-entry.terrum" : "range-entry.terrum"),
                 "-o", consumer).ConfigureAwait(true);
             Assert.That(consumerExit, Is.EqualTo(0));
@@ -1229,7 +1229,7 @@ public sealed class ModuleTests
     [Test]
     public async Task CliMultiSourceDiagnosticsIdentifySnapshotsAndPreserveArtifactsAsync()
     {
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"module-diagnostics-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"module-diagnostics-{Guid.NewGuid():N}");
         var first = prefix + "-first.terrum";
         var second = prefix + "-second.terrum";
         var artifact = prefix + ".trm";
@@ -1275,7 +1275,7 @@ public sealed class ModuleTests
     [Test]
     public async Task CliRejectsCombinedUtf8SourceBudgetBeforePublishingAsync()
     {
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"module-source-limit-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"module-source-limit-{Guid.NewGuid():N}");
         var first = prefix + "-first.terrum";
         var second = prefix + "-second.terrum";
         var artifact = prefix + ".trm";
@@ -1429,7 +1429,7 @@ public sealed class ModuleTests
             """), ModuleCompiler.CreateReference(first));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual53 = compilation.Program; Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual53!; }))(), first);
-        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"independent-{Guid.NewGuid():N}.trm");
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"independent-{Guid.NewGuid():N}.trm");
         var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
         try
         {
@@ -1493,8 +1493,8 @@ public sealed class ModuleTests
         var producerOne = ModuleCompiler.CreateProducer(first, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(first, producerOne);
         var producerTwo = ModuleCompiler.CreateProducer(second, ["Helper"]);
-        var consumerFile = Path.Combine(AppContext.BaseDirectory, $"consumer-{Guid.NewGuid():N}.trm");
-        var producerFile = Path.Combine(AppContext.BaseDirectory, $"producer-{Guid.NewGuid():N}.trm");
+        var consumerFile = Path.Combine(TestArtifactPaths.DirectoryPath, $"consumer-{Guid.NewGuid():N}.trm");
+        var producerFile = Path.Combine(TestArtifactPaths.DirectoryPath, $"producer-{Guid.NewGuid():N}.trm");
 
         try
         {
@@ -1526,8 +1526,8 @@ public sealed class ModuleTests
         var first = Compile("int32 Main() { return Helper(); } public int32 Helper() { return 11; }");
         var replacement = Compile("int32 Main() { return 0; } public int32 Helper() { return 22; }");
         var producer = ModuleCompiler.CreateProducer(first, ["Helper"]);
-        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"consumer-{Guid.NewGuid():N}.trm");
-        var producerPath = Path.Combine(AppContext.BaseDirectory, $"producer-{Guid.NewGuid():N}.trm");
+        var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"consumer-{Guid.NewGuid():N}.trm");
+        var producerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"producer-{Guid.NewGuid():N}.trm");
         try
         {
             await File.WriteAllBytesAsync(consumerPath, ModuleCompiler.CreateConsumer(first, producer)).ConfigureAwait(true);
@@ -1571,7 +1571,7 @@ public sealed class ModuleTests
     [Test]
     public async Task CliLoadsPersistedConsumerAfterBothSourceFilesAreRemovedAsync()
     {
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"module-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"module-cli-{Guid.NewGuid():N}");
         var referenceSource = prefix + "-reference.terrum";
         var consumerSource = prefix + "-consumer.terrum";
         var replacementSource = prefix + "-replacement.terrum";
@@ -1654,7 +1654,7 @@ public sealed class ModuleTests
     [Test]
     public async Task CompileModuleReportsSourceDiagnosticsAsSchemaOneJsonAsync()
     {
-        var source = Path.Combine(AppContext.BaseDirectory, $"module-source-{Guid.NewGuid():N}.terrum");
+        var source = Path.Combine(TestArtifactPaths.DirectoryPath, $"module-source-{Guid.NewGuid():N}.terrum");
         var artifact = Path.ChangeExtension(source, ".trm");
         try
         {
@@ -1873,8 +1873,8 @@ public sealed class ModuleTests
             var original = ModuleCompiler.CreateProducer(initial, [export]);
             var consumerBytes = ModuleCompiler.CreateConsumer(initial, original);
             var replacement = ModuleCompiler.CreateProducer(Compile(changedSource), [export]);
-            var consumerPath = Path.Combine(AppContext.BaseDirectory, $"consumer-{Guid.NewGuid():N}.trm");
-            var producerPath = Path.Combine(AppContext.BaseDirectory, $"producer-{Guid.NewGuid():N}.trm");
+            var consumerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"consumer-{Guid.NewGuid():N}.trm");
+            var producerPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"producer-{Guid.NewGuid():N}.trm");
             try
             {
                 await File.WriteAllBytesAsync(consumerPath, consumerBytes).ConfigureAwait(true);
@@ -2179,7 +2179,7 @@ public sealed class ModuleTests
     private static async Task<int> ExecuteAsync(byte[] image)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var path = Path.Combine(AppContext.BaseDirectory, $"module-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"module-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

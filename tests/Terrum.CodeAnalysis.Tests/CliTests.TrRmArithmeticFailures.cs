@@ -72,7 +72,7 @@ public sealed partial class CliTests
                 return result;
             }
             """;
-        var artifact = Path.Combine(Directory.GetCurrentDirectory(),
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-init-arithmetic-failure-{Guid.NewGuid():N}.trrm");
         try
         {

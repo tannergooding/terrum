@@ -34,7 +34,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(NativeDx11WindowAcquisitionContract.MatchesProgram(program), Is.True);
         SemanticVerifier.VerifyReferences(program);
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.CheckedExceptions);
-        var directory = Directory.CreateTempSubdirectory("terrum-window-device-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-window-device-");
         var executablePath = Path.Combine(directory, "window-device.exe");
         try
         {

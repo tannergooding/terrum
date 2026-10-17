@@ -119,7 +119,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(image.AsSpan().IndexOf("NativeFfi"u8) < 0, Is.True);
         Assert.That(CountCreateBufferSequence(image, [0xFF, 0x50, 0x18]), Is.EqualTo(1));
         Assert.That(CountCreateBufferSequence(image, [0xFF, 0x50, 0x10]) >= 2, Is.True);
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-buffer-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-buffer-");
         try
         {
             var executable = Path.Combine(directory, "direct-buffer.exe");
@@ -420,7 +420,7 @@ public sealed partial class NativeSourceImportTests
     {
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-buffer-abi-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-buffer-abi-");
         try
         {
             var fixture = Path.Combine(root, "tests", "native", "native-dx11-direct-buffer-probe.c");

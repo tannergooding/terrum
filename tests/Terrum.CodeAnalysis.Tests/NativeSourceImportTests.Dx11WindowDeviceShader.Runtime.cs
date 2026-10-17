@@ -29,7 +29,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var program = CompileDirectWindowDeviceShader();
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.CheckedExceptions);
-        var directory = Directory.CreateTempSubdirectory("terrum-window-device-shader-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-window-device-shader-");
         try
         {
             var shaderPath = Path.Combine(directory, "triangle.hlsl");

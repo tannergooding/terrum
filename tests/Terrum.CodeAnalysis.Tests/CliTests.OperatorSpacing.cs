@@ -18,9 +18,9 @@ public sealed partial class CliTests
     public async Task OperatorSpacingPreservesHostedComponentAndNativeExecutionAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var scanner = frontend;
-        var prefix = Path.Combine(root, "artifacts", $"operator-spacing-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"operator-spacing-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
         var component = prefix + ".component.exe";
         var native = prefix + ".native.exe";
@@ -94,8 +94,8 @@ public sealed partial class CliTests
     public async Task OperatorSpacingPreservesNativeLibraryBytesAndExportsAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
-        var prefix = Path.Combine(root, "artifacts", $"operator-library-{Guid.NewGuid():N}");
+        var frontend = SelfHostPaths.SourceDirectory(root);
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"operator-library-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.dll";
         var native = prefix + ".native.dll";
         try

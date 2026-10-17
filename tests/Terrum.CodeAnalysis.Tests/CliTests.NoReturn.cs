@@ -41,7 +41,7 @@ public sealed partial class CliTests
     [Test]
     public async Task UnprovedNoReturnDeclarationPreservesPriorArtifactAsync()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-no-return-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-no-return-{Guid.NewGuid():N}.exe");
         byte[] original = [1, 2, 3];
         try
         {

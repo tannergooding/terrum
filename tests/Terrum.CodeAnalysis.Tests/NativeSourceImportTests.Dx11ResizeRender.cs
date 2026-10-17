@@ -335,7 +335,7 @@ public sealed partial class NativeSourceImportTests
     {
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(true);
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-resize-render-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-resize-render-");
         try
         {
             var sdk = Path.Combine(root, "tests", "native", "dx11-resize-queue-sdk-probe.c");
@@ -527,7 +527,7 @@ public sealed partial class NativeSourceImportTests
     [Category("HardwareIntegration")]
     public async Task DirectHardwareSampleEntryPointSurvivesResizeAndClosesNormallyAsync()
     {
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-hardware-sample-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-hardware-sample-");
         try
         {
             var executable = Path.Combine(directory, "triangle-hardware.exe");
@@ -550,7 +550,7 @@ public sealed partial class NativeSourceImportTests
         var driverLabel = hardware ? "Hardware" : "WARP";
         var program = CompileSourceAuthoredResizeRender(hardware);
         var image = NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.CheckedExceptions);
-        var directory = Directory.CreateTempSubdirectory($"terrum-real-{driver}-resize-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory($"terrum-real-{driver}-resize-");
         try
         {
             File.Copy(Path.Combine(FindRepositoryRoot(), "samples", "design", "win32-dx11-triangle", "triangle.hlsl"),

@@ -85,7 +85,7 @@ public sealed class TryFinallyTests
         var linked = ModuleCompiler.Link(image, bytes);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,function => function.Name == "Compute"
             && function.Body.Statements[0] is BoundTryFinally),Is.True);
-        var executable = Path.Combine(AppContext.BaseDirectory, $"try-finally-{Guid.NewGuid():N}.exe");
+        var executable = Path.Combine(TestArtifactPaths.DirectoryPath, $"try-finally-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(executable, NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast));

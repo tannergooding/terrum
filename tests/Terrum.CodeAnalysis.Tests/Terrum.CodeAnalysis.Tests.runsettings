@@ -1,0 +1,5 @@
+<RunSettings>
+  <NUnit>
+    <WorkDirectory>tmp</WorkDirectory>
+  </NUnit>
+</RunSettings>

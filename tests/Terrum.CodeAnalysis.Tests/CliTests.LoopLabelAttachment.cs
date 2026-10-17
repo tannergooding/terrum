@@ -18,7 +18,7 @@ public sealed partial class CliTests
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(input, "frontend-component",
-                Path.Combine(RepositoryRoot(), "self-host"), "-", "--runtime", policy, "--json");
+                SelfHostPaths.SourceDirectory(RepositoryRoot()), "-", "--runtime", policy, "--json");
             Assert.That(exit == (invalid ? 1 : 0), Is.True, $"{output}{error}");
             using var document = JsonDocument.Parse(output);
             var result = document.RootElement.GetProperty("result");
@@ -44,7 +44,7 @@ public sealed partial class CliTests
                 foreach (var mode in new[] { "build", "build-component", "frontend-build" })
                 {
                     var args = mode == "build" ? new[] { "-", "-o", path, "--runtime", policy, "--json" }
-                        : new[] { Path.Combine(root, "self-host"),
+                        : new[] { SelfHostPaths.SourceDirectory(root),
                             "-", "-o", path, "--runtime", policy, "--json" };
                     var source = Encoding.UTF8.GetBytes($"int32 Main() {{ {valid} return 42; }}");
                     var (exit, output, error) = await RunAsync(source, [mode, .. args]);

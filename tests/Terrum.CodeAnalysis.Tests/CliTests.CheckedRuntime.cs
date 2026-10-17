@@ -57,7 +57,7 @@ public sealed partial class CliTests
     [TestCase(true)]
     public async Task ModulePolicyIsNotReadFromAnOptionLikeSourceOperandAsync(bool native)
     {
-        var directory = Directory.CreateTempSubdirectory("terrum-policy-operand-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-policy-operand-");
         var source = Path.Combine(directory, "--runtime");
         var artifact = Path.Combine(directory, native ? "provider.trmn" : "provider.trm");
         try
@@ -94,7 +94,7 @@ public sealed partial class CliTests
     [Test]
     public async Task InvalidUnsafeRecoveryPreservesAnExistingArtifactAsync()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-checked-invalid-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-checked-invalid-{Guid.NewGuid():N}.exe");
         byte[] original = [1, 2, 3];
         try
         {

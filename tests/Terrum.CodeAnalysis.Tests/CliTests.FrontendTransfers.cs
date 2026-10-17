@@ -24,7 +24,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"transfer-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"transfer-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -75,7 +75,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"transfer-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"transfer-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -114,7 +114,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"transfer-{Guid.NewGuid():N}.exe");
         try
         {
@@ -142,7 +142,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"transfer-{Guid.NewGuid():N}.exe");
         try
         {
@@ -176,7 +176,7 @@ public sealed partial class CliTests
             + string.Concat(Enumerable.Repeat("break; ", 12)) + "} return 42; }";
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var maximum = "int32 Main() { while (false) { "

@@ -197,7 +197,7 @@ public sealed partial class CliTests
     {
         const string Entry = "public int32 Value() { return Helper(); }";
         const string Helper = "int32 Helper() { return 42; }";
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-library-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-library-cli-{Guid.NewGuid():N}");
         var outputPath = prefix + ".dll";
         var helperPath = prefix + ".terrum";
         try
@@ -1157,7 +1157,7 @@ public sealed partial class CliTests
     [TestCase("\u03B1")]
     public async Task InvalidLibraryExportsPreservePriorArtifactsAsync(string export)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-library-export-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-library-export-{Guid.NewGuid():N}.dll");
         const string Source = "public int32 Value() { return 42; } int32 Hidden() { return 1; } public int32 \u03B1() { return 2; }";
         try
         {
@@ -1186,7 +1186,7 @@ public sealed partial class CliTests
     {
         const string Entry = "using Parts; int32 Main() { Box value = new Box(10); return value.Total(32); }";
         const string Library = "namespace Parts; [Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; public Box(int32 value) { Value = value; } public int32 Total(int32 extra) { return Value + extra; } }";
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-set-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-set-{Guid.NewGuid():N}");
         var library = prefix + ".terrum";
         var image = prefix + ".exe";
         try
@@ -1254,7 +1254,7 @@ public sealed partial class CliTests
     public async Task SourceSetErrorsKeepTheirOwningSnapshotAndPreserveOutputAsync(string command, bool json)
     {
         const string Invalid = "int32 Helper() { return missing; }";
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-errors-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-errors-{Guid.NewGuid():N}");
         var helper = prefix + ".terrum";
         var image = prefix + ".exe";
         byte[] original = [1, 2, 3];
@@ -1307,7 +1307,7 @@ public sealed partial class CliTests
     [Test]
     public async Task MultiSourceJsonDiagnosticsKeepTheirSourceIndexesAsync()
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-index-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-index-{Guid.NewGuid():N}");
         var entry = prefix + "-entry.terrum";
         var first = prefix + "-first.terrum";
         var second = prefix + "-second.terrum";
@@ -1340,7 +1340,7 @@ public sealed partial class CliTests
     [TestCase("build-library",".dll")]
     public async Task SourceSetOptionsRejectDuplicatesAndProtectEveryInputAsync(string command, string extension)
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-input-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-input-{Guid.NewGuid():N}");
         var entry = prefix + ".terrum";
         var helper = prefix + extension;
         const string Helper = "int32 Helper() { return 42; }";
@@ -1416,7 +1416,7 @@ public sealed partial class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         const string Source = "0 9223372036854775808 18446744073709551615 18446744073709551616 256 1.0 2e3 3.0";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
-            Path.Combine(root, "self-host"), "-", "--runtime", "fail-fast", "--json");
+            SelfHostPaths.SourceDirectory(root), "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(0));
         Assert.That(error, Is.Empty);
         using var document = JsonDocument.Parse(output);
@@ -1448,7 +1448,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("\u03B12 + 42 \U00010400 \U0001F600"),
-            "scan-component", Path.Combine(root, "self-host"), "-", "--runtime", "fail-fast", "--json");
+            "scan-component", SelfHostPaths.SourceDirectory(root), "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
         Assert.That(error, Is.EqualTo(""));
         using var document = JsonDocument.Parse(output);
@@ -1471,10 +1471,10 @@ public sealed partial class CliTests
     [TestCase(true)]
     public async Task BuildPublishesNativeArtifactAndFailedCompilationPreservesItAsync(bool nativeScanner)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-cli-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-cli-{Guid.NewGuid():N}.exe");
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] arguments = nativeScanner
-            ? ["build-component", Path.Combine(root, "self-host"), "-", "-o", path, "--runtime", "fail-fast", "--json"]
+            ? ["build-component", SelfHostPaths.SourceDirectory(root), "-", "-o", path, "--runtime", "fail-fast", "--json"]
             : ["build", "-", "-o", path, "--runtime", "fail-fast", "--json"];
 
         try
@@ -1549,7 +1549,7 @@ public sealed partial class CliTests
     public async Task NativeScannerFeedsTheOfficialCompilerWithoutChangingEmissionAsync(string source)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var original = Path.Combine(Path.GetTempPath(), $"terrum-host-{Guid.NewGuid():N}.exe");
+        var original = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-host-{Guid.NewGuid():N}.exe");
         var scanned = original + ".scanned.exe";
         try
         {
@@ -1559,7 +1559,7 @@ public sealed partial class CliTests
             Assert.That(hostExit, Is.EqualTo(0));
             Assert.That(hostError, Is.Empty);
             var (nativeExit, nativeOutput, nativeError) = await RunAsync(bytes, "build-component",
-                Path.Combine(root, "self-host"), "-", "-o", scanned, "--runtime", "fail-fast", "--json");
+                SelfHostPaths.SourceDirectory(root), "-", "-o", scanned, "--runtime", "fail-fast", "--json");
             Assert.That(nativeExit, Is.EqualTo(0));
             Assert.That(nativeError, Is.Empty);
             using var host = JsonDocument.Parse(hostOutput);
@@ -1581,13 +1581,13 @@ public sealed partial class CliTests
     public async Task NativeScannerBuildPreservesLexicalAndParserDiagnosticsAsync(string source, string code)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var artifact = Path.Combine(Path.GetTempPath(), $"terrum-scanner-failure-{Guid.NewGuid():N}.exe");
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scanner-failure-{Guid.NewGuid():N}.exe");
         byte[] previous = [1, 2, 3, 4];
         try
         {
             await File.WriteAllBytesAsync(artifact, previous);
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "build-component",
-                Path.Combine(root, "self-host"), "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+                SelfHostPaths.SourceDirectory(root), "-", "-o", artifact, "--runtime", "fail-fast", "--json");
             Assert.That(exit, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
@@ -1605,8 +1605,8 @@ public sealed partial class CliTests
     public async Task ScannerBundleCompilationDiagnosticsKeepTheirSourceFileAsync(bool json)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var selfHost = Path.Combine(root, "self-host");
-        var bundle = Path.Combine(Path.GetTempPath(), $"terrum-scanner-bundle-{Guid.NewGuid():N}");
+        var selfHost = SelfHostPaths.SourceDirectory(root);
+        var bundle = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scanner-bundle-{Guid.NewGuid():N}");
         var artifact = bundle + ".exe";
         var characterLiterals = Path.Combine(bundle, "CharacterLiteral.terrum");
         try
@@ -2120,7 +2120,7 @@ public sealed partial class CliTests
     [TestCase("int32 Scan() { require false; return 0; }",unchecked((int)0xE0540003))]
     public async Task ScannerFailureNeverFallsBackToTheHostLexerAsync(string scanner, int expected)
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-scanner-worker-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-scanner-worker-{Guid.NewGuid():N}");
         var component = prefix + ".terrum";
         var artifact = prefix + ".exe";
         byte[] previous = [1, 2, 3, 4];
@@ -2149,7 +2149,7 @@ public sealed partial class CliTests
     [TestCase(true)]
     public async Task ComponentBuildCannotOverwriteEitherSourceAsync(bool scannerIsDestination)
     {
-        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-component-input-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-component-input-{Guid.NewGuid():N}");
         var scanner = prefix + "-scanner.exe";
         var input = prefix + "-source.exe";
         const string Scanner = "int32 Scan() { require false; return 0; }";
@@ -2299,7 +2299,7 @@ public sealed partial class CliTests
     [Test]
     public async Task InputFailuresRemainStructuredAndDoNotClaimToParseAsync()
     {
-        foreach (var arguments in new[] { new[] { "bad", "-", "--json" }, ["check", Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".terrum"), "--json"] })
+        foreach (var arguments in new[] { new[] { "bad", "-", "--json" }, ["check", Path.Combine(TestArtifactPaths.DirectoryPath, Guid.NewGuid() + ".terrum"), "--json"] })
         {
             (var exit, var output, var error) = await RunAsync([], arguments);
             Assert.That(exit, Is.EqualTo(2));

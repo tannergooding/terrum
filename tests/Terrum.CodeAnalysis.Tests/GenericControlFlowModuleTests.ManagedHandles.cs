@@ -132,7 +132,7 @@ public sealed partial class GenericControlFlowModuleTests
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal)),Is.False);
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true), Is.EqualTo(42));
-        var sourcePath = Path.Combine(AppContext.BaseDirectory, $"managed-generic-{Guid.NewGuid():N}.terrum");
+        var sourcePath = Path.Combine(TestArtifactPaths.DirectoryPath, $"managed-generic-{Guid.NewGuid():N}.terrum");
         try
         {
             await File.WriteAllTextAsync(sourcePath, ManagedGenericSource).ConfigureAwait(true);
@@ -217,7 +217,7 @@ public sealed partial class GenericControlFlowModuleTests
         Assert.That(global::System.Linq.Enumerable.Any(program.Functions,static function =>
             function.Name == "RetainReversed<Stamp, Record>"),Is.False);
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true), Is.EqualTo(42));
-        var sourcePath = Path.Combine(AppContext.BaseDirectory, $"managed-generic-sample-{Guid.NewGuid():N}.terrum");
+        var sourcePath = Path.Combine(TestArtifactPaths.DirectoryPath, $"managed-generic-sample-{Guid.NewGuid():N}.terrum");
         try
         {
             await File.WriteAllTextAsync(sourcePath, source).ConfigureAwait(true);

@@ -112,9 +112,9 @@ public sealed partial class JitTests
     public async Task CopyOnlyGenericSelectionPreservesNestedTokenValuesAsync(bool checkedFailures, bool infer)
     {
         string[] components = [
-            Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "Token.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "CopyAlgorithms.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceRange.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "Token.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "CopyAlgorithms.terrum"),
         ];
         const string Source = """
             using Terrum;
@@ -278,7 +278,7 @@ public sealed partial class JitTests
                 return int32(contextual);
             }
             """;
-        string[] components = [Path.Combine(RepositoryRoot(), "self-host", "CopyAlgorithms.terrum")];
+        string[] components = [SelfHostPaths.ResolveFile(RepositoryRoot(), "CopyAlgorithms.terrum")];
         if (checkedFailures)
         {
             await AssertCheckedExecutionAsync(Source, 42, components).ConfigureAwait(true);

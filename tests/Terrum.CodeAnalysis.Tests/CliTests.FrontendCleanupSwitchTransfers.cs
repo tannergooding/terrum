@@ -46,7 +46,7 @@ public sealed partial class CliTests
                 "value = 1; value = value | 2;", 3),
         };
         var root = RepositoryRoot();
-        var directory = Path.Combine(root, "self-host");
+        var directory = SelfHostPaths.SourceDirectory(root);
         foreach (var testCase in cases)
         {
             var source = $"public int32 Main() {{ mut int32 value = 0; try {{}} finally {{ {testCase.Body} }} return value; }}";
@@ -99,7 +99,7 @@ public sealed partial class CliTests
         try
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                "frontend-build", Path.Combine(RepositoryRoot(), "self-host"), "-",
+                "frontend-build", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-",
                 "-o", path, "--runtime", policy, "--json");
             Assert.That(exit == 0, Is.True, $"{policy}: {exit}: {output}{error}");
             Assert.That(await ExecuteNativeImageAsync(path), Is.EqualTo(42));
@@ -134,7 +134,7 @@ public sealed partial class CliTests
             "public int32 Main() { try {} finally { var value = 1 switch { 1 => { continue _; }, _ => 0 }; } return 42; }",
         };
         var path = CreateTestArtifactPath($"cleanup-switch-rejected-{Guid.NewGuid():N}.exe");
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         try
         {
             var (initial, initialOutput, initialError) = await RunAsync(

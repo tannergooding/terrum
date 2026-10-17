@@ -39,7 +39,7 @@ public sealed partial class CliTests
             }
             """;
         var root = RepositoryRoot();
-        var directory = Path.Combine(root, "self-host");
+        var directory = SelfHostPaths.SourceDirectory(root);
         var input = Encoding.UTF8.GetBytes(source);
         var equivalentInput = Encoding.UTF8.GetBytes(hostedEquivalent);
         var nativePath = CreateTestArtifactPath($"switch-{Guid.NewGuid():N}.native.exe");
@@ -141,12 +141,12 @@ public sealed partial class CliTests
                 """, 12),
         };
         var root = RepositoryRoot();
-        var directory = Path.Combine(root, "self-host");
+        var directory = SelfHostPaths.SourceDirectory(root);
         foreach (var testCase in cases)
         {
-            var nativePath = Path.Combine(root,
+            var nativePath = Path.Combine(TestArtifactPaths.DirectoryPath,
                 $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.native.exe");
-            var hostedPath = Path.Combine(root,
+            var hostedPath = Path.Combine(TestArtifactPaths.DirectoryPath,
                 $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.hosted.exe");
             try
             {
@@ -237,16 +237,16 @@ public sealed partial class CliTests
                 """),
         };
         var root = RepositoryRoot();
-        var directory = Path.Combine(root, "self-host");
+        var directory = SelfHostPaths.SourceDirectory(root);
         foreach (var testCase in cases)
         {
             var input = Encoding.UTF8.GetBytes(testCase.Source);
             var equivalentInput = Encoding.UTF8.GetBytes(testCase.HostedEquivalent);
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
-                var nativePath = Path.Combine(root,
+                var nativePath = Path.Combine(TestArtifactPaths.DirectoryPath,
                     $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.native.exe");
-                var hostedPath = Path.Combine(root,
+                var hostedPath = Path.Combine(TestArtifactPaths.DirectoryPath,
                     $"switch-{testCase.Name}-{policy}-{Guid.NewGuid():N}.hosted.exe");
                 try
                 {
@@ -301,7 +301,7 @@ public sealed partial class CliTests
                 }
                 """;
             var root = RepositoryRoot();
-            var directory = Path.Combine(root, "self-host");
+            var directory = SelfHostPaths.SourceDirectory(root);
             var nativePath = CreateTestArtifactPath($"switch-widths-{Guid.NewGuid():N}.native.exe");
             var hostedPath = CreateTestArtifactPath($"switch-widths-{Guid.NewGuid():N}.hosted.exe");
             try
@@ -353,7 +353,7 @@ public sealed partial class CliTests
                 }
                 """;
             var root = RepositoryRoot();
-            var directory = Path.Combine(root, "self-host");
+            var directory = SelfHostPaths.SourceDirectory(root);
             var nativePath = CreateTestArtifactPath($"switch-default-{Guid.NewGuid():N}.native.exe");
             var hostedPath = CreateTestArtifactPath($"switch-default-{Guid.NewGuid():N}.hosted.exe");
             try
@@ -395,7 +395,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { switch (1) { 1 => {}, _ => {} } return 0; } int32 Broken() { int32 value = ; return 0; }")]
     public async Task ScalarFrontendSwitchRejectsUnsupportedFormsAsync(string source)
     {
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -408,7 +408,7 @@ public sealed partial class CliTests
     public async Task ScalarFrontendSwitchSeparatorDiagnosticRetainsTheOffendingSpanAsync(string policy)
     {
         const string source = "void Main() { switch (0) { 0 => {} _ => {} } }";
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
             "frontend-component", directory, "-", "--runtime", policy, "--json");
         Assert.That(exit, Is.EqualTo(1));
@@ -432,7 +432,7 @@ public sealed partial class CliTests
             return $"void Main() {{ switch (0) {{ {cases}, _ => {{}} }} }}";
         }
 
-        var directory = Path.Combine(RepositoryRoot(), "self-host");
+        var directory = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var (atLimitExit, atLimitOutput, atLimitError) = await RunAsync(
             Encoding.UTF8.GetBytes(SourceWithCases(10)),
             "frontend-component", directory, "-", "--runtime", policy, "--json");

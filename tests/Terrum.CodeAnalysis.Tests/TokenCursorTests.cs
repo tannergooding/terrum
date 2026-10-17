@@ -137,7 +137,7 @@ public sealed class TokenCursorTests
         BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var runnerPath = Path.Combine(root, "self-host", "TokenCursorComponentTestRunner.terrum");
+        var runnerPath = SelfHostPaths.ResolveFile(root, "TokenCursorComponentTestRunner.terrum");
         var runner = await File.ReadAllTextAsync(runnerPath).ConfigureAwait(true);
         var compilation = await CompileAsync("alpha 42", runner, policy, includeTokenCursorTests: true)
             .ConfigureAwait(true);
@@ -1284,7 +1284,7 @@ public sealed class TokenCursorTests
         var trees = new List<SyntaxTree>();
         foreach (var name in new[] { "SourceRange", "Token", "TokenCursor" })
         {
-            var path = Path.Combine(root, "self-host", name + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, name + ".terrum");
             trees.Add(SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path));
         }
         trees.Add(SyntaxTree.Parse("""
@@ -1326,13 +1326,13 @@ public sealed class TokenCursorTests
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {
-            var path = Path.Combine(root, "self-host", name + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, name + ".terrum");
             var source = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees.Add(SyntaxTree.Parse(rewrite is null ? source : rewrite(name, source), path));
         }
         if (includeTokenCursorTests)
         {
-            var path = Path.Combine(root, "self-host", "TokenCursorTests.terrum");
+            var path = SelfHostPaths.ResolveFile(root, "TokenCursorTests.terrum");
             trees.Add(SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path));
         }
         trees.Add(SyntaxTree.Parse(entry, "token-cursor-entry.terrum"));
@@ -1348,9 +1348,7 @@ public sealed class TokenCursorTests
     {
         var nativePolicy = (NativeRuntimePolicy)policy;
         Assert.That(NativeJit.Execute(program, nativePolicy), Is.EqualTo(42));
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "artifacts", "scanner-tests");
-        _ = Directory.CreateDirectory(directory);
+        var directory = TestArtifactPaths.CreateDirectory("scanner-tests");
         var path = Path.Combine(directory, $"terrum-token-cursor-{Guid.NewGuid():N}.exe");
         try
         {

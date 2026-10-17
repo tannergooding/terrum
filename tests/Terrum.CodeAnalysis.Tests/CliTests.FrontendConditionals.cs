@@ -33,7 +33,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"conditional-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"conditional-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -83,7 +83,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"conditional-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"conditional-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -137,7 +137,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"conditional-{Guid.NewGuid():N}.exe");
         try
         {

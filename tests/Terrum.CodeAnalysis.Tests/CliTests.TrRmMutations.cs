@@ -21,7 +21,7 @@ public sealed partial class CliTests
     [TestCase("uint64")]
     public async Task IndexedMutationArtifactRunsAndBuildsWithoutSourceAsync(string type)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-mutation-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-mutation-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         var source = $$"""
@@ -64,7 +64,7 @@ public sealed partial class CliTests
     [TestCase("uint64")]
     public async Task IndexedMutationLibraryExportExecutesFromSourceFreeDllAsync(string type)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-mutation-lib-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-mutation-lib-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var library = prefix + ".dll";
         try
@@ -124,7 +124,7 @@ public sealed partial class CliTests
     public async Task FailedMutationHasOrderedFailFastStatusInJitAndExeAsync(string type,
         string initial, string op, string right, int failure)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-mutation-fail-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-mutation-fail-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         var source = $"int32 Main() {{ mut {type} x = {initial}; x {op} {right}; return 42; }}";
@@ -157,7 +157,7 @@ public sealed partial class CliTests
     [TestCase(uint.MaxValue)]
     public async Task IndependentRawUInt32CountFailsInSourceFreeJitAndExeAsync(uint count)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-raw-shift-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-raw-shift-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         const int failure = unchecked((int)0xE0540001);
@@ -186,7 +186,7 @@ public sealed partial class CliTests
     [Test]
     public async Task HandwrittenIndexedShiftRunsInIndependentJitAndExeAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-indexed-shift-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-indexed-shift-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try

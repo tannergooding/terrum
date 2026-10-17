@@ -19,9 +19,9 @@ public sealed partial class CliTests
     public async Task ContextualPunctuationPreservesScalarJitExeDllAndAtomicOutputAsync(string policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var scanner = frontend;
-        var prefix = Path.Combine(root, "artifacts", $"contextual-punctuation-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"contextual-punctuation-{Guid.NewGuid():N}");
         var hosted = prefix + ".hosted.exe";
         var component = prefix + ".component.exe";
         var native = prefix + ".native.exe";

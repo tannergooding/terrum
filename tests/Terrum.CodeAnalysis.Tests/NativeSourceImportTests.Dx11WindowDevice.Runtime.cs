@@ -20,7 +20,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-window-device-runtime-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-window-device-runtime-");
         try
         {
             var fixture = Path.Combine(root, "tests", "native", "native-dx11-window-device-probe.c");

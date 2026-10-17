@@ -5,12 +5,28 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Tests;
 
+internal static class TestArtifactPaths
+{
+    public static string DirectoryPath
+    {
+        get
+        {
+            var directory = Path.Combine(AppContext.BaseDirectory, "tmp");
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+    }
+
+    public static string CreateDirectory(string prefix)
+    {
+        var directory = Path.Combine(DirectoryPath, $"{prefix}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+}
+
 public sealed partial class CliTests
 {
-    private static string CreateTestArtifactPath(string fileName)
-    {
-        var directory = Path.Combine(AppContext.BaseDirectory, "test-output");
-        Directory.CreateDirectory(directory);
-        return Path.Combine(directory, fileName);
-    }
+    private static string CreateTestArtifactPath(string fileName) =>
+        Path.Combine(TestArtifactPaths.DirectoryPath, fileName);
 }

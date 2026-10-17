@@ -325,7 +325,7 @@ public sealed partial class SourceLineComponentTests
 
     private static async Task ExecuteAsync(BoundProgram program, NativeRuntimePolicy policy, int expectedExit = 0)
     {
-        var path = Path.Combine(RepositoryRoot(), "artifacts", $"source-lines-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"source-lines-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
@@ -361,7 +361,7 @@ public sealed partial class SourceLineComponentTests
             : new[] { "SourceRange.terrum", "CharacterFacts.terrum", "SourceText.terrum" };
         foreach (var name in includeTests ? [.. names, "SourceLineTests.terrum"] : names)
         {
-            var path = Path.Combine(RepositoryRoot(), "self-host", name);
+            var path = SelfHostPaths.ResolveFile(RepositoryRoot(), name);
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             var tree = SyntaxTree.Parse(text, path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));

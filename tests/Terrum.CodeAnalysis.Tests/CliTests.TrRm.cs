@@ -26,7 +26,7 @@ public sealed partial class CliTests
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 1, strings),
         ]);
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-structure-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-structure-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, artifact);
@@ -60,7 +60,7 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmStructureReportsMissingInputAndUsageAsync()
     {
-        var missing = Path.Combine(Path.GetTempPath(), $"terrum-trrm-missing-{Guid.NewGuid():N}.trrm");
+        var missing = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-missing-{Guid.NewGuid():N}.trrm");
         var (missingExit, missingOutput, _) = await RunAsync([],
             "validate-trrm-structure", missing, "--json");
         Assert.That(missingExit, Is.EqualTo(2));
@@ -125,7 +125,7 @@ public sealed partial class CliTests
             new TrRmSection(0x7F00, 2, 1, sourceMap),
         ]);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-compact-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-compact-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, Encode());
@@ -256,7 +256,7 @@ public sealed partial class CliTests
             return TrRmArtifactWriter.Encode(sections);
         }
 
-        var path = Path.Combine(AppContext.BaseDirectory,
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-trrm-linear-call-{Guid.NewGuid():N}.trrm");
         try
         {
@@ -422,7 +422,7 @@ public sealed partial class CliTests
             new TrRmSection(0x7F00, 2, (uint)mapCount, mapRows ?? sourceMap),
         ]);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-indexed-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-indexed-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, Encode());
@@ -595,7 +595,7 @@ public sealed partial class CliTests
             return TrRmArtifactWriter.Encode([.. sections]);
         }
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-call-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-call-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, Artifact());
@@ -695,7 +695,7 @@ public sealed partial class CliTests
             ]);
         }
 
-        var path = Path.Combine(AppContext.BaseDirectory,
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-trrm-char16-convert-{Guid.NewGuid():N}.trrm");
         try
         {
@@ -802,7 +802,7 @@ public sealed partial class CliTests
             return TrRmArtifactWriter.Encode(sections);
         }
 
-        var path = Path.Combine(AppContext.BaseDirectory,
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-trrm-packed-call-{Guid.NewGuid():N}.trrm");
         try
         {
@@ -916,7 +916,7 @@ public sealed partial class CliTests
             new TrRmSection(0x0020, 0, 1, body),
         ]);
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-loop-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-loop-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, Artifact());

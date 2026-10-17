@@ -31,10 +31,10 @@ not build or restore. Combine switches when those prerequisites are needed.
 Additional arguments pass through to MSBuild. `-solution` selects a solution
 or project instead of `Terrum.slnx`.
 
-Tests that emit executable or library files keep them in a shared subdirectory
-of the test assembly output directory (`AppContext.BaseDirectory`); they must
-not write outputs into the repository root. Keep test logs and results under
-`artifacts\tst`.
+Transient files produced while running the test assembly, including executable
+and library outputs, belong in `AppContext.BaseDirectory\tmp`. NUnit uses this
+as its work directory as well. Use unique names or directories for concurrent
+tests. Keep test logs and results under `artifacts\tst`.
 
 `-architecture` installs the exact `global.json` SDK into `artifacts\dotnet`
 and selects it for that invocation, without changing the machine installation.
@@ -116,11 +116,12 @@ dotnet run --file scripts\check-owned-buffer-abi.cs
 dotnet run --file scripts\check-managed-node-abi.cs
 ```
 
-Run the probes sequentially; they write fixed filenames under `artifacts` and
-can overwrite a previous run's outputs. Their named `*-build.log`,
-`*-proof.log`, and related files record the native build and supervised
-execution results. API-based probes with `#:project` references instead use
-the library built by their standard `dotnet run` configuration.
+Run probes sequentially when they share a probe directory. Native executables
+go under `artifacts\bin\native-probes\<probe>`, intermediate objects under
+`artifacts\obj\native-probes\<probe>`, and logs under
+`artifacts\log\native-probes\<probe>`. Fixed filenames can overwrite a
+previous run's outputs. API-based probes with `#:project` references instead
+use the library built by their standard `dotnet run` configuration.
 The independent C callers require Visual Studio x64 C++ build tools; the
 [aggregate ABI recipe](implementation/native.md#semantic-and-target-boundaries)
 also builds its assembly/C fixture explicitly.

@@ -36,7 +36,7 @@ public sealed partial class CliTests
     public async Task ScopedLocalsMatchHostedExecutableAndJitAsync(string source, int expected)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -138,7 +138,7 @@ public sealed partial class CliTests
         int projectionVersion)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"lifetime-end-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"lifetime-end-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -191,7 +191,7 @@ public sealed partial class CliTests
         int projectionVersion)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"checked-catch-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"checked-catch-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -239,8 +239,8 @@ public sealed partial class CliTests
         int expected)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
-        var prefix = Path.Combine(Path.GetTempPath(), $"checked-catch-library-{Guid.NewGuid():N}");
+        var frontend = SelfHostPaths.SourceDirectory(root);
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"checked-catch-library-{Guid.NewGuid():N}");
         var frontendPath = prefix + ".frontend.dll";
         var hostedPath = prefix + ".hosted.dll";
         try
@@ -311,7 +311,7 @@ public sealed partial class CliTests
             {
                 var input = Encoding.UTF8.GetBytes(source);
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", nativePath,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", nativePath,
                     "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
@@ -363,7 +363,7 @@ public sealed partial class CliTests
     public async Task ScopedLocalsRejectInactiveOrDuplicateNamesAtomicallyAsync(string source)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.exe");
         try
         {
@@ -389,7 +389,7 @@ public sealed partial class CliTests
     [Test]
     public async Task ScopedLocalIdentityBudgetRemainsEightAcrossScopesAsync()
     {
-        var frontend = Path.Combine(RepositoryRoot(), "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(RepositoryRoot());
         var first = string.Concat(Enumerable.Range(0, 4).Select(i => $"int32 x{i} = {i}; "));
         var eight = first;
         var nine = first + "int32 x4 = 4; ";
@@ -422,7 +422,7 @@ public sealed partial class CliTests
     public async Task ScopedSixScalarsExportAndExecuteAsync(string type, string value, int expected)
     {
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"scoped-{Guid.NewGuid():N}.hosted.dll");
         try

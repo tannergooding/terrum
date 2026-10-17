@@ -29,7 +29,7 @@ public sealed class IntegerParsingRadixModuleTests
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, path);
             Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
@@ -173,7 +173,7 @@ public sealed class IntegerParsingRadixModuleTests
         var trees = new SyntaxTree[componentNames.Length];
         for (var index = 0; index < componentNames.Length; index++)
         {
-            var componentPath = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var componentPath = SelfHostPaths.ResolveFile(root, componentNames[index] + ".terrum");
             var text = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
             trees[index] = SyntaxTree.Parse(text, componentPath);
             Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
@@ -209,7 +209,7 @@ public sealed class IntegerParsingRadixModuleTests
             }
         });}
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-source-integer-parsing-{Guid.NewGuid():N}.dll");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-source-integer-parsing-{Guid.NewGuid():N}.dll");
         try
         {
             await File.WriteAllBytesAsync(path, artifact.Image).ConfigureAwait(true);
@@ -306,7 +306,7 @@ public sealed class IntegerParsingRadixModuleTests
         var trees = new SyntaxTree[componentNames.Length + 1];
         for (var index = 0; index < componentNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", componentNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, componentNames[index] + ".terrum");
             trees[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
         }
         trees[^1] = SyntaxTree.Parse(
@@ -319,7 +319,7 @@ public sealed class IntegerParsingRadixModuleTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
 
-        var pathToExecutable = Path.Combine(Path.GetTempPath(),
+        var pathToExecutable = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"terrum-source-integer-parsing-fail-fast-{Guid.NewGuid():N}.exe");
         try
         {

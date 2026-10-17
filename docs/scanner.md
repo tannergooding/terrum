@@ -85,8 +85,9 @@ validates one scalar but leaves target-type representability to the hosted
 binder.
 
 ```powershell
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host input.txt --runtime fail-fast --json
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component self-host samples\native\factorial.terrum -o artifacts\scanned-factorial.exe --runtime fail-fast --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component sources\self-host input.txt --runtime fail-fast --json
+New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component self-host samples\native\factorial.terrum -o artifacts\bin\samples\scanned-factorial.exe --runtime fail-fast --json
 ```
 
 For these commands a directory argument explicitly selects the ordered
@@ -178,7 +179,7 @@ The first nine grants have indices 0–8; the escape catalog is grant 9.
 The scalar frontend adds its 392-word output grant at index 10 and
 `Host.FrontendProgram` at index 11 for complete multi-function snapshots.
 Current projection layouts and reader bounds are in the
-[self-host inventory](../self-host/README.md); scanner grants and records are separate.
+[self-host inventory](implementation/self-host.md); scanner grants and records are separate.
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.
@@ -354,7 +355,7 @@ numeric forms; repeated scans reset the published count.
 
 ## Quoted-literal decoding candidate
 
-`self-host/StringLiteral.terrum` separately validates and decodes quoted source
+`sources/self-host/StringLiteral.terrum` separately validates and decodes quoted source
 spelling against the same fixed immutable `Host.Source` grant. It is not a new
 scanner side table or a runtime `Text` implementation. `StringLiteral.TryCreate`
 checks the complete range, delimiters, raw scalars and escapes before publishing

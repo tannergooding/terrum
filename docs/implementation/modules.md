@@ -295,21 +295,23 @@ From the repository root after building, compile the reference source and
 replacement source independently, then persist each artifact:
 
 ```powershell
+New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
 $cli = 'artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll'
-dotnet $cli compile-module producer samples\native\modules\reference.terrum Helper -o artifacts\producer-v1.trm
-dotnet $cli compile-module consumer samples\native\modules\consumer.terrum artifacts\producer-v1.trm -o artifacts\consumer.trm
-dotnet $cli compile-module producer samples\native\modules\replacement.terrum Helper -o artifacts\producer-v2.trm
-dotnet $cli run-module artifacts\consumer.trm artifacts\producer-v1.trm --runtime fail-fast # exits 11
-dotnet $cli run-module artifacts\consumer.trm artifacts\producer-v2.trm --runtime fail-fast # exits 22
-dotnet $cli link-module artifacts\consumer.trm artifacts\producer-v2.trm -o artifacts\linked.exe --runtime fail-fast
+dotnet $cli compile-module producer samples\native\modules\reference.terrum Helper -o artifacts\bin\modules\producer-v1.trm
+dotnet $cli compile-module consumer samples\native\modules\consumer.terrum artifacts\bin\modules\producer-v1.trm -o artifacts\bin\modules\consumer.trm
+dotnet $cli compile-module producer samples\native\modules\replacement.terrum Helper -o artifacts\bin\modules\producer-v2.trm
+dotnet $cli run-module artifacts\bin\modules\consumer.trm artifacts\bin\modules\producer-v1.trm --runtime fail-fast # exits 11
+dotnet $cli run-module artifacts\bin\modules\consumer.trm artifacts\bin\modules\producer-v2.trm --runtime fail-fast # exits 22
+dotnet $cli link-module artifacts\bin\modules\consumer.trm artifacts\bin\modules\producer-v2.trm -o artifacts\bin\modules\linked.exe --runtime fail-fast
 ```
 
 The actual compiler candidates can be built separately from their tests:
 
 ```powershell
-dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\CharacterFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o artifacts\compiler-values.trm
-dotnet $cli compile-module consumer self-host\RangeTests.terrum artifacts\compiler-values.trm --source samples\native\modules\range-entry.terrum -o artifacts\range-tests.trm
-dotnet $cli run-module artifacts\range-tests.trm artifacts\compiler-values.trm --runtime fail-fast # exits 0
+New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
+dotnet $cli compile-module producer sources\self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\self-host\CharacterFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o artifacts\bin\modules\compiler-values.trm
+dotnet $cli compile-module consumer tests\self-host\RangeTests.terrum artifacts\bin\modules\compiler-values.trm --source samples\native\modules\range-entry.terrum -o artifacts\bin\modules\range-tests.trm
+dotnet $cli run-module artifacts\bin\modules\range-tests.trm artifacts\bin\modules\compiler-values.trm --runtime fail-fast # exits 0
 ```
 
 `Token` also compiles separately from its tests. Its nested `SourceRange` makes
@@ -317,9 +319,10 @@ the value twelve bytes, exercising indirect arguments and results rather than
 the scalar-register-only profile:
 
 ```powershell
-dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\token-values.trm
-dotnet $cli compile-module consumer self-host\TokenTests.terrum artifacts\token-values.trm --source samples\native\modules\token-entry.terrum -o artifacts\token-tests.trm
-dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --runtime fail-fast # exits 0
+New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
+dotnet $cli compile-module producer sources\self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source sources\self-host\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\bin\modules\token-values.trm
+dotnet $cli compile-module consumer tests\self-host\TokenTests.terrum artifacts\bin\modules\token-values.trm --source samples\native\modules\token-entry.terrum -o artifacts\bin\modules\token-tests.trm
+dotnet $cli run-module artifacts\bin\modules\token-tests.trm artifacts\bin\modules\token-values.trm --runtime fail-fast # exits 0
 ```
 
 The bounded `ComponentTestRunner` composes the range, character-fact, UTF-16,
@@ -328,29 +331,30 @@ integer-saturation, integer-wrapping, checked-conversion and 32-/64-bit
 bit-operation checks against one independently compiled producer:
 
 ```powershell
+New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
 $componentSources = @(
-    'self-host\SourceRange.terrum',
-    'self-host\CharacterFacts.terrum',
-    'self-host\Utf16CodeUnits.terrum',
-    'self-host\IntegerFacts.terrum',
-    'self-host\IntegerFactsTestExports.terrum',
-    'self-host\Token.terrum',
-    'self-host\ManagedTokenChain.terrum',
-    'self-host\ManagedTokenChainTests.terrum',
-    'self-host\CopyAlgorithms.terrum',
-    'self-host\CopyAlgorithmsTests.terrum',
-    'self-host\Float32MathSelection.terrum',
-    'self-host\Float64MathSelection.terrum',
-    'self-host\FloatMathSelectionTests.terrum',
-    'self-host\WideIntegerFacts.terrum',
-    'self-host\IntegerFormatting.terrum',
-    'self-host\IntegerFormattingTests.terrum',
-    'self-host\IntegerCheckedArithmetic.terrum',
-    'self-host\IntegerMath.terrum',
-    'self-host\IntegerSaturation.terrum',
-    'self-host\IntegerWrapping.terrum',
-    'self-host\IntegerCheckedConversions.terrum',
-    'self-host\BitOperations.terrum'
+    'sources\self-host\SourceRange.terrum',
+    'sources\self-host\CharacterFacts.terrum',
+    'sources\self-host\Utf16CodeUnits.terrum',
+    'sources\self-host\IntegerFacts.terrum',
+    'tests\self-host\IntegerFactsTestExports.terrum',
+    'sources\self-host\Token.terrum',
+    'sources\self-host\ManagedTokenChain.terrum',
+    'tests\self-host\ManagedTokenChainTests.terrum',
+    'sources\self-host\CopyAlgorithms.terrum',
+    'tests\self-host\CopyAlgorithmsTests.terrum',
+    'sources\self-host\Float32MathSelection.terrum',
+    'sources\self-host\Float64MathSelection.terrum',
+    'tests\self-host\FloatMathSelectionTests.terrum',
+    'sources\self-host\WideIntegerFacts.terrum',
+    'sources\self-host\IntegerFormatting.terrum',
+    'tests\self-host\IntegerFormattingTests.terrum',
+    'sources\self-host\IntegerCheckedArithmetic.terrum',
+    'sources\self-host\IntegerMath.terrum',
+    'sources\self-host\IntegerSaturation.terrum',
+    'sources\self-host\IntegerWrapping.terrum',
+    'sources\self-host\IntegerCheckedConversions.terrum',
+    'sources\self-host\BitOperations.terrum'
 )
 $componentExports = @(
     'Terrum.CodeAnalysis.SourceRange.TryCreate',
@@ -494,41 +498,42 @@ for ($index = 1; $index -lt $componentSources.Count; $index++) {
 for ($index = 1; $index -lt $componentExports.Count; $index++) {
     $producerArgs += @('--export', $componentExports[$index])
 }
-$producerArgs += @('-o', 'artifacts\component-values.trm')
+$producerArgs += @('-o', 'artifacts\bin\modules\component-values.trm')
 dotnet $cli @producerArgs
 
 $componentTests = @(
-    'self-host\RangeTests.terrum',
-    'self-host\CharacterFactsTests.terrum',
-    'self-host\Utf16CodeUnitsTests.terrum',
-    'self-host\IntegerFactsTests.terrum',
-    'self-host\TokenTests.terrum',
-    'self-host\WideIntegerTests.terrum',
-    'self-host\IntegerCheckedArithmeticTests.terrum',
-    'self-host\IntegerMathTests.terrum',
-    'self-host\IntegerSaturationTests.terrum',
-    'self-host\IntegerWrappingTests.terrum',
-    'self-host\IntegerCheckedConversionsTests.terrum',
-    'self-host\BitOperationsTests.terrum',
-    'self-host\ComponentTestRunner.terrum'
+    'tests\self-host\RangeTests.terrum',
+    'tests\self-host\CharacterFactsTests.terrum',
+    'tests\self-host\Utf16CodeUnitsTests.terrum',
+    'tests\self-host\IntegerFactsTests.terrum',
+    'tests\self-host\TokenTests.terrum',
+    'tests\self-host\WideIntegerTests.terrum',
+    'tests\self-host\IntegerCheckedArithmeticTests.terrum',
+    'tests\self-host\IntegerMathTests.terrum',
+    'tests\self-host\IntegerSaturationTests.terrum',
+    'tests\self-host\IntegerWrappingTests.terrum',
+    'tests\self-host\IntegerCheckedConversionsTests.terrum',
+    'tests\self-host\BitOperationsTests.terrum',
+    'tests\self-host\ComponentTestRunner.terrum'
 )
-$consumerArgs = @('compile-module', 'consumer', $componentTests[0], 'artifacts\component-values.trm')
+$consumerArgs = @('compile-module', 'consumer', $componentTests[0], 'artifacts\bin\modules\component-values.trm')
 for ($index = 1; $index -lt $componentTests.Count; $index++) {
     $consumerArgs += @('--source', $componentTests[$index])
 }
-$consumerArgs += @('-o', 'artifacts\component-tests.trm')
+$consumerArgs += @('-o', 'artifacts\bin\modules\component-tests.trm')
 dotnet $cli @consumerArgs
-dotnet $cli run-module artifacts\component-tests.trm artifacts\component-values.trm --runtime fail-fast # exits 0
-dotnet $cli link-module artifacts\component-tests.trm artifacts\component-values.trm -o artifacts\component-tests.exe --runtime fail-fast
+dotnet $cli run-module artifacts\bin\modules\component-tests.trm artifacts\bin\modules\component-values.trm --runtime fail-fast # exits 0
+dotnet $cli link-module artifacts\bin\modules\component-tests.trm artifacts\bin\modules\component-values.trm -o artifacts\bin\modules\component-tests.exe --runtime fail-fast
 ```
 
 The wide-integer helpers exercise full-range signed and unsigned values across
 the same independent module boundary:
 
 ```powershell
-dotnet $cli compile-module producer self-host\WideIntegerFacts.terrum Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\wide-values.trm
-dotnet $cli compile-module consumer self-host\WideIntegerTests.terrum artifacts\wide-values.trm --source samples\native\modules\wide-entry.terrum -o artifacts\wide-tests.trm
-dotnet $cli run-module artifacts\wide-tests.trm artifacts\wide-values.trm --runtime fail-fast # exits 0
+New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
+dotnet $cli compile-module producer sources\self-host\WideIntegerFacts.terrum Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\bin\modules\wide-values.trm
+dotnet $cli compile-module consumer tests\self-host\WideIntegerTests.terrum artifacts\bin\modules\wide-values.trm --source samples\native\modules\wide-entry.terrum -o artifacts\bin\modules\wide-tests.trm
+dotnet $cli run-module artifacts\bin\modules\wide-tests.trm artifacts\bin\modules\wide-values.trm --runtime fail-fast # exits 0
 ```
 
 `samples/native/modules/incompatible.terrum` changes `Helper` to return `bool`.
@@ -615,14 +620,15 @@ artifact with either provider. `link-module` instead emits a fresh executable
 for each provider; it does not patch a previously linked PE:
 
 ```powershell
+New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
 $cli = 'artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll'
 foreach ($policy in 'fail-fast', 'checked-exceptions') {
     $suffix = $policy -replace '-', ''
-    $original = "artifacts\snapshot-original-$suffix.trm"
-    $replacement = "artifacts\snapshot-managed-$suffix.trm"
-    $consumer = "artifacts\snapshot-consumer-$suffix.trm"
-    $originalExe = "artifacts\snapshot-original-$suffix.exe"
-    $replacementExe = "artifacts\snapshot-managed-$suffix.exe"
+    $original = "artifacts\bin\modules\snapshot-original-$suffix.trm"
+    $replacement = "artifacts\bin\modules\snapshot-managed-$suffix.trm"
+    $consumer = "artifacts\bin\modules\snapshot-consumer-$suffix.trm"
+    $originalExe = "artifacts\bin\modules\snapshot-original-$suffix.exe"
+    $replacementExe = "artifacts\bin\modules\snapshot-managed-$suffix.exe"
     dotnet $cli compile-module producer samples\native\graph\copy-contract-original.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
     dotnet $cli compile-module producer samples\native\graph\copy-contract-managed.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
     dotnet $cli compile-module consumer samples\native\modules\managed-copy-consumer.terrum $original -o $consumer --runtime $policy

@@ -108,7 +108,7 @@ public sealed class BlobTableValidationComponentTests
         var components = new List<SyntaxTree>();
         foreach (var name in new[] { "VariableTableIndex.terrum", "BlobTableValidation.terrum" })
         {
-            var path = Path.Combine(root, "self-host", name);
+            var path = SelfHostPaths.ResolveFile(root, name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
@@ -165,7 +165,7 @@ public sealed class BlobTableValidationComponentTests
         var components = new List<SyntaxTree>();
         foreach (var name in new[] { "VariableTableIndex.terrum", "BlobTableValidation.terrum" })
         {
-            var path = Path.Combine(root, "self-host", name);
+            var path = SelfHostPaths.ResolveFile(root, name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
@@ -214,7 +214,7 @@ public sealed class BlobTableValidationComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"blob-table-validation-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"blob-table-validation-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy))

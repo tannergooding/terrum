@@ -43,7 +43,7 @@ public sealed partial class JitTests
         var checks = string.Join(Environment.NewLine, expected.Select((digit, index) =>
             FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         var source = component + $$"""
 
             int32 Main() {
@@ -65,7 +65,7 @@ public sealed partial class JitTests
     public async Task IntegerFormattingRejectsInsufficientWorkspaceAcrossAotAndJitAsync()
     {
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         const string Failure = """
 
             int32 Attempt() {
@@ -103,7 +103,7 @@ public sealed partial class JitTests
         ArgumentNullException.ThrowIfNull(value);
         var format = FormatterName(isSigned, isNarrow, false);
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         var checks = string.Join(Environment.NewLine, value.Select((digit, index) =>
             FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
         var source = component + $$"""
@@ -128,7 +128,7 @@ public sealed partial class JitTests
         string value, bool isSigned, int capacity, bool isNarrow = false)
     {
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         var format = FormatterName(isSigned, isNarrow, false);
         var attempt = $$"""
 
@@ -195,7 +195,7 @@ public sealed partial class JitTests
             (true, true) => "TryGetInt32BaseLength",
         };
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         var source = component + $$"""
 
             int32 Main() {
@@ -252,7 +252,7 @@ public sealed partial class JitTests
         var decimalChecks = string.Join(Environment.NewLine, decimalText.Select((digit, index) =>
             FormattableString.Invariant($"if (decimalDigits.Read({index}) != {(int)digit}) {{ return 5; }}")));
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         var format = uppercase ? "FormatChar16BaseUpper" : "FormatChar16Base";
         var source = component + $$"""
 
@@ -294,7 +294,7 @@ public sealed partial class JitTests
         int radix, int capacity, bool uppercase = false)
     {
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         var format = uppercase ? "FormatChar16BaseUpper" : "FormatChar16Base";
         var attempt = $$"""
 
@@ -328,7 +328,7 @@ public sealed partial class JitTests
         int radix, int capacity, bool signed, bool isNarrow = false, bool uppercase = false)
     {
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerFormatting.terrum")).ConfigureAwait(true);
         var format = FormatterName(signed, isNarrow, true) + (uppercase ? "Upper" : "");
         var value = signed
             ? isNarrow ? "int32.MinValue" : "int64.MinValue"
@@ -367,9 +367,9 @@ public sealed partial class JitTests
 
     private static Task AssertIntegerFormattingFailFastExecutionAsync(string source, int expected) =>
         AssertFailFastExecutionAsync(source, expected,
-            Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum"));
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "WideIntegerFacts.terrum"));
 
     private static Task AssertIntegerFormattingCheckedExecutionAsync(string source, int expected) =>
         AssertCheckedExecutionAsync(source, expected,
-            Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum"));
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "WideIntegerFacts.terrum"));
 }

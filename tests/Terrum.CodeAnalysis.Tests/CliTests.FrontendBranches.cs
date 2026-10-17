@@ -35,7 +35,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"branch-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"branch-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -91,7 +91,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"branch-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"branch-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -131,7 +131,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"branch-{Guid.NewGuid():N}.exe");
         try
         {
@@ -163,7 +163,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"branch-{Guid.NewGuid():N}.exe");
         try
         {
@@ -195,7 +195,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var sources = new[] {
             "int32 Main() { mut int32 x = 0; if (true) { "
                 + string.Concat(Enumerable.Repeat("x = x + 1; ", 12)) + "} return x; }",

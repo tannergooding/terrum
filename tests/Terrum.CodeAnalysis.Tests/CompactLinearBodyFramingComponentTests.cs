@@ -215,7 +215,7 @@ public sealed class CompactLinearBodyFramingComponentTests
             "CompactLinearBodyFraming.terrum",
         })
         {
-            var path = Path.Combine(root, "self-host", name);
+            var path = SelfHostPaths.ResolveFile(root, name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
@@ -271,7 +271,7 @@ public sealed class CompactLinearBodyFramingComponentTests
             "CompactLinearBodyFraming.terrum",
         })
         {
-            var path = Path.Combine(root, "self-host", name);
+            var path = SelfHostPaths.ResolveFile(root, name);
             var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
             components.Add(tree);
@@ -421,7 +421,7 @@ public sealed class CompactLinearBodyFramingComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(),
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"compact-linear-body-framing-{Guid.NewGuid():N}.exe");
         try
         {

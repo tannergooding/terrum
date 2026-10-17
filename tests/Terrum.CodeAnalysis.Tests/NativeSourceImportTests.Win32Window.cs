@@ -77,7 +77,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(image.AsSpan().IndexOf("DestroyWindow\0"u8) >= 0, Is.True);
         Assert.That(image.AsSpan().IndexOf("native-import-abi-probe.dll\0"u8) < 0, Is.True);
 
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-window-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-window-");
         var executablePath = Path.Combine(directory, "direct-window.exe");
         try
         {
@@ -173,7 +173,7 @@ public sealed partial class NativeSourceImportTests
         var repositoryRoot = FindRepositoryRoot();
         var native = Path.Combine(repositoryRoot, "tests", "native");
         var environment = await FindNativeFixtureEnvironmentAsync(repositoryRoot).ConfigureAwait(false);
-        var directory = Directory.CreateTempSubdirectory("terrum-win32-sdk-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-win32-sdk-");
         try
         {
             var objectPath = Path.Combine(directory, "window-sdk-probe.obj");

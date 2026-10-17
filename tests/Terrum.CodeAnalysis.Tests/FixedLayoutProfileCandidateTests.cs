@@ -479,7 +479,7 @@ public sealed class FixedLayoutProfileCandidateTests
         var environment = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
         Assert.That(File.Exists(environment), Is.True, "Visual Studio x64 C build tools are required for the C storage fixture.");
 
-        var directory = Directory.CreateTempSubdirectory("terrum-fixed-layout-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-fixed-layout-");
         var executable = Path.Combine(directory, "fixed-layout-storage-probe.exe");
         var objectFile = Path.Combine(directory, "fixed-layout-storage-probe.obj");
         var source = Path.Combine(root, "tests", "native", "fixed-layout-storage-probe.c");

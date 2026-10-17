@@ -66,7 +66,7 @@ public sealed partial class JitTests
         }
 
         var component = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot(), "self-host", "IntegerWrapping.terrum")).ConfigureAwait(true);
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerWrapping.terrum")).ConfigureAwait(true);
         foreach (var batch in checks.Chunk(24))
         {
             var assertions = string.Join(Environment.NewLine, batch.Select((check, index) =>

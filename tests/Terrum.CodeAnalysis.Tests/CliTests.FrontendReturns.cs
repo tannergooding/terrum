@@ -25,7 +25,7 @@ public sealed partial class CliTests
             + $" else {{ return {alternate}; }} }} return {fallback}; }}";
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"return-{Guid.NewGuid():N}.native.dll");
         var hostedPath = CreateTestArtifactPath($"return-{Guid.NewGuid():N}.hosted.dll");
         try
@@ -73,7 +73,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"return-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"return-{Guid.NewGuid():N}.hosted.exe");
         try
@@ -111,7 +111,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"return-{Guid.NewGuid():N}.exe");
         try
         {
@@ -141,7 +141,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var path = CreateTestArtifactPath($"return-{Guid.NewGuid():N}.exe");
         try
         {
@@ -173,7 +173,7 @@ public sealed partial class CliTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var source = "int32 Main() { " + string.Concat(Enumerable.Repeat("return 42; ", 12)) + "}";

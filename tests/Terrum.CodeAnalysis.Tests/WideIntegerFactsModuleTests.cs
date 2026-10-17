@@ -20,7 +20,7 @@ public sealed class WideIntegerFactsModuleTests
     public async Task CheckedWideArithmeticPersistsAndMatchesBigIntegerBoundariesAsync(
         BoundRuntimePolicy policy)
     {
-        var path = Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum");
+        var path = SelfHostPaths.ResolveFile(RepositoryRoot(), "WideIntegerFacts.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
 
@@ -140,7 +140,7 @@ public sealed class WideIntegerFactsModuleTests
     public async Task WideAccumulatorsPersistAndMatchBigIntegerBoundariesAsync(
         BoundRuntimePolicy policy)
     {
-        var path = Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum");
+        var path = SelfHostPaths.ResolveFile(RepositoryRoot(), "WideIntegerFacts.terrum");
         var tree = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
 

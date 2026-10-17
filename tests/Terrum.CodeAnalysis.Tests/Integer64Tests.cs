@@ -497,7 +497,7 @@ public sealed class Integer64Tests
 
     private static async Task ExecuteBothAsync(BoundProgram program, int expected)
     {
-        var prefix = Path.Combine(AppContext.BaseDirectory, $"integer64-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"integer64-{Guid.NewGuid():N}");
         var executable = prefix + ".exe";
         var consumer = prefix + ".consumer.trm";
         var producer = prefix + ".producer.trm";

@@ -48,7 +48,7 @@ public sealed partial class CliTests
     {
         Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length <= 64, Is.True);
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.hosted.exe");
         var scannerPath = CreateTestArtifactPath($"blocks-{Guid.NewGuid():N}.scanner.exe");
@@ -115,12 +115,12 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (initial, _, _) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { { return 42; } }"),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(initial, Is.EqualTo(0));
                 var original = await File.ReadAllBytesAsync(path);
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", path,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", path,
                     "--runtime", policy, "--json");
                 Assert.That(exit == 1, Is.True, $"{policy}: {exit}: {output}{error}");
                 Assert.That(await File.ReadAllBytesAsync(path), Is.EqualTo(original));
@@ -144,7 +144,7 @@ public sealed partial class CliTests
             {
                 var input = Encoding.UTF8.GetBytes(source);
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build", Path.Combine(root, "self-host"), "-", "-o", nativePath,
+                    "frontend-build", SelfHostPaths.SourceDirectory(root), "-", "-o", nativePath,
                     "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build", "-", "-o", hostedPath, "--runtime", policy, "--json");
@@ -178,7 +178,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o",
+                    "frontend-build-library", SelfHostPaths.SourceDirectory(root), "-", "-o",
                     nativePath, "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build-library", "-", "--export", "Value", "-o", hostedPath,
@@ -246,7 +246,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (exit, output, error) = await RunAsync(input, "frontend-build",
-                    Path.Combine(root, "self-host"), "-", "-o", nativePath, "--runtime", policy, "--json");
+                    SelfHostPaths.SourceDirectory(root), "-", "-o", nativePath, "--runtime", policy, "--json");
                 Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
                 using var document = JsonDocument.Parse(output);
                 var result = document.RootElement.GetProperty("result");
@@ -284,7 +284,7 @@ public sealed partial class CliTests
         var source = $"int32 Main() {{ {{ {declarations}return {expression}; }} }}";
         Assert.That(Lexer.Lex(SourceText.From(source)).Tokens.Length, Is.EqualTo(count));
         var root = RepositoryRoot();
-        var frontend = Path.Combine(root, "self-host");
+        var frontend = SelfHostPaths.SourceDirectory(root);
         var nativePath = CreateTestArtifactPath($"blocks-window-{Guid.NewGuid():N}.native.exe");
         var hostedPath = CreateTestArtifactPath($"blocks-window-{Guid.NewGuid():N}.hosted.exe");
         var scannerPath = CreateTestArtifactPath($"blocks-window-{Guid.NewGuid():N}.scanner.exe");
@@ -354,7 +354,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                    "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
+                    "frontend-component", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-",
                     "--runtime", policy, "--json");
                 Assert.That(exit, Is.EqualTo(2));
                 Assert.That(error, Is.Empty);
@@ -378,7 +378,7 @@ public sealed partial class CliTests
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
                 var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
-                    "frontend-build-library", Path.Combine(root, "self-host"), "-", "-o",
+                    "frontend-build-library", SelfHostPaths.SourceDirectory(root), "-", "-o",
                     nativePath, "--runtime", policy, "--json");
                 var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
                     "build-library", "-", "--export", "await", "-o", hostedPath,
@@ -412,7 +412,7 @@ public sealed partial class CliTests
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
-                "frontend-component", Path.Combine(RepositoryRoot(), "self-host"), "-",
+                "frontend-component", SelfHostPaths.SourceDirectory(RepositoryRoot()), "-",
                 "--runtime", policy, "--json");
             Assert.That(exit == (valid ? 0 : 1), Is.True, $"{policy}: {output}{error}");
             if (valid)

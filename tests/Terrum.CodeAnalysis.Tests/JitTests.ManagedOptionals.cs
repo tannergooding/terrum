@@ -93,9 +93,9 @@ public sealed partial class JitTests
     public async Task LinkedTokenCandidateRejectsInvalidMutationsAndCollectsClearedLinksAsync(bool checkedFailures)
     {
         string[] components = [
-            Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "Token.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "ManagedTokenChain.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceRange.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "Token.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "ManagedTokenChain.terrum"),
         ];
         const string Source = """
             using Terrum.CodeAnalysis;
@@ -141,9 +141,9 @@ public sealed partial class JitTests
     public async Task LinkedTokenCopiesMatchHostMetadataAfterCollectionAsync(bool checkedFailures)
     {
         string[] components = [
-            Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "Token.terrum"),
-            Path.Combine(RepositoryRoot(), "self-host", "ManagedTokenChain.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "SourceRange.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "Token.terrum"),
+            SelfHostPaths.ResolveFile(RepositoryRoot(), "ManagedTokenChain.terrum"),
         ];
         var lexical = Lexer.Lex(SourceText.From("// header\r\nint32 \U00010400() { return 42; }"));
         Assert.That(lexical.Diagnostics, Is.Empty);

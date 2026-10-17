@@ -128,4 +128,4 @@ Ordinary frontend AOT/JIT and persisted `scanner-10` checks are independent
 prerequisites, not evidence that this complete persisted path executes. Actual
 implementation and rejection evidence belongs in the
 [implementation reference](../implementation.md) and
-[self-host inventory](../../self-host/README.md), not an approval declaration.
+[self-host inventory](../implementation/self-host.md), not an approval declaration.

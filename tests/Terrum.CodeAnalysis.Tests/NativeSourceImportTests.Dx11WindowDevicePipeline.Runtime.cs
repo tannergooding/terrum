@@ -20,7 +20,7 @@ public sealed partial class NativeSourceImportTests
     {
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(true);
-        var directory = Directory.CreateTempSubdirectory("terrum-direct-pipeline-abi-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-direct-pipeline-abi-");
         try
         {
             var sdk = Path.Combine(root, "tests", "native", "dx11-direct-pipeline-sdk-probe.c");
@@ -172,7 +172,7 @@ public sealed partial class NativeSourceImportTests
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(true);
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-shader-path-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-shader-path-");
         var install = Path.Combine(directory, "install");
         var working = Path.Combine(directory, "working");
         Directory.CreateDirectory(install);
@@ -279,7 +279,7 @@ public sealed partial class NativeSourceImportTests
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var image = NativeEmitter.EmitWithNativeImports(CompileDirectWindowDevicePipeline(), NativeRuntimePolicy.CheckedExceptions);
-        var directory = Directory.CreateTempSubdirectory("terrum-window-device-pipeline-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-window-device-pipeline-");
         var install = Path.Combine(directory, "install");
         var working = Path.Combine(directory, "working");
         Directory.CreateDirectory(install);

@@ -26,7 +26,7 @@ public sealed class Char16FloatConversionModuleTests
         };
         for (var index = 0; index < dependencyNames.Length; index++)
         {
-            var path = Path.Combine(root, "self-host", dependencyNames[index] + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, dependencyNames[index] + ".terrum");
             trees[index] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
             Assert.That(trees[index].HasErrors, Is.False, string.Join(Environment.NewLine, trees[index].Diagnostics));
         }

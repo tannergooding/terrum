@@ -148,10 +148,10 @@ public sealed class StringRowTextComponentTests
         AddInvalidText(fixtures, wrongUnitCount, false);
 
         var root = RepositoryRoot();
-        var layoutPath = Path.Combine(root, "self-host", "StringRowLayout.terrum");
+        var layoutPath = SelfHostPaths.ResolveFile(root, "StringRowLayout.terrum");
         var layout = SyntaxTree.Parse(await File.ReadAllTextAsync(layoutPath).ConfigureAwait(true), layoutPath);
         Assert.That(layout.HasErrors, Is.False, string.Join(Environment.NewLine, layout.Diagnostics));
-        var textPath = Path.Combine(root, "self-host", "StringRowText.terrum");
+        var textPath = SelfHostPaths.ResolveFile(root, "StringRowText.terrum");
         var text = SyntaxTree.Parse(await File.ReadAllTextAsync(textPath).ConfigureAwait(true), textPath);
         Assert.That(text.HasErrors, Is.False, string.Join(Environment.NewLine, text.Diagnostics));
         var entry = SyntaxTree.Parse(VerificationSource, "string-row-text-component.terrum");
@@ -239,7 +239,7 @@ public sealed class StringRowTextComponentTests
 
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"string-row-text-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"string-row-text-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);

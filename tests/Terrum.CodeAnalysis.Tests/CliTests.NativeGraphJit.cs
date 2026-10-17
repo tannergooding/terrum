@@ -17,7 +17,7 @@ public sealed partial class CliTests
         var apphost = GraphJitApphostPath();
         var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var source = Path.Combine(repository, "artifacts", "checked-jit-apphost-"
+        var source = Path.Combine(TestArtifactPaths.DirectoryPath, "checked-jit-apphost-"
             + Guid.NewGuid().ToString("N") + ".terrum");
         try
         {
@@ -62,7 +62,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task NativeGraphJitReleasesOwnedBufferReturnedByLeafAsync(string policy)
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-jit-buffer-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var leafSource = Path.Combine(directory, "leaf.terrum");
@@ -107,7 +107,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task NativeGraphJitDropsLeafOwnedCompositeThroughRootAsync(string policy)
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-jit-composite-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var leafSource = Path.Combine(directory, "leaf.terrum");
@@ -155,7 +155,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task NativeGraphJitRunsPersistedImagesAndCompatibleLeafReplacementAsync(string policy)
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-jit-cli-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var leaf = Path.Combine(directory, "leaf.trmn");
@@ -233,7 +233,7 @@ public sealed partial class CliTests
     [TestCase("return n / (n - n);",unchecked((int)0xE0540002))]
     public async Task NativeGraphJitPreservesUnhandledCheckedFailureAsync(string body, int expected)
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-jit-unhandled-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var rootSource = Path.Combine(directory, "root.terrum");
@@ -268,7 +268,7 @@ public sealed partial class CliTests
     [TestCase("checked-exceptions")]
     public async Task NativeGraphJitServicesInternalReadonlyViewLeafAsync(string policy)
     {
-        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+        var directory = Path.Combine(TestArtifactPaths.DirectoryPath,
             "native-graph-view-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(directory);
         var original = Path.Combine(directory, "leaf.trmn");

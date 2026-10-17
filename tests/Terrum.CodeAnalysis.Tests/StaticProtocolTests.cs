@@ -231,7 +231,7 @@ public sealed class StaticProtocolTests
     internal static async Task<int> RunAsync(byte[] image)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
-        var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-protocol-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-protocol-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

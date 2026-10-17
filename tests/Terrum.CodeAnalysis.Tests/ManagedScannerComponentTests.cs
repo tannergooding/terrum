@@ -4829,7 +4829,7 @@ public sealed partial class ManagedScannerComponentTests
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {
-            var path = Path.Combine(root, "self-host", name + ".terrum");
+            var path = SelfHostPaths.ResolveFile(root, name + ".terrum");
             trees.Add(SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path));
         }
         trees.Add(SyntaxTree.Parse(entry, "managed-scanner-entry.terrum"));
@@ -4843,9 +4843,7 @@ public sealed partial class ManagedScannerComponentTests
 
     private static async Task ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var directory = Path.Combine(root, "artifacts", "scanner-tests");
-        _ = Directory.CreateDirectory(directory);
+        var directory = TestArtifactPaths.CreateDirectory("scanner-tests");
         var path = Path.Combine(directory, $"terrum-managed-scanner-{Guid.NewGuid():N}.exe");
         try
         {

@@ -152,7 +152,7 @@ public sealed class IntegerParsingComponentTests
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(0));
 
-        var path = Path.Combine(root, "artifacts", $"integer-parsing-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"integer-parsing-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
@@ -203,7 +203,7 @@ public sealed class IntegerParsingComponentTests
     }
 
     private static SyntaxTree ReadComponent(string root, string name) =>
-        SyntaxTree.Parse(File.ReadAllText(Path.Combine(root, "self-host", name)), name);
+        SyntaxTree.Parse(File.ReadAllText(SelfHostPaths.ResolveFile(root, name)), name);
 
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

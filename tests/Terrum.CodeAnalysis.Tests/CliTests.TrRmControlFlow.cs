@@ -19,7 +19,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedIndexedControlFlowRunsAndBuildsWithoutProducerSourceAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-indexed-cli-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-indexed-cli-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         const string source = """
@@ -62,7 +62,7 @@ public sealed partial class CliTests
     [Test]
     public async Task PersistedIndexedLibraryPreservesBranchExportAsync()
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-indexed-export-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-indexed-export-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var library = prefix + ".dll";
         const string source = """
@@ -112,7 +112,7 @@ public sealed partial class CliTests
     [TestCase("int32 Main() { int32 x = 0; return (int32.MaxValue + 1) + (x == 0 ? 1 / x : 0); }",        unchecked((int)0xE0540001))]
     public async Task IndexedCheckedFailureReturnsExactFailFastStatusAsync(string source, int status)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-indexed-failure-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-indexed-failure-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var executable = prefix + ".exe";
         try
@@ -141,7 +141,7 @@ public sealed partial class CliTests
     [TestCase(true,true)]
     public async Task IndependentIndexedConsumerAuditsBeforeReplacingOutputAsync(bool library, bool invalidEffect)
     {
-        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-indexed-independent-{Guid.NewGuid():N}");
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-indexed-independent-{Guid.NewGuid():N}");
         var artifact = prefix + ".trrm";
         var output = prefix + (library ? ".dll" : ".exe");
         try

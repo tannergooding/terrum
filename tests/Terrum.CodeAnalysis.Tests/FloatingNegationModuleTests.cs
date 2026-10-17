@@ -19,7 +19,7 @@ public sealed class FloatingNegationModuleTests
     public async Task FloatingNegationFlipsOnlyTheSignBitAsync(BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var path = Path.Combine(root, "self-host", "FloatingNegation.terrum");
+        var path = SelfHostPaths.ResolveFile(root, "FloatingNegation.terrum");
         var text = await File.ReadAllTextAsync(path).ConfigureAwait(true);
         var component = SyntaxTree.Parse(text, path);
         Assert.That(component.HasErrors, Is.False, string.Join(Environment.NewLine, component.Diagnostics));

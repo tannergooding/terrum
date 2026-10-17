@@ -72,7 +72,7 @@ descriptor cleanup before owners are reused.
 The separate frontend profile additionally executes complete v88 publication
 and summary decoding with fresh grants. Actual evidence and precise limits are
 recorded in the [implementation reference](../implementation.md) and
-[self-host inventory](../../self-host/README.md), not as acceptance here.
+[self-host inventory](../implementation/self-host.md), not as acceptance here.
 
 Returned `Span<Token>` values, `[return: DependsOn(...)]` result metadata,
 `TokenCursor` captures/advance, span fields, output/vacant/mutable span slots,

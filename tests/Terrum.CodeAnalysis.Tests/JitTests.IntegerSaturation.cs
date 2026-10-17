@@ -137,7 +137,7 @@ public sealed partial class JitTests
         var assertions = string.Join(Environment.NewLine,
             checks.Concat(narrowingChecks).Concat(wideningChecks).Select((check, index) =>
             $"if ({check}) {{ return {index + 1}; }}"));
-        var componentPath = Path.Combine(RepositoryRoot(), "self-host", "IntegerSaturation.terrum");
+        var componentPath = SelfHostPaths.ResolveFile(RepositoryRoot(), "IntegerSaturation.terrum");
         var component = await File.ReadAllTextAsync(componentPath).ConfigureAwait(true);
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(component, componentPath),
             (BoundRuntimePolicy)policy);
@@ -167,7 +167,7 @@ public sealed partial class JitTests
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));
 
         AssertWindowsX64();
-        var directory = Directory.CreateTempSubdirectory("terrum-saturation-module-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-saturation-module-");
         var image = Path.Combine(directory, "consumer.exe");
         try
         {

@@ -105,7 +105,7 @@ public sealed partial class NativeSourceImportTests
         }
         var root = FindRepositoryRoot();
         var environment = await FindNativeFixtureEnvironmentAsync(root).ConfigureAwait(true);
-        var directory = Directory.CreateTempSubdirectory("terrum-dx11-composed-hidden-warp-").FullName;
+        var directory = TestArtifactPaths.CreateDirectory("terrum-dx11-composed-hidden-warp-");
         try
         {
             const string dllName = "native-dx11-resize-render-hidden-warp-probe.dll";

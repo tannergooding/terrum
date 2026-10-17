@@ -454,7 +454,7 @@ public sealed partial class NativeManagedClassModuleTests
 
     private static async Task<int> ExecuteAsync(byte[] image)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, $"managed-class-module-{Guid.NewGuid():N}.exe");
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"managed-class-module-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);

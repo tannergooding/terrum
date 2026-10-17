@@ -31,10 +31,11 @@ dotnet run --file scripts\check-native-seh.cs
 
 The script discovers the installed toolchain with `vswhere`, builds
 [`seh-probe.c`](../tests/native/seh-probe.c) with `/W4 /WX`, and executes it
-in a ten-second supervised child. The compiler listing and build/execution
-logs remain in the printed, invocation-specific directory under
-`artifacts\log\native-probes`. Failed commands retain both output streams;
-only a fully checked run has `completed.txt`.
+in a ten-second supervised child. The executable is under
+`artifacts\bin\native-probes\native-seh`, the compiler listing and object are
+under `artifacts\obj\native-probes\native-seh`, and build/execution logs are
+under `artifacts\log\native-probes\native-seh`. These fixed filenames are
+overwritten on each run; the script does not write a completion marker.
 The C compiler is a reference for this probe,
 not a Terrum backend dependency.
 
