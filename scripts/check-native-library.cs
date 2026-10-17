@@ -38,13 +38,15 @@ const string Source = """
         return true;
     }
     """;
-var probe = Path.GetFullPath(Path.Combine("artifacts", "library-probe.exe"));
+var binaryDirectory = Path.GetFullPath(Path.Combine("artifacts", "bin", "native-probes", "native-library"));
+Directory.CreateDirectory(binaryDirectory);
+var probe = Path.Combine(binaryDirectory, "library-probe.exe");
 if (!File.Exists(probe))
 {
-    throw new FileNotFoundException("Build tests\\native\\library-probe.c with the MSVC x64 compiler before running the DLL check.", probe);
+    throw new FileNotFoundException("Build tests\\native\\library-probe.c into artifacts\\bin\\native-probes\\native-library before running the DLL check.", probe);
 }
-var first = Path.GetFullPath(Path.Combine("artifacts", "native-library-first.dll"));
-var second = Path.GetFullPath(Path.Combine("artifacts", "native-library-second.dll"));
+var first = Path.Combine(binaryDirectory, "native-library-first.dll");
+var second = Path.Combine(binaryDirectory, "native-library-second.dll");
 try
 {
     await File.WriteAllBytesAsync(first, Compile(Source)).ConfigureAwait(false);

@@ -65,7 +65,8 @@ var first = NativeEmitter.EmitLibrary(provider, exports, NativeRuntimePolicy.Fai
 var replacement = ProgramOf(Compilation.CreateLibrary(SyntaxTree.Parse(
     Provider.Replace("Hidden() { return 5;", "Hidden() { return 6;", StringComparison.Ordinal))));
 var second = NativeEmitter.EmitLibrary(replacement, exports, NativeRuntimePolicy.FailFast);
-var root = Path.GetFullPath("artifacts");
+var root = Path.GetFullPath(Path.Combine("artifacts", "bin", "native-probes", "native-imports"));
+Directory.CreateDirectory(root);
 var exePath = Path.Combine(root, "native-import-consumer.exe");
 var dllPath = Path.Combine(root, DllName);
 var failurePath = Path.Combine(root, "native-import-failure.exe");

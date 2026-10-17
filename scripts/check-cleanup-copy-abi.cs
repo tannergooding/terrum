@@ -65,7 +65,12 @@ var source = """
     }
     """;
 var artifacts = Path.GetFullPath("artifacts");
-Directory.CreateDirectory(artifacts);
+var binaries = Path.Combine(artifacts, "bin", "native-probes", "cleanup-copy-abi");
+var objects = Path.Combine(artifacts, "obj", "native-probes", "cleanup-copy-abi");
+var logs = Path.Combine(artifacts, "log", "native-probes", "cleanup-copy-abi");
+Directory.CreateDirectory(binaries);
+Directory.CreateDirectory(objects);
+Directory.CreateDirectory(logs);
 
 var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
     "Microsoft Visual Studio", "Installer", "vswhere.exe");
@@ -81,16 +86,16 @@ if (installation.Length == 0 || !File.Exists(environment))
 {
     throw new FileNotFoundException("Visual Studio x64 C++ build tools are required.", environment);
 }
-var provider = Path.Combine(artifacts, "cleanup-copy-provider.dll");
-var worker = Path.Combine(artifacts, "cleanup-copy-worker.exe");
+var provider = Path.Combine(binaries, "cleanup-copy-provider.dll");
+var worker = Path.Combine(binaries, "cleanup-copy-worker.exe");
 var providerSource = Path.GetFullPath(Path.Combine("tests", "native", "cleanup-copy-provider.c"));
 var workerSource = Path.GetFullPath(Path.Combine("tests", "native", "cleanup-copy-worker.c"));
 var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
     ?? throw new InvalidOperationException("ComSpec is unset.")) {
-    Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /TC /LD /Fo\"{Path.Combine(artifacts, "cleanup-copy-provider.obj")}\" /Fe\"{provider}\" \"{providerSource}\" /link /incremental:no /implib:\"{Path.Combine(artifacts, "cleanup-copy-provider.lib")}\" && cl /nologo /W4 /WX /O2 /TC /Fo\"{Path.Combine(artifacts, "cleanup-copy-worker.obj")}\" /Fe\"{worker}\" \"{workerSource}\" /link /incremental:no\"",
+    Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /TC /LD /Fo\"{Path.Combine(objects, "cleanup-copy-provider.obj")}\" /Fe\"{provider}\" \"{providerSource}\" /link /incremental:no /implib:\"{Path.Combine(objects, "cleanup-copy-provider.lib")}\" && cl /nologo /W4 /WX /O2 /TC /Fo\"{Path.Combine(objects, "cleanup-copy-worker.obj")}\" /Fe\"{worker}\" \"{workerSource}\" /link /incremental:no\"",
 };
 var buildOutput = await Run(build, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "cleanup-copy-build.log"), buildOutput).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "cleanup-copy-build.log"), buildOutput).ConfigureAwait(false);
 foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
 {
     var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
@@ -117,13 +122,13 @@ foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy
             new NativeImportBinding("Parent.Close", "cleanup-copy-provider.dll", "ClobberParent"),
             new NativeImportBinding("Child.Close", "cleanup-copy-provider.dll", "RecordChild"),
         ], policy);
-    var target = Path.Combine(artifacts, $"cleanup-copy-target-{policy}.dll");
+    var target = Path.Combine(binaries, $"cleanup-copy-target-{policy}.dll");
     await File.WriteAllBytesAsync(target, image).ConfigureAwait(false);
-    var execute = new ProcessStartInfo(worker) { WorkingDirectory = artifacts };
+    var execute = new ProcessStartInfo(worker) { WorkingDirectory = binaries };
     execute.ArgumentList.Add(provider);
     execute.ArgumentList.Add(target);
     var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-    await File.WriteAllTextAsync(Path.Combine(artifacts, $"cleanup-copy-proof-{policy}.log"), proof).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(logs, $"cleanup-copy-proof-{policy}.log"), proof).ConfigureAwait(false);
     if (proof.Trim() != "cleanup-copy-abi parent-scratch=clobbered child=42 cases=5")
     {
         throw new InvalidOperationException("The independent cleanup copy ABI proof did not complete.");

@@ -8,6 +8,8 @@ directly and does not fall back to WARP. Both author window creation, shader
 loading, rendering, resize handling, message processing, and cleanup in source.
 The vertex shader uses `SV_VertexID`, so the render path needs no input layout
 or vertex buffer.
+Build outputs are kept under
+`artifacts\bin\samples\win32-dx11-triangle\<configuration>`.
 
 ## Build and run
 
@@ -28,6 +30,9 @@ Release` selects the Release compiler. Launch with the matching driver option;
 & samples\design\win32-dx11-triangle\Start-Dx11Triangle.ps1 -Warp -WhatIf
 & samples\design\win32-dx11-triangle\Start-Dx11Triangle.ps1 -WhatIf
 ```
+
+Pass the same `-Configuration` to the start script when launching a Release
+build.
 
 Both entry points use `checked-exceptions`, require Windows x64 and the D3D11
 runtime, and load `triangle.hlsl` from beside the executable. Normal shutdown

@@ -27,18 +27,23 @@ if (installation.Length == 0 || !File.Exists(environment))
     throw new FileNotFoundException("No installed Visual Studio x64 C++ toolchain was found.", environment);
 }
 var artifacts = Path.GetFullPath("artifacts");
-Directory.CreateDirectory(artifacts);
+var binaries = Path.Combine(artifacts, "bin", "native-probes", "native-seh");
+var objects = Path.Combine(artifacts, "obj", "native-probes", "native-seh");
+var logs = Path.Combine(artifacts, "log", "native-probes", "native-seh");
+Directory.CreateDirectory(binaries);
+Directory.CreateDirectory(objects);
+Directory.CreateDirectory(logs);
 var source = Path.GetFullPath(Path.Combine("tests", "native", "seh-probe.c"));
-var executable = Path.Combine(artifacts, "seh-probe.exe");
-var listing = Path.Combine(artifacts, "seh-reference.asm");
-var objectFile = Path.Combine(artifacts, "seh-reference.obj");
+var executable = Path.Combine(binaries, "seh-probe.exe");
+var listing = Path.Combine(objects, "seh-reference.asm");
+var objectFile = Path.Combine(objects, "seh-reference.obj");
 var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? throw new InvalidOperationException("ComSpec is unset.")) {
     Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /Od /GS- /FAs /Fa\"{listing}\" /Fo\"{objectFile}\" /Fe\"{executable}\" \"{source}\" /link /incremental:no\"",
 };
 var buildOutput = await Run(build, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "native-seh-build.log"), buildOutput).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "native-seh-build.log"), buildOutput).ConfigureAwait(false);
 var output = await Run(new ProcessStartInfo(executable), TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "native-seh-proof.log"), output).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "native-seh-proof.log"), output).ConfigureAwait(false);
 if (output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length != 16)
 {
     throw new InvalidOperationException("The probe did not report all sixteen C/dynamic execution cases.");

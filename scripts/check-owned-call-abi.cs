@@ -24,11 +24,16 @@ if (installation.Length == 0 || !File.Exists(environment))
 }
 
 var artifacts = Path.GetFullPath("artifacts");
-Directory.CreateDirectory(artifacts);
+var binaries = Path.Combine(artifacts, "bin", "native-probes", "owned-call-abi");
+var objects = Path.Combine(artifacts, "obj", "native-probes", "owned-call-abi");
+var logs = Path.Combine(artifacts, "log", "native-probes", "owned-call-abi");
+Directory.CreateDirectory(binaries);
+Directory.CreateDirectory(objects);
+Directory.CreateDirectory(logs);
 var cli = Path.GetFullPath(Path.Combine("artifacts", "bin", "sources", "terrumc", "Debug", "net11.0", "terrumc.dll"));
-var dll = Path.Combine(artifacts, "owned-call-abi.dll");
-var executable = Path.Combine(artifacts, "owned-call-abi-probe.exe");
-var objectFile = Path.Combine(artifacts, "owned-call-abi-probe.obj");
+var dll = Path.Combine(binaries, "owned-call-abi.dll");
+var executable = Path.Combine(binaries, "owned-call-abi-probe.exe");
+var objectFile = Path.Combine(objects, "owned-call-abi-probe.obj");
 var buildLibrary = new ProcessStartInfo("dotnet");
 foreach (var argument in new[] { cli, "build-library",
     Path.GetFullPath(Path.Combine("tests", "native", "owned-call-abi.terrum")),
@@ -48,11 +53,11 @@ var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
     Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /TC /Fo\"{objectFile}\" /Fe\"{executable}\" \"{source}\" /link /incremental:no\"",
 };
 var nativeOutput = await Run(build, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "owned-call-abi-build.log"), libraryOutput + nativeOutput).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "owned-call-abi-build.log"), libraryOutput + nativeOutput).ConfigureAwait(false);
 var execute = new ProcessStartInfo(executable);
 execute.ArgumentList.Add(dll);
 var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "owned-call-abi-proof.log"), proof).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "owned-call-abi-proof.log"), proof).ConfigureAwait(false);
 if (proof.Trim() != "owned-call-abi direct=4 indirect=16 stack=6 composite=8,16 publication=checked recovery=42")
 {
     throw new InvalidOperationException("The independent native owned-call ABI proof did not complete.");

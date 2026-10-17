@@ -24,11 +24,16 @@ if (installation.Length == 0 || !File.Exists(environment))
 }
 
 var artifacts = Path.GetFullPath("artifacts");
-Directory.CreateDirectory(artifacts);
+var binaries = Path.Combine(artifacts, "bin", "native-probes", "native-frame");
+var objects = Path.Combine(artifacts, "obj", "native-probes", "native-frame");
+var logs = Path.Combine(artifacts, "log", "native-probes", "native-frame");
+Directory.CreateDirectory(binaries);
+Directory.CreateDirectory(objects);
+Directory.CreateDirectory(logs);
 var cli = Path.GetFullPath(Path.Combine("artifacts", "bin", "sources", "terrumc", "Debug", "net11.0", "terrumc.dll"));
-var dll = Path.Combine(artifacts, "frame-unwind.dll");
-var executable = Path.Combine(artifacts, "frame-unwind-probe.exe");
-var objectFile = Path.Combine(artifacts, "frame-unwind-probe.obj");
+var dll = Path.Combine(binaries, "frame-unwind.dll");
+var executable = Path.Combine(binaries, "frame-unwind-probe.exe");
+var objectFile = Path.Combine(objects, "frame-unwind-probe.obj");
 var buildLibrary = new ProcessStartInfo("dotnet");
 foreach (var argument in new[] { cli, "build-library", Path.GetFullPath(Path.Combine("samples", "native", "frame-unwind.terrum")),
     "--export", "Mix", "--export", "TryWrite", "-o", dll, "--runtime", "fail-fast" })
@@ -42,11 +47,11 @@ var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
     Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /Od /GS- /Fo\"{objectFile}\" /Fe\"{executable}\" \"{source}\" /link /incremental:no\"",
 };
 var nativeOutput = await Run(build, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "native-frame-build.log"), libraryOutput + nativeOutput).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "native-frame-build.log"), libraryOutput + nativeOutput).ConfigureAwait(false);
 var execute = new ProcessStartInfo(executable);
 execute.ArgumentList.Add(dll);
 var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "native-frame-proof.log"), proof).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "native-frame-proof.log"), proof).ConfigureAwait(false);
 if (proof.Trim() != "native-frame exports=42 unwound-rbp=1 funclets=1 unwound-funclet=1 prolog-states=8")
 {
     throw new InvalidOperationException("The generated frame did not satisfy the independent native ABI proof.");

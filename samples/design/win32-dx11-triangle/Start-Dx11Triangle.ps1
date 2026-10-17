@@ -1,13 +1,15 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [switch]$Warp
+    [switch]$Warp,
+    [ValidateSet('Debug', 'Release')]
+    [string]$Configuration = 'Debug'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $outputDirectory = [IO.Path]::GetFullPath(
-    (Join-Path $PSScriptRoot '..\..\..\artifacts\dx11-pipeline'))
+    (Join-Path $PSScriptRoot "..\..\..\artifacts\bin\samples\win32-dx11-triangle\$Configuration"))
 $driver = if ($Warp) { 'WARP' } else { 'hardware' }
 $sampleMode = 'event-driven resize'
 $executableName = if ($Warp) { 'triangle-warp-resize.exe' } else { 'triangle-hardware-resize.exe' }

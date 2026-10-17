@@ -21,14 +21,16 @@ if (compilation.HasErrors || compilation.Program is not BoundProgram program)
 
 var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
 var image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
-var imagePath = Path.GetFullPath(Path.Combine("artifacts", "aggregate-abi.exe"));
+var binaryDirectory = Path.GetFullPath(Path.Combine("artifacts", "bin", "native-probes", "native-abi"));
+Directory.CreateDirectory(binaryDirectory);
+var imagePath = Path.Combine(binaryDirectory, "aggregate-abi.exe");
 File.WriteAllBytes(imagePath, image);
 
 // Source functions follow callable/process entry and failure helpers.
 // Match sorted code ranges rather than PE table slots.
 var ranges = code.Functions.OrderBy(static function => function.Start).ToArray();
 var sourceStart = ranges.Length - program.Functions.Length;
-var start = new ProcessStartInfo(Path.GetFullPath(Path.Combine("artifacts", "abi-probe.exe"))) {
+var start = new ProcessStartInfo(Path.Combine(binaryDirectory, "abi-probe.exe")) {
     UseShellExecute = false,
     CreateNoWindow = true,
 };

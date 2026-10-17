@@ -59,13 +59,15 @@ var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
 var image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
 var secondCode = NativeEmitter.EmitCode(secondProgram, NativeRuntimePolicy.FailFast);
 var secondImage = NativeEmitter.Emit(secondProgram, NativeRuntimePolicy.FailFast);
-var imagePath = Path.GetFullPath(Path.Combine("artifacts", "relocation-proof.exe"));
-var secondPath = Path.GetFullPath(Path.Combine("artifacts", "relocation-proof-second.exe"));
-var failurePath = Path.GetFullPath(Path.Combine("artifacts", "relocation-failure.exe"));
-var probePath = Path.GetFullPath(Path.Combine("artifacts", "relocation-probe.exe"));
+var binaryDirectory = Path.GetFullPath(Path.Combine("artifacts", "bin", "native-probes", "native-relocation"));
+Directory.CreateDirectory(binaryDirectory);
+var imagePath = Path.Combine(binaryDirectory, "relocation-proof.exe");
+var secondPath = Path.Combine(binaryDirectory, "relocation-proof-second.exe");
+var failurePath = Path.Combine(binaryDirectory, "relocation-failure.exe");
+var probePath = Path.Combine(binaryDirectory, "relocation-probe.exe");
 if (!File.Exists(probePath))
 {
-    throw new FileNotFoundException("Build tests\\native\\relocation-probe.c before running the relocation check.", probePath);
+    throw new FileNotFoundException("Build tests\\native\\relocation-probe.c into artifacts\\bin\\native-probes\\native-relocation before running the relocation check.", probePath);
 }
 try
 {

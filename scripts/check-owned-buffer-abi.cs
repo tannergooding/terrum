@@ -9,7 +9,12 @@ if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Ar
 }
 
 var artifacts = Path.GetFullPath("artifacts");
-Directory.CreateDirectory(artifacts);
+var binaries = Path.Combine(artifacts, "bin", "native-probes", "owned-buffer-abi");
+var objects = Path.Combine(artifacts, "obj", "native-probes", "owned-buffer-abi");
+var logs = Path.Combine(artifacts, "log", "native-probes", "owned-buffer-abi");
+Directory.CreateDirectory(binaries);
+Directory.CreateDirectory(objects);
+Directory.CreateDirectory(logs);
 var vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
     "Microsoft Visual Studio", "Installer", "vswhere.exe");
 var discover = new ProcessStartInfo(vswhere);
@@ -24,19 +29,19 @@ if (installation.Length == 0 || !File.Exists(environment))
 {
     throw new FileNotFoundException("Visual Studio x64 C++ build tools are required.", environment);
 }
-var executable = Path.Combine(artifacts, "owned-buffer-abi-probe.exe");
-var objectFile = Path.Combine(artifacts, "owned-buffer-abi-probe.obj");
+var executable = Path.Combine(binaries, "owned-buffer-abi-probe.exe");
+var objectFile = Path.Combine(objects, "owned-buffer-abi-probe.obj");
 var source = Path.GetFullPath(Path.Combine("tests", "native", "owned-buffer-abi-probe.c"));
 var nativeBuild = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
     ?? throw new InvalidOperationException("ComSpec is unset.")) {
     Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /TC /Fo\"{objectFile}\" /Fe\"{executable}\" \"{source}\" /link /incremental:no\"",
 };
 var nativeOutput = await Run(nativeBuild, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "owned-buffer-abi-c-build.log"), nativeOutput).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(logs, "owned-buffer-abi-c-build.log"), nativeOutput).ConfigureAwait(false);
 var cli = Path.Combine(artifacts, "bin", "sources", "terrumc", "Debug", "net11.0", "terrumc.dll");
 foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
 {
-    var dll = Path.Combine(artifacts, $"owned-buffer-abi-{policy}.dll");
+    var dll = Path.Combine(binaries, $"owned-buffer-abi-{policy}.dll");
     var compile = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
         Path.GetFullPath(Path.Combine("tests", "native", "owned-buffer-abi.terrum")),
@@ -44,8 +49,8 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         "--export", "Rebuild", "--export", "TryRebuild", "--export", "Composite",
         "--export", "FieldMutation", "--export", "FieldViewMutation",
         "--export", "FormattingWorkspace", "--export", "FormatDigits", "--export", "FormatSignedDigits",
-        "--source", Path.GetFullPath(Path.Combine("self-host", "IntegerFormatting.terrum")),
-        "--source", Path.GetFullPath(Path.Combine("self-host", "WideIntegerFacts.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("sources", "self-host", "IntegerFormatting.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("sources", "self-host", "WideIntegerFacts.terrum")),
         "-o", dll, "--runtime", policy })
     {
         compile.ArgumentList.Add(argument);
@@ -64,12 +69,12 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         compile.ArgumentList.Add("RecoverFieldView");
     }
     var buildOutput = await Run(compile, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-    await File.WriteAllTextAsync(Path.Combine(artifacts, $"owned-buffer-abi-build-{policy}.log"), buildOutput).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(logs, $"owned-buffer-abi-build-{policy}.log"), buildOutput).ConfigureAwait(false);
     var execute = new ProcessStartInfo(executable);
     execute.ArgumentList.Add(dll);
     execute.ArgumentList.Add(policy == "checked-exceptions" ? "checked" : "fail-fast");
     var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-    await File.WriteAllTextAsync(Path.Combine(artifacts, $"owned-buffer-abi-proof-{policy}.log"), proof).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(logs, $"owned-buffer-abi-proof-{policy}.log"), proof).ConfigureAwait(false);
     if (proof.Trim() != "owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked field=tracked field-view=tracked heap=tracked live=0")
     {
         throw new InvalidOperationException("The independent owned-buffer ABI proof did not complete.");
@@ -81,18 +86,18 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     failedRelease.ArgumentList.Add("reject-release");
     _ = await Run(failedRelease, TimeSpan.FromSeconds(10), unchecked((int)0xE0540005u)).ConfigureAwait(false);
     var failureProof = $"{policy}: BOOL low32=false/high32!=0; release failure terminates with 0xE0540005\n";
-    await File.WriteAllTextAsync(Path.Combine(artifacts, $"owned-buffer-release-failure-{policy}.log"),
+    await File.WriteAllTextAsync(Path.Combine(logs, $"owned-buffer-release-failure-{policy}.log"),
         failureProof).ConfigureAwait(false);
     Console.Write(failureProof);
 }
 
-var decimalSource = Path.GetFullPath(Path.Combine("self-host", "DecimalFloatLiteral.terrum"));
+var decimalSource = Path.GetFullPath(Path.Combine("sources", "self-host", "DecimalFloatLiteral.terrum"));
 var sourceGrantProbe = Path.GetFullPath(Path.Combine(
     "tests", "native", "decimal-float-source-grant-abi.terrum"));
 foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
 {
-    var dll = Path.Combine(artifacts, $"decimal-float-source-grant-{policy}.dll");
-    var manifest = Path.Combine(artifacts, $"decimal-float-source-grant-{policy}.abi.json");
+    var dll = Path.Combine(binaries, $"decimal-float-source-grant-{policy}.dll");
+    var manifest = Path.Combine(binaries, $"decimal-float-source-grant-{policy}.abi.json");
     var compile = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] {
         cli, "build-library", decimalSource,
@@ -108,7 +113,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     }
     var buildOutput = await Run(compile, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
     await File.WriteAllTextAsync(
-        Path.Combine(artifacts, $"decimal-float-source-grant-build-{policy}.log"), buildOutput)
+        Path.Combine(logs, $"decimal-float-source-grant-build-{policy}.log"), buildOutput)
         .ConfigureAwait(false);
 
     var execute = new ProcessStartInfo(executable);
@@ -117,7 +122,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         ? "source-grant-checked" : "source-grant-fail-fast");
     var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
     await File.WriteAllTextAsync(
-        Path.Combine(artifacts, $"decimal-float-source-grant-proof-{policy}.log"), proof)
+        Path.Combine(logs, $"decimal-float-source-grant-proof-{policy}.log"), proof)
         .ConfigureAwait(false);
     var expectedProof = policy == "checked-exceptions"
         ? "decimal-source-grant scalar-exports=checked source-context=forwarded owner-transfer=checked owner-failure-cleanup=checked allocation-failure=checked heap=tracked live=0"

@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\.."))
 $artifactDirectory = Join-Path $repositoryRoot "artifacts"
-$outputDirectory = Join-Path $artifactDirectory "dx11-pipeline"
+$outputDirectory = Join-Path $artifactDirectory "bin\samples\win32-dx11-triangle\$Configuration"
 $compilerPath = Join-Path $artifactDirectory "bin\sources\terrumc\$Configuration\net11.0\terrumc.dll"
 
 if (-not (Test-Path -LiteralPath $compilerPath -PathType Leaf)) {

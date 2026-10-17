@@ -133,11 +133,10 @@ try {
     $env:DOTNET_MULTILEVEL_LOOKUP = 0
     $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = 1
 
-    $DotNetInstallScript = Join-Path -Path $ArtifactsDir -ChildPath "dotnet-install.ps1"
-    Invoke-WebRequest -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $DotNetInstallScript -UseBasicParsing
-
     $DotNetInstallDirectory = Join-Path -Path $ArtifactsDir -ChildPath "dotnet"
     Create-Directory -Path $DotNetInstallDirectory
+    $DotNetInstallScript = Join-Path -Path $DotNetInstallDirectory -ChildPath "dotnet-install.ps1"
+    Invoke-WebRequest -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $DotNetInstallScript -UseBasicParsing
 
     $GlobalJson = Get-Content -Raw (Join-Path -Path $RepoRoot -ChildPath "global.json") | ConvertFrom-Json
     & $DotNetInstallScript -Version $GlobalJson.sdk.version -InstallDir $DotNetInstallDirectory -Architecture $architecture
