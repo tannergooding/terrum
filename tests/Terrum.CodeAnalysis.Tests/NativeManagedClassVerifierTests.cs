@@ -129,20 +129,20 @@ public sealed class NativeManagedClassVerifierTests
         };
         var normalError = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed))!;
         Assert.That(normalError.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
-        var persistedError = Assert.Throws<ArgumentException>(() =>
+        var persistedError = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateConsumer(malformed, producer))!;
-        Assert.That(persistedError.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
+        Assert.That(persistedError.InnerException!.Data["Terrum.InvalidEffect"], Is.EqualTo("Ownership"));
         var factoryIndex = FindFactory(consumer);
         var factory = consumer.Functions[factoryIndex];
         malformed = consumer with {
             Functions = consumer.Functions.SetItem(factoryIndex, factory with { ClassConstructor = 4096 }),
         };
-        _ = Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateConsumer(malformed, producer))!;
         malformed = consumer with {
             Functions = consumer.Functions.SetItem(factoryIndex, factory with { Intrinsic = BoundIntrinsic.None }),
         };
-        _ = Assert.Throws<ArgumentException>(() =>
+        _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateConsumer(malformed, producer))!;
     }
 
@@ -171,7 +171,7 @@ public sealed class NativeManagedClassVerifierTests
         Assert.That(descriptorOnly.EntryPoint, Is.EqualTo(-1));
         Assert.That(global::System.Linq.Enumerable.Single(descriptorOnly.Functions).Name, Is.EqualTo("Export"));
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(descriptorOnly))!;
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(descriptorOnly, ["Export"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(descriptorOnly, ["Export"]))!;
     }
     [TestCase("struct Copy { public int64 Value; public Copy(int64 value) { Value = value; } }",true)]
     [TestCase("struct Copy { public int64 First; public int64 Second; public Copy(int64 value) { First = value; Second = value; } }",true)]

@@ -133,7 +133,7 @@ public sealed class AggregateAbiTests
         var source = new StringBuilder("[Blittable] [Layout(LayoutKind.Sequential)] struct Bytes {");
         for (var index = 0; index < fieldCount; index++)
         {
-            _ = source.Append("public int64 F").Append(index).Append(';');
+            _ = source.Append(index == lastField ? "public mut int64 F" : "public int64 F").Append(index).Append(';');
         }
         _ = source.Append("public Bytes() {");
         for (var index = 0; index < fieldCount; index++)
@@ -143,7 +143,11 @@ public sealed class AggregateAbiTests
         _ = source.Append("} } [NoThrow] void Touch() {}")
             .Append("Bytes ReturnThroughFinally() { try { return new Bytes(); } finally { Touch(); } }")
             .Append("Bytes Fill(out Bytes output) { output = new Bytes(); return ReturnThroughFinally(); }")
-            .Append("int32 Main() { Bytes result = Fill(out var output);")
+            .Append("void FillTwo(out Bytes first, out Bytes second) { first = new Bytes(); second = new Bytes(); second.F")
+            .Append(lastField).Append(" = 43; }")
+            .Append("int32 Main() { Bytes result = Fill(out var output); FillTwo(out var first, out var second);")
+            .Append("if (first.F").Append(lastField).Append(" != 42 || second.F")
+            .Append(lastField).Append(" != 43) { return -2; }")
             .Append("if (result.F").Append(lastField).Append(" != 42 || output.F").Append(lastField)
             .Append(" != 42) { return -1; } return 42; }");
         var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));

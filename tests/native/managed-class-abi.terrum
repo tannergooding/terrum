@@ -113,8 +113,8 @@ public int32 AliasUpdates() {
     require ManagedNode.TryCreate(0, out var extra);
     extra.SetNext(extra);
     require Pair.TryCreate(child, child, extra, out var pair);
-    write Leaf alias = pair.First;
-    alias.Value = 21;
+    write Leaf writable = pair.First;
+    writable.Value = 21;
     require ManagedHeap.Collect() == 0;
     return pair.Sum();
 }
@@ -169,13 +169,13 @@ public int32 CollectWithScalar(uint64 bits) {
     return ManagedHeap.Collect();
 }
 
-public struct ExportValue {
+[Blittable] [Layout(LayoutKind.Sequential)] public struct ExportValue {
     public int64 First;
     public int64 Second;
     public ExportValue(int64 first, int64 second) { First = first; Second = second; }
 }
 
-public struct ExportSmall {
+[Blittable] [Layout(LayoutKind.Sequential)] public struct ExportSmall {
     public int32 Value;
     public ExportSmall(int32 value) { Value = value; }
 }

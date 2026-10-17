@@ -484,7 +484,7 @@ public static partial class NativeModuleCompiler
             ? ModuleCompiler.GetConsumerNativeImports(package.Contract)
             : package.IsLeaf ? ImmutableDictionary<string, IReadOnlyList<string>>.Empty
                 : ModuleCompiler.GetGraphProducerNativeImports(package.Contract);
-        foreach (var (dllName, symbols) in directImports)
+        foreach (var (dllName, symbols) in System32DirectImports(directImports))
         {
             if (!imports.TryGetValue(dllName, out var expectedSymbols))
             {

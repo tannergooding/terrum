@@ -8,6 +8,7 @@ using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
@@ -114,6 +115,30 @@ public sealed class NativeModuleTests
         return at;
     }
 
+    private static byte[] WithoutPackageMachineImport(byte[] artifact, string name)
+    {
+        var tableOffset = 18 + artifact[7] + artifact[8];
+        var count = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(tableOffset, 2));
+        var entryOffset = tableOffset + 2;
+        for (var index = 0; index < count; index++)
+        {
+            var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(entryOffset, 2));
+            var nameOffset = entryOffset + 2;
+            if (Encoding.ASCII.GetString(artifact, nameOffset, length) == name)
+            {
+                var result = new byte[artifact.Length - 2 - length];
+                artifact.AsSpan(0, entryOffset).CopyTo(result);
+                artifact.AsSpan(nameOffset + length).CopyTo(result.AsSpan(entryOffset));
+                BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(tableOffset, 2),
+                    checked((ushort)(count - 1)));
+                RehashArtifact(result);
+                return result;
+            }
+            entryOffset = nameOffset + length;
+        }
+        throw new InvalidOperationException($"Native package does not contain machine import '{name}'.");
+    }
+
     private static byte[] WithSourceGrantRequirement(byte[] artifact)
     {
         var result = artifact.ToArray();
@@ -189,6 +214,34 @@ public sealed class NativeModuleTests
     }
 
     [Test]
+    public async Task NativeConsumerRejectsOmittedAddressOnlyProviderImportAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var provider = NativeModuleCompiler.CreateProducer(CompileLibrary("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 Identity(int32 value) { return value; }
+            """), ["Identity"], "AddressOnlyProvider", NativeRuntimePolicy.FailFast);
+        var consumer = ConsumerPackage(provider, """
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> identity = &Identity;
+                    return identity(42);
+                }
+            }
+            """);
+
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, provider,
+            TimeSpan.FromSeconds(15), NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.EqualTo(42));
+        var missingImport = WithoutPackageMachineImport(consumer, "Identity");
+        var exception = Assert.Throws<ModuleFormatException>(() =>
+            NativeModuleCompiler.Inspect(missingImport));
+        Assert.That(exception!.Message,
+            Is.EqualTo("Native machine imports differ from retained semantic declarations or calls."));
+    }
+
+    [Test]
     public async Task SamePersistedConsumerExecutesCompatibleProvidersWithoutReemissionAsync()
     {
         var original = Producer();
@@ -251,6 +304,32 @@ public sealed class NativeModuleTests
         var linked = ModuleCompiler.Link(consumer, producer);
 
         Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public void StandardTrRmSystemDirectoryImportRemainsQualifiedInLibraryEmission()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
+            [NoThrow]
+            public extern unsafe uint32 ThreadId();
+
+            public uint32 ReadThreadId() {
+                unsafe { return ThreadId(); }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "system-directory-import");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var library = NativeEmitter.EmitLibraryWithNativeImports(
+            loaded, ["ReadThreadId"], NativeRuntimePolicy.FailFast);
+
+        Assert.That(Encoding.ASCII.GetString(library),
+            Does.Contain(NativeEmitter.System32ImportPath("kernel32.dll")));
     }
 
     [Test]

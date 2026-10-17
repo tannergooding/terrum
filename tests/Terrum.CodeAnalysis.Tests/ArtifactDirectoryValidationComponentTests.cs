@@ -59,6 +59,8 @@ public sealed class ArtifactDirectoryValidationComponentTests
             NewCase(SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0x7F00),
             NewCase(featureArtifact, 0x0004),
             NewCase(FeatureArtifact(0, 0,
+                TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 8)])), 0x0004),
+            NewCase(FeatureArtifact(0, 0,
                 TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])), 0x0001),
             NewCase(WithZeroGap(minimal), 0x0002),
             Invalid(ChangeByte(minimal, 0, (byte)'X')),
@@ -97,7 +99,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
             Invalid(SourceMapWithTrailingPayload()),
             Invalid(ChangeSectionWord(featureArtifact, 0x0004, 0, 2)),
             Invalid(ChangeSectionWord(featureArtifact, 0x0004, 4, 0)),
-            Invalid(ChangeSectionWord(featureArtifact, 0x0004, 4, 7)),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0004, 4, 9)),
             Invalid(AddSecondFeatureRow(
                 FeatureArtifact(0, 0,
                     TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])),
@@ -126,7 +128,8 @@ public sealed class ArtifactDirectoryValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HostedArtifact is not null)
             {
-                Assert.That(ValidateHosted(testCase.HostedArtifact), Is.EqualTo(testCase.ExpectedHostedValid));
+                Assert.That(ValidateHosted(testCase.HostedArtifact),
+                    Is.EqualTo(testCase.ExpectedHostedValid), $"Hosted artifact case {caseIndex}");
             }
 
             var entryCount = testCase.Artifact[12] | (testCase.Artifact[13] << 8)

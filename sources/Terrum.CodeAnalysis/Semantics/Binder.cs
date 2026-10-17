@@ -3458,6 +3458,12 @@ internal sealed partial class Binder
                         Report("TRM3030", "A pointer assignment requires a writable pointer to a value type.",
                             target.Span);
                     }
+                    if (!DirectNativeImportContract.IsCopyablePointee(pointerDefinition.PointeeType, _structs))
+                    {
+                        Report("TRM3023",
+                            "A raw pointer cannot load or store an owning value without preserving its ownership and cleanup.",
+                            target.Span);
+                    }
                     if (_unsafeDepth == 0)
                     {
                         Report("TRM3028", "A pointer write requires an explicit unsafe context.", target.Span);
@@ -4130,21 +4136,7 @@ internal sealed partial class Binder
         BoundRequiredConstant required => ContainsAuthorizedExpressionScopeCall(required.Operand),
         BoundCall call => (call.IsUnsafeAuthorized && call.Function >= 0
             && call.Function < _signatures.Count
-            && (_signatures[call.Function].StructName is null
-                || IsSupportedExpressionStaticOperator(_signatures[call.Function])
-                || _signatures[call.Function] is {
-                    IsStatic: true, IsOperator: false, PropertyName: null,
-                }
-                || _signatures[call.Function] is {
-                    IsConstructor: true, IsClassConstructor: false,
-                }
-                || _signatures[call.Function] is {
-                    IsOperator: false, PropertyName: not null,
-                }
-                || _signatures[call.Function] is {
-                    IsStatic: false, IsConstructor: false, IsClassConstructor: false,
-                    IsCleanup: false, IsMutable: false, IsOperator: false, PropertyName: null,
-                }))
+            && _signatures[call.Function].RequiresUnsafeCaller)
             || call.Arguments.Any(ContainsAuthorizedExpressionScopeCall),
         BoundNativeFunctionAddress address => address.IsUnsafeAuthorized,
         BoundIndirectCall call => call.IsUnsafeAuthorized
@@ -4184,12 +4176,6 @@ internal sealed partial class Binder
         BoundIsVariablePattern pattern => ContainsAuthorizedExpressionScopeCall(pattern.Value),
         _ => false,
     };
-
-    private static bool IsSupportedExpressionStaticOperator(Signature signature) =>
-        signature.IsStatic && signature.IsOperator && signature.StructName is string owner
-        && TryGetStaticOperatorKey(signature.Name, owner, out var key)
-        && key.Arity is 1 or 2
-        && key.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus);
 
     private static bool IsSupportedExpressionStaticUpdateOperator(Signature signature, TokenKind updateOperator) =>
         signature.IsStatic && signature.IsOperator && signature.StructName is string owner
@@ -4518,6 +4504,12 @@ internal sealed partial class Binder
                             Report("TRM3030", "A void pointer cannot be dereferenced.", node.Span);
                             expression = ErrorExpression(node.Span);
                             break;
+                        }
+                        if (!DirectNativeImportContract.IsCopyablePointee(pointeeType, _structs))
+                        {
+                            Report("TRM3023",
+                                "A raw pointer cannot load or store an owning value without preserving its ownership and cleanup.",
+                                node.Span);
                         }
                         if (_unsafeDepth == 0)
                         {

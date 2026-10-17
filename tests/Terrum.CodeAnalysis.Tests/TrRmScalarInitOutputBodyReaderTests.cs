@@ -17,7 +17,11 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
     private delegate object ReadBody(TrRmBodyTableReader bodies, int method,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contracts, uint ruleRevision);
+        TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contracts,
+        TrRmContractTableReader contractTable,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeVTableTableReader nativeVTables, uint ruleRevision,
+        uint rootlessNativeValuesRuleRevision);
 
     private static readonly ReadBody s_read = (typeof(TrRmBodyTableReader).Assembly
         .GetType("Terrum.CodeAnalysis.Modules.TrRmScalarInitOutputBodyReader", throwOnError: true)
@@ -413,7 +417,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             targetModes: [2], targetFlags: 2));
     }
     [TestCase("PlaceFlags",(byte)(0))]
-    [TestCase("PlaceFlags",(byte)(5))]
+    [TestCase("PlaceFlags",(byte)(6))]
     [TestCase("PlaceRegion",(byte)(1))]
     [TestCase("PlaceUses",(byte)(0))]
     [TestCase("ValueKind",(byte)(0))]
@@ -688,6 +692,13 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
 
         var methods = new TrRmMethodDefTableReader(methodBytes, methodCount, names, modules,
             typeDefinitions, signatures, contractKind is null ? 0 : 1, methodCount);
+        var contractTable = new TrRmContractTableReader(contractSection,
+            contractKind is null ? 0 : 1, typeDefinitions, methods, signatures,
+            parameters, types);
+        var nativeImports = new TrRmNativeImportTableReader([], 0, names, methods,
+            signatures, parameters, types, contractTable);
+        var nativeVTables = new TrRmNativeVTableTableReader([], 0, methods, signatures,
+            parameters, types, contractTable);
         byte[] target = targetModes is [2, 2]
             ? Encode([[0x0B, 1, 1], [0x0B, 2, 2], [0x02, 3, 1, 42],
                 [0x0E, 1, 3], [0x0E, 2, 3]], [1, 1, 0], [3, 4, 4], [5, 5],
@@ -703,7 +714,8 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             targetModes is null ? [body] : [body, target]);
         var bodies = new TrRmBodyTableReader(bodyBytes, methodCount);
         return s_read(bodies, 1, modules, methods, signatures, parameters, types,
-            contractSection, ruleRevision);
+            contractSection, contractTable, nativeImports, nativeVTables, ruleRevision,
+            TrRmFeatureTableReader.RootlessNativeValuesRuleRevision);
     }
 
     private static void Signature(byte[] bytes, int offset, uint result, int first, int count)

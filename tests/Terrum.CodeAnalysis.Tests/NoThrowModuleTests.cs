@@ -140,8 +140,8 @@ public sealed class NoThrowModuleTests
         var forged = unsafeProgram with {
             Functions = unsafeProgram.Functions.SetItem(0, unsafeProgram.Functions[0] with { IsNoThrow = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]))!;
-        _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(forged,
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(forged,
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast))!;
         var artifact = Producer("[NoThrow] public int32 Compute() { return 42; }");
         artifact[4] = 7;
@@ -167,8 +167,8 @@ public sealed class NoThrowModuleTests
             }),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged))!;
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]))!;
-        _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(forged,
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(forged,
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast))!;
     }
 

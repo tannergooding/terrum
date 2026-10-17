@@ -6,7 +6,11 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed record NativeVTableMethodDefinition(
     int Slot,
-    ImmutableArray<DirectNativeParameter> Parameters);
+    ImmutableArray<DirectNativeParameter> Parameters,
+    int VTableByteOffset = 0)
+{
+    internal ImmutableArray<DirectNativeOutput> Outputs { get; init; } = [];
+}
 
 internal static class NativeVTableCallContract
 {
@@ -27,7 +31,11 @@ internal static class NativeVTableCallContract
             || !function.Body.Statements.IsEmpty || function.Variables.IsDefault
             || function.ParameterCount < 1 || function.ParameterCount != function.Variables.Length
             || method.Slot < 0 || method.Slot > int.MaxValue / NativeTargetProfile.PointerSize
+            || method.VTableByteOffset < 0
+            || method.VTableByteOffset % NativeTargetProfile.PointerSize != 0
+            || method.VTableByteOffset > int.MaxValue - NativeTargetProfile.PointerSize
             || method.Parameters.IsDefault
+            || method.Outputs.IsDefault
             || !IsNativeValueType(function.ReturnType, program))
         {
             return false;
@@ -44,11 +52,41 @@ internal static class NativeVTableCallContract
         }
 
         var annotatedParameters = new bool[function.ParameterCount];
+        var annotatedOutputs = new bool[function.ParameterCount];
+        foreach (var output in method.Outputs)
+        {
+            if (output is null || output.ParameterIndex <= 0
+                || output.ParameterIndex >= function.ParameterCount
+                || annotatedOutputs[output.ParameterIndex]
+                || !DirectNativeImportContract.IsOutputPointee(output.PointeeType)
+                || (NativePointerTypes.IsType(output.PointeeType)
+                    && !NativePointerTypeContract.IsValidType(
+                        output.PointeeType, program.NativePointerTypes))
+                || (NativeFunctionPointerTypes.IsType(output.PointeeType)
+                    && !NativeFunctionPointerContract.IsValidType(
+                        output.PointeeType, program.NativeFunctionPointerSignatures))
+                || !DirectNativeImportContract.IsValidResultCondition(
+                    function.ReturnType, output.ResultCondition)
+                || output.FailureDisposition != 1
+                || function.ReturnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32)
+                || function.Variables[output.ParameterIndex] is not {
+                    Type: PrimitiveType.NativeStorageAddress,
+                    IsOut: true,
+                    IsInit: false,
+                    IsImplicitRef: false,
+                })
+            {
+                return false;
+            }
+            annotatedOutputs[output.ParameterIndex] = true;
+        }
+
         foreach (var parameter in method.Parameters)
         {
             if (parameter is null || parameter.ParameterIndex <= 0
                 || parameter.ParameterIndex >= function.ParameterCount
                 || annotatedParameters[parameter.ParameterIndex]
+                || annotatedOutputs[parameter.ParameterIndex]
                 || parameter.Access is not (NativeParameterAccess.Read
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention is not (NativeParameterRetention.NoEscape
@@ -75,9 +113,18 @@ internal static class NativeVTableCallContract
             {
                 return false;
             }
+            if (annotatedOutputs[index])
+            {
+                if (parameter.Type != PrimitiveType.NativeStorageAddress || !parameter.IsOut)
+                {
+                    return false;
+                }
+                continue;
+            }
             if (parameter.IsOut)
             {
                 if (annotatedParameters[index]
+                    || parameter.Type == PrimitiveType.NativeStorageAddress
                     || !IsNativeValueType(parameter.Type, program))
                 {
                     return false;
@@ -112,6 +159,16 @@ internal static class NativeVTableCallContract
             return null;
         }
         return method.Parameters.FirstOrDefault(parameter => parameter.ParameterIndex == parameterIndex);
+    }
+
+    internal static DirectNativeOutput? OutputForParameter(BoundFunction function, int parameterIndex)
+    {
+        if (function.NativeVTableMethod is not NativeVTableMethodDefinition method
+            || method.Outputs.IsDefault)
+        {
+            return null;
+        }
+        return method.Outputs.FirstOrDefault(output => output.ParameterIndex == parameterIndex);
     }
 
     internal static bool IsNativeValueType(PrimitiveType type, BoundProgram program) =>

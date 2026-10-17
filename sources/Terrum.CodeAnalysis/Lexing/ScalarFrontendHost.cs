@@ -3198,7 +3198,7 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation == 110)
                 {
-                    bound = treeExpressions[node.Left];
+                    bound = new BoundUnsafeExpression(treeExpressions[node.Left], node.Span);
                 }
                 else if (node.Operation is 102 or 105)
                 {

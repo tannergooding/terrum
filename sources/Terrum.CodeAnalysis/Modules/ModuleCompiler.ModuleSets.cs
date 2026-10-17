@@ -225,10 +225,15 @@ public static partial class ModuleCompiler
                     program.NativePointerTypes);
                 if (!CompatibleContract(contract,
                     Contract(export, reference.Structures, reference.NativeFunctionPointerSignatures,
-                        reference.NativePointerTypes)))
+                        reference.NativePointerTypes))
+                    || !CompatibleImportedNativeVTableMethod(
+                        function.ModuleImport is null ? null : function.NativeVTableMethod,
+                        export.NativeVTableMethod))
                 {
                     throw new ModuleContractException($"Incompatible or missing provider declaration '{function.Name}'.");
                 }
+                var importedNativeVTableMethod = function.ModuleImport is null
+                    ? null : function.NativeVTableMethod;
                 var hasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures);
                 if (hasOwnershipTransfer != Compilation.HasOwnershipTransfer(export, reference.Structures))
                 {
@@ -236,6 +241,7 @@ public static partial class ModuleCompiler
                 }
                 declarations.Add(new ModuleFunction(function.Name, contract, function, true) {
                     HasOwnershipTransfer = hasOwnershipTransfer,
+                    ImportedNativeVTableMethod = importedNativeVTableMethod,
                 });
             }
             else
@@ -349,6 +355,8 @@ public static partial class ModuleCompiler
             if (!exports.TryGetValue(imported.Name, out var actual)
                 || !CompatibleContract(imported.Contract, Contract(actual, reference.Structures,
                     reference.NativeFunctionPointerSignatures, reference.NativePointerTypes))
+                || !CompatibleImportedNativeVTableMethod(imported.ImportedNativeVTableMethod,
+                    actual.NativeVTableMethod)
                 || imported.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, reference.Structures))
             {
                 throw new ModuleContractException($"Incompatible or missing provider contract for '{imported.Name}'.");

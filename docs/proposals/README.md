@@ -9,6 +9,12 @@ direction** settles a semantic
 boundary only; adjacent grammar and APIs remain open unless explicitly
 approved.
 
+Standard TRRM is still pre-release and expected to evolve. Current registry
+authority does not freeze its design: needed extensions should have explicit
+reviewable proposals, concrete recommended records and consumer obligations.
+Proposal status is not canonical approval; registration and support gates can
+be updated together after consolidation.
+
 - [Core-library proposal](core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
 - [Built-in numeric selection members](numeric-selection-members.md) records
@@ -144,17 +150,24 @@ approved.
   until a concrete native source-processing caller exists; no ABI or
   16,384-unit cap is accepted.
 - [Sample-driven Windows native FFI](windows-native-ffi.md) accepts only the
-  sample-specific staged direction. General fixed/rootless Windows x64
-  storage/calls are now selected canonically; the proposed import catalog,
-  callback and closed-COM APIs remain unapproved. Exact sample gates do not
-  establish general interop support.
+  historical integration target/stage direction. Its compiler-owned API
+  catalog, sample-specific admission and COM ownership recommendations are
+  withdrawn; generic native mechanisms and authored library/source policy
+  supersede them. Old stage/probe statements are not current qualification.
 - [Unsafe FFI and native vtable cleanup](unsafe-ffi-vtable-cleanup.md)
-  records the user-settled trust boundary and recommends removing
-  compiler-owned COM ownership/acquisition policy. It does not approve a
-  generic vtable source form or any metadata assignments.
-- [Native import metadata in TRRM](trrm-native-interop-metadata.md) remains
-  unapproved; its native binding and aggregate-pointer experiments are
-  provisional. Standard vtable metadata remains unresolved.
+  records the settled unsafe/library boundary and approved native-callable
+  direction, distinguishes mandatory known-fact verification from foreign
+  proof, and recommends generic receiver/slot binding without compiler-owned
+  COM ownership/acquisition. Exact source forms and wire assignments remain
+  unapproved.
+- [Standard TRRM native boundary metadata](trrm-native-interop-metadata.md)
+  recommends an additive early-draft extension for native imports, explicit
+  native entries, pointer/function-pointer signatures, generic vtable binding,
+  layout commitments, output/retention/dependency facts and consumer
+  revalidation. Concrete collision-checked record/opcode/Feature candidates
+  are **unapproved**, not a canonical registration. Missing current records
+  motivate the extension rather than permanent deferral; review defects,
+  metadata design and final-revision evidence have separate dispositions.
 - [Persisted scanner invocation profile](scanner-invocation-profile.md) is
   deferred until an integrated compiler path needs it and its full-file
   size/resource policy is defined; revision-76 support remains provisional.
@@ -178,6 +191,12 @@ approved.
   the accepted TRRM 1.0 GA requirement for executable core output-mode
   semantics; its profile, encoding, place, publication and exceptional-state
   details remain unapproved.
+- [Joint output, failure and ownership interchange](trrm-output-failure-ownership.md)
+  preserves that accepted GA composition gate and recommends a concrete
+  synchronous native-output phase/correlation model alongside the native
+  metadata extension. Raw pointer validity does not substitute for checked
+  initialization, owned-result publication, retained backing or cleanup;
+  its proposed carriers and acceptance cases are not current test evidence.
 - [Optional scalar TRRM execution](optional-scalar-trrm-execution.md) records
   an implementation-only boundary under the approved Body contract; optional
   source types, call signatures and native ABI support remain out of scope.

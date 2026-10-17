@@ -91,4 +91,90 @@ public sealed class NativeGraphJitTests
         Assert.That(await NativeModuleCompiler.RunGraphJitAsync(consumer, [provider],
             CompilerApphost(), TimeSpan.FromSeconds(15), Policy).ConfigureAwait(true), Is.EqualTo(42));
     }
+
+    [Test]
+    public async Task GraphJitExecutesAddressOnlyProviderImportAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const NativeRuntimePolicy Policy = NativeRuntimePolicy.FailFast;
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 ProviderCallback(int32 value) { return value; }
+            """), (BoundRuntimePolicy)Policy);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["ProviderCallback"], "GraphJitAddressOnlyProvider", Policy);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32, int32> callback = &ProviderCallback;
+                    return callback(42) == 42 ? 0 : -1;
+                }
+            }
+            """), NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)Policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(consumerCompilation.Program!,
+            [provider], Policy);
+
+        NativeModuleCompiler.ValidateGraph(consumer, [provider]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [provider],
+            TimeSpan.FromSeconds(15), Policy).ConfigureAwait(true), Is.Zero);
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(consumer, [provider],
+            CompilerApphost(), TimeSpan.FromSeconds(15), Policy).ConfigureAwait(true), Is.Zero);
+    }
+
+    [Test]
+    public async Task GraphDoesNotPublishNativePointerOutputOnFailureAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const NativeRuntimePolicy Policy = NativeRuntimePolicy.FailFast;
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 FailWithPointer(write ptr<ptr<void>> output, ptr<void> value) {
+                unsafe { *output = value; }
+                return -1;
+            }
+            """), (BoundRuntimePolicy)Policy);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["FailWithPointer"], "GraphJitFailedOutputProvider", Policy);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentProcess")]
+            [NoThrow]
+            extern unsafe ptr<void> GetCurrentProcess();
+
+            [NoThrow]
+            unsafe ptr<void> TryAcquire(ptr<void> candidate) {
+                mut ptr<void> output = null;
+                mut int32 status = -1;
+                unsafe { status = FailWithPointer(&output, candidate); }
+                if (status >= 0) { return output; }
+                return null;
+            }
+
+            int32 Main() {
+                unsafe {
+                    ptr<void> candidate = GetCurrentProcess();
+                    return TryAcquire(candidate) == null ? 0 : -1;
+                }
+            }
+            """), NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)Policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(consumerCompilation.Program!,
+            [provider], Policy);
+
+        NativeModuleCompiler.ValidateGraph(consumer, [provider]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [provider],
+            TimeSpan.FromSeconds(15), Policy).ConfigureAwait(true), Is.Zero);
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(consumer, [provider],
+            CompilerApphost(), TimeSpan.FromSeconds(15), Policy).ConfigureAwait(true), Is.Zero);
+    }
 }

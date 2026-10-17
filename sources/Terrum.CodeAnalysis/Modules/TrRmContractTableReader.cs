@@ -14,7 +14,10 @@ internal readonly record struct TrRmNativeOutputContract(
     int ParameterOrdinal, PrimitiveType PointeeType, uint ResultCondition, uint FailureDisposition);
 
 internal readonly record struct TrRmNativeParameterContract(
-    int ParameterOrdinal, byte Access, byte Retention, uint Extent);
+    int ParameterOrdinal, byte Access, byte Retention, byte ExtentKind, uint Extent,
+    uint PointerDepth, uint RequiredAlignment);
+
+internal readonly record struct TrRmNativeAbiContract(uint AbiId, byte Role, byte ExceptionMode);
 
 /// <summary>Validates Contract row framing, owner ranges and assigned clause shapes.</summary>
 /// <remarks>Structural decoding does not prove the promises or make unassigned clause modes executable.</remarks>
@@ -26,6 +29,8 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmParamTableReader _parameters;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
     private readonly ImmutableArray<TrRmNativeParameterContract>[] _nativeParameters;
+    private readonly TrRmNativeAbiContract[] _nativeAbis;
+    private readonly bool[] _hasNativeAbis;
     private readonly uint[] _nativeBlittableTargetRequirements;
 
     public TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
@@ -46,6 +51,8 @@ public readonly ref struct TrRmContractTableReader
         _parameters = parameters;
         _typeSpecs = typeSpecs;
         _nativeParameters = new ImmutableArray<TrRmNativeParameterContract>[methods.Count + 1];
+        _nativeAbis = new TrRmNativeAbiContract[methods.Count + 1];
+        _hasNativeAbis = new bool[methods.Count + 1];
         _nativeBlittableTargetRequirements = new uint[types.Count + 1];
         var owners = new uint[recordCount + 1];
         for (var type = 1; type <= types.Count; type++)
@@ -74,7 +81,8 @@ public readonly ref struct TrRmContractTableReader
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
             if (owners[row] == 0 || owner != owners[row]
                 || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0
-                || (kind is 1 or 5 or 12 && !singletons.Add((owner, kind))))
+                || (kind is 1 or 5 or 0x10 or 0x13
+                    && !singletons.Add((owner, kind))))
             {
                 throw InvalidContract();
             }
@@ -109,7 +117,7 @@ public readonly ref struct TrRmContractTableReader
                     var ordinal = Read(data, 8);
                     if (result.Length != 3 || result[0] != 1 || result[1] != 0
                         || result[2] != 1 || ordinal >= paramCount
-                        || parameters.GetMode(paramFirst + (int)ordinal) > 2
+                        || parameters.GetMode(paramFirst + (int)ordinal) is not (1 or 2)
                         || !outputStates.Add((owner, ordinal)))
                     {
                         throw InvalidContract();
@@ -140,7 +148,55 @@ public readonly ref struct TrRmContractTableReader
                     _ = cleanupTypes.Add((int)(owner & 0xFF_FFFF));
                     break;
                 case 6:
-                    if (data.Length != 24 || owner >> 24 != 0x16)
+                    throw InvalidContract();
+                case 0x10:
+                    if (data.Length != 16 || owner >> 24 != 0x16
+                        || Read(data, 8) != 1 || data[12] is < 1 or > 4
+                        || data[13] != 0 || data[14] != 0 || data[15] != 0)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var abiMethod = (int)(owner & 0xFF_FFFF);
+                    _nativeAbis[abiMethod] = new TrRmNativeAbiContract(
+                        Read(data, 8), data[12], data[13]);
+                    _hasNativeAbis[abiMethod] = true;
+                    break;
+                case 0x11:
+                    if (data.Length != 28 || owner >> 24 != 0x16
+                        || data[19] != 0 || Read(data, 12) != 1
+                        || data[16] is < 1 or > 3 || data[17] != 1
+                        || data[18] is not (0 or 1)
+                        || (data[18] == 0 && Read(data, 20) != 0)
+                        || Read(data, 24) != 0)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var parameterMethod = (int)(owner & 0xFF_FFFF);
+                    var parameterOrdinal = Read(data, 8);
+                    var parameterSignature = methods.GetSignature(parameterMethod);
+                    var (nativeParameterFirst, nativeParameterCount) =
+                        signatures.GetParamRange(parameterSignature);
+                    if (parameterOrdinal >= nativeParameterCount
+                        || !IsPointerTypeSpec(typeSpecs,
+                            parameters.GetTypeSpec(nativeParameterFirst + (int)parameterOrdinal))
+                        || !nativeParameterOrdinals.Add((owner, parameterOrdinal)))
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var nativeParameter = new TrRmNativeParameterContract(
+                        (int)parameterOrdinal, data[16], data[17], data[18],
+                        Read(data, 20), Read(data, 12), Read(data, 24));
+                    AddNativeParameter(parameterMethod, nativeParameter);
+                    break;
+                case 0x12:
+                    if (data.Length != 28 || owner >> 24 != 0x16
+                        || data[19] != 0 || Read(data, 12) != 1
+                        || data[16] is not (2 or 4)
+                        || data[17] != 2 || data[18] != 0
+                        || ReadUInt64(data, 20) != 0)
                     {
                         throw InvalidContract();
                     }
@@ -148,18 +204,16 @@ public readonly ref struct TrRmContractTableReader
                     var methodRow = (int)(owner & 0xFF_FFFF);
                     var outputSignature = methods.GetSignature(methodRow);
                     var outputOrdinal = Read(data, 8);
-                    var outputCondition = Read(data, 12);
-                    var failureDisposition = Read(data, 16);
+                    var outputCondition = data[16];
                     var outputResult = TrRmCompactLinearBodyReader.ResolveType(typeSpecs,
                         signatures.GetResultTypeSpec(outputSignature));
                     var (outputFirst, outputCount) = signatures.GetParamRange(outputSignature);
-                    var validOutputCondition = outputResult == 8
-                        ? outputCondition is 1 or 3
-                        : outputResult == 0x0D && outputCondition == 2;
+                    var validOutputCondition = outputCondition == 2
+                        ? outputResult is 8 or 0x0D
+                        : outputResult == 8;
                     if (outputOrdinal >= outputCount
                         || !outputs.Add((owner, outputOrdinal))
-                        || !validOutputCondition || failureDisposition != 1
-                        || Read(data, 20) != 0
+                        || !validOutputCondition
                         || parameters.GetMode(outputFirst + (int)outputOrdinal) != 0)
                     {
                         throw InvalidContract();
@@ -171,33 +225,8 @@ public readonly ref struct TrRmContractTableReader
                         throw InvalidContract();
                     }
                     break;
-                case 10:
-                    if (data.Length != 20 || owner >> 24 != 0x16)
-                    {
-                        throw InvalidContract();
-                    }
-
-                    var parameterMethod = (int)(owner & 0xFF_FFFF);
-                    var parameterOrdinal = Read(data, 8);
-                    var parameterSignature = methods.GetSignature(parameterMethod);
-                    var (nativeParameterFirst, nativeParameterCount) =
-                        signatures.GetParamRange(parameterSignature);
-                    if (parameterOrdinal >= nativeParameterCount
-                        || data[12] is < 1 or > 3 || data[13] > 1
-                        || data[14] != 0 || data[15] != 0
-                        || !IsPointerTypeSpec(typeSpecs,
-                            parameters.GetTypeSpec(nativeParameterFirst + (int)parameterOrdinal))
-                        || !nativeParameterOrdinals.Add((owner, parameterOrdinal)))
-                    {
-                        throw InvalidContract();
-                    }
-
-                    var nativeParameter = new TrRmNativeParameterContract(
-                        (int)parameterOrdinal, data[12], data[13], Read(data, 16));
-                    AddNativeParameter(parameterMethod, nativeParameter);
-                    break;
-                case 12:
-                    if (data.Length != 12 || owner >> 24 != 0x13)
+                case 0x13:
+                    if (data.Length != 20 || owner >> 24 != 0x13)
                     {
                         throw InvalidContract();
                     }
@@ -210,7 +239,8 @@ public readonly ref struct TrRmContractTableReader
                         || blittableLayout is not (1 or 3)
                         || types.GetLayoutRow(blittableType) == 0
                         || types.GetGenericRange(blittableType).Count != 0
-                        || blittableTargetRequirement != 1)
+                        || blittableTargetRequirement != 1 || Read(data, 12) != 0
+                        || Read(data, 16) != 1)
                     {
                         throw InvalidContract();
                     }
@@ -225,6 +255,14 @@ public readonly ref struct TrRmContractTableReader
         foreach (var method in cleanupMethods)
         {
             if (!noThrowMethods.Contains(method))
+            {
+                throw InvalidContract();
+            }
+        }
+
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            if (_hasNativeAbis[method] && (GetEffectsMask(method) & 4) == 0)
             {
                 throw InvalidContract();
             }
@@ -275,25 +313,36 @@ public readonly ref struct TrRmContractTableReader
         for (var index = 0; index < count; index++)
         {
             var clause = _rows.GetRow(first + index);
-            if (BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]) == 6)
+            if (BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]) == 0x12)
             {
                 var ordinal = Read(clause, 8);
                 var signature = _methods.GetSignature(methodRow);
                 var (paramFirst, _) = _signatures.GetParamRange(signature);
-                var parameterTypeSpec = _parameters.GetTypeSpec(paramFirst + checked((int)ordinal));
+                var parameterTypeSpec = _parameters.GetTypeSpec(
+                    paramFirst + checked((int)ordinal));
                 if (!TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
                     _typeSpecs, parameterTypeSpec, out var pointeeType))
                 {
                     throw InvalidContract();
                 }
-                results.Add(new TrRmNativeOutputContract(
-                    checked((int)ordinal), pointeeType,
-                    Read(clause, 12), Read(clause, 16)));
+
+                var resultType = TrRmCompactLinearBodyReader.ResolveType(_typeSpecs,
+                    _signatures.GetResultTypeSpec(signature));
+                var condition = clause[16] == 4
+                    ? 3u : resultType == 8 ? 1u : 2u;
+                results.Add(new TrRmNativeOutputContract(checked((int)ordinal),
+                    pointeeType, condition, 1));
             }
         }
 
         return results.ToImmutable();
     }
+
+    internal bool HasNativeAbi(int methodRow)
+        => methodRow > 0 && methodRow < _hasNativeAbis.Length && _hasNativeAbis[methodRow];
+
+    internal TrRmNativeAbiContract GetNativeAbi(int methodRow)
+        => HasNativeAbi(methodRow) ? _nativeAbis[methodRow] : throw InvalidContract();
 
     internal uint GetNativeBlittableTargetRequirement(int typeDefRow)
         => typeDefRow > 0 && typeDefRow < _nativeBlittableTargetRequirements.Length
@@ -338,6 +387,9 @@ public readonly ref struct TrRmContractTableReader
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+
+    private static ulong ReadUInt64(ReadOnlySpan<byte> data, int offset)
+        => BinaryPrimitives.ReadUInt64LittleEndian(data.Slice(offset, sizeof(ulong)));
 
     private static InvalidDataException InvalidContract()
         => new("Invalid TRRM Contract table.");

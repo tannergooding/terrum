@@ -13,7 +13,11 @@ public readonly ref struct TrRmStringTableReader
     public TrRmStringTableReader(ReadOnlySpan<byte> section, int recordCount)
     {
         _rows = new TrRmVariableTableIndex(section, recordCount, 8, 4);
+        Count = recordCount;
     }
+
+    /// <summary>Gets the number of validated string rows.</summary>
+    public int Count { get; }
 
     public string DecodeName(int row)
         => TrRmStringRowReader.DecodeName(_rows.GetRow(row));

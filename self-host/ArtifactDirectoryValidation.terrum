@@ -275,7 +275,7 @@ bool TryValidateArtifactFeatures()
                 || !TryReadArtifactWord(rowStart + 4, init var minimumRuleRevision)
                 || featureId <= previousFeatureId
                 || featureId != 1
-                || minimumRuleRevision == 0 || minimumRuleRevision > 6)
+                || minimumRuleRevision == 0 || minimumRuleRevision > 8)
             {
                 return false;
             }

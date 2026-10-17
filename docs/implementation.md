@@ -147,25 +147,86 @@ module revision 83. Typed pointer formation can take the address of an element
 in an initialized fixed-array local; native lowering retains its checked
 element bounds. Fixed-array expressions, including those pointer addresses,
 remain unsupported by private semantic modules. Standard TRRM does not encode
-these pointer tables or nodes; that private support does not extend the
-standard format.
+general pointer address/read/write operations, but it carries typed
+native-pointer TypeSpecs and admitted pointer-valued declaration/call
+arguments in its bounded executable profile.
 
 A separate prototype under the unapproved
 [TRRM native interop proposal](proposals/trrm-native-interop-metadata.md)
 supports two-string `Terrum.Interop.NativeImport` declarations with
 `Terrum.Interop.NativeOutput` for result-correlated writable scalar pointers
 and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. Direct imports
-also admit supported scalar results and opaque `ptr<void>` results; typed
-pointer tables remain rejected by this standard TRRM prototype.
-The default output condition is nonzero; `NativeOutput(ordinal, NonNegative)`
-provisionally expresses signed nonnegative status results such as HRESULT
-success. The latter
+also admit target scalar, represented data-pointer and native-function-pointer
+parameters and results. `NativeParameter` is optional: without it, the raw
+pointer remains caller-unsafe and carries no checked access, retention, extent
+or alignment promise. This does not enable general pointer locals or memory
+operations in executable Bodies.
+Output conditions are explicit: `NativeOutput(ordinal, NonZero)` selects
+nonzero for `int32` or `uint32` results, while
+`NativeOutput(ordinal, NonNegative)` provisionally expresses signed
+nonnegative status results such as HRESULT success. The latter
 pointer output represents only unmanaged pointer bits; it adds no backing,
 provenance, ownership, pinning, or cleanup guarantee. The prototype carries the raw
 import's caller-unsafety and direct representation through a provisional TRRM
 NativeImport table and source-reference path; that standard path is limited to
 named Windows System32 imports. Its section, clause, and Feature assignments
-are not canonical TRRM assignments. The source prototype also accepts
+are not canonical TRRM assignments. It also persists `NativeCallable` entries
+through a provisional NativeCallable table and ABI role; source-free references
+expose those entries as caller-unsafe external declarations. Provisional
+function-pointer signature anchors in section `0x0033` and TypeSpec form `0x0D`
+preserve recursively nested signatures over scalar, raw-pointer, and
+function-pointer values. Duplicate normalized signatures reject, and each
+module using a callable or function-pointer signature must declare the
+provisional `RootlessNativeValues` feature. Compact Body type keys are limited
+to 65,024 signature rows. Standard TRRM now supports function-address formation
+and indirect calls to local `NativeCallable` entries and bodyless imported
+callable declarations in compact-indexed Bodies. Ordinary ModuleRef/Import rows
+retain the selected provider identity and export key through loading; the writer
+and consumer validate the local expected signature and preserve lexical unsafe
+authorization with indexed region kind `0x06`. The provisional feature closure
+also requires `DirectNativeCalls` and `NativeCallableEntries` for these entries
+and operations. Native single-provider and graph consumers enforce retained
+provider identity for native-callable imports; their selected semantic
+contracts are checked before native emission. Address operations retain the
+selected MethodDef/import identity in the artifact, including address-only
+dependency use. A loaded indexed TRRM consumer cannot yet be repackaged through
+the private semantic-module path. The runtime function pointer does not own or
+extend its provider image's lifetime; deployment must keep that image live.
+Generic numeric-slot vtable declarations now round-trip through
+provisional section `0x0032` and ABI role 4, including the explicit receiver,
+aligned vptr byte offset, slot, scalar/raw-pointer signatures, annotated
+pointer inputs, and result-correlated output clauses. Compact-indexed Bodies
+preserve admitted typed-pointer formals and arguments and support scalar
+output destinations through the restricted ScalarInitOutput rule below;
+general pointer address/read/write operations remain unsupported. Public
+declarations are exposed for source-reference binding. A TRRM reference
+projects role-4 declarations into the consumer as local vtable-dispatch stubs.
+ModuleRef/Import rows preserve the selected provider identity and export key,
+while the consumer retains a copy of the role-4 binding row needed for
+source-free verification and lowering. The loader does not resolve that
+provider or replace the copied slot/offset.
+Native-package single-provider, set, and graph consumers validate the retained
+provider identity and exact vtable binding, then rebind the local dispatch stub
+to the selected provider export. Private semantic revision 87 persists that
+expected binding and its output contracts for consumer-side revalidation; ordinary private-module
+replacement still permits a provider with a different slot. Private semantic
+modules retain vptr offsets in revision 85. Same-artifact
+compact-indexed bodies can call role-4 declarations
+through ordinary `Call`, transporting raw pointers only through
+signature-matched call results/arguments or zero-valued constants; ordinary
+pointer/address operations remain unsupported.
+Vtable-bearing artifacts provisionally require candidate Features `0x0101`
+(`RootlessNativeValues`) and `0x0104` (`NativeVTableCalls`) in addition to
+`0x0100` (`NativeBoundaryContracts`); these assignments remain unapproved.
+The writer can emit this body from source, and the loader reconstructs and
+verifies it; a loaded indexed body is not yet reserializable by the standard
+writer. Native-package binding and consumer-side revalidation are covered for
+TRRM-derived imports. Runtime dispatch is also demonstrated for a non-null
+receiver through a TRRM-derived declaration, including a scalar output pointer:
+the consumer artifact is loaded, emitted as a native library, and dispatched
+through a one-slot vtable. This does not establish arbitrary pointer operations
+or reserialization of loaded indexed bodies. The
+source prototype also accepts
 `NativeParameter` for raw pointer inputs with explicit `Read`, `Write`, or
 `ReadWrite` access, `NoEscape` retention, and extent zero or one for supported
 scalar, raw-pointer, and fixed-layout Blittable aggregate pointees. Extent zero
@@ -184,7 +245,8 @@ Raw pointer values remain caller-authored unsafe inputs. Caller-unsafe source
 functions may return opaque `ptr<void>` values through private semantic
 modules. This preserves caller-unsafety and address bits only; it conveys no
 provenance, backing, ownership, or lifetime, and source-body pointer results
-remain outside the current TRRM executable prototype. This input metadata
+from ordinary Terrum functions remain outside the current TRRM executable
+prototype. This input metadata
 round-trips through private semantic-module revision 80, native packages,
 consumer sets, and graph-JIT roots. The experimental TRRM direct-import path
 also round-trips scalar, opaque-pointer, and `ptr<void>` pointees, plus
@@ -197,6 +259,28 @@ This path is limited to declaration-only import libraries; pointer fields,
 function-pointer fields, aggregate bodies, by-value aggregate ABI, and
 aggregate outputs remain unsupported. These assignments remain unapproved
 and do not establish canonical TRRM conformance.
+The provisional ScalarInitOutput rule revision 8 additionally round-trips
+exact typed addresses of initialized scalar locals for read-only `NoEscape`
+`NativeParameter` and writable `NativeOutput` formals on direct imports or
+generic vtable calls. The Body retains addressable-place identity, typed
+pointer TypeSpecs, and an explicit unsafe scope; loading reconstructs the
+address fact for mandatory semantic verification. Its bounded three-block
+conditional form can keep a terminal result check and both return arms inside
+that scope. A consumer can re-emit a vtable call using this address form; this
+does not add general pointer locals, fields, or memory operations. It requires
+the candidate `RootlessNativeValues` feature alongside
+`NativeBoundaryContracts`. Fixed-array or aggregate addresses, pointer
+reads/writes, and broader control flow remain unsupported. The candidate
+`0x2E` unsafe marker remains unapproved and is documented in the
+[native interop proposal](proposals/trrm-native-interop-metadata.md). The
+verifier now ties each output destination to the producing call and its result
+condition, and admits reads only on paths that prove availability. It supports
+direct comparisons against zero for the declared `NonZero` and signed
+`NonNegative` conditions, plus body-verified, single-parameter Boolean
+predicates that reduce to those comparisons, including scalar temporaries
+reconstructed from TRRM. Overwriting the status or destination, another output
+call, or an unmodeled pointer write invalidates the relevant correlation;
+unguarded, mismatched, and stale-result observations are rejected.
 
 Direct imports with writable scalar outputs and `NativeParameter` inputs also
 round-trip through private semantic producer/consumer and native package
@@ -230,8 +314,9 @@ without inferring interface identity, ownership, or provider behavior.
 Supervised native execution covers mixed register/stack arguments, floating
 arguments and results, and output publication. The provisional
 `NativeVTableMethod` spelling is not normative. Private semantic-module
-revision 84 persists and revalidates the slot and parameter contract; exported
-methods are exposed to consumers as ordinary caller-unsafe external functions.
+revision 84 persists and revalidates the slot and parameter contract; revision
+85 additionally persists the aligned vptr byte offset. Exported methods are
+exposed to consumers as ordinary caller-unsafe external functions.
 Native module packages use the same producer/consumer path. Standard TRRM
 continues to reject these declarations until its metadata contract is reviewed.
 
@@ -258,9 +343,12 @@ interface identity, ownership, or provider behavior. The active suite covers
 both maintained entrypoint builds and the generic import, pointer, callable,
 and vtable mechanisms. Legacy DX11/COM prototype tests remain excluded because
 they depend on retired compiler-owned contracts; they are not acceptance
-evidence. DX11 generalization is not yet accepted: WARP/hardware execution
-remains unqualified and requires its documented opt-in. These are explicit
-evidence gaps, not reasons to restore sample-specific compiler policy.
+evidence. Both maintained entrypoints now have supervised WARP and hardware
+runtime evidence for window startup, client resize, and normal shutdown; the
+explicit WARP provider-output failure test also passed separately. These runs
+do not establish rendering correctness or every provider/runtime path. DX11
+generalization is accepted with those evidence limits; they are not reasons to
+restore sample-specific compiler policy.
 
 ## Syntax and CLI
 

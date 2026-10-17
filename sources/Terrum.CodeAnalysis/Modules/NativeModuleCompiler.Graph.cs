@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
@@ -34,6 +35,12 @@ public static partial class NativeModuleCompiler
         CheckIdentity(identity);
         CheckPolicy(runtimePolicy);
         var providers = ReadGraphProviders(dependencies);
+        var importProviders = providers.Select(static provider =>
+            (provider.Identity!, provider.Policy,
+                provider.ValidatedReference
+                    ?? throw new ModuleFormatException("Graph provider reference is missing.")))
+            .ToArray();
+        program = BindModuleImportBindings(program, importProviders);
         foreach (var provider in providers)
         {
             if (provider.Identity!.Equals(identity, StringComparison.OrdinalIgnoreCase))
@@ -97,6 +104,12 @@ public static partial class NativeModuleCompiler
         ArgumentNullException.ThrowIfNull(program);
         CheckPolicy(runtimePolicy);
         var providers = ReadGraphProviders(dependencies);
+        var importProviders = providers.Select(static provider =>
+            (provider.Identity!, provider.Policy,
+                provider.ValidatedReference
+                    ?? throw new ModuleFormatException("Graph provider reference is missing.")))
+            .ToArray();
+        program = BindModuleImportBindings(program, importProviders);
         if (providers[0].Policy != runtimePolicy || program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
             throw new ModuleContractException("Graph consumer and dependency runtime policies differ.");

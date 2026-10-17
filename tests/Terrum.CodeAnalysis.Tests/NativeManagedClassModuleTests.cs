@@ -358,12 +358,12 @@ public sealed partial class NativeManagedClassModuleTests
         var forged = program with {
             Functions = program.Functions.SetItem(factoryIndex, factory with { ClassConstructor = 999 }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Leaf"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Leaf"]))!;
         forged = program with {
             Functions = program.Functions.SetItem(program.Functions.IndexOf(make),
                 make with { Body = make.Body with { RetiredManagedLocals = [] } }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Leaf"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Leaf"]))!;
     }
 
     [Test]

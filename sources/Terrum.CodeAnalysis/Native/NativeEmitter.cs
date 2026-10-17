@@ -50,7 +50,6 @@ public static class NativeEmitter
         ArgumentNullException.ThrowIfNull(program);
 
         var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
-        var system32ImportPaths = new Dictionary<int, string>();
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
             var function = program.Functions[functionIndex];
@@ -68,10 +67,6 @@ public static class NativeEmitter
                 }
                 bindings.Add(new NativeImportBinding(function.Name,
                     directImport.LibraryName, directImport.ExportName));
-                if (!allowApplicationDirectory)
-                {
-                    system32ImportPaths.Add(functionIndex, System32ImportPath(directImport.LibraryName));
-                }
                 continue;
             }
             if (function.NativeVTableMethod is not null)
@@ -89,14 +84,9 @@ public static class NativeEmitter
         }
         var code = CompileWithImports(program, bindings.ToImmutable(), runtimePolicy, cancellationToken,
             allowNativeImports: true).Code;
-        return PeImage.Build(code with {
-            NativeImports = [
-                .. code.NativeImports.Select(import =>
-                    import.DeclarationIndex >= 0
-                        && system32ImportPaths.TryGetValue(import.DeclarationIndex, out var path)
-                            ? import with { DllName = path } : import),
-            ],
-        });
+        return PeImage.Build(allowApplicationDirectory
+            ? code
+            : QualifyDirectNativeImports(program, code));
     }
 
     internal static string System32ImportPath(string dllName)
@@ -123,7 +113,32 @@ public static class NativeEmitter
         }
         var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken,
             allowNativeImports || allowDirectNativeImports);
-        return (PeImage.Build(code), UsedImports(code, selected));
+        var used = UsedImports(code, selected);
+        if (allowDirectNativeImports)
+        {
+            code = QualifyDirectNativeImports(program, code);
+        }
+        return (PeImage.Build(code), used);
+    }
+
+    private static NativeCode QualifyDirectNativeImports(BoundProgram program, NativeCode code)
+    {
+        var system32ImportPaths = new Dictionary<int, string>();
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            if (program.Functions[index].DirectNativeImport is DirectNativeImport directImport)
+            {
+                system32ImportPaths.Add(index, System32ImportPath(directImport.LibraryName));
+            }
+        }
+        return code with {
+            NativeImports = [
+                .. code.NativeImports.Select(import =>
+                    import.DeclarationIndex >= 0
+                        && system32ImportPaths.TryGetValue(import.DeclarationIndex, out var path)
+                            ? import with { DllName = path } : import),
+            ],
+        };
     }
 
     /// <summary>Emits callable native code with verified external declaration bindings for graph JIT callers.</summary>
@@ -218,7 +233,8 @@ public static class NativeEmitter
         }
         var selected = SelectImports(program, bindings, cancellationToken);
         var managedNodes = UsesManagedNodes(program);
-        var compiler = new PeCompiler(program, cancellationToken, managedNodes, imports: selected);
+        var compiler = new PeCompiler(program, managedNodes, imports: selected,
+            cancellationToken: cancellationToken);
         return (compiler.Compile(), selected);
     }
 
@@ -502,6 +518,8 @@ public static class NativeEmitter
         }
         var selected = new List<(string Name, int Index)>(exports.Count);
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var imageNames = new HashSet<string>(StringComparer.Ordinal);
+        var nativeCallableEntryNames = new HashSet<string>(StringComparer.Ordinal);
         var managedExports = UsesManagedNodes(program);
         var functionIndices = new Dictionary<string, int>(program.Functions.Length, StringComparer.Ordinal);
         for (var index = 0; index < program.Functions.Length; index++)
@@ -531,16 +549,54 @@ public static class NativeEmitter
             {
                 throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
             }
+            if (!imageNames.Add(name))
+            {
+                throw new ArgumentException("Native library export names must be unique.", nameof(exports));
+            }
             selected.Add((name, index));
+        }
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var function = program.Functions[index];
+            if (function.NativeCallableEntryName is not string entryName)
+            {
+                continue;
+            }
+            if (function.NativeFunctionPointerType is null
+                || !DirectNativeImportContract.IsValidExportName(entryName)
+                || !nativeCallableEntryNames.Add(entryName))
+            {
+                throw new ArgumentException(
+                    $"Function '{function.Name}' has an invalid or duplicate native callable entry name.",
+                    nameof(program));
+            }
+            if (!function.IsExternal && !imageNames.Add(entryName))
+            {
+                throw new ArgumentException("Native library export names must be unique.", nameof(exports));
+            }
+            if (!function.IsExternal)
+            {
+                selected.Add((entryName, index));
+            }
+        }
+        if (selected.Count > 1024)
+        {
+            throw new ArgumentException("A native library supports at most 1024 public exports.", nameof(exports));
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
         captureSelectedExports?.Invoke([.. selected]);
         var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
-        var compiler = new PeCompiler(program, cancellationToken, managedExports, library: true, imports: imports,
-            sourceDependent: sourceDependent);
+        var compiler = new PeCompiler(program, managedExports, library: true, imports: imports,
+            sourceDependent: sourceDependent, cancellationToken: cancellationToken);
         var code = compiler.Compile();
+        var usedImports = UsedImports(code, imports);
+        if (allowDirectNativeImports)
+        {
+            code = QualifyDirectNativeImports(program, code);
+        }
         captureCode?.Invoke(code);
-        return (PeImage.BuildLibrary(code, [.. selected]), UsedImports(code, imports));
+        return (PeImage.BuildLibrary(code, [.. selected]), usedImports);
     }
 
     internal static bool UsesManagedNodes(BoundProgram program) => !program.Classes.IsEmpty
@@ -651,7 +707,7 @@ public static class NativeEmitter
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
         }
         var managedNodes = UsesManagedNodes(program);
-        return new PeCompiler(program, cancellationToken, managedNodes).Compile();
+        return new PeCompiler(program, managedNodes, cancellationToken: cancellationToken).Compile();
     }
 }
 
@@ -730,8 +786,9 @@ internal sealed partial class PeCompiler
         internal List<int> Continues { get; } = [];
     }
 
-    internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool managedNodes, bool library = false,
-        IReadOnlyDictionary<int, NativeImportBinding>? imports = null, bool[]? sourceDependent = null)
+    internal PeCompiler(BoundProgram program, bool managedNodes, bool library = false,
+        IReadOnlyDictionary<int, NativeImportBinding>? imports = null, bool[]? sourceDependent = null,
+        CancellationToken cancellationToken = default)
     {
         _program = program;
         _sourceDependent = sourceDependent;
@@ -3319,7 +3376,7 @@ internal sealed partial class PeCompiler
                         StoreValue(PendingReturnSlot(), returnType);
                     }
                     CommitOutParameters();
-                    if (returnType != PrimitiveType.Bool && returnType != PrimitiveType.Void)
+                    if (returnType is not (PrimitiveType.Bool or PrimitiveType.Void))
                     {
                         if (IsIndirect(returnType))
                         {
@@ -3493,7 +3550,8 @@ internal sealed partial class PeCompiler
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verified scalar layouts and eight-byte fallback cover all output slots.")]
     private void CommitOutParameters()
     {
-        var variables = _program.Functions[_currentFunction].Variables;
+        var function = _program.Functions[_currentFunction];
+        var variables = function.Variables;
         var hasOut = false;
         foreach (var variable in variables)
         {
@@ -3513,7 +3571,8 @@ internal sealed partial class PeCompiler
         }
         for (var i = 0; i < variables.Length; i++)
         {
-            if (!variables[i].IsOut)
+            if (!variables[i].IsOut
+                || NativeVTableCallContract.OutputForParameter(function, i) is not null)
             {
                 continue;
             }

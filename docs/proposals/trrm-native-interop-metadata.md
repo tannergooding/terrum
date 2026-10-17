@@ -1,444 +1,764 @@
-# Native import metadata in TRRM
+# Standard TRRM native boundary metadata
 
-**Status: UNAPPROVED proposal for review.** This proposal adds no records to
-the canonical TRRM design and does not approve current implementation
-experiments. A provisional direct native-import slice exists in the branch;
-its unapproved wire assignments and support limits are recorded below. This
-proposal describes provisional generic native-import metadata. Earlier
-COM-specific interface, method, owner, acquisition, reference-count, and
-cleanup clauses and worked examples are withdrawn; they are not required TRRM
-gaps and must not be implemented from this proposal. COM ownership and
-wrappers belong in authored Terrum code. Generic vtable metadata remains
-unresolved and is outside this proposal. See
-[Unsafe FFI and native vtable cleanup](unsafe-ffi-vtable-cleanup.md).
+**Status: UNAPPROVED extension proposal for consolidated review.** Raw
+caller-unsafety, direct target-compatible representation, authored wrappers,
+and removal of compiler-owned API/COM policy are settled. Explicit
+native-callable entry support is an approved direction. The logical carriers,
+physical shapes, capability decomposition and numeric candidates below are
+recommendations, not canonical assignments or implementation acceptance.
 
-## Goal
+This proposal covers imports, native-callable entries, native function
+pointers and generic vtable calls together. It supersedes this document's
+earlier direct-import-only scope and its deferral of the latter surfaces.
+Withdrawn COM owner/acquisition, IID, reference-count and automatic cleanup
+records remain withdrawn. See [unsafe FFI cleanup](unsafe-ffi-vtable-cleanup.md)
+and [joint output/failure/ownership composition](trrm-output-failure-ownership.md#proposed-native-boundary-composition).
 
-A Terrum library should be able to declare a native boundary, compile that
-declaration and its contract into TRRM, and expose it through an ordinary
-Terrum dependency. A consumer should bind the selected dependency and obtain
-the native binding and generic pointer/output facts from its metadata. The
-compiler should then validate and lower those facts using generic target
-rules.
+## Recommendation and reason to extend TRRM now
 
-This is a format proposal, not a decision about the broader native-package
-architecture. It does not change `.trmn` or `.trng`, and it does not add a
-separate C# profile, compiler registry, or DX11-specific path.
+Add required semantic records to standard `.trrm`, selected through ordinary
+Terrum dependency binding. Reuse complete types, declarations, signatures,
+effects and layouts; add the native binding, callable role, explicit layout
+commitment and pointer relationships that those records cannot currently
+express. Do not make private modules, a compiler catalog or a native package
+the only source of a dependency's callable contract.
+This does not redesign private semantic modules, `.trmn`, `.trng` or native
+deployment sets. Those routes may carry derived code and their own private
+representation, but cannot establish standard TRRM support by implication.
 
-These records describe the selected dependency's declarations, so TRRM should
-be their source of truth. Native package formats may carry executable images
-and deployment data, but they should not be the only place a consumer can
-learn an imported method's signature and native binding.
+The [format-version contract](../specs/representation/format-versioning.md)
+explicitly permits draft changes while retaining `(1, 0)`, without unpublished
+artifact compatibility. The current
+[registry](../specs/representation/trrm-1.registry.json) is
+`trrm/1-draft-unified-3`; it registers no Feature IDs and no released schema.
+Its authority over current assignments does **not** make metadata frozen,
+complete or closed to extensions. Missing records are design work to specify,
+not a reason to reject the needed language/compiler route indefinitely.
 
-## Current gap
+Recommend an additive next draft, with the candidate agreement label
+`trrm/1-draft-native-boundaries-1` and the existing version pair `(1, 0)`.
+The label is out-of-band draft agreement, not a new header field. Consumers
+must select that exact schema and its governing semantics; equal version
+bytes or a Feature number cannot make an old decoder understand new records.
+After user consolidation, update the canonical registry, clause applicability,
+manifest catalog and conformance gates together. This proposal performs none
+of those normative updates.
 
-TRRM already represents Terrum modules, types, fields, target layouts,
-callable signatures, parameter modes, semantic contracts, and
-producer/key imports. Its existing `Import` row selects a Terrum producer and
-export; it does not identify an operating-system DLL or native export.
+An existing consumer must still reject an unsupported required record rather
+than drop its meaning. That is a temporary support boundary, not a permanent
+decision against extending TRRM. Implementation can proceed against an
+explicitly selected experimental draft; ordinary standard interchange is
+claimed only after review, registration and complete consumer support.
 
-An earlier native-catalog prototype filled that gap out of band, including
-DX11 and sample behavior; that API-specific catalog policy has been retired.
-The branch now has a provisional source-authored direct-import form without a
-compiler-owned import catalog, but its experimental TRRM assignments and
-incomplete dependency paths are not canonical metadata. This
-proposal addresses dependency consumption of authored native declarations;
-it does not preserve catalog-only convenience behavior or add API-specific
-compiler policy. Generic vtable calls exist in source and private-module
-prototypes, but their standard TRRM representation is outside this proposal
-and remains unresolved.
+### Settled semantics, recommended choices and remaining choices
 
-## Unsafe boundary and representation
+| Category | Disposition |
+|---|---|
+| Settled | Raw imports and native-callable declarations require unsafe callers, including scalar-only signatures. An unsafe declaration does not authorize its own body. |
+| Settled | No automatic marshalling, pinning, rooting, ownership/refcount operation, COM acquisition or foreign-provider proof. Preserve known backing, loans, access, output state and cleanup. |
+| Settled | API names, library symbols, IIDs, SDK layouts, slot choices and application algorithms are authored library/source data, never compiler recognizers. |
+| Recommended here | Required native declaration records, an explicit native callable-signature carrier, numeric vtable binding with an explicit receiver, generic pointer/output/dependency clauses and exact capabilities. |
+| Recommended here | First executable boundary is synchronous, closed, rootless ABI data. Use target classification without a 16-byte aggregate cap or a sample-specific admission gate. |
+| Still for review | Exact source annotation/type-use spelling; product loading defaults; whether to consolidate the proposed scoped dependency/value facts into broader shared codecs before registration. Recommended defaults appear below. |
 
-A native import is a call across the Terrum boundary into code whose
-implementation and memory behavior are not checked by Terrum. A declaration
-that is callable from non-Terrum code crosses the same boundary in the other
-direction. These raw declarations are caller-unsafe even when their
-signatures contain only scalar values: their `MethodDef` must carry the
-existing `Effects.RequiresUnsafeCaller` contract. A caller must satisfy that
-obligation in an explicit `unsafe { ... }` block or `unsafe(expr)`; declaring
-the caller `unsafe` propagates its obligation but does not make its body an
-implicit unsafe scope. `NoThrow` and other effects are separate promises;
-they do not remove the unsafe obligation.
+## Logical contract and ownership of facts
 
-`unsafe` is an authored trust contract: it marks operations whose safety the
-compiler cannot establish and places responsibility on the author and caller.
-An explicit unsafe block or expression can contain that obligation inside an
-authored wrapper; it does not prove the wrapper's assumptions or the foreign
-provider's behavior. Unsafe code may be used to work around initialization
-analysis, a compiler limitation, or an optimization decision, and may also
-contain an intentional bug; the language does not judge those choices.
-However, `unsafe` need not authorize every possible escape: the language can
-limit which otherwise-dangerous operations it admits while still supporting
-common boundaries such as FFI. For admitted unsafe operations, the compiler
-should preserve source intent and may report an obvious contradiction as a
-suppressible warning, but should not reject code merely because a fact beyond
-the language's verification boundary cannot be proven. Safe code remains
-subject to the compiler's ordinary verification rules and blocking
-diagnostics.
+| Fact | Producer and consumer obligation |
+|---|---|
+| Terrum identity | Ordinary Module/Import/Export selects a declaration and its complete expected contract, not a DLL inferred from its source name. |
+| Foreign binding | An import declares library identity, exact export and loading policy. A native-callable entry explicitly opts into the foreign ABI; public Terrum visibility alone is not an OS export. |
+| ABI and types | Retain exact target convention, complete scalar/pointer/function-pointer types, logical parameter order and fixed-layout commitment. Derive registers, hidden result storage and stack positions in lowering. |
+| Effects | Retain existing Effects, including caller-unsafe. NoThrow is independent of native faults, blocking, purity, allocation and foreign retention. |
+| Pointer use | Authored access, extent, alignment and retention promises are separate from pointer representation and the actual argument's backing/loan facts. |
+| Output | Preserve the exact invocation result, region/destination version and conditional validity. A native pointer cell becoming readable is not ownership or initialization of everything reachable through it. |
+| Dependencies | Preserve result/capture sources and carried backing, pin/root, holder, code/load and cleanup obligations through copies, fields, forwarding, binding and replacement. |
+| Vtable binding | Retain receiver formal, vptr offset, slot and native signature. No IID, interface acquisition or reference-count semantics follow. |
+| Verification | Readers revalidate supported shapes and binding; mandatory verification reconstructs local authority and flow. A serialized authorization or provider assertion is not a verifier bypass. |
 
-Every by-value scalar/aggregate and every data region exposed through a
-pointer must have the selected target's fixed `Blittable` representation.
-Opaque native handles are represented by their ABI pointer values; that does
-not make the referenced object a blittable Terrum value or establish its
-identity, ownership, or lifetime. The raw declaration spells the actual ABI
-shape: native-width scalar types, pointers, and explicitly laid-out values.
-`NativeParameter` describes pointer access and retention, but it does not
-grant safety or prove that the foreign implementation honors those claims.
-`ref<T>` is not a pin: ordinary reference formation acquires no address
-stability. A C pointer parameter is represented as `ptr<T>` in the raw FFI
-signature. The caller may form that pointer from stable stack/native storage,
-or from movable managed storage only under an explicit live `pin ref<T>`
-dependency. `ptr<T>` itself does not root or pin its referent.
-Any temporary required by the target ABI for a by-value `Blittable` aggregate
-is ordinary ABI lowering, not a general-purpose marshalling or pinning step.
+The accepted [pointer/reference rules](../specs/language/references.md),
+[dependency rules](../specs/language/dependencies-and-views.md),
+[caller-unsafety](../specs/grammar-spec.md#53-caller-unsafe-declarations-and-explicit-unsafe-scopes),
+[layout contract](../specs/data-layout-and-abi.md#fixed-directly-interoperable-representations)
+and [Windows x64 call interface](../specs/targets/windows-x64-call-interface.md)
+remain the semantic owners.
 
-This proposal adds no built-in marshaller. It does not implicitly convert
-strings, managed references, or arrays; copy managed values to temporary
-native buffers; root or pin objects; or otherwise extend their lifetimes.
-Any buffer construction, encoding, pinning facility, or safe wrapper must be
-ordinary explicitly authored Terrum code with its own checked contract.
-Blittability fixes representation; it does not make an unsafe call safe.
-An address may refer directly to stack storage only for the duration and
-access permitted by its explicit loan contract; an import with a retention
-contract cannot silently extend that storage's lifetime.
+`ptr<T>` is a raw ABI address, not `ref<T>`, `pin ref<T>` or `init ref<T>`.
+Copies and admitted erasures preserve known dependencies; none acquire a pin
+or extend a lifetime. A pointer into movable storage still needs its explicit
+live pin or independently stable backing. Per-indirection qualifications
+remain distinct; this proposal does not settle every C/C++ const mapping or
+introduce `ptr<init T>`.
 
-An authored wrapper may contain a raw call in an explicit unsafe block and
-expose a safe API only when it establishes the full safety contract. For
-example, a wrapper over `QueryPerformanceCounter` can check the native
-success result before exposing its output. Such wrappers do not change the
-unsafe status of the imported declarations themselves.
-The accepted [caller-unsafe rules](../specs/grammar-spec.md#53-caller-unsafe-declarations-and-explicit-unsafe-scopes)
-and [Blittable contract](../specs/data-layout-and-abi.md#fixed-directly-interoperable-representations)
-remain authoritative.
+Optional foreign annotations are authored evidence, not provider verification
+and not a prerequisite catalog of approved APIs. Their absence supplies no
+no-retention, initialized-output or fresh-backing theorem. Raw addresses with
+unknown provenance can remain unsafe inputs; converting a known stack/pin/owner
+loan into an unknown address is not a way to discharge its checked obligations.
+Known authority, backing or retention contradictions still reject under the
+ordinary rules. Lack of proof about foreign behavior alone is not a reason to
+reject an otherwise admitted raw call.
 
-The intended model is direct blittable FFI, closer to .NET interop with
-runtime marshalling disabled and a generated `LibraryImport` stub than to
-classic runtime-marshalled `DllImport`.
+## Proposed physical records
 
-### `ref<T>`, `pin ref<T>`, and `ptr<T>` at the boundary
+All new numbers in this section are **unapproved candidates**. Existing
+Module, ModuleRef, TypeDef, FieldDef, Layout, MethodDef, MethodSig, Param,
+TypeSpec, Import, Export, Contract and Body framing remain unchanged.
+New semantic sections use required policy `0x0000`, not the optional
+nonsemantic extension range. Typed references remain little-endian `u32`
+row indexes with a zero high byte and the existing 24-bit bounds; only fields
+marked `?` admit zero. No semantic references are hidden in Blob bytes.
 
-These forms overlap in how callers can reach storage, but they are not aliases:
+### Candidate allocation and collision check
 
-| Form | Contract | Native-boundary role |
+| Namespace | Candidate allocation | Existing assignments checked |
 |---|---|---|
-| `ref<T>` | Checked reference descriptor; ordinary formation acquires no pin and does not promise a stable raw address. | Not the C pointer type. |
-| `pin ref<T>` | Checked reference plus an explicit live pin/root dependency that keeps eligible backing address-stable for that dependency's lifetime. | Can convert to the matching `ptr<T>` while the pin remains live. The conversion acquires no pin. |
-| `ptr<T>` | Explicit raw address; it carries no root, ownership, or pin by itself. Dereference requires unsafe authorization and valid lifetime/provenance. | The direct representation for a C `T*`; `ptr<ptr<T>>` represents `T**`. |
-| `init ref<T>` | Initialization-destination parameter mode for a Terrum `T` value, not a raw pointer or a type qualifier inside `T`. | Appropriate on a safe Terrum wrapper. Do not use it in place of the raw FFI pointer parameter. |
+| Required section kind (`u16`) | `0x0030` NativeImport, `0x0031` NativeCallable, `0x0032` NativeVTable, `0x0033` NativeFunctionPointerSignature | Canonical tables end at `0x0020`, with SourceMap at `0x7F00`; the branch experiment separately uses `0x0021`. |
+| Contract kind (`u16`) | `0x0010` NativeAbi, `0x0011` NativeParameter, `0x0012` NativeOutput, `0x0013` NativeRepresentation, `0x0014` InteropDependency | Canonical kinds are `0x0001..0x0005`; avoid experimental kinds 6, 10 and 12 and retired COM kinds 7–9 and 11. |
+| TypeSpec form (`u8`) | `0x0D` native function-pointer signature-table reference | Canonical forms are `0x01..0x0C`. This is not a new atomic/family type code. |
+| Body primary opcode (`u8`) | `0x2A..0x2D` raw address/memory operations; `0x2E` provisional unsafe-tail marker; `0x31..0x32` native address/indirect operations | Canonical place shapes occupy `0x20..0x29`; Call is `0x30`. Vtable calls reuse Call with a role-4 MethodDef target, avoiding a duplicate call encoding. `0x2E` is an experimental profile candidate, not an assigned canonical opcode. |
+| Feature identity (`u32`) | `0x0100..0x0104`, exact revision `1` | The canonical Feature list is empty; avoid experimental IDs 1, 2 and 4 and retired COM experiments. |
 
-Thus `ptr<T>` is not `pin ref<T>`: a pointer may refer to stack or native
-storage without a GC pin, while a pointer into movable managed storage
-requires an explicit live pin or other independently stable backing. The QPC
-wrapper uses `init ref<int64>` only for its Terrum-facing output; the raw
-import accepts `write ptr<int64>` and receives the address of an initialized
-stack local. A pointer-to-pointer output such as `write ptr<ptr<void>>`
-describes the ABI shape only; it does not establish the returned pointer's
-identity, ownership, or lifetime.
+These are separate namespaces: section `0x0031` does not collide with opcode
+`0x31`. No new DefId discriminator, qualifier bit, MethodDef flag, target
+requirement, runtime-policy value or type-family code is proposed.
+ABI/role/access/condition domains below belong to these new records only.
 
-`init ref<T>` is currently a parameter mode with call-site spelling
-`init value`; it is not a first-class `init T` type qualifier. This proposal
-therefore keeps `init ref<T>` in safe wrapper signatures and uses
-`NativeParameter` and `NativeOutput` metadata for raw pointer access and
-conditional validity. Any ownership remains an authored wrapper contract;
-these annotations do not supply it. Whether the language should add a form
-such as `ref<init T>` or `ptr<init T>` is a separate type model question, not
-an implied part of this TRRM extension.
+The allocation check used
+`docs/specs/representation/trrm-1.registry.json`, schema
+`trrm/1-draft-unified-3`, SHA-256
+`6ad18dcb65a00a0cf742fade77234f745dd036b7ae5deb7b2f5ab8d2bc23b470`.
+Its section, clause, TypeSpec, opcode and Feature sets have no intersection
+with the corresponding candidates. A search of the existing proposals found
+only historical opcode `0x0D` in the output-profile inventory, not a TypeSpec
+form assignment. The provisional native readers separately use the old
+section/clause/Feature numbers listed above. A reservation is **not** created
+by this check; repeat it when consolidating the then-current registry.
 
-An `init var` call-site argument is only an initialization destination for
-the wrapper's parameter. If pointer-valued initialization destinations are
-admitted, `init ref<ptr<T>>` initializes the pointer cell only; it does not
-pin the pointee or confer ownership. Whether that destination form should be
-admitted, and its required validity/ownership contract, remains open.
+### Native binding tables
 
-The proposed `NativeParameter` access field can distinguish simple readonly,
-writable, and read/write pointer use; it does not settle a complete C/C++
-const-qualification mapping. In particular, `T* const`'s top-level const is
-callee-local and does not change the ABI signature, while `write ptr<T>` and
-`ptr<write T>` qualify different levels of a Terrum type. A complete
-per-indirection mapping and its relationship to `[In]`, `[Out]`, and
-`[In, Out]` remain open; do not infer those contracts from `ptr<T>` alone.
-These distinctions follow the current [reference and pointer rules](../specs/language/references.md)
-and [initialization-loan syntax](../specs/grammar-spec.md#32-types-parameters-and-arguments).
+| Section | Exact ordered row payload | Stride |
+|---|---|---:|
+| `0x0030` NativeImport | `u32 methodDef, str libraryName, str entryName, u32 resolutionPolicy` | 16 |
+| `0x0031` NativeCallable | `u32 methodDef, str entryName?` | 8 |
+| `0x0032` NativeVTable | `u32 methodDef, u32 receiverOrdinal, u32 vptrByteOffset, u32 slot` | 16 |
 
-## Proposed metadata
+Rows inherit their module through MethodDef; no new Module partition cursor
+is needed. Each provider method has exactly one binding row of its declared
+role, except a signature-only contract, which has none. Duplicate/conflicting
+rows reject. A raw import or vtable declaration has no Body. A local
+native-callable entry has its own ordinary verified Body. Unresolved method
+formals, an implicit instance receiver and variadics are outside revision 1:
+all receiver and ordinary ABI parameters are explicit Param rows in mode
+`ordinary`, with no implicit-reference adaptation.
+Boundary parameters/results are formally admitted target scalars, raw data
+or native-function pointers, and the marked Copy structs below. Checked
+references, init modes, managed/owning descriptors and unrepresented optional
+layouts do not become raw ABI parameters through this record.
+NativeVTable.receiverOrdinal must select an ordinary data-pointer parameter;
+it is not MethodSig.receiverTypeSpec or an extra physical argument.
 
-Reuse existing `Module`, `TypeDef`, `FieldDef`, `Layout`, `MethodDef`,
-`MethodSig`, `Param`, `Import`, `Export`, and `Contract` records wherever
-they already express the fact. Add one native binding table and generic
-pointer/output clauses for native imports. This proposal does not define
-standard vtable metadata.
+An unresolved imported expected MethodDef has no local implementation or
+native binding row: its ordinary Import selects the provider. Compare its
+declared ABI role and complete callable contract, then obtain binding data from
+that selected provider. Do not require a consumer to duplicate a DLL binding
+or invent a local code address for its bodyless proxy. For a role-4 vtable
+declaration, this provider lookup is distinct from a consumer-local dispatch
+stub materialized after source binding. Signature-only contract declarations
+can likewise be selected through ordinary declaration imports.
 
-### Native DLL binding
+Library/entry names are nonempty, NUL-free decoded text. Library identities
+are names, not filesystem paths; named native exports use exact target
+symbol spelling, without a guessed suffix or inferred source name.
+Revision 1 uses ASCII library basenames and export names so that PE/loader
+byte interpretation does not depend on an ambient code page. A broader
+symbol-name encoding needs an explicit target mapping, not silent transcoding.
+`NativeCallable.entryName=0` means addressable native entry only, not an
+automatically named PE export. A nonzero entry name explicitly requests an
+OS-visible symbol, independently of ordinary Terrum Export keys.
+Duplicate native export names in one output image reject.
 
-Add a `NativeImport` table. Each row associates a bodyless external `MethodDef`
-with one target-resolved library and export:
+Recommend these resolution-policy candidates:
 
-| Field | Meaning |
-|---|---|
-| `methodDef` | The external method declaration; its existing `MethodSig` and `Param` rows are authoritative for the signature. |
-| `libraryName` | A library identity, not a path. |
-| `exportName` | The exact named export. |
-| `resolutionPolicy` | A target-defined search/deployment policy; it does not grant arbitrary path loading. |
+| Code | Meaning |
+|---:|---|
+| `0` HostResolved | Use the selected deployment's ordinary native-library resolution. It supplies no trusted-system-image guarantee. |
+| `1` SystemDirectory | Require the selected Windows deployment/loader to enforce system-directory resolution, or reject that lowering. |
 
-The current implementation experiment uses a provisional section kind
-`0x0021` with fixed 16-byte rows: `methodDef`, `libraryName`, `exportName`,
-and a 32-bit resolution policy (`1` for the selected Windows System32 policy).
-These values are not accepted TRRM assignments and remain subject to
-end-to-end review. The implementation is limited to named exports and this
-single policy.
+The default recommendation is explicit authored `HostResolved`, not an
+immutable compiler API catalog. No source-supplied path, plugin discovery,
+automatic DLL staging or implicit ownership is added. A static PE import's
+DLL basename alone cannot satisfy SystemDirectory; a backend must establish
+the actual loader/deployment basis or decline. The current Windows x64 direct
+import emitter enforces its persisted `SystemDirectory` policy by rewriting
+executable and library import names to fully qualified system-directory
+paths; unsupported platforms or system-directory paths are rejected.
+Renaming a policy value does not enforce it. Ordinal imports and
+platform-specific decorated/member conventions need later explicit shapes,
+not overloads of `entryName`.
 
-This row is distinct from `Import`: a Terrum `Import` resolves a dependency
-declaration; `NativeImport` binds the selected declaration to an OS symbol.
-The library's exported method has both its ordinary signature/contract and
-its native binding row. A consumer imports that method through the ordinary
-Terrum dependency mechanism. The selected provider's metadata supplies the
-native binding when the consumer is lowered.
+### Native ABI and callable-signature identity
 
-The module's target requirement and the existing signature/layout records
-determine the ABI. Do not serialize register assignments, stack offsets, or
-compiler-specific ABI strings in the binding row. A native import record is
-declaration metadata, not proof that the foreign DLL implements the declared
-contract.
+Contract `0x0010` NativeAbi is a MethodDef-owned singleton. Its payload is
+`u32 abiId, u8 role, u8 exceptionMode, u16 reserved=0`: 16 bytes including the
+existing eight-byte Contract header. Candidate ABI ID `1` denotes the exact
+selected Windows x64 system call interface and requires Module target `1`.
+Roles are `1` raw import, `2` native entry, `3` signature-only contract and
+`4` vtable call. Exception mode `0` is direct non-unwinding; other values
+reject in revision 1. NoThrow remains an ordinary Effects promise, not an
+implicit consequence of this byte.
 
-### Generic vtable calls remain unresolved
+Every role requires the existing caller-unsafe Effects bit. Native entries
+also require checked NoThrow and the accepted fault-containment-or-termination
+boundary; an arbitrary body is not made contained by setting the bit.
+An unsafe declaration still needs explicit unsafe regions for operations
+inside that body. A contained foreign-failure adapter is a separate selected
+[bridge](../specs/runtime/foreign-failure-bridge.md), not an exception-mode
+fallback or a universal interpretation of integer status.
 
-The compiler's source/private-module prototype supports numeric-slot vtable
-calls, but that does not establish standard TRRM support. Any future
-vtable-to-TRRM mapping needs a separately reviewed contract for the exact
-target ABI, explicit receiver, slot, and method signature. The source spelling
-and wire representation remain open; this proposal assigns no vtable records
-or wrapper recipes.
+Candidate TypeSpec form `0x0D` is exactly
+`u8 form=0x0D, u8 qualifiers=0, u32 nativeFunctionPointerSignatureRow`
+(six bytes). Required section `0x0033` has fixed eight-byte rows:
+`u32 signatureContractMethodDef, u32 reserved=0`. Each row targets a bodyless,
+non-exported role-3 MethodDef carrying the complete MethodSig, Effects,
+NativeAbi and applicable pointer/output/dependency clauses. A TypeSpec refers
+to this table row, not to an implementation or an entry-point name. The
+signature row order is the artifact-local type identity used by Body values;
+duplicate normalized contracts reject rather than creating alternate type
+identities. The referenced MethodDef is a contract anchor, not a callable
+implementation; ordinary Call and native address formation cannot invoke or
+take its address.
 
-For the current native-import/output experiment only, `NativeOutput` uses
-provisional Contract kind `6` with a 16-byte payload: 32-bit parameter
-ordinal, result-condition code, failure-disposition code, and a reserved
-zero word. The source experiment defaults integer outputs to a nonzero result;
-it also provisionally accepts `NativeOutput(ordinal, NonNegative)` for signed
-nonnegative status results such as HRESULT success, using result-condition
-code `3`. Neither the source form nor its wire code is standard approval.
-`NativeParameter` uses provisional Contract kind `10` for native-import
-pointer access, retention, and extent facts; it does not define vtable
-metadata.
+This reuses MethodDef-owned contracts instead of inventing a second Effects
+or Param system. A native function-pointer type's normalized identity is the
+resolved complete callable contract, not the anchor's row number or name.
+Separate anchors can denote equivalent signatures; different nominal pointee
+identities, conventions, modes, access, effects or retained relationships
+cannot be merged because their machine words match. Reject unanchored
+structural signature cycles; pointer recursion through valid nominal types
+does not expand their pointee storage.
 
-For a branch-local aggregate-pointer experiment, use provisional Feature ID
-`4` (`NativeBlittableLayouts`, revision `1`) and Contract kind `12`. Kind `12`
-is owned by a `TypeDef` and has one `u32` payload: the explicit
-`targetRequirement`, currently limited to Windows x64 requirement `1`. The
-referencing `NativeParameter` signature uses `ptr<TypeDef>`; its existing
-clause carries access, retention, and extent. The marked `TypeDef` must be a
-non-unique struct with `Sequential` or `Transparent` layout, a matching
-`Layout` row with default packing and zero flags, and recursively marked
-value-struct fields. The initial executable subset accepts scalar fields and
-nested marked structs. Pointer and function-pointer fields are excluded
-because the current bound field representation does not retain their complete
-type identity. Consumers must recompute field offsets, size, and alignment
-and reject mismatched marker, feature, or layout facts; neither layout values
-nor the target requirement alone imply the commitment.
+Existing `ptr` TypeSpecs can point to a function-pointer cell, and FieldDef
+can carry the complete function-pointer TypeSpec. The new form specifically
+selects a foreign convention; it does not change the accepted default Terrum
+convention of an unqualified `fnptr`, choose a new source spelling, create an
+environment or extend code lifetime.
 
-Feature ID `4` and Contract kind `12` are temporary branch assignments, not
-canonical `(1, 0)` assignments. They do not change the normative
-specification's explicit statement that `(1, 0)` has no `Blittable` marker.
-The experiment is limited to declaration-only native-import dependencies;
-it does not add aggregate Body storage, by-value aggregate ABI, or
-aggregate-output validity. The proposal remains unapproved and these choices
-must be reconciled with a future assigned schema before any conformance claim.
+### Explicit fixed representation
 
-`NativeParameter` and `NativeOutput` are needed because a pointer type alone
-does not say whether the callee reads, writes, or retains the address, and a
-signature alone does not say when an output becomes valid.
+Contract `0x0013` NativeRepresentation is a TypeDef-owned singleton:
+`u32 targetRequirement, u32 explicitAlignment, u32 valueKind`, for 20 bytes
+including the header. Target is `1`. Metadata `explicitAlignment=0` means
+omitted; otherwise it records the source's actual power-of-two requirement
+in `1..8192`, not merely the derived aggregate alignment. This metadata
+sentinel does not permit source `Alignment: 0`.
 
-Use existing `TypeDef`/`FieldDef`/`Layout` records for native structure
-declarations. Those rows describe physical representation, not API-specific
-value constraints. Field requirements, backing extents, and fixed-array
-storage rules should be checked by ordinary Terrum wrappers or a separately
-specified generic storage contract; do not add DX11-specific layout rows.
-Use existing callable signatures and semantic effect/cleanup contracts where
-they already express the requirement. Do not add SDK type names or DX11
-method names to the format.
+The clause expressly carries the per-target Blittable commitment. Candidate
+value kind `1` additionally records a rootless, cleanup-free Copy contract;
+it is a separate declared fact, **not** an inference that Blittable implies
+Copy. Revision 1 admits ordinary closed structs with that fact and
+Sequential, Union or Transparent layout under the existing target rules.
+Unique/owning values, enums or other declaration kinds need their complete
+general value/validity/ownership codecs before this scoped carrier admits
+them; a marker must not retag one as a Copy struct.
 
-### Keep API convenience in Terrum source
+Retain the existing Layout row and every complete FieldDef type. For
+Sequential/Union, Layout.pack is the normalized effective packing
+`1/2/4/8/16` (omitted source packing is 16). Transparent has no custom
+packing/alignment controls and uses pack `0` here. Recompute field offsets,
+size, object alignment, transitive required explicit alignment and stride;
+reject mismatches, by-value storage cycles, Auto layout or unknown fields.
+Raw Union keeps the target's unsafe alternative-access and Copy-field
+restrictions; it does not gain an active-member tracker.
 
-Native declarations should expose the exact native call shape. When an API
-needs hidden constants, reordered arguments, aggregate-address adaptation,
-buffer accessors, or a more convenient owner-facing method, express that
-adaptation as an ordinary Terrum wrapper in the interop library. The initial
-metadata proposal does not persist catalog-authored argument recipes or
-sample policy. This keeps the compiler responsible for generic native-import lowering, not
-for synthesizing an API's wrapper layer.
+Scalar, covered data-pointer, native-function-pointer and recursively marked
+struct fields retain their exact types. Pointer fields do not recursively
+require a layout for an opaque pointee. A typed operation exposing T's data
+instead requires T's admitted commitment and validity, including when a
+selected import publishes typed access to that region. A declaration cannot
+publish an uncommitted T layout by calling it a pointer. `ptr<void>` can carry
+an opaque address without asserting a foreign object's layout.
+Layout numbers, public visibility or Sequential alone never supply the
+commitment. Fixed inline-array, enum and owned-value codecs remain separate
+representation work, not a reason to reject the minimal scalar/pointer route.
 
-## Worked examples
+### Pointer access and retention
 
-The source examples use ordinary Terrum declarations and call syntax. The
-tables show proposed TRRM metadata rows; the source syntax for authoring those
-rows is still open. Each library method has its ordinary Terrum signature and
-export contract. Native-import records add only facts that cannot be
-recovered from that signature.
-
-### `QueryPerformanceCounter`
-
-The Windows API is a `BOOL` function with one output pointer to a signed
-64-bit `LARGE_INTEGER`. Its raw FFI signature uses `write ptr<int64>`:
-`init ref<T>` is a checked Terrum destination descriptor, not the native
-pointer type.
-
-**Interop library declaration**
-
-```terrum
-namespace Terrum.Interop.Windows;
-
-[NoThrow]
-public extern unsafe int32 QueryPerformanceCounter(write ptr<int64> performanceCount);
-```
-
-The bodyless `extern unsafe` declaration is Terrum source syntax. Its
-`Kernel32.dll!QueryPerformanceCounter` binding and pointer/output contracts
-are separate TRRM metadata rows; the source syntax that authors those rows
-remains open in this proposal.
-
-**Consumer use**
-
-```terrum
-using Terrum.Interop.Windows;
-
-public int32 Main() {
-    if (!TryGetPerformanceCounter(init var ticks)) {
-        return 1;
-    }
-    ObserveCounter(ticks);
-    return 0;
-}
-
-[NoThrow]
-internal void ObserveCounter(int64 ticks) {}
-```
-
-An authored safe wrapper can contain the unsafe call and publish its own
-result/output contract:
-
-```terrum
-public bool TryGetPerformanceCounter(init ref<int64> ticks) {
-    mut int64 nativeTicks = 0;
-    unsafe {
-        int32 succeeded = QueryPerformanceCounter(&nativeTicks);
-        if (succeeded == 0) {
-            return false;
-        }
-    }
-    *ticks = nativeTicks;
-    return true;
-}
-```
-
-That wrapper must state that `ticks` is initialized on `true` and unavailable
-on `false`. It passes the address of an initialized stack local for the
-synchronous call, then copies the successful scalar into the safe output
-destination. A stack local is stable for this call; a pointer into movable
-managed storage would instead require an explicit pin or separately stable
-native storage. The compiler inserts neither.
-
-The exported declaration produces or reuses these TRRM records:
-
-| Record | Example value |
-|---|---|
-| `MethodDef` / `MethodSig` / `Param` | `int32 QueryPerformanceCounter(write ptr<int64>)`; parameter 0 is a writable raw pointer to one `int64`. |
-| `NativeImport` | Method `QueryPerformanceCounter` → `Kernel32.dll!QueryPerformanceCounter`, resolved by the selected Windows system-library policy. |
-| `Effects` | `RequiresUnsafeCaller` and `NoThrow`. |
-| `NativeParameter` | Parameter 0 is writable and non-retained; its pointee is one `Blittable` `int64`. |
-| `NativeOutput` | Parameter 0 is valid when the `int32` result is nonzero. On zero, its state is unspecified and the caller must not read it. |
-| `OutputState` | On the safe `TryGetPerformanceCounter` wrapper, `ticks` is initialized on `true` and vacant on `false`. |
-
-The Windows x64 backend derives the pointer argument and 32-bit result
-classification from the target and signature. TRRM does not store `RCX`,
-`EAX`, or another compiler's register/stack plan. This example also shows why
-an output declaration needs more than a `MethodSig`: the signature identifies
-the return type and output destination, while `NativeOutput` records that the
-destination is usable only when `BOOL` is nonzero.
-
-### Generic vtable metadata
-
-This proposal makes no standard TRRM claim or worked example for vtable
-dispatch. The maintained sample's interface declarations, slot choices,
-pointer ownership, and cleanup are authored Terrum code. The source/private
-numeric-slot prototype and private semantic-module revision 84 do not assign
-standard TRRM records or define generic vtable metadata.
-
-A generic vtable source or TRRM mapping remains a separate unresolved
-contract.
-
-- Microsoft Learn: [`QueryPerformanceCounter`](https://learn.microsoft.com/en-us/windows/win32/api/profileapi/nf-profileapi-queryperformancecounter)
-
-## Data flow
+Contract `0x0011` NativeParameter is MethodDef-owned and keyed by
+`(parameterOrdinal, pointerDepth)`. Its exact payload is:
 
 ```text
-Terrum interop declarations
-        -> TRRM dependency metadata
-        -> ordinary dependency binding
-        -> generic native-import validation and target lowering
-        -> PE imports
+u32 parameterOrdinal, u32 pointerDepth,
+u8 access, u8 retention, u8 extentKind, u8 reserved=0,
+u32 extentValue, u32 requiredAlignment
 ```
 
-There is no independent DX11 catalog or runtime profile-selection mechanism
-in this flow. The declarations and metadata are selected as part of the
-Terrum dependency contract; target-specific ABI classification remains in
-the backend.
+The complete row is 28 bytes. Depth `1` selects the first pointee, depth `2`
+the next pointer's pointee, and so on; every selected level must exist in
+the complete data-pointer type. It is not a field path or receiver ordinal.
+Access codes are `0` unspecified, `1` read, `2` write and `3` read/write.
+Write facts must agree with the access at the corresponding indirection;
+they cannot upgrade known readonly backing.
 
-## Validation and evidence
+Retention codes are `0` unspecified, `1` call-extent/no-retention on every
+outcome, and `2` declared capture into a surviving destination. Code `2`
+requires the matching InteropDependency capture relationship; it does not
+allocate or prolong that destination. Code `0` is not no-retention and does
+not grant a safe escaping loan. These are provider promises at an unsafe
+boundary, not a demand for provider-specific proof.
 
-The metadata writer should reject malformed or incomplete declarations.
-Binding should check the consumer's expected Terrum signature and contracts
-against the selected dependency before emission. Lowering should derive ABI
-locations from the selected target and exact signature. Direct native imports
-should use the exact declared export rather than compiler-owned API policy.
+Extent kinds are `0` unknown (`extentValue=0`), `1` fixed elements,
+`2` element count in an integer formal, `3` fixed bytes and `4` byte count in
+an integer formal. In count forms extentValue is a zero-based formal ordinal,
+not a table reference. Checked region use must establish a nonnegative,
+representable bound under the ordinary flow/runtime rules, without size/stride
+overflow; the annotation itself does not prove it or silently add a marshalling
+stub. A fixed extent zero genuinely covers no pointee bytes; it is not the
+unknown sentinel or a string-termination proof.
+Alignment zero means no additional published bound; a nonzero value must be
+a supported power of two. Neither value improves actual backing alignment.
 
-Tests should include unrelated synthetic native libraries and malformed
-bindings, invalid pointer clauses, signature mismatches, and invalid output
-conditions. Independent C/C++ ABI probes remain evidence for the foreign
-declaration; a TRRM record alone does not prove provider conformance.
+For a raw import's ordinary by-value pointer formal, `NativeParameter` is
+optional. The pointer TypeSpec already carries the ABI pointer shape and any
+represented pointee identity/qualifier; without this clause the artifact makes
+no provider promise about access, retention, extent or alignment, and grants no
+checked pointee observation or escape. The declaration remains caller-unsafe.
+Use `NativeParameter` only when the author opts into those stronger facts.
+Native-function-pointer values use their `0x0D` TypeSpec and complete signature
+contract directly as by-value arguments or results; they do not require a
+data-pointer `NativeParameter` clause.
 
-## Non-goals and open review points
+These clauses describe only their selected regions. Whole-value copying,
+embedded pointer fields and adapters still preserve their actual dependency
+closure; the absence of an explicit field-path clause cannot erase it.
+Complete C/C++ const/direction import syntax remains separate work.
 
-- This does not redesign `.trmn`, `.trng`, native deployment, or graph
-  packaging.
-- It does not define arbitrary DLL paths, plugin loading, or caller-selected
-  binding catalogs.
-- It does not add a C header importer, general marshalling, callbacks, or
-  application-specific wrapper generation.
-- Native callable exports and callbacks are outside this first slice, but
-  their ABI-crossing signatures inherit the same caller-unsafe and Blittable
-  requirements.
-- It does not change accepted language, ABI, ownership, or lifetime
-  semantics.
-- Generic vtable source syntax and standard metadata remain unresolved and
-  outside this direct-import proposal. Vtable calls, interface identities,
-  ownership, acquisition, reference counting, and cleanup are not represented
-  by the withdrawn clauses; API-specific behavior belongs in authored Terrum
-  declarations and wrappers.
-- Sample-specific storage, mapped-buffer, and cleanup contracts are not
-  import metadata. This proposal does not add API-specific layout records or
-  compiler-generated wrappers.
-- Exact table/clause assignments and the required-feature identifier remain
-  unapproved. The implementation experiment provisionally uses section
-  `0x0021` with 16-byte rows (`MethodDef`, library `String`, export `String`,
-  System32 resolution policy `1`), `Contract` clause kind `6` with a
-  16-byte payload (parameter ordinal, result condition, failure disposition,
-  reserved zero), `NativeParameter` Contract kind `10`, and Feature ID `2`,
-  rule revision `1`, for Windows named native imports. Feature ID `1` remains
-  assigned to `ScalarInitOutput`; neither assignment is a canonical registry
-  change.
-- The branch-local aggregate-pointer experiment uses provisional Feature ID
-  `4` and Contract kind `12`, as described above. These assignments are not
-  canonical and do not change the normative specification.
-- The prototype represents `write ptr<T>` with the existing inline
-  `TypeSpec` family encoding for `ptr<T>` (`familyCode=0x8C`, writable
-  qualifier `0x01`, and the atomic code for `T`). This reuses the existing
-  TypeSpec grammar and does not assign a new form.
-- The prototype admits bodyless source-authored imports for named DLL
-  exports under the Windows System32 policy, with directly Blittable scalar
-  parameters and writable scalar pointer outputs. Output validity conditions
-  and failure dispositions remain provisional. Mandatory verification still
-  requires `Effects.RequiresUnsafeCaller`. Private semantic producer and
-  native-package paths preserve and revalidate direct-import and writable-
-  output facts and bind consumers against the produced dependency. This does
-  not establish canonical TRRM assignments, complete JIT/module-set/graph
-  dependency support, or native runtime behavior.
+### Result-correlated native outputs
+
+Contract `0x0012` NativeOutput is MethodDef-owned, with the same
+`(parameterOrdinal, pointerDepth)` key:
+
+```text
+u32 parameterOrdinal, u32 pointerDepth,
+u8 condition, u8 onMatch, u8 onOther, u8 reserved=0,
+u64 comparisonBits
+```
+
+The row is 28 bytes. The destination is a writable data-pointer region in
+the exact signature. Conditions are `1` always, `2` integer nonzero,
+`3` integer zero, `4` signed integer nonnegative, `5` integer equal and
+`6` integer not equal, plus `7` Boolean true. Codes 2–6 use the exact
+immediate integer result, at most 64 bits; code `4` needs a signed result.
+Code `7` needs the exact atomic bool, not Win32 BOOL or an integer alias.
+Comparison bits are zero for codes 1–4/7 and a correctly width-bounded bit
+pattern for codes 5–6. Floating, later async and arbitrary predicate conditions
+are not inferred.
+
+States are `0` unspecified/unavailable for checked observation,
+`1` unchanged valid entry value and `2` complete valid pointee value.
+Unchanged requires a valid entry value. An always condition requires
+`onOther=0`. Reject conflicting/overlapping output-region declarations.
+For `ptr<ptr<void>>` at depth 1, state 2 publishes the pointer cell's value
+only: not a live pointee, fixed interface, nonnull value, owner or release
+obligation. Initialized-null is a value, not vacancy.
+
+No source default such as “integer nonzero means success” is inferred from
+the return type. An author can select nonnegative status without assigning
+HRESULT or another API a compiler-known meaning. Failure state 0 never
+authorizes reading, adopting or releasing a possibly unwritten pointer.
+Explicit live failure outputs remain describable; their ownership, if any,
+belongs to the wrapper's complete ordinary contract.
+
+NativeOutput is not the checked `init ref<T>` mode or a replacement for
+OutputState. It supplies no new address-of-vacant-place operation and no
+automatic safe output publication. A wrapper may use initialized private
+native staging, check the result and then publish its own declared output.
+The [joint proposal](trrm-output-failure-ownership.md#proposed-native-boundary-composition)
+defines the required publication/cleanup composition.
+
+### Whole-source relationships
+
+Contract `0x0014` InteropDependency is a proposed scoped carrier for the
+accepted DependsOn/Captures/ForwardsBacking semantics, not a native owner
+model. Its MethodDef-owned payload is:
+
+```text
+u8 destinationKind, u8 sourceKind, u8 relationship, u8 phase,
+u32 destinationOrdinal, u32 sourceOrdinal
+```
+
+The complete row is 20 bytes, keyed by destination kind/ordinal, phase and
+source kind/ordinal. Destination kinds are `1` result, `2` checked init-output,
+`3` native-output pointee value, `4` retained formal holder and `5` retained
+receiver. Result/receiver ordinals are zero; formal destinations use their
+actual zero-based ordinal. Native-output dependencies in this revision select
+depth 1; deeper or partial-region retained relationships need a separately
+complete carrier, not a dropped dependency.
+
+Source kinds are `1` whole formal and `2` receiver (ordinal zero for the
+latter). The receiver is never formal zero. Relationships are `1` eligible
+source-storage borrow, `2` existing-backing-only forwarding and `3` their
+broad union, matching the meanings discussed in the
+[reference-call proposal](reference-call-metadata.md#1-which-dependency-relations-belong-in-the-first-callable-profile).
+Every listed source constrains the caller, and a by-value parameter copy is
+never surviving caller storage. Code `0` source with ordinal/relationship
+zero explicitly declares no borrowed sources for that destination; it
+cannot coexist with source rows for the same destination/phase.
+
+Phase `1` is normal publication and is used by destination kinds 1–3.
+Phase `2` is capture into an existing surviving holder on every applicable
+exit and is used by kinds 4–5. A normal-failure status is still an exit that
+may retain state; no implicit rollback or exceptional release is assumed.
+Output destinations must actually be published in the declared outcome before
+dependent values can use them. An init formal is not a live default source.
+Existing-holder destinations must independently denote actual surviving
+storage/state, not a callee's by-value parameter slot. An opaque native address
+alone proves neither a holder lifetime nor authority to capture into it.
+
+Writers normalize inherited/default source relationships into explicit rows.
+No missing row proves a dependency-bearing result fresh. Explicit empty
+borrowed-source sets still retain definition-owned backing/code/load facts.
+The verifier derives actual instance versions and nested closure from values
+and calls; annotations do not serialize fresh lifetime authority.
+Function-pointer copies preserve code dependencies as well as data backing.
+This concrete interop provider/consumer path supplies the trigger for
+revisiting the previously deferred physical dependency work. Consolidation
+may move these fields into a shared general dependency codec; it must not
+reinterpret the existing reserved Dependency payload or its earlier candidate
+tags without review.
+
+## Executable Body carriers
+
+Declaration metadata alone cannot make these operations executable. Recommend
+the following candidate shapes under the capabilities below. `r`, `t`, `m`
+and argument lists use the existing Body value/type/method namespaces and
+width rules; the method operand keeps its typed artifact-wide escape.
+
+| Opcode | Candidate shape | Required meaning |
+|---:|---|---|
+| `0x2A` AddressOfPlace | `rNew, tPointer, rPlace` | Form an exact typed data address from positive-extent initialized, addressable backing; retain access, extent, actual alignment and every backing/pin dependency. |
+| `0x2B` ReadPointer | `rNew, rPointer` | Read the complete admitted Copy pointee under its exact access, validity, extent/alignment and dependency contract. |
+| `0x2C` WritePointer | `rPointer, rValue` | Write the exact complete pointee type under ordinary authority and state obligations; neither initialize an unrelated checked output nor discard dependencies stored in a pointer field. |
+| `0x2D` ReinterpretPointer | `rNew, tPointer, rSource` | Explicit unsafe data-pointer reinterpretation/erasure; retain actual backing and alignment, with no authority upgrade or fresh-backing inference. |
+| `0x2E` UnsafeTail | no operands | Experimental one-block marker or revision-8 conditional-entry marker for an explicit unsafe lexical scope through all terminal successors; reconstructs a `BoundUnsafe` scope. This is not the accepted indexed-Body region kind `0x06`. |
+| `0x31` NativeAddress | `rNew, tNativeFnPtr, m` | Resolve a native import or explicit native entry, check its callable contract, and retain the selected symbol/provider/code origin. Never use the consumer proxy's absent body offset. |
+| `0x32` CallIndirect | `rNew?, rNativeFnPtr, arguments` | Invoke the complete native function-pointer contract, preserving staged arguments, output correlations, effects, backing and code lifetime. |
+
+**Current experimental support, not approval:** ScalarInitOutput rule revision
+7 can encode `0x2A` only for an initialized scalar local passed to an exact
+typed, read-only, `NoEscape` scalar `NativeParameter`, within an explicit
+unsafe suffix. Revision 8 additionally permits writable scalar `NativeOutput`
+addresses and the existing three-block terminal conditional form in that
+scope: the entry block contains the unsafe marker, and both terminal arms
+remain within the reconstructed unsafe block. The same path supports
+direct-import and role-4 vtable calls, including a consumer re-emitting a
+vtable dispatch stub call. Such a body may carry opaque raw-pointer by-value
+formals, but does not thereby gain general pointer locals, fields, or memory
+operations. The writer emits the candidate `RootlessNativeValues` feature;
+the reader compares the pointer TypeSpec to both the backing and formal,
+reconstructs `BoundNativeStorageAddress` and retains mandatory semantic
+verification. Fixed arrays, aggregates and pointer memory operations remain
+unsupported in this standard Body path. The consumer verifier ties each
+output destination to its producing call and declared result condition. It
+accepts direct zero comparisons for `NonZero` and signed `NonNegative`
+conditions, as well as body-verified single-parameter Boolean predicates that
+reduce to those comparisons, including predicates reconstructed from TRRM.
+Overwriting the status or destination, another output call, or an unmodeled
+pointer write invalidates the correlation; unguarded, mismatched, and stale
+observations reject. The `0x2E` encoding is profile-specific and remains a
+consolidation decision; future general Bodies should use a reviewed structural
+unsafe-region encoding rather than infer lexical authority from a declaration's
+unsafe effect.
+
+The current standard-TRRM implementation additionally supports `0x31` and
+`0x32` for local `NativeCallable` entries and bodyless imported callable
+declarations in compact-indexed Bodies. Ordinary ModuleRef/Import rows retain
+the expected provider identity and export key; address formation validates the
+imported local declaration against its callable signature and requires the
+existing indexed unsafe region kind `0x06`. The provisional
+`DirectNativeCalls` and `NativeCallableEntries` Features are emitted and checked
+for this path. Native single-provider and graph consumers enforce the retained
+provider identity and compare selected callable contracts before emission.
+The NativeAddress method target retains the imported MethodDef identity, whose
+ModuleRef/Import rows select the provider/export; address-only uses participate
+in dependency selection. This preserves code origin, not ownership of the
+loaded image: the runtime function pointer does not extend image lifetime, and
+deployment must keep the image live. Loaded indexed TRRM consumers are not yet
+repackaged through the private semantic-module path. These implementation
+assignments and supported cases remain experimental and unapproved.
+
+For role-4 vtable imports, the current prototype retains the selected provider
+identity/export key in ModuleRef/Import and copies the role-4 binding row into
+the consumer so source-free loading can verify and lower its call body.
+Native-package single-provider, set, and graph consumers validate that
+identity against the selected provider, compare the exact slot, offset, and
+pointer-parameter contract, and rebind the local stub to the provider export.
+Private semantic revision 86 retains the expected binding for consumer-side
+revalidation. This copied-row/provider-export path remains experimental and
+unapproved.
+
+The recommended model has two distinct phases. An unresolved imported
+declaration obtains its binding from the selected provider. Once source
+binding materializes a consumer-local dispatch stub, that stub retains its
+complete role-4 contract (receiver, offset, slot, and full signature) and
+remains a vtable dispatch call, not a provider-code call. Re-emission must
+preserve that local dispatch contract. This recommendation does not assign a
+canonical row or approve the current copied-row/provider-export encoding; keep
+those implementation details experimental pending proposal consolidation.
+A source-consumer artifact has also been emitted, loaded, lowered to a native
+library, and executed through a non-null one-slot receiver. The same bounded
+Body profile supports scalar `NativeOutput` parameters with result-condition
+verification and preserves admitted typed native-pointer signatures and
+arguments. These cases do not enable general pointer address/read/write
+operations, fixed-array or aggregate addresses, or arbitrary pointer locals
+and memory operations.
+
+The new pointer/address operations and vtable-targeted Calls require
+structurally reconstructed unsafe authorization, including scalar-only
+indirect/vtable calls. Zero result IDs retain the existing unit-result rule.
+No declaration's unsafe bit authorizes nested operations in a caller or in
+its own body.
+
+Ordinary Call gains raw-import and resolved dependency targets under the
+direct-call capability, retaining full selected declarations and contracts.
+A role-4 MethodDef is an indirect vtable target under the vtable capability:
+its explicit receiver ordinal, vptr offset, slot and complete signature
+determine dispatch. Signature-only contracts cannot be ordinary targets, and
+taking the address of an unbound vtable declaration rejects. NativeAddress
+cannot silently expose an ordinary Terrum method as a foreign entry.
+
+At a vtable invocation, evaluate/stage source arguments once in their normal
+order. Use the staged receiver formal; load its vptr at the declared byte
+offset and its code address at `slot * targetPointerSize`, with checked
+address arithmetic and all known access/backing obligations. The receiver is
+an ordinary explicit pointer parameter in the native argument list, not an
+extra hidden `this`; aggregate result storage still follows the selected ABI.
+These loads occur at invocation after argument staging. Do not fuse explicit
+source loads with different observation timing into this operation.
+An author asserts external table validity; metadata does not prove its extent
+or a COM identity. Nontrivial native member conventions, implicit this
+adjustment and C++ inheritance are not implied.
+
+Native value support must also admit and verify the applicable existing
+Copy/Select, Aggregate/Extract, place, field, initialization and branch shapes;
+their current inspectable numbers alone do not provide that support.
+The existing equality/inequality operation shapes can compare same-type native
+addresses, including null, under this capability; no address arithmetic or
+data-to-code conversion follows from reusing their type matrix.
+ConstBits can represent a null raw address with zero bits, not arbitrary
+integer-to-code conversion. Complete type identity survives field transport.
+Reconstruct pointer dependencies from address formation, values, copies,
+joins, loads/stores and call contracts rather than trusting serialized root
+sets. A nested indirect call has exactly the same backing obligations as a
+direct one.
+
+Call-site output facts are derived from the actual status value and
+destination storage/value generation for that invocation. Reassigning a
+status or reusing its destination cannot attach the old correlation to a new
+invocation. An unchanged/copied status may still witness its original
+invocation while that destination state remains valid; unrelated calls do not
+erase it. No “output initialized” or “unsafe authorized” Boolean in an artifact
+substitutes for those relationships.
+
+The target owns scratch/result storage sizing. Allocate each staged value
+using its full checked extent and required alignment, preserve distinct live
+ranges across nested calls, and account separately for shadow space, stack
+arguments and indirect results. Neither the metadata nor the Windows x64
+ABI supplies a 16-byte maximum or a fixed scratch stride.
+
+## Exact capabilities and implementation sequence
+
+These candidate Feature IDs all use exact revision `1`, not a minimum-version
+comparison. Their interpretation is under governing edition `1`, target
+requirement `1`, with the direct non-unwinding boundary and the existing
+runtime-policy obligations. The canonical catalog currently registers none.
+
+| Candidate Feature | Coherent scope | Prerequisites |
+|---|---|---|
+| `0x0100` NativeBoundaryContracts | Declaration tables/clauses, native callable-signature TypeSpec, fixed representation, complete binding/rewrite rules and malformed rejection. No new Body execution is implied. | Edition/target rules above; applicable base metadata/effect contracts |
+| `0x0101` RootlessNativeValues | Exact admitted native scalar/address/function-pointer and marked Copy-aggregate values, fields/places, operations `0x2A..0x2D`, initialization and backing-flow verification. | `0x0100/1` |
+| `0x0102` DirectNativeCalls | Standard-TRRM direct imports and selected dependency calls, target ABI staging/results and source-independent consumers. | `0x0100/1`, `0x0101/1` |
+| `0x0103` NativeCallableEntries | Explicit native entry Bodies/exports, NativeAddress and CallIndirect, pointer transport and retained code origins. | `0x0102/1` |
+| `0x0104` NativeVTableCalls | Generic explicit-receiver/offset/slot calls through role-4 MethodDef targets of ordinary Call, including supported pointer/function-pointer/output arguments. | `0x0100/1`, `0x0101/1` |
+
+`NativeVTableCalls` does not depend on native address formation or indirect
+function-pointer invocation: it reuses ordinary `Call` with a role-4 target.
+The feature is required when a module carries a vtable binding or a Body calls
+one, while `RootlessNativeValues` supplies the pointer-valued Body contract.
+
+These are coherent optional extensions of the bounded interchange baseline,
+not optional source semantics or substitutes for accepted GA output/failure
+requirements. Rootless native scalar admission follows the target's formal
+foreign mapping, not equal storage width; it does not activate arbitrary
+arithmetic for newly carried scalar identities.
+
+Start with declaration-library consumption and the direct scalar/pointer
+route, then complete native entries/function-pointer transport and vtable
+execution using these same records. This is an implementation sequence, not
+deferral of their design. A declaration-only library can require `0x0100`
+without executable pointer Bodies. A provider retaining native entry Bodies
+must declare their actual execution requirements too. Rich checked outputs,
+owners, async retention, witnesses or failure bridges additionally require
+their complete shared capabilities; none can be erased to fit this slice.
+
+A source reference to a public role-4 declaration should materialize a local
+vtable-dispatch stub in the consumer program, preserving the receiver, offset,
+slot and full signature without treating the declaration as a provider code
+import. Re-emitting that consumer preserves its call body and vtable contract;
+it does not establish general binary module linking or provider compatibility.
+
+Register every applicable declaration, value, program, operation, phase,
+dependency and runtime carrier, with explicitly inapplicable layers. A
+consumer can report inspectable unsupported declarations, but cannot claim
+bindable or executable support merely by recognizing Feature rows. Admit the
+complete retained Module/dependency closure, including address-only and other
+non-call obligations.
+
+### Contract-to-consumer acceptance boundary
+
+| Surface | Carrier and invariant | Required independent evidence |
+|---|---|---|
+| Source/bound program | Resolved declarations, complete types, structured unsafe scopes and generic pointer/value facts; no API recognizers | Unrelated imports, native entries and vtables with nested expressions and negative authority cases |
+| TRRM producer/reader | Tables, clauses, types and exact manifest closure; validate lengths, roles, references, owner/key uniqueness and supported meaning | Source-free bytes, separately produced fixtures, malformed records and unsupported capabilities |
+| Dependency binding | Ordinary expected declarations plus selected native roles/contracts; preserve complete nominal/layout and source sets | Reordered type tables, multiple consumers, incompatible replacement and retained stronger provider facts |
+| Traversal/verifier | Complete children, remapping, actual argument backing and per-invocation output versions | Nested indirect calls, field/copy forwarding, stripped unsafe scope, expired pin/loan and status/storage reuse |
+| JIT/AOT/native consumers | Explicit target ABI and retained symbols/code/load dependencies; no consumer-local proxy offsets | Imported address-only use, mixed register/stack signatures, large/over-aligned aggregates and independent C ABI probes |
+| Publication/cleanup | Call preparation, exact output/result publication and unchanged destination on rejected artifact production | Normal refusal, live/unspecified failure outputs, staged-result failure and destination preservation |
+
+These are required cases, **not** results established by this documentation
+change. Ordinary tests stay headless; SDK probes, emission and supervised
+execution remain separate evidence. Private round trips do not establish
+standard `.trrm` support.
+
+## Binding, replacement and lifetime
+
+1. Resolve the ordinary producer/key first; compare complete normalized
+   types, ABI role/convention, modes, effects, layouts, output states and
+   dependency/capture sets under the existing
+   [directed binding relation](../specs/representation/binding-and-replacement.md).
+   No DLL name, equal layout or matching machine signature identifies a
+   Terrum declaration.
+2. Preserve every expected guarantee and do not add caller requirements.
+   Unknown required clauses or unsupported relationships reject; compare
+   retention/source bounds by their specified meaning, not numeric ordering.
+   Known retaining behavior cannot satisfy a no-retention expectation.
+3. Use the selected provider's native symbol/entry/vtable binding. If an
+   expectation or optimization fixes a stronger binding fact, retain that
+   obligation for replacement; do not silently publish every private binding
+   detail as the consumer's expected contract.
+4. Retain provider code, native-library load and embedded-data dependencies
+   for every address use, including storing, returning or indirectly invoking
+   it without a direct Call. Function pointers do not themselves acquire
+   ownership of an image. Deployment must keep the actual image/library live.
+5. Packing/trimming remaps every typed reference and context-sensitive
+   signature anchor; clone shared rows when imported meanings differ.
+   Preserve required layout, capture, code/load and cleanup facts even when
+   a direct call disappears. Never infer dependency use only from Call nodes.
+6. A new provider revision revalidates all retained facts and any derived
+   native artifacts. A previously accepted bit, unchanged module name or
+   matching format pair is not sufficient. Incompatible machine code must
+   be rebuilt/relinked before use, not patched by changing metadata alone.
+
+The authored `GetClientRect` boundary, for example, needs an integer result,
+an opaque native pointer and a pointer to the authored fixed RECT layout.
+The compiler needs those generic records, not built-in knowledge of that API,
+its spelling or SDK layout, and no approved-API catalog. Its success/output
+promise is authored separately. This is an ABI schematic, not new source
+annotation syntax or a claim that the current TRRM consumer implements the
+proposal.
+
+## Review feedback: defects versus contract gaps
+
+The original review rejected frozen revision
+`578032c9190938708f6d7134e91edbf906e45ea2`. The follow-up did not inspect the
+requested later snapshot/diff and therefore neither cleared those findings
+nor ruled out new defects. The classifications below do not assert that an
+old defect is present in a newer working tree, and do not certify its fix.
+
+| Reported concern | Classification and required disposition |
+|---|---|
+| F1: scratch overlap for aggregates larger than 16 bytes | Implementation/ABI lowering defect. Size/alignment-based live storage is required; no new metadata permission or artificial size cap cures it. |
+| F2: imported callable address becomes consumer offset zero | Binding/relocation defect. Preserve the selected provider/symbol and resolve its origin; the proposed NativeAddress record makes that obligation explicit, not optional. |
+| F3: indirect calls drop known pointer backing | Traversal/verification/lowering defect wherever facts already exist. Missing standard value/dependency carriers are a separate interchange gap addressed above; unsafe never licenses erasing known facts. |
+| F4: typed imports expose uncommitted struct layout | Both a missing explicit standard representation carrier and a consumer-validation defect if layout is inferred. Add the commitment and validate transitive actual layouts. |
+| F5: nested unsafe operations escape verification | Shared traversal/authorization defect, not a need for another “trusted” metadata bit. Every nested operation retains structural scope and ordinary obligations. |
+| Address-only import-use accounting | Dependency-retention defect. Function-address use is a real symbol/code/load obligation even without a direct invocation. |
+| Output publication and cleanup | Ordering/cleanup defects wherever required facts already exist; general source-free output/failure/owner composition also needs the shared records discussed in the joint proposal. Native annotations do not replace them. |
+| Standard declaration/reference route absent | Design/implementation gap, not a frozen-format prohibition. Specify, review, register and implement the extension rather than reject the route as unnecessary metadata. |
+
+Design approval cannot close implementation findings. Conversely, a local
+implementation fix cannot approve a wire schema or establish standard
+interchange, foreign ABI correctness or runtime qualification.
+
+## Malformed, incompatible and unsupported input
+
+Reject, at the applicable access/admission boundary:
+
+- Incorrect section policy/stride/extent, overflowing counts/ranges, reserved
+  fields, unknown enum values, invalid typed references or hidden references.
+- Duplicate binding/contract keys, orphaned or wrong-owner rows, conflicting
+  method roles, a local import/vtable Body, or an unbound native entry.
+- Safe raw declarations, a native entry without its required checked effect,
+  a signature-only invocation, implicit convention conversion or incompatible
+  function-pointer anchors.
+- Missing explicit fixed representation, false transitive layout facts,
+  incompatible packing/alignment, unsupported owning/managed representation
+  or a typed access that upgrades actual pointer authority/alignment.
+- Invalid formal/depth/count selectors, contradictory pointer/output facts,
+  invalid result predicates, unsupported partial/async phases or a claimed
+  retention destination that cannot survive.
+- A missing normalized dependency relation, unsafe-region contradiction,
+  forged output correlation or discarded known backing/code origin.
+- Unknown exact capability/revision, incomplete prerequisite closure,
+  unsupported target/runtime/loading policy or incompatible replacement.
+
+Use the existing [reader-trust partition](../specs/representation/reader-trust.md):
+directory checks, naturally accessed row/contract checks and retained
+requirement admission are mandatory. A trusted selective reader need not
+pre-scan every unrelated Body; a whole-artifact validator checks its declared
+scope, including uncalled bodies. Producer truth and foreign-provider truth
+are distinct. No unsupported fact becomes a default value, optional section
+or success-shaped fallback.
+
+Validate and complete production before publishing/replacing an output
+artifact; rejected production must not truncate an existing destination or
+leave a partial executable that looks successful. Cleanup only the
+producer-owned staging/output artifacts.
+
+## Consolidation decisions and experimental history
+
+Recommend approving the additive boundary model and the explicit candidate
+shapes together, then assigning the exact draft/catalog and migrating every
+producer/consumer. Keep source spelling a separate review: prefer ordinary
+extern declarations plus explicit ABI/native-entry/type-use annotations,
+and explicit receiver/slot declarations rather than a mandatory native
+interface or COM type system. No settled unsafe or library-policy decision
+needs reopening to choose that spelling.
+
+The material remaining choices are:
+
+- Confirm HostResolved as the raw default, or require an explicitly supported
+  stronger deployment policy. Recommendation: permit the former under unsafe;
+  never claim SystemDirectory from a tag or PE basename alone.
+- Confirm MethodDef contract anchors and the scoped rootless-Copy/dependency
+  carriers, or consolidate them into shared callable/value/dependency records
+  with identical facts before allocation. Recommendation: reuse these existing
+  declaration/Contract owners now, preserving a later explicit draft rewrite.
+- Select source annotation ergonomics and the exact reviewed draft/IDs.
+  Recommendation: retain ABI-shaped source and the fresh allocations above;
+  do not couple implementation to library/API names or wait for a frozen GA
+  schema.
+
+Historical experiments used NativeImport section `0x0021` (16-byte rows),
+NativeOutput Contract kind 6 (16-byte payload), NativeParameter kind 10,
+NativeBlittableLayouts kind 12 and Feature IDs 2/4; the private scalar-output
+experiment uses Feature 1. Source/private callable and numeric-slot vtable
+prototypes are not standard assignments. Earlier COM kinds 7–9/11 remain
+withdrawn. Preserve this distinction when reading older artifacts or notes.
+
+Do not alias those experimental bytes to this candidate schema. Migration
+explicitly decodes the selected old draft, reconstructs complete types and
+contracts, writes the new draft and revalidates it, or declines incomplete
+input. In particular, historical DefId-like Contract owners and
+minimum-revision acceptance are not the standard typed-owner/exact-revision
+rules. Draft compatibility shims are not required. No compiler, test,
+canonical registry or acceptance document is changed by this proposal.

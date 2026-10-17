@@ -249,30 +249,41 @@ internal static class NativeModuleImageValidator
                 var table = header.ImportTableDirectory;
                 // The address table is later bounded to .idata; lookup pointers retain general RVA mapping.
                 var importSection = sections[1];
-                var systemCount = checkedExceptions ? 2 : 1;
-                var providerDlls = new List<string>();
                 var seenProviderDlls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var providerDll in providerImports.Keys)
+                var expectedProviderSymbols = new Dictionary<string, IReadOnlyList<string>>(
+                    StringComparer.OrdinalIgnoreCase);
+                var expectedDlls = new List<string>(providerImports.Count + (checkedExceptions ? 2 : 1))
                 {
-                    if (StringComparer.OrdinalIgnoreCase.Equals(providerDll, "KERNEL32.dll")
-                        || (checkedExceptions
-                            && StringComparer.OrdinalIgnoreCase.Equals(providerDll, "NTDLL.dll")))
-                    {
-                        continue;
-                    }
+                    "KERNEL32.dll",
+                };
+                foreach (var (providerDll, symbols) in providerImports)
+                {
                     if (!seenProviderDlls.Add(providerDll))
                     {
                         throw Invalid();
                     }
-                    providerDlls.Add(providerDll);
+                    if (!expectedProviderSymbols.TryAdd(providerDll, SortOrdinalIfNeeded(symbols)))
+                    {
+                        throw Invalid();
+                    }
+                    expectedDlls.Add(providerDll);
                 }
-                providerDlls.Sort(static (left, right) =>
+                if (checkedExceptions)
                 {
+                    expectedDlls.Add("NTDLL.dll");
+                }
+                expectedDlls.Sort(static (left, right) =>
+                {
+                    var leftIsKernel = StringComparer.OrdinalIgnoreCase.Equals(left, "KERNEL32.dll");
+                    var rightIsKernel = StringComparer.OrdinalIgnoreCase.Equals(right, "KERNEL32.dll");
+                    if (leftIsKernel != rightIsKernel)
+                    {
+                        return leftIsKernel ? -1 : 1;
+                    }
                     var comparison = StringComparer.OrdinalIgnoreCase.Compare(left, right);
                     return comparison != 0 ? comparison : StringComparer.Ordinal.Compare(left, right);
                 });
-                var providerCount = providerDlls.Count;
-                var count = systemCount + providerCount;
+                var count = expectedDlls.Count;
                 if (table.Size != 20 * (count + 1))
                 {
                     throw Invalid();
@@ -289,13 +300,15 @@ internal static class NativeModuleImageValidator
                         throw Invalid();
                     }
                     var dll = Name(name);
-                    var expectedDll = index == 0 ? "KERNEL32.dll"
-                        : checkedExceptions && index == 1 ? "NTDLL.dll"
-                        : providerDlls[index - systemCount];
+                    var expectedDll = expectedDlls[index];
                     if (!StringComparer.OrdinalIgnoreCase.Equals(dll, expectedDll))
                     {
                         throw Invalid();
                     }
+                    var isKernelImport = index == 0;
+                    var isExceptionHandlerImport = checkedExceptions
+                        && StringComparer.OrdinalIgnoreCase.Equals(dll, "NTDLL.dll");
+                    var isSystemImport = isKernelImport || isExceptionHandlerImport;
                     var expectedSymbols = ProviderSymbols(dll);
                     var matchedProviderSymbols = new HashSet<string>(StringComparer.Ordinal);
                     var symbolCount = 0;
@@ -371,20 +384,20 @@ internal static class NativeModuleImageValidator
                                     break;
                             }
                         }
-                        if (checkedExceptions && index == 1 && symbolName == "__C_specific_handler")
+                        if (isExceptionHandlerImport && symbolName == "__C_specific_handler")
                         {
                             hasExceptionHandler = true;
                         }
-                        if (index >= systemCount
+                        if (!isSystemImport
                             && (symbolCount >= expectedSymbols.Count
                                 || symbolName != expectedSymbols[symbolCount]))
                         {
                             importsMatchProviders = false;
                         }
-                        else if (index < systemCount && !isProviderSymbol
-                            && !(index == 0 && (symbolName is "ExitProcess" or "RaiseException"
+                        else if (isSystemImport && !isProviderSymbol
+                            && !(isKernelImport && (symbolName is "ExitProcess" or "RaiseException"
                                 or "GetProcessHeap" or "HeapAlloc" or "HeapFree"))
-                            && !(checkedExceptions && index == 1 && symbolName == "__C_specific_handler"))
+                            && !(isExceptionHandlerImport && symbolName == "__C_specific_handler"))
                         {
                             importsMatchProviders = false;
                         }
@@ -409,15 +422,15 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (checkedExceptions && index == 1 && !hasExceptionHandler)
+                    if (isExceptionHandlerImport && !hasExceptionHandler)
                     {
                         throw Invalid();
                     }
-                    if (index >= systemCount && symbolCount != expectedSymbols.Count)
+                    if (!isSystemImport && symbolCount != expectedSymbols.Count)
                     {
                         importsMatchProviders = false;
                     }
-                    if (index < systemCount && matchedProviderSymbols.Count != expectedSymbols.Count)
+                    if (isSystemImport && matchedProviderSymbols.Count != expectedSymbols.Count)
                     {
                         importsMatchProviders = false;
                     }
@@ -435,14 +448,9 @@ internal static class NativeModuleImageValidator
 
                 IReadOnlyList<string> ProviderSymbols(string dll)
                 {
-                    foreach (var (providerDll, symbols) in providerImports)
-                    {
-                        if (StringComparer.OrdinalIgnoreCase.Equals(providerDll, dll))
-                        {
-                            return SortOrdinalIfNeeded(symbols);
-                        }
-                    }
-                    return Array.Empty<string>();
+                    return expectedProviderSymbols.TryGetValue(dll, out var symbols)
+                        ? symbols
+                        : Array.Empty<string>();
                 }
             }
 

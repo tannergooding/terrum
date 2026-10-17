@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -10,7 +11,10 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
-    private static byte[] EncodeBody(BoundFunction function, bool hasFloatingTypes)
+    private static byte[] EncodeBody(BoundFunction function, bool hasFloatingTypes,
+        int nativeRawPointerTypeRow,
+        Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
+        Dictionary<PrimitiveType, int> nativePointerTypeRows)
     {
         var instructions = new List<byte>();
         var current = new int[function.Variables.Length];
@@ -231,7 +235,15 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("A linear Body requires a terminal return.");
         }
-        var typeCount = hasFloatingTypes ? 8 : 6;
+        var builtinTypeCount = hasFloatingTypes ? 8 : 6;
+        var nativeParameterTypes = function.Variables
+            .Select(static variable => variable.Type)
+            .Where(static type => type == PrimitiveType.NativeRawPointer
+                || NativeFunctionPointerTypes.IsType(type)
+                || NativePointerTypes.IsType(type))
+            .Distinct()
+            .ToArray();
+        var typeCount = builtinTypeCount + nativeParameterTypes.Length;
         var localWidth = Width((ulong)Math.Max(next, typeCount));
         var terminatorWidth = Width((ulong)returnValue);
         var terminatorInstructionLength = terminatorWidth == 1 ? 1 : 3;
@@ -242,9 +254,23 @@ public static partial class TrRmExecutableCompiler
         var destination = body.AsSpan();
         destination[bodyPosition++] = (byte)(0x04 | WidthCode(localWidth));
         WriteToSpan(destination, ref bodyPosition, (ulong)typeCount, localWidth);
-        for (var row = 2; row <= typeCount + 1; row++)
+        for (var row = 2; row <= builtinTypeCount + 1; row++)
         {
             WriteToSpan(destination, ref bodyPosition, (ulong)row, 4);
+        }
+        foreach (var type in nativeParameterTypes)
+        {
+            var typeRow = type == PrimitiveType.NativeRawPointer
+                ? NativeValueTypeRow(type, nativeRawPointerTypeRow,
+                    nativeFunctionPointerTypeRows)
+                : NativeFunctionPointerTypes.IsType(type)
+                    ? nativeFunctionPointerTypeRows.TryGetValue(type, out var functionPointerRow)
+                        ? functionPointerRow
+                        : throw Unsupported("An executable native function-pointer type has no TypeSpec row.")
+                    : nativePointerTypeRows.TryGetValue(type, out var nativePointerRow)
+                        ? nativePointerRow
+                        : throw Unsupported("An executable native pointer type has no TypeSpec row.");
+            WriteToSpan(destination, ref bodyPosition, (ulong)typeRow, 4);
         }
         WriteToSpan(destination, ref bodyPosition, (ulong)(next - function.ParameterCount), localWidth);
         instructions.CopyTo(body, bodyPosition);
@@ -261,20 +287,30 @@ public static partial class TrRmExecutableCompiler
 
     private static ImmutableArray<BoundStatement> DecodeBody(ReadOnlySpan<byte> body,
         int parameterCount, ImmutableArray<BoundVariable>.Builder variables, bool noThrow,
-        TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions)
+        TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions,
+        int[] functionIndexByMethodRow,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
+        bool isCallerUnsafeScope = false,
+        List<NativePointerTypeDefinition>? nativePointerTypeDefinitions = null,
+        int[]? structureTypeByTypeDef = null)
     {
         var position = 0;
         var header = ReadByte(body, ref position);
         var localWidth = 1 << (header & 3);
         var typeCount = ReadInt(body, ref position, localWidth);
-        if (typeCount is < 0 or > 12)
+        if (typeCount is < 0 or > SemanticVerifier.MaximumVariables + 8)
         {
-            throw Invalid("Body type map exceeds the scalar profile.");
+            throw Invalid("Body type map exceeds the native-value profile.");
         }
         var mappedTypes = new PrimitiveType[typeCount + 1];
         for (var id = 1; id <= typeCount; id++)
         {
-            var type = BodyTypeFromRow(types, ReadInt(body, ref position, 4));
+            var row = ReadInt(body, ref position, 4);
+            var type = nativePointerTypeDefinitions is not null
+                && structureTypeByTypeDef is not null
+                ? BodyTypeFromRow(types, row, nativePointerTypeDefinitions,
+                    structureTypeByTypeDef)
+                : BodyTypeFromRow(types, row);
             if (type == PrimitiveType.Void || Array.IndexOf(mappedTypes, type, 1, id - 1) >= 0)
             {
                 throw Invalid("Void or duplicate scalar in Body type map.");
@@ -294,12 +330,14 @@ public static partial class TrRmExecutableCompiler
         {
             var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D or 0x1E or 0x1F))
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D or 0x1E or 0x1F
+                or 0x31 or 0x32))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
             var result = ReadInt(body, ref position, width);
-            if (result != 0 && result != ++nextValue || result == 0 && opcode != 0x12
+            if ((result != 0 && result != ++nextValue)
+                || (result == 0 && opcode is not (0x12 or 0x32))
                 || nextValue > SemanticVerifier.MaximumVariables)
             {
                 throw Invalid("Noncontiguous value definitions.");
@@ -319,18 +357,29 @@ public static partial class TrRmExecutableCompiler
             var kind = opcode is 4 or 5 or 0x15 or 0x19 or 0x1D
                 ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D or 0x1E or 0x1F
+            var left = opcode is 3 or 4 or 6 or 7 or 8 or 0x0A or 0x16 or 0x17 or 5 or 0x15 or 0x18 or 0x19 or 0x1A or 0x1B or 0x1C or 0x1D or 0x1E or 0x1F or 0x32
                 ? ReadInt(body, ref position, width) : 0;
             var right = opcode is 5 or 7 or 0x15 or 0x18 or 0x19 or 0x1D
                 ? ReadInt(body, ref position, width) : 0;
             var third = opcode == 7 ? ReadInt(body, ref position, width) : 0;
             var method = opcode == 0x12 ? ReadInt(body, ref position, width) : 0;
-            if (opcode == 0x12 && (method == 0 || method > functions.Count))
+            var nativeAddressMethod = opcode == 0x31 ? ReadInt(body, ref position, width) : 0;
+            var methodFunction = opcode == 0x12
+                ? FunctionIndexForMethodRow(method, functionIndexByMethodRow) : -1;
+            var nativeAddressFunction = opcode == 0x31
+                ? FunctionIndexForMethodRow(nativeAddressMethod, functionIndexByMethodRow) : -1;
+            if (opcode == 0x12 && methodFunction < 0)
             {
                 throw Invalid("Call target is not a module-local definition.");
             }
-            var argumentCount = opcode == 0x12 ? ReadInt(body, ref position, countWidth) : 0;
-            var maximum = Math.Max(Math.Max(Math.Max(result, typeId), method),
+            if (opcode == 0x31 && nativeAddressFunction < 0)
+            {
+                throw Invalid("Native address target is not a module-local callable entry.");
+            }
+            var argumentCount = opcode is 0x12 or 0x32
+                ? ReadInt(body, ref position, countWidth) : 0;
+            var maximum = Math.Max(Math.Max(Math.Max(result, typeId),
+                    Math.Max(method, nativeAddressMethod)),
                 Math.Max(Math.Max(Math.Max(left, right), third), secondResult));
             var arguments = ImmutableArray.CreateBuilder<BoundExpression>(argumentCount);
             for (var argument = 0; argument < argumentCount; argument++)
@@ -397,7 +446,7 @@ public static partial class TrRmExecutableCompiler
             }
             else if (opcode == 0x12)
             {
-                var target = functions[method - 1];
+                var target = functions[methodFunction];
                 if (target.ReturnType == PrimitiveType.Void != (result == 0)
                     || target.ParameterCount != argumentCount
                     || noThrow && !target.IsNoThrow)
@@ -412,7 +461,54 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid("Call argument type or mode does not match.");
                     }
                 }
-                expression = new BoundCall(method - 1, arguments.MoveToImmutable(), target.ReturnType, default);
+                expression = new BoundCall(methodFunction, arguments.MoveToImmutable(),
+                    target.ReturnType, default);
+            }
+            else if (opcode == 0x31)
+            {
+                var target = functions[nativeAddressFunction];
+                if (!isCallerUnsafeScope
+                    || target.NativeFunctionPointerType is not PrimitiveType addressType
+                    || !NativeFunctionPointerContract.MatchesFunction(target, addressType,
+                        nativeFunctionPointerSignatures)
+                    || result == 0)
+                {
+                    throw Invalid("Native address target does not match its callable signature or unsafe scope.");
+                }
+                expression = new BoundNativeFunctionAddress(nativeAddressFunction,
+                    addressType, default) {
+                    IsUnsafeAuthorized = true,
+                };
+            }
+            else if (opcode == 0x32)
+            {
+                var target = Operand(left);
+                if (!isCallerUnsafeScope
+                    || !NativeFunctionPointerContract.IsValidType(
+                        target.Type, nativeFunctionPointerSignatures))
+                {
+                    throw Invalid("Indirect native call target does not match an unsafe function-pointer signature.");
+                }
+
+                var signatureIndex = NativeFunctionPointerTypes.Index(target.Type);
+                var nativeSignature = nativeFunctionPointerSignatures[signatureIndex];
+                if (nativeSignature.ReturnType == PrimitiveType.Void != (result == 0)
+                    || nativeSignature.ParameterTypes.Length != argumentCount)
+                {
+                    throw Invalid("Indirect native call result or argument count does not match its signature.");
+                }
+                for (var argument = 0; argument < argumentCount; argument++)
+                {
+                    if (arguments[argument].Type != nativeSignature.ParameterTypes[argument])
+                    {
+                        throw Invalid("Indirect native call argument does not match its signature.");
+                    }
+                }
+
+                expression = new BoundIndirectCall(target, arguments.MoveToImmutable(),
+                    nativeSignature.ReturnType, default) {
+                    IsUnsafeAuthorized = true,
+                };
             }
             else if (opcode == 3)
             {
@@ -683,6 +779,10 @@ public static partial class TrRmExecutableCompiler
         return statements.ToImmutable();
     }
 
+    private static int FunctionIndexForMethodRow(int methodRow, int[] functionIndexByMethodRow)
+        => methodRow > 0 && methodRow < functionIndexByMethodRow.Length
+            ? functionIndexByMethodRow[methodRow] : -1;
+
     private static int Width(ulong bits) => bits <= byte.MaxValue ? 1
         : bits <= ushort.MaxValue ? 2 : bits <= uint.MaxValue ? 4 : 8;
     private static int SignedWidth(long value) => value is >= sbyte.MinValue and <= sbyte.MaxValue ? 1
@@ -770,8 +870,9 @@ public static partial class TrRmExecutableCompiler
         var layout = ReadByte(bytes, ref position);
         opcode = ReadByte(bytes, ref position);
         if (layout == 0 || (layout & 0xC0) != 0 || (layout & 3) == 3
-            || ((layout >> 2) & 3) == 3 || (layout & 0x0C) != 0 && opcode != 0x12
-            || (layout & 0x30) != 0 && opcode is not (1 or 2))
+            || ((layout >> 2) & 3) == 3
+            || ((layout & 0x0C) != 0 && opcode is not (0x12 or 0x32))
+            || ((layout & 0x30) != 0 && opcode is not (1 or 2)))
         {
             throw Invalid("Unsupported wide instruction layout.");
         }

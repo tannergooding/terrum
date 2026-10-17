@@ -46,6 +46,9 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Consumer and selected native runtime policies differ.");
         }
+        var importProviders = providers.Select(static provider =>
+            (provider.Package.Identity, provider.Package.Policy, provider.Reference)).ToArray();
+        program = BindModuleImportBindings(program, importProviders);
         var referenceSet = CreateReferenceSet(providers);
         var semantic = ModuleCompiler.CreateConsumerAgainstReference(program, referenceSet,
             allowManagedParticipant: true);
@@ -304,7 +307,7 @@ public static partial class NativeModuleCompiler
             }
         }
         foreach (var (dllName, directImports) in
-            ModuleCompiler.GetConsumerNativeImports(set.Contract))
+            System32DirectImports(ModuleCompiler.GetConsumerNativeImports(set.Contract)))
         {
             if (!imports.TryGetValue(dllName, out var symbols))
             {

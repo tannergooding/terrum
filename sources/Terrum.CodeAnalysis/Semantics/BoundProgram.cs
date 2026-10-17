@@ -10,6 +10,7 @@ using Terrum.CodeAnalysis.Text;
 namespace Terrum.CodeAnalysis.Semantics;
 
 /// <summary>Primitive types supported by the first executable profile.</summary>
+[SuppressMessage("Design", "CA1027:Mark enums with FlagsAttribute", Justification = "Primitive type ordinals are disjoint discriminants, not combinable flags.")]
 public enum PrimitiveType
 {
     /// <summary>No result.</summary>
@@ -333,7 +334,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
     internal DirectNativeImport? DirectNativeImport { get; init; }
+    internal BoundModuleImport? ModuleImport { get; init; }
     internal PrimitiveType? NativeFunctionPointerType { get; init; }
+    internal string? NativeCallableEntryName { get; init; }
 
     internal NativeVTableMethodDefinition? NativeVTableMethod { get; init; }
     internal TrRmScalarGraph? IndexedBody { get; init; }
@@ -391,6 +394,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Input parameter ordinals that conservatively constrain a forwarded Span result. Never persisted.</summary>
     internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
 }
+
+internal sealed record BoundModuleImport(string ProducerIdentity, string ExportKey,
+    uint TargetRequirement, uint RuntimePolicy);
 
 internal sealed record DirectNativeImport(string LibraryName, string ExportName,
     ImmutableArray<DirectNativeOutput> Outputs)

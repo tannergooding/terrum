@@ -92,7 +92,7 @@ public sealed class TrRmContractTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(Section(transfer),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
-        Assert.Throws<InvalidDataException>(() => Create(Section(Contract(0x1600_0001, 6, [])),
+        Assert.Throws<InvalidDataException>(() => Create(Section(Contract(0x1600_0001, 0x12, [])),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
     }
@@ -108,10 +108,10 @@ public sealed class TrRmContractTableReaderTests
         Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
-        Create(section,
+        Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
-            hasOutputParam: true, paramMode: 0);
+            hasOutputParam: true, paramMode: 0));
         Assert.Throws<InvalidDataException>(() => Create(section,
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
@@ -155,7 +155,7 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void NativeParameterRequiresAnAddressParameterAndAssignedAccess()
     {
-        var contract = NativeParameter(ordinal: 0, access: 3, retention: 0, extent: 0);
+        var contract = NativeParameter(ordinal: 0, access: 3, retention: 1, extent: 0);
         Create(Section(contract), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             hasOutputParam: true, pointerParameter: true);
@@ -163,7 +163,7 @@ public sealed class TrRmContractTableReaderTests
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, hasOutputParam: true));
         Assert.Throws<InvalidDataException>(() => Create(
-            Section(NativeParameter(ordinal: 0, access: 0, retention: 0, extent: 0)),
+            Section(NativeParameter(ordinal: 0, access: 0, retention: 1, extent: 0)),
             recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
             methodFirst: 1, methodCount: 1, hasOutputParam: true, pointerParameter: true));
     }
@@ -309,12 +309,14 @@ public sealed class TrRmContractTableReaderTests
 
     private static byte[] NativeParameter(uint ordinal, byte access, byte retention, uint extent)
     {
-        var data = new byte[12];
+        var data = new byte[20];
         Write(data, 0, ordinal);
-        data[4] = access;
-        data[5] = retention;
-        Write(data, 8, extent);
-        return Contract(0x1600_0001, 10, data);
+        Write(data, 4, 1);
+        data[8] = access;
+        data[9] = retention;
+        data[10] = extent == 0 ? (byte)0 : (byte)1;
+        Write(data, 12, extent);
+        return Contract(0x1600_0001, 0x11, data);
     }
 
     private static byte[] Contract(uint owner, ushort kind, byte[] data)

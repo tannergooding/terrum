@@ -1382,7 +1382,7 @@ public sealed class ModuleTests
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual52 = compilation.Program; Assert.That(__nunitActual52, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual52!; }))();
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast))!;
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Consumer.Main"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Consumer.Main"]))!;
         var consumer = ModuleCompiler.CreateConsumer(program, producer);
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Any(linked.Functions,static function => function.IsExternal),Is.False);

@@ -36,6 +36,51 @@ public sealed class TrRmTypeSpecTableReaderTests
         Assert.That(reader.GetRow(6)[0], Is.EqualTo((byte)0x0C));
         Assert.That(reader.GetRow(8)[0], Is.EqualTo((byte)0x05));
     }
+
+    [Test]
+    public void ReusesCompactKeysForEquivalentNativePointerTypes()
+    {
+        var section = Rows(
+            [0x01, 0, 0x0D],
+            [0x01, 0, 0x8C, 0x0D],
+            [0x01, 0, 0x8C, 0x0D],
+            [0x01, 1, 0x8C, 0x0D],
+            [0x01, 0, 0x8C, 0]);
+        var reader = new TrRmTypeSpecTableReader(section, 5, 0, 0, 0, 0);
+
+        Assert.That(reader.GetCompactValueTypeKey(2),
+            Is.EqualTo(reader.GetCompactValueTypeKey(3)));
+        Assert.That(reader.GetCompactValueTypeKey(2),
+            Is.Not.EqualTo(reader.GetCompactValueTypeKey(4)));
+        Assert.That(reader.GetCompactValueTypeKey(5), Is.EqualTo(0x8C));
+    }
+
+    [Test]
+    public void RejectsNativePointerTypeKeyExhaustionAfterEquivalentPointers()
+    {
+        var signatureCount = ushort.MaxValue - TrRmTypeSpecTableReader.NativeFunctionPointerTypeKeyStart;
+        var rows = new ReadOnlyMemory<byte>[signatureCount + 5];
+        rows[0] = TrRmTypeSpecTableWriter.Builtin(8);
+        rows[1] = TrRmTypeSpecTableWriter.Builtin(0x0D);
+        for (var index = 0; index < signatureCount; index++)
+        {
+            rows[index + 2] = TrRmTypeSpecTableWriter.Reference(0x0D, (uint)(index + 1));
+        }
+        var firstPointerRow = signatureCount + 3;
+        rows[firstPointerRow - 1] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D);
+        rows[firstPointerRow] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D);
+        rows[firstPointerRow + 1] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 8);
+
+        var section = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0, signatureCount);
+        var reader = new TrRmTypeSpecTableReader(section, rows.Length, 0, 0, 0, 0,
+            signatureCount);
+
+        Assert.That(reader.GetCompactValueTypeKey(firstPointerRow), Is.EqualTo(ushort.MaxValue));
+        Assert.That(reader.GetCompactValueTypeKey(firstPointerRow + 1), Is.EqualTo(ushort.MaxValue));
+        Assert.Throws<InvalidDataException>(() => GetCompactValueTypeKey(section,
+            rows.Length, signatureCount, firstPointerRow + 2));
+    }
+
     [TestCase(new byte[] { 0x00, 0, 8 })]
     [TestCase(new byte[] { 0x01, 2, 8 })]
     [TestCase(new byte[] { 0x01, 0, 0x1A })]
@@ -95,6 +140,14 @@ public sealed class TrRmTypeSpecTableReaderTests
     {
         var reader = new TrRmTypeSpecTableReader(bytes, 1, 0, 0, 0, 0);
         return reader.GetRow(row).ToArray();
+    }
+
+    private static ushort GetCompactValueTypeKey(byte[] bytes, int count,
+        int nativeFunctionPointerSignatureCount, int row)
+    {
+        var reader = new TrRmTypeSpecTableReader(bytes, count, 0, 0, 0, 0,
+            nativeFunctionPointerSignatureCount);
+        return reader.GetCompactValueTypeKey(row);
     }
 
     private static byte[] Rows(params byte[][] rows)

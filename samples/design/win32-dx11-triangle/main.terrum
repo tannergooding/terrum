@@ -6,7 +6,7 @@ namespace Triangle.Interop;
 [Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
 [Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
 [Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
-[Terrum.Interop.NativeParameter(9, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(9, Write, NoEscape, 1)]
 [Terrum.Interop.NativeOutput(7, NonNegative)]
 extern int32 D3DCompileFromFileRaw(
     ptr<char16> sourceFile,
@@ -17,7 +17,7 @@ extern int32 D3DCompileFromFileRaw(
     uint32 flags1,
     uint32 flags2,
     write ptr<ptr<void>> code,
-    ptr<void> diagnostics);
+    ptr<ptr<void>> diagnostics);
 
 bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
     mut InlineArray<char16, 260> shaderPath = [];
@@ -26,7 +26,6 @@ bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
     mut uint32 prefixLength = 0;
     mut bool pathValid = false;
     mut ptr<void> rawCode = null;
-    mut int32 result = -1;
     unsafe {
         pathLength = GetModuleFileNameW(null, &shaderPath[0], 260);
         if (pathLength > 0 && pathLength < 260) {
@@ -62,17 +61,21 @@ bool TryCompileShader(bool vertexShader, out ShaderBlobOwner code) {
             shaderPath[prefixLength + 12] = 108;
             shaderPath[prefixLength + 13] = 0;
             if (vertexShader) {
-                result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
+                int32 result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
                     utf8z("VertexMain"), utf8z("vs_5_0"), 0, 0, &rawCode, null);
+                if (result >= 0) {
+                    code = unsafe(new ShaderBlobOwner(rawCode));
+                    return true;
+                }
             } else {
-                result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
+                int32 result = D3DCompileFromFileRaw(&shaderPath[0], null, null,
                     utf8z("PixelMain"), utf8z("ps_5_0"), 0, 0, &rawCode, null);
+                if (result >= 0) {
+                    code = unsafe(new ShaderBlobOwner(rawCode));
+                    return true;
+                }
             }
         }
-    }
-    if (result >= 0) {
-        code = unsafe(new ShaderBlobOwner(rawCode));
-        return true;
     }
     code = unsafe(new ShaderBlobOwner(null));
     return false;
@@ -177,16 +180,15 @@ unsafe bool CreateD3D11DeviceAndSwapChain(
     mut ptr<void> rawDevice = null;
     mut uint32 selectedFeatureLevel = 0;
     mut ptr<void> rawContext = null;
-    mut int32 status = 0;
-    unsafe {
-        status = D3D11CreateDeviceAndSwapChainRaw(
-            null, 5, null, 0, &featureLevel, 1, 7, &description,
-            &rawSwapChain, &rawDevice, &selectedFeatureLevel, &rawContext);
-    }
-    if (status >= 0) {
-        swapChain = unsafe(new SampleSwapChainOwner(rawSwapChain));
-        device = unsafe(new SampleDeviceOwner(rawDevice));
-        immediateContext = unsafe(new SampleContextOwner(rawContext));
+    if (unsafe(D3D11CreateDeviceAndSwapChainRaw(
+        null, 5, null, 0, &featureLevel, 1, 7, &description,
+        &rawSwapChain, &rawDevice, &selectedFeatureLevel, &rawContext)) >= 0) {
+        ptr<void> swapChainPointer = rawSwapChain;
+        ptr<void> devicePointer = rawDevice;
+        ptr<void> contextPointer = rawContext;
+        swapChain = unsafe(new SampleSwapChainOwner(swapChainPointer));
+        device = unsafe(new SampleDeviceOwner(devicePointer));
+        immediateContext = unsafe(new SampleContextOwner(contextPointer));
         return true;
     }
     swapChain = unsafe(new SampleSwapChainOwner(null));

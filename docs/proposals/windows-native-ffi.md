@@ -1,10 +1,39 @@
 # Sample-driven Windows native FFI
 
-**Status: Accepted direction only: a staged Windows x64 FFI using the DX11
-sketch as a target. Its import/catalog, storage/pointer, callback, COM and
-application contracts remain unapproved; the sketch is still non-compiling.**
+**Status: historical staged proposal; only the Windows x64 integration
+direction and motivating DX11 target were accepted.** Compiler-owned API
+catalogs, sample-specific layout/carrier admission, COM ownership/acquisition
+and application recipes below are withdrawn as forward recommendations.
+Generic native-callable entry support is an approved direction, not approval
+of the exact callback forms or metadata in these historical stages.
 
-## Summary
+## Current decision boundary
+
+Use [unsafe FFI cleanup](unsafe-ffi-vtable-cleanup.md) for the settled unsafe
+and library/compiler boundary, and the
+[standard TRRM native extension](trrm-native-interop-metadata.md) for concrete
+unapproved import, native-entry, function-pointer, vtable and dependency
+records. The latter recommends evolving the early TRRM draft, not treating
+missing current assignments as a reason to reject the route.
+
+Native declarations must be ordinary ABI-shaped library/source data. SDK
+layouts, symbols, IIDs, reference-count policy, safe wrappers and application
+control flow stay authored outside compiler policy. No sample name, catalog
+key or exact application pattern can substitute for generic verification.
+An authored integer/pointer declaration such as the GetClientRect boundary
+must be supportable without the compiler recognizing that API.
+
+The remaining sections preserve the earlier staged design and its historical
+evidence, not current admission rules or a fresh support audit. In particular,
+their present-tense sketch/support statements, closed catalog recommendations,
+host observations and reported probes must not be cited as verification of
+the current patch. Consult the implementation references for support, and
+requalify the final compiler/input revision before claiming execution.
+Native output/failure/cleanup composition is covered separately by the
+[joint proposal](trrm-output-failure-ownership.md#proposed-native-boundary-composition);
+unsafe does not erase known backing or cleanup obligations.
+
+## Historical summary
 
 The Win32 + Direct3D 11 triangle is a design sketch, not a compiling program.
 Its current source produces parser diagnostics, and the implemented Windows x64

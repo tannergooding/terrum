@@ -14,19 +14,19 @@ if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Ar
 
 var source = """
     public unique struct Child {
-        public int32 Tag;
+        internal int32 Tag;
         public Child() { Tag = 42; }
         [NoThrow] public int32 Read() { return Tag; }
         [NoThrow] [Cleanup] public void Close() {}
     }
     public unique struct Parent {
-        public Child Value;
-        public int64 Marker;
+        internal Child Value;
+        internal int64 Marker;
         public Parent() { Value = new Child(); Marker = int64.MinValue; }
         [NoThrow] [Cleanup] public void Close() {}
     }
     public unique struct Envelope {
-        public Parent Value;
+        internal Parent Value;
         public Envelope() { Value = new Parent(); }
     }
     public int32 Check() {

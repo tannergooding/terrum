@@ -935,6 +935,118 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void RawPointerReadsAndWritesCannotCopyUniqueOwners()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            unique struct Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unsafe void Read(ptr<Owner> address) {
+                unsafe { Owner copy = *address; }
+            }
+            unsafe void Write(write ptr<Owner> address) {
+                unsafe { *address = new Owner(2); }
+            }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics.Count(static diagnostic => diagnostic.Code == "TRM3023"),
+            Is.GreaterThanOrEqualTo(2), string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [TestCase("Read")]
+    [TestCase("Write")]
+    public void VerifierRejectsForgedRawPointerAccessToUniqueOwners(string functionName)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            unique struct Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unsafe void Read(ptr<int32> address) {
+                unsafe {
+                    int32 raw = *address;
+                    Owner copy = MakeOwner();
+                }
+            }
+            unsafe void Write(write ptr<int32> address) {
+                unsafe { *address = 2; }
+            }
+            Owner MakeOwner() { return new Owner(2); }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var ownerIndex = Enumerable.Range(0, program.Structures.Length)
+            .Single(index => program.Structures[index].Name == "Owner");
+        var ownerType = (PrimitiveType)(100 + ownerIndex);
+        var functionIndex = Enumerable.Range(0, program.Functions.Length)
+            .Single(index => program.Functions[index].Name == functionName);
+        var function = program.Functions[functionIndex];
+        var unsafeBlock = function.Body.Statements.OfType<BoundUnsafe>().Single();
+        var accessIndex = Enumerable.Range(0, unsafeBlock.Body.Statements.Length)
+            .Single(index => unsafeBlock.Body.Statements[index] switch {
+                BoundLocal { Initializer: BoundNativePointerRead } => functionName == "Read",
+                BoundExpressionStatement { Expression: BoundNativePointerWrite } => functionName == "Write",
+                _ => false,
+            });
+        var statements = unsafeBlock.Body.Statements;
+        if (functionName == "Read")
+        {
+            var readLocal = (BoundLocal)statements[accessIndex];
+            var read = (BoundNativePointerRead)readLocal.Initializer;
+            var ownerLocalIndex = Enumerable.Range(0, statements.Length)
+                .Single(index => statements[index] is BoundLocal local
+                    && function.Variables[local.Variable].Type == ownerType);
+            var ownerLocal = (BoundLocal)statements[ownerLocalIndex];
+            statements = statements.SetItem(accessIndex, readLocal with {
+                Initializer = new BoundConstant(0, PrimitiveType.Int32, read.Span),
+            });
+            statements = statements.SetItem(ownerLocalIndex, ownerLocal with {
+                Initializer = read with { Type = ownerType },
+            });
+        }
+        else
+        {
+            var writeStatement = (BoundExpressionStatement)statements[accessIndex];
+            var write = (BoundNativePointerWrite)writeStatement.Expression;
+            var makeOwner = program.Functions.Single(static candidate => candidate.Name == "MakeOwner")
+                .Body.Statements.OfType<BoundReturn>().Single().Value!;
+            statements = statements.SetItem(accessIndex, writeStatement with {
+                Expression = write with { Value = makeOwner },
+            });
+        }
+
+        var pointerVariable = function.Variables[0];
+        var pointerIndex = NativePointerTypes.Index(pointerVariable.Type);
+        var forged = program with {
+            NativePointerTypes = program.NativePointerTypes.SetItem(pointerIndex,
+                program.NativePointerTypes[pointerIndex] with { PointeeType = ownerType }),
+            Functions = program.Functions.SetItem(functionIndex, function with {
+                Body = function.Body with {
+                    Statements = function.Body.Statements.SetItem(
+                        function.Body.Statements.IndexOf(unsafeBlock),
+                        unsafeBlock with { Body = unsafeBlock.Body with { Statements = statements } }),
+                },
+            }),
+        };
+
+        var verifierError = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
+        Assert.That(verifierError.Data["Terrum.InvalidEffect"], Is.EqualTo("NativePointer"));
+        var moduleError = Assert.Throws<ModuleContractException>(
+            () => ModuleCompiler.CreateProducer(forged, [functionName]))!;
+        Assert.That(moduleError.InnerException!.Data["Terrum.InvalidEffect"], Is.EqualTo("NativePointer"));
+    }
+
+    [Test]
     public void PrivateModulesRejectNativeFixedArrayPointerAddresses()
     {
         var compilation = Compilation.Create([SyntaxTree.Parse("""

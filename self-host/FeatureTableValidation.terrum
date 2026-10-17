@@ -14,10 +14,16 @@ public static bool TryValidateFeatureTable(int32 recordCount)
         int32 rowStart = row * 8;
         if (!TryReadFeatureTableWord(rowStart, init var featureId)
             || !TryReadFeatureTableWord(rowStart + 4, init var minimumRuleRevision)
-            || featureId <= previousFeatureId
-            || minimumRuleRevision == 0
-            || featureId != 1
-            || minimumRuleRevision > 6)
+            || featureId <= previousFeatureId)
+        {
+            return false;
+        }
+
+        int32 maximumRuleRevision = featureId == 1 ? 8
+            : featureId == 0x0100 || featureId == 0x0101 || featureId == 0x0102
+                || featureId == 0x0103 || featureId == 0x0104 ? 1 : 0;
+        if (maximumRuleRevision == 0 || minimumRuleRevision == 0
+            || minimumRuleRevision > uint32(maximumRuleRevision))
         {
             return false;
         }

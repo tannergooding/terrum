@@ -45,7 +45,7 @@ public readonly ref struct TrRmArtifactIndex
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
         // Reference slots target only kinds 1 through 0x20; NativeImport is not referenceable.
-        Span<uint> sectionCounts = stackalloc uint[0x21 + 1];
+        Span<uint> sectionCounts = stackalloc uint[0x33 + 1];
         sectionCounts.Clear();
         var previousKind = 0;
         // Keep directory-ordered payloads allocation-free while retaining support for alternate layouts.
@@ -86,7 +86,7 @@ public readonly ref struct TrRmArtifactIndex
                 throw InvalidArtifact();
             }
 
-            if (kind <= 0x0021)
+            if (kind <= 0x0033)
             {
                 sectionCounts[kind] = count;
             }
@@ -286,7 +286,8 @@ public readonly ref struct TrRmArtifactIndex
         0x0004 => 8, 0x0010 => 12, 0x0012 => 12, 0x0013 => 40,
         0x0014 => 20, 0x0015 => 24, 0x0016 => 28, 0x0017 => 24,
         0x0018 => 16, 0x0019 => 20, 0x001A => 16, 0x001C => 12,
-        0x001D => 8, 0x001E => 20, 0x001F => 8, 0x0021 => 16,
+        0x001D => 8, 0x001E => 20, 0x001F => 8, 0x0030 => 16, 0x0031 => 8,
+        0x0032 => 16, 0x0033 => 8,
         _ => -1,
     };
 

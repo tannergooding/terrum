@@ -9,10 +9,10 @@ using Terrum.CodeAnalysis.Semantics;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>
-/// Inspects the root-free scalar compact-indexed subset with branches, loop regions and lexical
-/// unsafe scopes.
+/// Inspects the root-free compact-indexed subset with scalar values, raw-pointer null constants,
+/// calls, branches, loop regions and lexical unsafe scopes.
 /// </summary>
-/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local, expected-import and packed direct scalar calls, Branch/BranchIf/Switch, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar operators, zero raw-pointer constants, optional values, Copy, Select, local, expected-import, packed direct calls and role-4 vtable calls, Branch/BranchIf/Switch, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -22,6 +22,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
     public int BlockCount { get; }
     public int ValueCount { get; }
+    /// <summary>Whether the indexed body contains native function-pointer operations.</summary>
+    public bool HasNativeFunctionPointerOperations { get; }
 
     public int GetOperationCount(int block)
         => block > 0 && block <= BlockCount && block < _operationCounts.Length
@@ -32,7 +34,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types)
         : this(bodies, methodRow, modules, methods, signatures, parameters, types,
-            default, default)
+            default, default, default, default, default, default, default, true)
     {
     }
 
@@ -41,7 +43,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmImportTableReader imports)
         : this(bodies, methodRow, modules, methods, signatures, parameters, types,
-            default, imports)
+            default, imports, default, default, default, default, default, true)
     {
     }
 
@@ -51,25 +53,94 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
         TrRmImportTableReader imports)
         : this(bodies, methodRow, modules, methods, signatures, parameters, types,
-            nominalTypes, imports, true)
+            nominalTypes, imports, default, default, default, default, default, true)
+    {
+    }
+
+    internal TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
+        TrRmImportTableReader imports, TrRmNativeVTableTableReader nativeVTables)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            nominalTypes, imports, default, default, default, default, nativeVTables, true)
+    {
+    }
+
+    internal TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
+        TrRmImportTableReader imports, TrRmFeatureTableReader features,
+        TrRmNativeCallableTableReader nativeCallables,
+        TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
+        TrRmNativeVTableTableReader nativeVTables)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            nominalTypes, imports, features, nativeCallables, default,
+            nativeFunctionPointerSignatures, nativeVTables, true)
+    {
+    }
+
+    internal TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
+        TrRmImportTableReader imports, TrRmFeatureTableReader features,
+        TrRmNativeCallableTableReader nativeCallables,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
+        TrRmNativeVTableTableReader nativeVTables)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            nominalTypes, imports, features, nativeCallables, nativeImports,
+            nativeFunctionPointerSignatures, nativeVTables, true)
     {
     }
 
     internal static void ValidateOnly(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types)
+        TrRmTypeSpecTableReader types, TrRmNativeVTableTableReader nativeVTables)
     {
         _ = new TrRmCompactIndexedBodyReader(bodies, methodRow, modules, methods, signatures,
-            parameters, types, default, default, false);
+            parameters, types, default, default, default, default, default, default,
+            nativeVTables, false);
+    }
+
+    internal static void ValidateOnly(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmFeatureTableReader features,
+        TrRmNativeCallableTableReader nativeCallables,
+        TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
+        TrRmNativeVTableTableReader nativeVTables)
+        => ValidateOnly(bodies, methodRow, modules, methods, signatures, parameters, types,
+            features, nativeCallables, default, nativeFunctionPointerSignatures, nativeVTables);
+
+    internal static void ValidateOnly(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmFeatureTableReader features,
+        TrRmNativeCallableTableReader nativeCallables,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
+        TrRmNativeVTableTableReader nativeVTables)
+    {
+        _ = new TrRmCompactIndexedBodyReader(bodies, methodRow, modules, methods, signatures,
+            parameters, types, default, default, features, nativeCallables, nativeImports,
+            nativeFunctionPointerSignatures, nativeVTables, false);
     }
 
     private TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
-        TrRmImportTableReader imports, bool captureOperationCounts)
+        TrRmImportTableReader imports, TrRmFeatureTableReader features,
+        TrRmNativeCallableTableReader nativeCallables,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
+        TrRmNativeVTableTableReader nativeVTables, bool captureOperationCounts)
     {
+        HasNativeFunctionPointerOperations = false;
         var bodyRow = methods.GetBodyRow(methodRow);
         if (bodyRow == 0
             || modules.GetRequirements(methods.GetOwnerModule(methodRow)).RuntimePolicy != 0)
@@ -226,6 +297,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var callerTargetRequirement = 0u;
         var callerRuntimePolicy = 0u;
         var callerRequirementsLoaded = false;
+        var hasNativeCallableEntriesFeature = false;
+        var nativeFunctionPointerFeaturesLoaded = false;
         Dictionary<int, (int Declared, int Observed)>? lastUses = null;
         for (var block = 1; block <= BlockCount; block++)
         {
@@ -246,6 +319,11 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         || regions[blockRegions[block]].Parent != 0))
             {
                 throw InvalidBody();
+            }
+            var isCallerUnsafeScope = false;
+            for (var region = blockRegions[block]; region != 0; region = regions[region].Parent)
+            {
+                isCallerUnsafeScope |= regions[region].Kind == 6;
             }
 
             blockParameters[block] = ReadList(extent, ref cursor, width, (presence & 2) != 0, ValueCount);
@@ -349,7 +427,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 useOffset = cursor;
                 var (opcode, referenceWidth, operationCountWidth, dataWidth) = ReadOperation(extent, ref cursor);
                 var result = ReadCount(extent, ref cursor, referenceWidth);
-                if (result == 0 && opcode == 0x12)
+                if (result == 0 && opcode is 0x12 or 0x32)
                 {
                     // A void call has no value descriptor or definition offset.
                 }
@@ -567,12 +645,13 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var imported = method == 0
                         ? targetBodyRow == 0
                         : methods.GetBodyRow(target) == 0;
+                    var nativeVTableTarget = nativeVTables.HasVTableForMethod(target);
                     var targetOwner = methods.GetOwnerType(target);
-                    if ((method == 0 || imported)
+                    if ((method == 0 || (imported && !nativeVTableTarget))
                         && (methods.GetFlags(target) != 2
-                            || targetOwner != 0 && (targetOwner > nominalTypes.Count
+                            || (targetOwner != 0 && (targetOwner > nominalTypes.Count
                                 || (nominalTypes.GetFlags(targetOwner) & 3) != 2
-                                || nominalTypes.GetGenericRange(targetOwner).Count != 0)))
+                                || nominalTypes.GetGenericRange(targetOwner).Count != 0))))
                     {
                         throw InvalidBody();
                     }
@@ -583,7 +662,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     {
                         throw InvalidBody();
                     }
-                    if (imported)
+                    if (imported && !nativeVTableTarget
+                        && !nativeImports.HasImportForMethod(target))
                     {
                         if (!imports.TryGetExpectedRequirements(0x1600_0000u | (uint)target,
                             out var requirements))
@@ -627,13 +707,129 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     {
                         var value = ReadCount(extent, ref cursor, referenceWidth);
                         Use(value, ordinal);
+                        var parameterType = nativeVTables.HasNativeParameter(
+                            target, argument)
+                            ? (ushort)0x8C
+                            : TrRmCompactLinearBodyReader.ResolveType(types,
+                                parameters.GetTypeSpec(first + argument));
                         if (parameters.GetMode(first + argument) != 0
-                            || valueTypes[value] != TrRmCompactLinearBodyReader.ResolveType(types,
-                                parameters.GetTypeSpec(first + argument)))
+                            || valueTypes[value] != parameterType)
                         {
                             throw InvalidBody();
                         }
                     }
+                }
+                else if (opcode == 0x31)
+                {
+                    var method = ReadCount(extent, ref cursor, referenceWidth);
+                    if (localMethodStart == 0)
+                    {
+                        callerModule = methods.GetOwnerModule(methodRow);
+                        (localMethodStart, localMethodEnd) = modules.GetMethodDefRange(
+                            callerModule);
+                    }
+                    if (!nativeFunctionPointerFeaturesLoaded)
+                    {
+                        var (featureStart, featureCount) = modules.GetFeatureRange(callerModule);
+                        for (var featureOffset = 0; featureOffset < featureCount; featureOffset++)
+                        {
+                            hasNativeCallableEntriesFeature |= features
+                                .GetFeature(featureStart + featureOffset).FeatureId
+                                == TrRmFeatureTableReader.NativeCallableEntriesFeatureId;
+                        }
+
+                        nativeFunctionPointerFeaturesLoaded = true;
+                    }
+
+                    if (!hasNativeCallableEntriesFeature || !isCallerUnsafeScope
+                        || method == 0 || method > localMethodEnd - localMethodStart
+                        || !types.TryGetNativeFunctionPointerSignatureRow(
+                            valueTypes[result], out var signatureRow))
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var target = localMethodStart + method - 1;
+                    if (!nativeCallables.HasCallableForMethod(target)
+                        || nativeCallables.GetFunctionPointerSignatureIndex(target) + 1
+                            != signatureRow)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    HasNativeFunctionPointerOperations = true;
+                }
+                else if (opcode == 0x32)
+                {
+                    var targetValue = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(targetValue, ordinal);
+                    if (localMethodStart == 0)
+                    {
+                        callerModule = methods.GetOwnerModule(methodRow);
+                        (localMethodStart, localMethodEnd) = modules.GetMethodDefRange(
+                            callerModule);
+                    }
+                    if (!nativeFunctionPointerFeaturesLoaded)
+                    {
+                        var (featureStart, featureCount) = modules.GetFeatureRange(callerModule);
+                        for (var featureOffset = 0; featureOffset < featureCount; featureOffset++)
+                        {
+                            hasNativeCallableEntriesFeature |= features
+                                .GetFeature(featureStart + featureOffset).FeatureId
+                                == TrRmFeatureTableReader.NativeCallableEntriesFeatureId;
+                        }
+
+                        nativeFunctionPointerFeaturesLoaded = true;
+                    }
+
+                    var targetType = valueTypes[targetValue];
+                    if (!hasNativeCallableEntriesFeature || !isCallerUnsafeScope
+                        || !types.TryGetNativeFunctionPointerSignatureRow(
+                            targetType, out var signatureRow))
+                    {
+                        throw InvalidBody();
+                    }
+
+                    if (signatureRow > nativeFunctionPointerSignatures.Count)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var anchorMethod = nativeFunctionPointerSignatures
+                        .GetMethodDefRow(signatureRow);
+                    var anchorSignature = methods.GetSignature(anchorMethod);
+                    var (first, count) = signatures.GetParamRange(anchorSignature);
+                    var arguments = ReadCount(extent, ref cursor, operationCountWidth);
+                    if (arguments != count
+                        || arguments > (extent.Length - cursor) / referenceWidth)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var returnTypeSpec = signatures.GetResultTypeSpec(anchorSignature);
+                    var returnTypeRow = types.GetRow(returnTypeSpec);
+                    var voidReturn = returnTypeRow.Length == 3 && returnTypeRow[0] == 1
+                        && returnTypeRow[1] == 0 && returnTypeRow[2] == 0;
+                    if (voidReturn ? result != 0
+                        : result == 0 || valueTypes[result]
+                            != TrRmCompactLinearBodyReader.ResolveType(types, returnTypeSpec))
+                    {
+                        throw InvalidBody();
+                    }
+
+                    for (var argument = 0; argument < arguments; argument++)
+                    {
+                        var value = ReadCount(extent, ref cursor, referenceWidth);
+                        Use(value, ordinal);
+                        if (parameters.GetMode(first + argument) != 0
+                            || valueTypes[value] != TrRmCompactLinearBodyReader.ResolveType(
+                                types, parameters.GetTypeSpec(first + argument)))
+                        {
+                            throw InvalidBody();
+                        }
+                    }
+
+                    HasNativeFunctionPointerOperations = true;
                 }
                 else if (opcode == 0x15)
                 {
@@ -1280,6 +1476,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             3 => bits <= ushort.MaxValue,
             8 or 0x0D or 0x14 => bits <= uint.MaxValue,
             9 or 0x0E or 0x15 => true,
+            0x8C => bits == 0,
             _ => false,
         };
 
@@ -1322,8 +1519,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         opcode = Read(data, ref position, 1);
         if (layout == 0 || (layout & 0xC0) != 0 || (layout & 3) == 3
             || ((layout >> 2) & 3) == 3
-            || opcode != 0x12 && (layout & 0x0C) != 0
-            || opcode is not (1 or 2) && (layout & 0x30) != 0)
+            || (opcode is not (0x12 or 0x32) && (layout & 0x0C) != 0)
+            || (opcode is not (1 or 2) && (layout & 0x30) != 0))
         {
             throw InvalidBody();
         }

@@ -64,6 +64,9 @@ public static partial class TrRmExecutableCompiler
         private readonly BoundFunction _function;
         private readonly BoundProgram _program;
         private readonly bool _hasFloatingTypes;
+        private readonly int _nativeRawPointerTypeRow;
+        private readonly Dictionary<PrimitiveType, int> _nativeFunctionPointerTypeRows;
+        private readonly Dictionary<PrimitiveType, int> _nativePointerTypeRows;
         private readonly List<IndexedBlock> _blocks = [];
         private readonly List<IndexedRegion> _regions = [];
         private readonly List<PrimitiveType> _types = [];
@@ -71,11 +74,17 @@ public static partial class TrRmExecutableCompiler
         private IndexedBlock? _current;
         private int[] _slots;
 
-        internal IndexedBuilder(BoundFunction function, BoundProgram program, bool hasFloatingTypes)
+        internal IndexedBuilder(BoundFunction function, BoundProgram program, bool hasFloatingTypes,
+            int nativeRawPointerTypeRow,
+            Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
+            Dictionary<PrimitiveType, int> nativePointerTypeRows)
         {
             _function = function;
             _program = program;
             _hasFloatingTypes = hasFloatingTypes;
+            _nativeRawPointerTypeRow = nativeRawPointerTypeRow;
+            _nativeFunctionPointerTypeRows = nativeFunctionPointerTypeRows;
+            _nativePointerTypeRows = nativePointerTypeRows;
             _slots = new int[function.Variables.Length];
             _current = NewBlock(0);
             for (var index = 0; index < function.ParameterCount; index++)
@@ -87,8 +96,43 @@ public static partial class TrRmExecutableCompiler
 
         private static byte[] EncodeIndexed(BoundFunction function, List<IndexedBlock> source,
             List<IndexedRegion> regions, List<PrimitiveType> sourceTypes, BoundProgram program,
-            bool hasFloatingTypes)
+            bool hasFloatingTypes, int nativeRawPointerTypeRow,
+            Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
+            Dictionary<PrimitiveType, int> nativePointerTypeRows)
         {
+            var hasNativeRawPointer = sourceTypes.Contains(PrimitiveType.NativeRawPointer);
+            if (hasNativeRawPointer && nativeRawPointerTypeRow == 0)
+            {
+                throw Unsupported("An indexed raw-pointer value has no raw-pointer TypeSpec row.");
+            }
+            var scalarTypeCount = hasFloatingTypes ? 8 : 6;
+            var functionPointerTypes = sourceTypes
+                .Where(NativeFunctionPointerTypes.IsType)
+                .Distinct()
+                .OrderBy(type => nativeFunctionPointerTypeRows.TryGetValue(type, out var row)
+                    ? row : throw Unsupported("An indexed native function-pointer value has no TypeSpec row."))
+                .ToArray();
+            var functionPointerTypeIds = new Dictionary<PrimitiveType, int>(
+                functionPointerTypes.Length);
+            for (var index = 0; index < functionPointerTypes.Length; index++)
+            {
+                functionPointerTypeIds.Add(functionPointerTypes[index],
+                    scalarTypeCount + (hasNativeRawPointer ? 1 : 0) + index + 1);
+            }
+            var pointerTypes = sourceTypes
+                .Where(NativePointerTypes.IsType)
+                .Distinct()
+                .OrderBy(type => nativePointerTypeRows.TryGetValue(type, out var row)
+                    ? row : throw Unsupported("An indexed native pointer value has no TypeSpec row."))
+                .ToArray();
+            var pointerTypeIds = new Dictionary<PrimitiveType, int>(pointerTypes.Length);
+            for (var index = 0; index < pointerTypes.Length; index++)
+            {
+                pointerTypeIds.Add(pointerTypes[index],
+                    scalarTypeCount + (hasNativeRawPointer ? 1 : 0)
+                        + functionPointerTypes.Length + index + 1);
+            }
+
             static bool IsBackEdge(IndexedBlock block, IndexedEdge edge)
                 => edge.Target.IsLoopHeader && block.Region == edge.Target.Region && block != edge.Target;
 
@@ -452,7 +496,9 @@ public static partial class TrRmExecutableCompiler
                             overflowedDefinition |= definitions[remap[result] - 1] >= sentinel;
                         }
                         WriteScalarOperation(data, result == 0 ? 0 : remap[result],
-                            expression, remap, function.IsNoThrow, program);
+                            expression, remap, function.IsNoThrow, program,
+                            sourceTypes.Contains(PrimitiveType.NativeRawPointer)
+                                ? scalarTypeCount + 1 : 0);
                     }
                     terminators.Add(data.Count - blockStart);
                     WriteIndexedTerminator(data, block, remap);
@@ -464,7 +510,8 @@ public static partial class TrRmExecutableCompiler
                 {
                     return [];
                 }
-                var typeCount = hasFloatingTypes ? 8 : 6;
+                var typeCount = scalarTypeCount + (hasNativeRawPointer ? 1 : 0)
+                    + functionPointerTypes.Length + pointerTypes.Length;
                 var bodyCapacity = checked(1 + (4 * width) + (4 * typeCount)
                     + (regions.Count * (1 + (4 * width)))
                     + (sourceTypes.Count * (2 * width))
@@ -481,9 +528,23 @@ public static partial class TrRmExecutableCompiler
                 WriteToSpan(destination, ref bodyPosition, (ulong)sourceTypes.Count, width);
                 WriteToSpan(destination, ref bodyPosition, (ulong)regions.Count, width);
                 WriteToSpan(destination, ref bodyPosition, (ulong)typeCount, width);
-                for (var row = 2; row <= typeCount + 1; row++)
+                for (var row = 2; row <= scalarTypeCount + 1; row++)
                 {
                     WriteToSpan(destination, ref bodyPosition, (ulong)row, 4);
+                }
+                if (hasNativeRawPointer)
+                {
+                    WriteToSpan(destination, ref bodyPosition, (ulong)nativeRawPointerTypeRow, 4);
+                }
+                foreach (var functionPointerType in functionPointerTypes)
+                {
+                    WriteToSpan(destination, ref bodyPosition,
+                        (ulong)nativeFunctionPointerTypeRows[functionPointerType], 4);
+                }
+                foreach (var pointerType in pointerTypes)
+                {
+                    WriteToSpan(destination, ref bodyPosition,
+                        (ulong)nativePointerTypeRows[pointerType], 4);
                 }
                 foreach (var region in regions)
                 {
@@ -496,7 +557,16 @@ public static partial class TrRmExecutableCompiler
                 }
                 for (var id = 1; id < types.Length; id++)
                 {
-                    WriteToSpan(destination, ref bodyPosition, (ulong)(TypeRow(types[id]) - 1), width);
+                    var typeId = types[id] switch
+                    {
+                        PrimitiveType.NativeRawPointer => scalarTypeCount + 1,
+                        _ when NativeFunctionPointerTypes.IsType(types[id])
+                            => functionPointerTypeIds[types[id]],
+                        _ when NativePointerTypes.IsType(types[id])
+                            => pointerTypeIds[types[id]],
+                        _ => TypeRow(types[id]) - 1,
+                    };
+                    WriteToSpan(destination, ref bodyPosition, (ulong)typeId, width);
                     WriteToSpan(destination, ref bodyPosition, (ulong)useCounts[id], width);
                 }
                 foreach (var start in starts)
@@ -580,8 +650,43 @@ public static partial class TrRmExecutableCompiler
                         VisitReads(argument, visit);
                     }
                     break;
+                case BoundIndirectCall call:
+                    VisitReads(call.Target, visit);
+                    foreach (var argument in call.Arguments)
+                    {
+                        VisitReads(argument, visit);
+                    }
+                    break;
             }
         }
+
+        private static bool ContainsNativeFunctionPointerOperation(BoundExpression expression)
+            => expression switch
+            {
+                BoundNativeFunctionAddress or BoundIndirectCall => true,
+                BoundUnsafeExpression unsafeExpression
+                    => ContainsNativeFunctionPointerOperation(unsafeExpression.Expression),
+                BoundUnary unary => ContainsNativeFunctionPointerOperation(unary.Operand),
+                BoundCast cast => ContainsNativeFunctionPointerOperation(cast.Operand),
+                TrRmScalarReinterpret reinterpret
+                    => ContainsNativeFunctionPointerOperation(reinterpret.Operand),
+                TrRmScalarOptionalLift lift
+                    => ContainsNativeFunctionPointerOperation(lift.Value),
+                TrRmScalarOptionalPresence presence
+                    => ContainsNativeFunctionPointerOperation(presence.Optional),
+                TrRmScalarOptionalEquality equality
+                    => ContainsNativeFunctionPointerOperation(equality.Left)
+                        || ContainsNativeFunctionPointerOperation(equality.Right),
+                BoundConditional conditional
+                    => ContainsNativeFunctionPointerOperation(conditional.Condition)
+                        || ContainsNativeFunctionPointerOperation(conditional.WhenTrue)
+                        || ContainsNativeFunctionPointerOperation(conditional.WhenFalse),
+                BoundBinary binary
+                    => ContainsNativeFunctionPointerOperation(binary.Left)
+                        || ContainsNativeFunctionPointerOperation(binary.Right),
+                BoundCall call => call.Arguments.Any(ContainsNativeFunctionPointerOperation),
+                _ => false,
+            };
 
         private static void WriteList(List<byte> bytes, ReadOnlySpan<int> values, int width)
         {
@@ -668,7 +773,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         private static void WriteScalarOperation(List<byte> bytes, int result,
-            BoundExpression expression, int[] remap, bool noThrow, BoundProgram program)
+            BoundExpression expression, int[] remap, bool noThrow, BoundProgram program,
+            int nativeRawPointerTypeId)
         {
             int ReadOperand(BoundExpression operand) => operand is BoundRead read
                 ? remap[read.Variable + 1] : throw Unsupported("Indexed scalar operand was not materialized.");
@@ -683,7 +789,11 @@ public static partial class TrRmExecutableCompiler
             {
                 case BoundConstant constant:
                     opcode = 1;
-                    target = TypeRow(constant.Type) - 1;
+                    target = constant.Type == PrimitiveType.NativeRawPointer
+                        ? constant.Value == 0 && nativeRawPointerTypeId != 0
+                            ? nativeRawPointerTypeId
+                            : throw Unsupported("Only a null raw-pointer constant has an indexed TRRM encoding.")
+                        : TypeRow(constant.Type) - 1;
                     bits = constant.Type switch {
                         PrimitiveType.Int32 or PrimitiveType.UInt32 => unchecked((uint)constant.Value),
                         PrimitiveType.Bool or PrimitiveType.Char16 => (ulong)constant.Value,
@@ -804,6 +914,27 @@ public static partial class TrRmExecutableCompiler
                         throw Unsupported("NoThrow caller cannot target a may-fail declaration.");
                     }
                     break;
+                case BoundNativeFunctionAddress address:
+                    opcode = 0x31;
+                    target = address.Function + 1;
+                    if (!address.IsUnsafeAuthorized
+                        || !NativeFunctionPointerContract.MatchesFunction(
+                            program.Functions[address.Function], address.Type,
+                            program.NativeFunctionPointerSignatures))
+                    {
+                        throw Unsupported("Native function address does not match a callable entry.");
+                    }
+                    break;
+                case BoundIndirectCall call:
+                    opcode = 0x32;
+                    target = ReadOperand(call.Target);
+                    if (!call.IsUnsafeAuthorized
+                        || !NativeFunctionPointerContract.IsValidType(
+                            call.Target.Type, program.NativeFunctionPointerSignatures))
+                    {
+                        throw Unsupported("Indirect native call does not have a valid unsafe function-pointer target.");
+                    }
+                    break;
                 default:
                     throw Unsupported($"Operation {expression.GetType().Name} is not executable.");
             }
@@ -812,14 +943,19 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported("NoThrow requires a total indexed Body.");
             }
             var maximum = Math.Max(result, target);
-            Span<int> callArguments = expression is BoundCall callForStorage
-                ? stackalloc int[callForStorage.Arguments.Length]
-                : Span<int>.Empty;
-            if (expression is BoundCall callOperands)
+            var argumentExpressions = expression switch
             {
-                for (var index = 0; index < callOperands.Arguments.Length; index++)
+                BoundCall call => call.Arguments,
+                BoundIndirectCall call => call.Arguments,
+                _ => [],
+            };
+            var callArguments = argumentExpressions.IsEmpty
+                ? [] : stackalloc int[argumentExpressions.Length];
+            if (!argumentExpressions.IsEmpty)
+            {
+                for (var index = 0; index < argumentExpressions.Length; index++)
                 {
-                    var operand = ReadOperand(callOperands.Arguments[index]);
+                    var operand = ReadOperand(argumentExpressions[index]);
                     callArguments[index] = operand;
                     maximum = Math.Max(maximum, operand);
                 }
@@ -848,9 +984,31 @@ public static partial class TrRmExecutableCompiler
                 }
                 return;
             }
+            if (opcode == 0x32)
+            {
+                var countWidth = Width((ulong)argumentExpressions.Length);
+                if (referenceWidth == 1 && countWidth == 1)
+                {
+                    bytes.Add(0x32);
+                }
+                else
+                {
+                    bytes.Add(0xF0);
+                    bytes.Add((byte)(WidthCode(referenceWidth) | (WidthCode(countWidth) << 2)));
+                    bytes.Add(0x32);
+                }
+                Write(bytes, (ulong)result, referenceWidth);
+                Write(bytes, (ulong)target, referenceWidth);
+                Write(bytes, (ulong)argumentExpressions.Length, countWidth);
+                foreach (var argument in callArguments)
+                {
+                    Write(bytes, (ulong)argument, referenceWidth);
+                }
+                return;
+            }
             WriteInstruction(bytes, opcode, referenceWidth, dataWidth);
             Write(bytes, (ulong)result, referenceWidth);
-            if (opcode is 1 or 6 or 0x16 or 0x1A or 0x1B or 0x1E or 0x1F)
+            if (opcode is 1 or 6 or 0x16 or 0x1A or 0x1B or 0x1E or 0x1F or 0x31)
             {
                 Write(bytes, (ulong)target, referenceWidth);
             }
@@ -879,7 +1037,11 @@ public static partial class TrRmExecutableCompiler
 
         internal static TrRmScalarGraph DecodeIndexedBody(ReadOnlySpan<byte> body,
             int parameterCount, PrimitiveType resultType, bool noThrow, bool doesNotReturn,
-            TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions)
+            TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions,
+            int[] functionIndexByMethodRow,
+            ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
+            List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+            int[] structureTypeByTypeDef)
         {
             var position = 1;
             var width = 1 << (body[0] & 3);
@@ -889,7 +1051,7 @@ public static partial class TrRmExecutableCompiler
             var typeCount = ReadInt(body, ref position, width);
             if (blockCount == 0 || blockCount > SemanticVerifier.MaximumAnalysisVisits
                 || valueCount > SemanticVerifier.MaximumVariables
-                || typeCount is < 0 or > 12)
+                || typeCount is < 0 or > SemanticVerifier.MaximumVariables + 8)
             {
                 throw Invalid("Indexed scalar Body exceeds native verification bounds.");
             }
@@ -897,7 +1059,8 @@ public static partial class TrRmExecutableCompiler
             for (var index = 0; index < typeMap.Length; index++)
             {
                 typeMap[index] = ReadInt(body, ref position, 4);
-                if (BodyTypeFromRow(types, typeMap[index]) == PrimitiveType.Void)
+                if (BodyTypeFromRow(types, typeMap[index], nativePointerTypeDefinitions,
+                    structureTypeByTypeDef) == PrimitiveType.Void)
                 {
                     throw Invalid("Void indexed value type.");
                 }
@@ -919,7 +1082,8 @@ public static partial class TrRmExecutableCompiler
                 {
                     throw Invalid("Indexed value has unmapped type.");
                 }
-                valueTypes.Add(BodyTypeFromRow(types, typeMap[typeId - 1]));
+                valueTypes.Add(BodyTypeFromRow(types, typeMap[typeId - 1],
+                    nativePointerTypeDefinitions, structureTypeByTypeDef));
             }
             var starts = new int[blockCount + 1];
             for (var index = 0; index < starts.Length; index++)
@@ -1004,7 +1168,9 @@ public static partial class TrRmExecutableCompiler
                     variables.Add(variable);
                 }
                 var statements = DecodeBody(CollectionsMarshal.AsSpan(synthetic), variables.Count,
-                    variables, noThrow, types, functions);
+                    variables, noThrow, types, functions, functionIndexByMethodRow,
+                    nativeFunctionPointerSignatures,
+                    isCallerUnsafeScope, nativePointerTypeDefinitions, structureTypeByTypeDef);
                 var operations = ImmutableArray.CreateBuilder<BoundStatement>(countOperations);
                 foreach (var statement in statements)
                 {
@@ -1330,7 +1496,7 @@ public static partial class TrRmExecutableCompiler
             return arguments;
         }
 
-        private void Jump(IndexedBlock target, int[] slots, int[] visible)
+        private void Jump(IndexedBlock target, int[] slots, int[] visible, int result = 0)
         {
             if (_current is null)
             {
@@ -1338,7 +1504,7 @@ public static partial class TrRmExecutableCompiler
             }
             int? expectedArgumentCount = target.Creation < 0 ? null : target.Parameters.Count;
             _current.True = new IndexedEdge(target,
-                Arguments(slots, visible, expectedArgumentCount: expectedArgumentCount));
+                Arguments(slots, visible, result, expectedArgumentCount));
             _current = null;
         }
 
@@ -1408,6 +1574,55 @@ public static partial class TrRmExecutableCompiler
                     }
                     return _slots[read.Variable] != 0 ? _slots[read.Variable]
                         : throw Unsupported("Read of an uninitialized scalar local.");
+                case BoundUnsafeExpression unsafeExpression:
+                {
+                    if (!NativeFunctionPointerTypes.IsType(unsafeExpression.Type)
+                        && !ContainsNativeFunctionPointerOperation(unsafeExpression.Expression))
+                    {
+                        throw Unsupported("Indexed unsafe expressions are limited to native function-pointer operations.");
+                    }
+                    var source = _current ?? throw Unsupported("Unsafe expression has no entry block.");
+                    var unsafeParent = source.Region;
+                    var visibleSlots = (int[])_slots.Clone();
+                    var unsafeHeader = NewBlock(_regions.Count + 1);
+                    var unsafeRegion = new IndexedRegion(_regions.Count + 1, unsafeParent,
+                        unsafeHeader, visibleSlots)
+                    {
+                        Kind = 6,
+                    };
+                    _regions.Add(unsafeRegion);
+                    var unsafeEntrySlots = Parameters(unsafeHeader, visibleSlots);
+                    Jump(unsafeHeader, _slots, visibleSlots);
+                    _current = unsafeHeader;
+                    _slots = unsafeEntrySlots;
+                    var value = Expression(unsafeExpression.Expression);
+                    if (_current is null)
+                    {
+                        unsafeRegion.Exit = source;
+                        return 0;
+                    }
+
+                    var unsafeExit = NewBlock(unsafeParent);
+                    unsafeRegion.Exit = unsafeExit;
+                    var unsafeExitSlots = Parameters(unsafeExit, visibleSlots,
+                        unsafeExpression.Type == PrimitiveType.Void ? null : unsafeExpression.Type);
+                    Jump(unsafeExit, _slots, visibleSlots, value);
+                    _current = unsafeExit;
+                    _slots = unsafeExitSlots;
+                    return unsafeExpression.Type == PrimitiveType.Void
+                        ? 0 : unsafeExit.Parameters[0];
+                }
+                case BoundNativeFunctionAddress address:
+                    if (!address.IsUnsafeAuthorized
+                        || !IsCallerUnsafeScope((_current
+                            ?? throw Unsupported("Native function address has no indexed block.")).Region)
+                        || !NativeFunctionPointerContract.MatchesFunction(
+                            _program.Functions[address.Function], address.Type,
+                            _program.NativeFunctionPointerSignatures))
+                    {
+                        throw Unsupported("Native function address requires an executable unsafe-region contract.");
+                    }
+                    return Add(address);
                 case BoundConstant constant:
                     return Add(constant);
                 case BoundUnary unary:
@@ -1478,6 +1693,25 @@ public static partial class TrRmExecutableCompiler
                         arguments[call.ParameterIndex(index)] = Read(Expression(call.Arguments[index]));
                     }
                     return Add(new BoundCall(call.Function, arguments.ToImmutableArray(), call.Type, default));
+                case BoundIndirectCall call:
+                    if (!call.IsUnsafeAuthorized
+                        || !IsCallerUnsafeScope((_current
+                            ?? throw Unsupported("Indirect native call has no indexed block.")).Region)
+                        || !NativeFunctionPointerContract.IsValidType(
+                            call.Target.Type, _program.NativeFunctionPointerSignatures))
+                    {
+                        throw Unsupported("Indirect native calls require an executable unsafe-region contract.");
+                    }
+                    var target = Read(Expression(call.Target));
+                    var indirectArguments = new BoundExpression[call.Arguments.Length];
+                    for (var index = 0; index < call.Arguments.Length; index++)
+                    {
+                        indirectArguments[index] = Read(Expression(call.Arguments[index]));
+                    }
+                    return Add(new BoundIndirectCall(target, [.. indirectArguments],
+                        call.Type, default) {
+                        IsUnsafeAuthorized = true,
+                    });
                 default:
                     throw Unsupported($"Expression {expression.GetType().Name} has no executable indexed scalar encoding.");
             }
@@ -2090,7 +2324,9 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported("An indexed region is missing its required loop or scope exit.");
                 }
             }
-            return EncodeIndexed(_function, _blocks, _regions, _types, _program, _hasFloatingTypes);
+            return EncodeIndexed(_function, _blocks, _regions, _types, _program,
+                _hasFloatingTypes, _nativeRawPointerTypeRow, _nativeFunctionPointerTypeRows,
+                _nativePointerTypeRows);
         }
     }
 }

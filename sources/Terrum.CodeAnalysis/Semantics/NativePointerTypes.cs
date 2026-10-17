@@ -78,6 +78,10 @@ internal static class NativePointerTypeContract
         {
             return false;
         }
+        if (pointerType.PointeeType == PrimitiveType.Void && !pointerType.IsWritable)
+        {
+            return false;
+        }
         pointerStates[index] = 1;
         if (!IsValidPointee(pointerType.PointeeType, pointerTypes, structures, functionPointers,
             pointerStates, functionPointerStates, depth + 1))

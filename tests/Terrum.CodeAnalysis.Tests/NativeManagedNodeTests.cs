@@ -264,7 +264,7 @@ public sealed class NativeManagedNodeTests
                 function with { Body = function.Body with { RetiredManagedLocals = [] } }),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged))!;
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Proof"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Proof"]))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(forged,
             ["Proof"], NativeRuntimePolicy.CheckedExceptions))!;
     }

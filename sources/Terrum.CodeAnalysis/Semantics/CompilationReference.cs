@@ -25,7 +25,7 @@ public sealed class CompilationReference
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
     public ImmutableArray<BoundStruct> Structures { get; }
 
-    /// <summary>Gets external function declarations whose empty bodies are not implementations.</summary>
+    /// <summary>Gets imported declarations and dispatch stubs whose empty bodies are not Terrum implementations.</summary>
     public ImmutableArray<BoundFunction> Functions { get; }
 
     /// <summary>The checked-failure behavior required by imported declarations.</summary>

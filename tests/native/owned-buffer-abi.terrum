@@ -96,7 +96,7 @@ public int32 FieldViewMutation() {
 }
 
 public unique struct Envelope {
-    public OwnedInt32Buffer Data;
+    internal OwnedInt32Buffer Data;
 
     public Envelope(bool complete) {
         require OwnedInt32Buffer.TryCreate(1, out var created);

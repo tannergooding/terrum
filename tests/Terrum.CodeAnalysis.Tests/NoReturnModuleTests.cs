@@ -178,14 +178,14 @@ public sealed class NoReturnModuleTests
         var forged = program with {
             Functions = program.Functions.SetItem(0, program.Functions[0] with { DoesNotReturn = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Stop"]))!;
-        _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(forged,
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Stop"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(forged,
             ["Stop"], "Termination", NativeRuntimePolicy.FailFast))!;
         var nonVoid = CompileLibrary("public int32 Value() { return 42; }");
         var invalidReturn = nonVoid with {
             Functions = nonVoid.Functions.SetItem(0, nonVoid.Functions[0] with { DoesNotReturn = true }),
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(invalidReturn, ["Value"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(invalidReturn, ["Value"]))!;
 
         var producer = Producer(Returning);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer("int32 Main() { Stop(); return 0; }", producer), producer);

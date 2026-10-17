@@ -236,7 +236,10 @@ public static partial class ModuleCompiler
                         Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
                             program.NativePointerTypes),
                         Contract(actual, dependencies.Structures,
-                            dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes)))
+                            dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes))
+                    || !CompatibleImportedNativeVTableMethod(
+                        function.ModuleImport is null ? null : function.NativeVTableMethod,
+                        actual.NativeVTableMethod))
                 {
                     throw new ModuleContractException($"Incompatible graph import '{function.Name}'.");
                 }
@@ -535,10 +538,15 @@ public static partial class ModuleCompiler
                 ? ImmutableDictionary<string, BoundFunction>.Empty
                 : dependencies.Functions.ToDictionary(static function => function.Name,
                     StringComparer.Ordinal);
+            var importedNativeVTableMethod = item.ImportedNativeVTableMethod
+                ?? (item.Function is { IsExternal: true } importedFunction
+                    ? importedFunction.NativeVTableMethod : null);
             if (!availableFunctions.TryGetValue(item.Name, out var actual)
                 || !CompatibleContract(item.Contract,
                     Contract(actual, dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
                         dependencies.NativePointerTypes))
+                || !CompatibleImportedNativeVTableMethod(importedNativeVTableMethod,
+                    actual.NativeVTableMethod)
                 || item.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))
             {
                 throw new ModuleContractException($"Incompatible graph import '{item.Name}'.");

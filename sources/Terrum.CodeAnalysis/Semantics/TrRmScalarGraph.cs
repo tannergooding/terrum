@@ -194,6 +194,67 @@ internal sealed class TrRmScalarGraph
                 {
                     throw new ArgumentException("Indexed CheckedDivRem result or operand contract does not match.");
                 }
+                var nativeAddress = operation switch
+                {
+                    BoundLocal { Initializer: BoundNativeFunctionAddress value } => value,
+                    BoundExpressionStatement { Expression: BoundNativeFunctionAddress value } => value,
+                    _ => null,
+                };
+                if (nativeAddress is not null)
+                {
+                    if (!nativeAddress.IsUnsafeAuthorized || !block.IsCallerUnsafeScope
+                        || (uint)nativeAddress.Function >= (uint)program.Functions.Length
+                        || !NativeFunctionPointerContract.MatchesFunction(
+                            program.Functions[nativeAddress.Function], nativeAddress.Type,
+                            program.NativeFunctionPointerSignatures)
+                        || (operation is BoundLocal addressLocal
+                            && (addressLocal.Variable < ParameterCount
+                                || addressLocal.Variable >= Types.Length
+                                || Types[addressLocal.Variable] != nativeAddress.Type)))
+                    {
+                        throw new ArgumentException("Indexed native function address violates its callable or unsafe-scope contract.");
+                    }
+                }
+                var indirectCall = operation switch
+                {
+                    BoundLocal { Initializer: BoundIndirectCall value } => value,
+                    BoundExpressionStatement { Expression: BoundIndirectCall value } => value,
+                    _ => null,
+                };
+                if (indirectCall is not null)
+                {
+                    if (!indirectCall.IsUnsafeAuthorized || !block.IsCallerUnsafeScope
+                        || indirectCall.Arguments.IsDefault
+                        || !NativeFunctionPointerTypes.IsType(indirectCall.Target.Type)
+                        || !NativeFunctionPointerContract.IsValidType(
+                            indirectCall.Target.Type, program.NativeFunctionPointerSignatures)
+                        || !GraphReadMatches(indirectCall.Target, indirectCall.Target.Type, Types)
+                        || (operation is BoundLocal indirectLocal
+                            && (indirectLocal.Variable < ParameterCount
+                                || indirectLocal.Variable >= Types.Length
+                                || Types[indirectLocal.Variable] != indirectCall.Type)))
+                    {
+                        throw new ArgumentException("Indexed indirect call violates its function-pointer or unsafe-scope contract.");
+                    }
+
+                    var signature = program.NativeFunctionPointerSignatures[
+                        NativeFunctionPointerTypes.Index(indirectCall.Target.Type)];
+                    if (indirectCall.Type != signature.ReturnType
+                        || indirectCall.Arguments.Length != signature.ParameterTypes.Length)
+                    {
+                        throw new ArgumentException("Indexed indirect call signature does not match.");
+                    }
+                    for (var argument = 0; argument < indirectCall.Arguments.Length; argument++)
+                    {
+                        Visit(ref remaining);
+                        if (indirectCall.Arguments[argument].Type != signature.ParameterTypes[argument]
+                            || !GraphReadMatches(indirectCall.Arguments[argument],
+                                signature.ParameterTypes[argument], Types))
+                        {
+                            throw new ArgumentException("Indexed indirect call argument does not match its signature.");
+                        }
+                    }
+                }
                 if (call is null)
                 {
                     continue;
@@ -219,12 +280,19 @@ internal sealed class TrRmScalarGraph
                     throw new ArgumentException("Indexed call target is outside the module.");
                 }
                 var target = program.Functions[call.Function];
+                var isDirectNativeImport = target?.IsExternal == true
+                    && target.DirectNativeImport is not null
+                    && DirectNativeImportContract.IsValid(target, program.Structures,
+                        program.NativeFunctionPointerSignatures, program.NativePointerTypes);
                 if (target is null || target.Variables.IsDefault
                     || target.Variables.Length < call.Arguments.Length
-                    || target.IsExternal || target.IsConstructor
+                    || (target.IsExternal && !isDirectNativeImport) || target.IsConstructor
                     || target.IsClassConstructor || target.ClassConstructor != -1
                     || target.DeclaringStruct is not null || target.IsStatic || target.IsCleanup
-                    || target.PropertyName is not null || target.Intrinsic != BoundIntrinsic.None
+                    || target.PropertyName is not null
+                    || (target.Intrinsic != BoundIntrinsic.None
+                        && (target.Intrinsic != BoundIntrinsic.NativeVTableCall
+                            || target.NativeVTableMethod is null))
                     || target.RequiresUnsafeCaller != call.IsUnsafeAuthorized
                     || target.RequiresUnsafeCaller && !block.IsCallerUnsafeScope
                     || target.ReturnType != call.Type
@@ -246,8 +314,20 @@ internal sealed class TrRmScalarGraph
                 {
                     Visit(ref remaining);
                     var parameter = target.Variables[index];
-                    if (parameter.IsOut || parameter.IsInit
-                        || parameter.Type != call.Arguments[index].Type)
+                    var output = isDirectNativeImport
+                        ? DirectNativeImportContract.OutputForParameter(target, index)
+                        : null;
+                    var nativeParameter = isDirectNativeImport
+                        ? DirectNativeImportContract.ParameterForParameter(target, index)
+                        : null;
+                    var isMatchingNativeAddress = call.Arguments[index] is BoundNativeStorageAddress address
+                        && ((output is not null
+                            && DirectNativeImportContract.MatchesAddress(address, output, function, program))
+                            || (nativeParameter is not null
+                                && DirectNativeImportContract.MatchesAddress(address, nativeParameter,
+                                    function, program)));
+                    if (parameter.IsInit || (parameter.IsOut && output is null)
+                        || (parameter.Type != call.Arguments[index].Type && !isMatchingNativeAddress))
                     {
                         throw new ArgumentException("Indexed call argument declaration does not match.");
                     }
@@ -407,6 +487,13 @@ internal sealed class TrRmScalarGraph
         }
     }
 
+    private static bool GraphReadMatches(BoundExpression expression, PrimitiveType type,
+        ImmutableArray<PrimitiveType> types)
+        => expression is BoundRead read
+            && (uint)read.Variable < (uint)types.Length
+            && read.Type == type
+            && types[read.Variable] == type;
+
     private static bool HasTerminalDoesNotReturnCall(TrRmScalarBlock block, BoundProgram program)
     {
         if (block.Operations.IsDefaultOrEmpty
@@ -415,6 +502,7 @@ internal sealed class TrRmScalarGraph
         {
             return false;
         }
+
         var target = program.Functions[call.Function];
         return target is not null && target.DoesNotReturn;
     }

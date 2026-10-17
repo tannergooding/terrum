@@ -192,6 +192,10 @@ public sealed class PublicFixedLayoutStorageTests
         {
             _ = Assert.Throws<NotSupportedException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
         }
+        else if (change == "missing-root")
+        {
+            _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
+        }
         else
         {
             _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Make"]))!;
@@ -298,7 +302,7 @@ public sealed class PublicFixedLayoutStorageTests
                     BlittableTargetRequirement = 0,
                 })],
             };
-            _ = Assert.Throws<ArgumentException>(() =>
+            _ = Assert.Throws<ModuleContractException>(() =>
                 ModuleCompiler.CreateProducer(uncommitted, ["Make"]))!;
             return;
         }
@@ -435,7 +439,7 @@ public sealed class PublicFixedLayoutStorageTests
                 }],
             },
         };
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateConsumer(program with {
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(program with {
             Functions = program.Functions.SetItem(program.EntryPoint, forgedMain),
         }, producer))!;
     }
@@ -476,7 +480,7 @@ public sealed class PublicFixedLayoutStorageTests
             Functions = booleanProgram.Functions.SetItem(booleanProgram.Functions.IndexOf(constructor), forgedConstructor),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forgedBoolean))!;
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forgedBoolean, ["Make"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forgedBoolean, ["Make"]))!;
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -504,7 +508,7 @@ public sealed class PublicFixedLayoutStorageTests
                 BlittableTargetRequirement = 0,
             })],
         };
-        _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(
             uncommittedProgram, ["Make"], "FixedLeaf", nativePolicy))!;
     }
     [TestCase("[Blittable] [Layout(LayoutKind.Sequential)] public struct Box { public int32 Value; }")]

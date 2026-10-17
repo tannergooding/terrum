@@ -137,7 +137,7 @@ public sealed class NativeModuleSetsTests
         var beta = Producer(Beta, "Beta", "Second");
         var consumer = MakeConsumerSource("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeOutput(0)]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
             extern int32 ReadValue(write ptr<int32> value);
             [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]

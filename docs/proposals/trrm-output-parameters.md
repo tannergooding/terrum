@@ -42,7 +42,7 @@ does not supply a complete capability or an implicit numeric compatibility rule.
   `u32 featureId, u32 minimumRuleRevision`. Provisionally assign
   `featureId=1` to `ScalarInitOutput`, initially require rule revision `1`,
   and require each affected module's feature range to name that row. The current
-  provisional reader accepts revisions 1–6 as described below. A module with
+  provisional reader accepts revisions 1–8 as described below. A module with
   no output behavior retains an absent Feature section and `(0, 0)` range.
   Reject unknown feature IDs and unsupported revisions before binding or
   lowering; do not add general same-major/future-minor acceptance.
@@ -155,7 +155,7 @@ only and do not approve other proposed executable contracts. Comparison opcode
 draft, as is opcode `0x1D` for same-format `float32`/`float64` addition,
 subtraction, multiplication and division. Arithmetic NaN results retain only
 the NaN-class guarantee; sign and payload are unspecified.
-The current writer emits required feature rule revision 6 for output Bodies.
+The current writer emits required feature rule revision 8 for output Bodies.
 Rule revision 2 provisionally permits `bool`, `char16`, `int32`, `uint32`,
 `int64`, `uint64`, `float32` and `float64` referents and scalar initialized
 locals; rule revision 1 remains loadable with `int32` referents only. Rule
@@ -167,7 +167,38 @@ independently on each edge. The writer emits one such conditional split; the
 reader also accepts either terminal arm to use existing `Fail` reason 1.
 Rule revision 6 also admits a direct Boolean call condition with no output
 arguments; both successors inherit the audited post-call place state unchanged.
-These remain provisional, unapproved implementation boundaries.
+Rule revision 7 provisionally admits an exact typed address of an initialized
+scalar local passed to a matching read-only, `NoEscape` `NativeParameter`.
+Revision 8 also admits writable `NativeOutput` addresses and permits the
+existing three-block conditional body form inside the explicit unsafe scope:
+the entry block opens the scope, performs the address-taking and call, and
+computes a direct Boolean-call condition; both successor blocks remain within
+the scope and terminate in Return or Fail reason 1. The Body must preserve the pointer
+TypeSpec, encode the addressable place, and reconstruct the
+`BoundNativeStorageAddress` fact so mandatory verification rechecks backing,
+type, access, and initialization. Caller-unsafety on the import does not
+authorize the caller's Body. This narrow path requires the candidate
+`RootlessNativeValues` feature alongside `NativeBoundaryContracts`. It does
+not admit fixed arrays, aggregate addresses, pointer memory operations, or
+broader control flow. The current verifier versions each output destination
+against its producing call and retains the call result through scalar local
+copies. It permits observations only after a direct comparison or a
+body-verified single-parameter Boolean predicate proves the declared
+`NonZero` or signed `NonNegative` condition. Reassignment of the status or
+destination, a subsequent output call, or an unmodeled pointer write invalidates
+the proof. Unsupported predicates remain conservative and do not establish
+output availability. This is provisional implementation behavior, not
+approval of the language or wire contract.
+
+The experimental Body uses candidate opcode `0x2E` as a no-operand unsafe
+marker. In a one-block body it begins the lexical suffix through the
+terminator; in the revision-8 three-block form it appears only in the entry
+block and the scope extends to both terminal successors. This is distinct from
+the accepted indexed-Body lexical unsafe region (region kind `0x06`), which
+does not support compact-linear imported calls. Treat `0x2E` as an unapproved,
+profile-specific encoding that must be reconciled during proposal
+consolidation; it does not amend the accepted instruction-set contract.
+Revisions 1–8 remain provisional, unapproved implementation boundaries.
 Exact type identity is retained through place descriptors, handles, loads,
 initialization values, call arguments and results. Revisions 1 and 2 retain
 their `void`/`int32` output-bearing result restriction; unsupported revisions

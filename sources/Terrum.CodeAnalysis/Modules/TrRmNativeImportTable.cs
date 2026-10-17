@@ -14,21 +14,25 @@ internal static class TrRmNativeImportTypeContract
         int typeSpecRow, out PrimitiveType resultType)
     {
         var type = types.GetRow(typeSpecRow);
-        if (type.Length == 3 && type[0] == 1 && type[1] == 0)
+        if (type.Length == 3 && type[0] == 1 && type[1] == 0 && type[2] == 0)
         {
-            if (type[2] == 0)
-            {
-                resultType = PrimitiveType.Void;
-                return true;
-            }
+            resultType = PrimitiveType.Void;
+            return true;
+        }
 
-            resultType = FromAtomicCode(type[2]);
+        if (TryGetScalarType(types, typeSpecRow, out resultType))
+        {
             return DirectNativeImportContract.IsScalar(resultType);
         }
 
-        resultType = PrimitiveType.NativeRawPointer;
-        return type.Length == 4 && type[0] == 1 && type[1] == 0
-            && type[2] == 0x8C && type[3] == 0;
+        if (IsNativeAbiPointerOrFunctionPointerType(types, typeSpecRow))
+        {
+            resultType = PrimitiveType.NativeRawPointer;
+            return true;
+        }
+
+        resultType = PrimitiveType.Void;
+        return false;
     }
 
     internal static bool TryGetScalarType(TrRmTypeSpecTableReader types, int typeSpecRow,
@@ -99,6 +103,30 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
+    internal static bool IsNativeAbiValueType(TrRmTypeSpecTableReader types, int typeSpecRow)
+        => (TryGetScalarType(types, typeSpecRow, out var scalarType)
+                && DirectNativeImportContract.IsScalar(scalarType))
+            || IsNativeAbiPointerOrFunctionPointerType(types, typeSpecRow);
+
+    private static bool IsNativeAbiPointerOrFunctionPointerType(
+        TrRmTypeSpecTableReader types, int typeSpecRow)
+    {
+        var type = types.GetRow(typeSpecRow);
+        if ((type.Length == 4 && type[0] == 0x01 && type[2] == 0x8C)
+            || (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C))
+        {
+            return true;
+        }
+
+        if (type.Length != 6 || type[0] != 0x0D || type[1] != 0)
+        {
+            return false;
+        }
+
+        var signatureRow = BinaryPrimitives.ReadUInt32LittleEndian(type[2..]);
+        return signatureRow != 0 && signatureRow <= types.NativeFunctionPointerSignatureCount;
+    }
+
     internal static bool TryGetBlittableAggregateParameterTypeDef(
         TrRmTypeSpecTableReader types, int typeSpecRow,
         TrRmContractTableReader contracts, out int typeDefRow)
@@ -134,18 +162,18 @@ internal static class TrRmNativeImportTypeContract
     };
 }
 
-/// <summary>One provisional TRRM named native import declaration.</summary>
+/// <summary>One native import declaration in the selected provisional TRRM draft.</summary>
 /// <param name="MethodDefRow">The 1-based method-definition row.</param>
 /// <param name="LibraryNameStringRow">The 1-based library-name string row.</param>
 /// <param name="ExportNameStringRow">The 1-based export-name string row.</param>
-/// <param name="ResolutionPolicy">A provisional resolution-policy value.</param>
+/// <param name="ResolutionPolicy">The declared native-library resolution policy.</param>
 public readonly record struct TrRmNativeImportRow(
     int MethodDefRow, int LibraryNameStringRow, int ExportNameStringRow, uint ResolutionPolicy);
 
-/// <summary>Emits provisional TRRM Windows named native import rows.</summary>
+/// <summary>Emits native import rows for the selected provisional TRRM draft.</summary>
 public static class TrRmNativeImportTableWriter
 {
-    /// <summary>Encodes and validates provisional named native import rows.</summary>
+    /// <summary>Encodes and validates native import rows.</summary>
     /// <param name="rows">The rows to encode.</param>
     /// <param name="strings">The string table used to validate library and export names.</param>
     /// <param name="methods">The method definitions associated with the imports.</param>
@@ -188,7 +216,7 @@ public static class TrRmNativeImportTableWriter
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 }
 
-/// <summary>Validates provisional TRRM Windows named native import declarations.</summary>
+/// <summary>Validates native import declarations for the selected provisional TRRM draft.</summary>
 /// <remarks>The borrowed NativeImport section must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmNativeImportTableReader
 {
@@ -198,7 +226,7 @@ public readonly ref struct TrRmNativeImportTableReader
     private readonly int[] _rowByMethod;
     private readonly int _recordCount;
 
-    /// <summary>Validates a provisional named native import section against its declarations.</summary>
+    /// <summary>Validates the native import section against its declarations.</summary>
     /// <param name="section">The borrowed section bytes.</param>
     /// <param name="recordCount">The number of fixed-size rows in the section.</param>
     /// <param name="strings">The associated string table.</param>
@@ -238,7 +266,10 @@ public readonly ref struct TrRmNativeImportTableReader
                 || methods.GetBodyRow((int)method) != 0
                 || signatures.GetReceiverTypeSpec(methods.GetSignature((int)method)) != 0
                 || signatures.GetGenericCount(methods.GetSignature((int)method)) != 0
-                || (contracts.GetEffectsMask((int)method) & 4) == 0)
+                || (contracts.GetEffectsMask((int)method) & 4) == 0
+                || !contracts.HasNativeAbi((int)method)
+                || contracts.GetNativeAbi((int)method)
+                    != new TrRmNativeAbiContract(1, 1, 0))
             {
                 throw InvalidNativeImport();
             }
@@ -262,8 +293,10 @@ public readonly ref struct TrRmNativeImportTableReader
             var outputs = contracts.GetNativeOutputs(method);
             if (_rowByMethod[method] == 0)
             {
-                if (!outputs.IsEmpty
-                    || !contracts.GetNativeParameters(method).IsDefaultOrEmpty)
+                var abiRole = contracts.HasNativeAbi(method)
+                    ? contracts.GetNativeAbi(method).Role : (byte)0;
+                if (abiRole == 1 || (abiRole != 4 && !outputs.IsEmpty)
+                    || (abiRole != 4 && !contracts.GetNativeParameters(method).IsDefaultOrEmpty))
                 {
                     throw InvalidNativeImport();
                 }
@@ -282,7 +315,7 @@ public readonly ref struct TrRmNativeImportTableReader
     /// <param name="methodDefRow">The 1-based method-definition row.</param>
     /// <returns><see langword="true"/> when the method has an import row.</returns>
     public bool HasImportForMethod(int methodDefRow)
-        => methodDefRow > 0 && methodDefRow < _rowByMethod.Length
+        => _rowByMethod is not null && methodDefRow > 0 && methodDefRow < _rowByMethod.Length
             && _rowByMethod[methodDefRow] != 0;
 
     /// <summary>Gets the import row for a method.</summary>
@@ -345,11 +378,13 @@ public readonly ref struct TrRmNativeImportTableReader
         for (var parameter = 0; parameter < count; parameter++)
         {
             var typeRow = parameters.GetTypeSpec(first + parameter);
+            var hasNativeParameter = TryGetNativeParameter(
+                nativeParameters, parameter, out var nativeParameter);
             if (TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
-                types, typeRow, out var pointeeType))
+                    types, typeRow, out var pointeeType)
+                && seenOutputs[parameter])
             {
-                if (parameters.GetMode(first + parameter) != 0
-                    || HasNativeParameter(nativeParameters, parameter)
+                if (parameters.GetMode(first + parameter) != 0 || hasNativeParameter
                     || !seenOutputs[parameter])
                 {
                     throw InvalidNativeImport();
@@ -362,10 +397,10 @@ public readonly ref struct TrRmNativeImportTableReader
                 }
             }
             else if (TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-                    types, typeRow, out var nativePointeeType))
+                    types, typeRow, out var nativePointeeType)
+                && hasNativeParameter)
             {
                 if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
-                    || !TryGetNativeParameter(nativeParameters, parameter, out var nativeParameter)
                     || !ValidNativeParameter(nativeParameter, nativePointeeType))
                 {
                     throw InvalidNativeImport();
@@ -374,10 +409,10 @@ public readonly ref struct TrRmNativeImportTableReader
                 seenNativeParameters[parameter] = true;
             }
             else if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
-                    types, typeRow, contracts, out _))
+                        types, typeRow, contracts, out _)
+                    && hasNativeParameter)
             {
-                if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
-                    || !TryGetNativeParameter(nativeParameters, parameter, out var nativeParameter)
+                    if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
                     || !ValidNativeParameter(nativeParameter, PrimitiveType.NativeRawPointer))
                 {
                     throw InvalidNativeImport();
@@ -385,8 +420,9 @@ public readonly ref struct TrRmNativeImportTableReader
 
                 seenNativeParameters[parameter] = true;
             }
-            else if (seenOutputs[parameter] || HasNativeParameter(nativeParameters, parameter)
-                || !IsScalar(types, typeRow))
+            else if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
+                || hasNativeParameter
+                || !TrRmNativeImportTypeContract.IsNativeAbiValueType(types, typeRow))
             {
                 throw InvalidNativeImport();
             }
@@ -405,10 +441,6 @@ public readonly ref struct TrRmNativeImportTableReader
             }
         }
     }
-
-    private static bool HasNativeParameter(
-        System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> parameters, int ordinal)
-        => TryGetNativeParameter(parameters, ordinal, out _);
 
     private static bool TryGetNativeParameter(
         System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> parameters,
@@ -435,13 +467,14 @@ public readonly ref struct TrRmNativeImportTableReader
 
     private static bool ValidNativeParameter(TrRmNativeParameterContract parameter, PrimitiveType pointeeType)
     {
-        var access = parameter.Access - 1;
-        return parameter.Retention == (byte)NativeParameterRetention.NoEscape
+        return parameter.PointerDepth == 1 && parameter.Retention == 1
+            && parameter.RequiredAlignment == 0
+            && parameter.ExtentKind is 0 or 1
+            && (parameter.ExtentKind != 0 || parameter.Extent == 0)
             && (pointeeType == PrimitiveType.Void
-                ? access == (byte)NativeParameterAccess.Read && parameter.Extent == 0
+                ? parameter.Access == 1 && parameter.Extent == 0
                 : parameter.Extent <= int.MaxValue
-                    && access is >= (byte)NativeParameterAccess.Read
-                        and <= (byte)NativeParameterAccess.ReadWrite);
+                    && parameter.Access is >= 1 and <= 3);
     }
 
     private static TrRmNativeOutputContract FindOutput(
@@ -457,9 +490,6 @@ public readonly ref struct TrRmNativeImportTableReader
 
         throw InvalidNativeImport();
     }
-
-    private static bool IsScalar(TrRmTypeSpecTableReader types, int row)
-        => TrRmNativeImportTypeContract.TryGetScalarType(types, row, out _);
 
     private ReadOnlySpan<byte> GetRow(int row)
     {

@@ -5,10 +5,22 @@ namespace Terrum.CodeAnalysis.Native;
 
 internal sealed partial class PeCompiler
 {
-    private void EmitNativeVTableCall(int slot)
+    private void EmitNativeVTableCall(int slot, int vtableByteOffset)
     {
         var byteOffset = checked(slot * NativeTargetProfile.PointerSize);
-        _code.Bytes(0x48, 0x8B, 0x01);
+        if (vtableByteOffset == 0)
+        {
+            _code.Bytes(0x48, 0x8B, 0x01);
+        }
+        else if (vtableByteOffset <= sbyte.MaxValue)
+        {
+            _code.Bytes(0x48, 0x8B, 0x41, checked((byte)vtableByteOffset));
+        }
+        else
+        {
+            _code.Bytes(0x48, 0x8B, 0x81);
+            _code.Int32(vtableByteOffset);
+        }
         if (byteOffset <= sbyte.MaxValue)
         {
             _code.Bytes(0xFF, 0x50, checked((byte)byteOffset));
@@ -31,7 +43,8 @@ internal sealed partial class PeCompiler
         for (var index = 0; index < function.ParameterCount; index++)
         {
             var parameter = function.Variables[index];
-            if (parameter.IsOut)
+            var nativeOutput = NativeVTableCallContract.OutputForParameter(function, index);
+            if (parameter.IsOut && nativeOutput is null)
             {
                 _code.Address(OutSlot(index));
             }
@@ -46,7 +59,7 @@ internal sealed partial class PeCompiler
 
             if (index < 4)
             {
-                if (!parameter.IsOut
+                if (nativeOutput is null && !parameter.IsOut
                     && parameter.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                 {
                     _code.MoveFloatingArgument(index, parameter.Type == PrimitiveType.Float64);
@@ -54,7 +67,8 @@ internal sealed partial class PeCompiler
                 else
                 {
                     _code.MoveArgument(index,
-                        parameter.IsOut || Size(parameter.Type) > 4 || IsIndirect(parameter.Type));
+                        (parameter.IsOut && nativeOutput is null)
+                            || Size(parameter.Type) > 4 || IsIndirect(parameter.Type));
                 }
             }
             else
@@ -63,7 +77,7 @@ internal sealed partial class PeCompiler
             }
         }
 
-        EmitNativeVTableCall(method.Slot);
+        EmitNativeVTableCall(method.Slot, method.VTableByteOffset);
         var returnType = function.ReturnType;
         if (returnType is PrimitiveType.Float32 or PrimitiveType.Float64)
         {
@@ -77,7 +91,8 @@ internal sealed partial class PeCompiler
         var hasOutputParameter = false;
         for (var index = 0; index < function.ParameterCount; index++)
         {
-            hasOutputParameter |= function.Variables[index].IsOut;
+            hasOutputParameter |= function.Variables[index].IsOut
+                && NativeVTableCallContract.OutputForParameter(function, index) is null;
         }
         if (hasOutputParameter)
         {

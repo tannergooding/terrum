@@ -40,6 +40,7 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
+
     [TestCase("""
         int32 Fill(int32 prefix, init ref<int32> result, int32 suffix) {
             result = prefix + suffix;
@@ -363,7 +364,8 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "scalar-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.That(ScalarInitOutputRevision(artifact), Is.EqualTo(6u));
+        Assert.That(ScalarInitOutputRevision(artifact),
+            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
@@ -406,7 +408,8 @@ public sealed class TrRmExecutableCompilerTests
             """);
 
         var artifact = TrRmExecutableCompiler.Emit(program, "boolean-output-result");
-        Assert.That(ScalarInitOutputRevision(artifact), Is.EqualTo(6u));
+        Assert.That(ScalarInitOutputRevision(artifact),
+            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
@@ -461,7 +464,8 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "boolean-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.That(ScalarInitOutputRevision(artifact), Is.EqualTo(6u));
+        Assert.That(ScalarInitOutputRevision(artifact),
+            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
@@ -526,7 +530,8 @@ public sealed class TrRmExecutableCompilerTests
         var artifact = TrRmExecutableCompiler.Emit(original, "conditional-output-result");
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
-        Assert.That(ScalarInitOutputRevision(artifact), Is.EqualTo(6u));
+        Assert.That(ScalarInitOutputRevision(artifact),
+            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 

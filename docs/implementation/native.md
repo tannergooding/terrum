@@ -107,10 +107,13 @@ The current Windows x64 prototype also emits `NoThrow` native-callable
 functions and explicit native function-pointer values. It carries the exact
 scalar/raw-pointer signature through local and field storage, direct address
 formation, indirect-call verification, native x64 lowering, and private
-module/dependency paths. Forming or invoking a function pointer requires an
-explicit unsafe scope; a callback target remains valid only while its code
-image is loaded. This prototype is separate from the accepted grammar and
-standard TRRM metadata.
+module/dependency paths. A nonzero provisional `NativeCallable.entryName` is
+preserved by TRRM and private semantic modules and emitted as an additional
+exactly named PE export, independently of the ordinary library export list.
+Forming or invoking a function pointer requires an explicit unsafe scope; a
+callback target remains valid only while its code image is loaded. These
+declarations and records remain separate from accepted grammar and canonical
+TRRM metadata.
 For the supported provisional invocation-scoped `Host.Source` library path,
 semantic verification rejects native-callable functions that directly or
 transitively depend on that source grant: the foreign callback ABI has no
@@ -1366,6 +1369,9 @@ executable import-binding checks; it verifies external declaration shapes and
 bindings, not provider contract compatibility. A bounded execution test loads
 an EXE through a dependent DLL into a leaf DLL using these raw APIs. Static AOT
 linking from these artifacts is separate from replacement of an unchanged PE.
+Direct source-native imports use absolute paths under the active Windows system
+directory in executable, library, module-set and graph images; selected
+package-provider DLLs remain name-based imports.
 There is no optimizer, debug-symbol format, general source interop, managed
 root map, production runtime or hot replacement. The broader TRRM IL design
 remains separate from both PE and any optional CIL representation.

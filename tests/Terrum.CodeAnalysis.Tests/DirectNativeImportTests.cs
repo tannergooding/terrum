@@ -18,19 +18,185 @@ public sealed class DirectNativeImportTests
 {
     private const string ImportDeclaration = """
         [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
-        [Terrum.Interop.NativeOutput(0)]
+        [Terrum.Interop.NativeOutput(0, NonZero)]
         extern int32 QueryPerformanceCounter(write ptr<int64> counter);
         """;
     private const string PublicImportDeclaration = """
         [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
-        [Terrum.Interop.NativeOutput(0)]
+        [Terrum.Interop.NativeOutput(0, NonZero)]
         public extern int32 QueryPerformanceCounter(write ptr<int64> counter);
         """;
     private const string OpaquePointerImportDeclaration = """
         [Terrum.Interop.NativeImport("example.dll", "AcquireInterface")]
-        [Terrum.Interop.NativeOutput(0)]
+        [Terrum.Interop.NativeOutput(0, NonZero)]
         public extern int32 AcquireInterface(write ptr<ptr<void>> result);
         """;
+
+    [TestCase("int32", 1u)]
+    [TestCase("uint32", 2u)]
+    public void NativeOutputRequiresAnExplicitResultCondition(string returnType, uint expectedCondition)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($"""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
+            extern {returnType} ReadValue(write ptr<uint32> value);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Functions.Single(static function =>
+            function.Name == "ReadValue").DirectNativeImport!.Outputs.Single().ResultCondition,
+            Is.EqualTo(expectedCondition));
+
+        var omitted = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeOutput(0)]
+            extern int32 ReadValue(write ptr<uint32> value);
+            """));
+        Assert.That(omitted.Program, Is.Null);
+        Assert.That(omitted.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public void NativeOutputReadsRequireTheMatchingCallResultCondition()
+    {
+        var cases = new[]
+        {
+            (Body: """
+                int32 status = ReadValue(&value);
+                if (status != 0) { return value; } else { return -1; }
+                """, HasErrors: false),
+            (Body: """
+                int32 status = ReadValue(&value);
+                if (Failed(status)) { return -1; } else { return value; }
+                """, HasErrors: false),
+            (Body: """
+                int32 status = ReadValue(&value);
+                return value;
+                """, HasErrors: true),
+            (Body: """
+                int32 status = ReadValue(&value);
+                if (status == 0) { return value; } else { return -1; }
+                """, HasErrors: true),
+            (Body: """
+                int32 status = ReadValue(&value);
+                if (status < 0) { return value; } else { return -1; }
+                """, HasErrors: true),
+            (Body: """
+                int32 status = ReadValue(&value);
+                status = GetStatus(status);
+                if (status != 0) { return value; } else { return -1; }
+                """, HasErrors: true),
+            (Body: """
+                int32 status = ReadValue(&value);
+                int32 otherStatus = ReadValue(&otherValue);
+                if (status != 0) { return value; } else { return -1; }
+                """, HasErrors: true),
+            (Body: """
+                int32 status = ReadValue(&value);
+                int32 replacementStatus = ReadValue(&value);
+                if (status != 0) { return value; } else { return -1; }
+                """, HasErrors: true),
+        };
+
+        foreach (var testCase in cases)
+        {
+            var source = """
+                [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+                [Terrum.Interop.NativeOutput(0, NonZero)]
+                extern int32 ReadValue(write ptr<int32> value);
+
+                bool Failed(int32 status) { return status == 0; }
+                int32 GetStatus(int32 status) { return status; }
+
+                public int32 Probe() {
+                    mut int32 value = 0;
+                    mut int32 otherValue = 0;
+                    unsafe {
+                """ + testCase.Body + """
+                    }
+                }
+                """;
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+            Assert.That(compilation.HasErrors, Is.EqualTo(testCase.HasErrors),
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [Test]
+    public void NativeOutputPointerAliasesRequireTheMatchingCallResultCondition()
+    {
+        var cases = new[]
+        {
+            (Body: """
+                unsafe {
+                    write ptr<int32> outputPointer = &value;
+                    int32 status = ReadValue(&value);
+                    if (status != 0) { return *outputPointer; }
+                    return -1;
+                }
+                """, HasErrors: false),
+            (Body: """
+                unsafe {
+                    write ptr<int32> outputPointer = &value;
+                    int32 status = ReadValue(&value);
+                    return *outputPointer;
+                }
+                """, HasErrors: true),
+        };
+
+        foreach (var testCase in cases)
+        {
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+                [Terrum.Interop.NativeOutput(0, NonZero)]
+                extern int32 ReadValue(write ptr<int32> value);
+
+                public int32 Probe() {
+                    mut int32 value = 0;
+                """ + testCase.Body + """
+                }
+                """));
+            Assert.That(compilation.HasErrors, Is.EqualTo(testCase.HasErrors),
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [Test]
+    public void MultipleNativeOutputsShareTheirCallResultCondition()
+    {
+        var source = """
+            [Terrum.Interop.NativeImport("example.dll", "AcquireValues")]
+            [Terrum.Interop.NativeOutput(0, NonNegative)]
+            [Terrum.Interop.NativeOutput(1, NonNegative)]
+            [Terrum.Interop.NativeOutput(2, NonNegative)]
+            [Terrum.Interop.NativeOutput(3, NonNegative)]
+            extern int32 AcquireValues(
+                write ptr<ptr<void>> first,
+                write ptr<ptr<void>> second,
+                write ptr<uint32> selectedLevel,
+                write ptr<ptr<void>> third);
+
+            public int32 Probe() {
+                mut ptr<void> first = null;
+                mut ptr<void> second = null;
+                mut uint32 selectedLevel = 0;
+                mut ptr<void> third = null;
+                unsafe {
+                    if (AcquireValues(&first, &second, &selectedLevel, &third) >= 0) {
+                        if (first == null || second == null || selectedLevel == 0 || third == null) {
+                            return -2;
+                        }
+                        return 0;
+                    }
+                }
+                return -1;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
 
     [Test]
     public void SourceAuthoredImportEmitsTheNamedWindowsBinding()
@@ -324,6 +490,57 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
+    public void TrRmNativeImportsRoundTripTypedPointerAndFunctionPointerValues()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "AcquireValue")]
+            public extern ptr<int32> AcquireValue();
+
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadValue")]
+            public extern int32 ReadValue(ptr<int32> value);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "AcquireCallback")]
+            public extern fnptr<NativeAbi, int32, int32> AcquireCallback();
+
+            [Terrum.Interop.NativeImport("fixture.dll", "InvokeCallback")]
+            public extern int32 InvokeCallback(
+                fnptr<NativeAbi, int32, int32> callback, int32 value);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-callable-imports");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        foreach (var imported in provider.Program!.Functions)
+        {
+            var roundTripped = loaded.Functions.Single(function => function.Name == imported.Name);
+            Assert.That(roundTripped.ReturnType, Is.EqualTo(imported.ReturnType), imported.Name);
+            Assert.That(roundTripped.Variables.Select(static variable => variable.Type),
+                Is.EqualTo(imported.Variables.Select(static variable => variable.Type)),
+                imported.Name);
+            Assert.That(roundTripped.DirectNativeImport!.Parameters, Is.Empty, imported.Name);
+        }
+        Assert.That(TrRmExecutableCompiler.Emit(loaded, "pointer-callable-imports"),
+            Is.EqualTo(artifact));
+
+        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var consumer = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    return InvokeCallback(
+                        AcquireCallback(), ReadValue(AcquireValue()));
+                }
+            }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            consumer.Program!, NativeRuntimePolicy.FailFast)),
+            Does.Contain("AcquireValue").And.Contain("AcquireCallback")
+                .And.Contain("ReadValue").And.Contain("InvokeCallback"));
+    }
+
+    [Test]
     public void DirectNativeImportPreservesTypedPointerResults()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
@@ -354,7 +571,7 @@ public sealed class DirectNativeImportTests
     }
 
     [Test]
-    public void TrRmNativeImportRejectsWritablePointerResultType()
+    public void TrRmNativeImportRoundTripsWritableOpaquePointerResult()
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("fixture.dll", "AcquireContext")]
@@ -365,9 +582,19 @@ public sealed class DirectNativeImportTests
 
         var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-result");
         var resultTypeRow = FindVariableRow(artifact, 0x0011, [1, 0, 0x8C, 0]);
-        var malformed = MutateVariableRowByte(artifact, 0x0011, resultTypeRow, 1, 1);
+        var writableArtifact = MutateVariableRowByte(artifact, 0x0011, resultTypeRow, 1, 1);
 
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
+        var loaded = TrRmExecutableCompiler.Load(writableArtifact);
+        var returnType = loaded.Functions.Single(static function =>
+            function.Name == "AcquireContext").ReturnType;
+        Assert.That(NativePointerTypes.IsType(returnType), Is.True);
+        var pointer = loaded.NativePointerTypes[NativePointerTypes.Index(returnType)];
+        Assert.That(pointer.PointeeType, Is.EqualTo(PrimitiveType.Void));
+        Assert.That(pointer.IsWritable, Is.True);
+        Assert.That(TrRmExecutableCompiler.Emit(loaded, "pointer-result"),
+            Is.EqualTo(writableArtifact));
+        var invalidQualifier = MutateVariableRowByte(artifact, 0x0011, resultTypeRow, 1, 2);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(invalidQualifier));
     }
 
     [Test]
@@ -451,7 +678,7 @@ public sealed class DirectNativeImportTests
 
             [Terrum.Interop.NativeImport("kernel32.dll", "SystemTimeToFileTime")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
-            [Terrum.Interop.NativeOutput(1)]
+            [Terrum.Interop.NativeOutput(1, NonZero)]
             extern int32 SystemTimeToFileTime(ptr<SystemTime> value, write ptr<int64> fileTime);
 
             int32 Main() {
@@ -1071,9 +1298,13 @@ public sealed class DirectNativeImportTests
         var index = new TrRmArtifactIndex(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
-        Assert.That(featureCount, Is.EqualTo(1));
+        Assert.That(featureCount, Is.EqualTo(3));
         Assert.That(features.GetFeature(1).FeatureId,
-            Is.EqualTo(TrRmFeatureTableReader.WindowsNamedNativeImportsFeatureId));
+            Is.EqualTo(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId));
+        Assert.That(features.GetFeature(2).FeatureId,
+            Is.EqualTo(TrRmFeatureTableReader.RootlessNativeValuesFeatureId));
+        Assert.That(features.GetFeature(3).FeatureId,
+            Is.EqualTo(TrRmFeatureTableReader.DirectNativeCallsFeatureId));
 
         var reference = TrRmExecutableCompiler.CreateReference(artifact);
         var consumer = Compilation.Create(SyntaxTree.Parse("""
@@ -1089,6 +1320,141 @@ public sealed class DirectNativeImportTests
             consumer.Program!, NativeRuntimePolicy.FailFast);
         Assert.That(Encoding.ASCII.GetString(image), Does.Contain("ReadValue"));
         Assert.That(Encoding.ASCII.GetString(image), Does.Contain("example.dll"));
+    }
+
+    [Test]
+    public void TrRmAddressBodyRoundTripsTypedReadonlyScalarLocalAddresses()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadSigned")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern void ReadSigned(ptr<int32> value);
+
+            [Terrum.Interop.NativeImport("example.dll", "ReadUnsigned")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern void ReadUnsigned(ptr<uint32> value);
+
+            int32 Main() {
+                int32 signedValue = 1;
+                uint32 unsignedValue = 2;
+                unsafe {
+                    ReadSigned(&signedValue);
+                    ReadUnsigned(&unsignedValue);
+                    return 0;
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "typed-address-body");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var main = loaded.Functions.Single(static function => function.Name == "Main");
+        var unsafeBody = main.Body.Statements.OfType<BoundUnsafe>().Single();
+        var addresses = unsafeBody.Body.Statements
+            .OfType<BoundExpressionStatement>()
+            .Select(static statement => statement.Expression)
+            .OfType<BoundCall>()
+            .Select(static call => call.Arguments.Single())
+            .OfType<BoundNativeStorageAddress>()
+            .ToArray();
+        Assert.That(addresses.Select(static address => address.ElementType),
+            Is.EqualTo([PrimitiveType.Int32, PrimitiveType.UInt32]));
+        Assert.That(addresses.All(static address => address.IsReadonly), Is.True);
+
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.That(featureCount, Is.EqualTo(4));
+        Assert.That(features.GetFeature(1),
+            Is.EqualTo(TrRmFeatureRow.ScalarInitOutput));
+        Assert.That(features.GetFeature(2),
+            Is.EqualTo(TrRmFeatureRow.NativeBoundaryContracts));
+        Assert.That(features.GetFeature(3),
+            Is.EqualTo(TrRmFeatureRow.RootlessNativeValues));
+        Assert.That(features.GetFeature(4),
+            Is.EqualTo(TrRmFeatureRow.DirectNativeCalls));
+
+        var reemitted = TrRmExecutableCompiler.Emit(loaded, "typed-address-body-reemitted");
+        Assert.That(TrRmExecutableCompiler.Load(reemitted).Functions
+            .Single(static function => function.Name == "Main").Body.Statements
+            .OfType<BoundUnsafe>().Single().Body.Statements
+            .OfType<BoundExpressionStatement>().Count(), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void TrRmAddressBodyRejectsMalformedPointersBackingAndUnsafeScope()
+    {
+        var sourceWithoutUnsafeScope = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadSigned")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern void ReadSigned(ptr<int32> value);
+
+            int32 Main() {
+                int32 signedValue = 1;
+                ReadSigned(&signedValue);
+                return 0;
+            }
+            """));
+        Assert.That(sourceWithoutUnsafeScope.HasErrors, Is.True);
+
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ReadSigned")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern void ReadSigned(ptr<int32> value);
+
+            [Terrum.Interop.NativeImport("example.dll", "ReadUnsigned")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern void ReadUnsigned(ptr<uint32> value);
+
+            int32 Main() {
+                int32 signedValue = 1;
+                uint32 unsignedValue = 2;
+                unsafe {
+                    ReadSigned(&signedValue);
+                    ReadUnsigned(&unsignedValue);
+                    return 0;
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "malformed-address-body");
+        var layout = ReadOutputBodyLayout(artifact);
+        var operations = ReadOutputBodyOperations(artifact, layout);
+        var addresses = operations.Where(static operation => operation.Opcode == 0x2A).ToArray();
+        Assert.That(addresses, Has.Length.EqualTo(2));
+
+        var mismatchedPointer = artifact.ToArray();
+        var secondPointerType = ReadUnsigned(mismatchedPointer,
+            addresses[1].Offset + 1 + addresses[1].ReferenceWidth,
+            addresses[1].ReferenceWidth);
+        WriteUnsigned(mismatchedPointer,
+            addresses[0].Offset + 1 + addresses[0].ReferenceWidth,
+            addresses[0].ReferenceWidth, secondPointerType);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(mismatchedPointer));
+
+        var nonAddressableBacking = artifact.ToArray();
+        nonAddressableBacking[layout.FirstPlaceFlagsOffset] = 4;
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(nonAddressableBacking));
+
+        var uninitializedBacking = artifact.ToArray();
+        var initialize = operations.First(static operation => operation.Opcode == 0x0E);
+        var handle = ReadUnsigned(uninitializedBacking,
+            initialize.Offset + 1, initialize.ReferenceWidth);
+        var value = ReadUnsigned(uninitializedBacking,
+            initialize.Offset + 1 + initialize.ReferenceWidth, initialize.ReferenceWidth);
+        uninitializedBacking[initialize.Offset] = 0x0D;
+        WriteUnsigned(uninitializedBacking, initialize.Offset + 1,
+            initialize.ReferenceWidth, value);
+        WriteUnsigned(uninitializedBacking, initialize.Offset + 1 + initialize.ReferenceWidth,
+            initialize.ReferenceWidth, handle);
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(uninitializedBacking));
+
+        var missingUnsafeScope = artifact.ToArray();
+        var unsafeMarker = operations.Single(static operation => operation.Opcode == 0x2E);
+        missingUnsafeScope[unsafeMarker.Offset] = 0x2F;
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingUnsafeScope));
     }
 
     [Test]
@@ -1134,10 +1500,10 @@ public sealed class DirectNativeImportTests
         var index = new TrRmArtifactIndex(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
-        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId,
+        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
             out var blittableFeature), Is.True);
         Assert.That(blittableFeature.MinimumRuleRevision,
-            Is.EqualTo(TrRmFeatureTableReader.NativeBlittableLayoutsRuleRevision));
+            Is.EqualTo(TrRmFeatureTableReader.NativeBoundaryContractsRuleRevision));
 
         var reference = TrRmExecutableCompiler.CreateReference(artifact);
         Assert.That(reference.Structures.Select(static structure => structure.Name),
@@ -1157,7 +1523,7 @@ public sealed class DirectNativeImportTests
 
         var wrongTarget = MutateVariableRowByte(artifact, 0x001B, 1, 8, 2);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(wrongTarget));
-        var missingFeature = MutateFixedSectionByte(artifact, 0x0004, 8, 3);
+        var missingFeature = MutateFixedSectionByte(artifact, 0x0004, 4, 0);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingFeature));
         var wrongAlignment = MutateFixedRowByte(artifact, 0x0015, 2, 24, 12, 4);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(wrongAlignment));
@@ -1180,7 +1546,7 @@ public sealed class DirectNativeImportTests
             function.Name == "ObserveValues").DirectNativeImport!;
         Assert.That(import.Parameters.Single().Extent, Is.EqualTo(3));
 
-        var malformed = MutateVariableRowByte(artifact, 0x001B, 2, 19, 0x80);
+        var malformed = MutateVariableRowByte(artifact, 0x001B, 3, 23, 0x80);
         Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
     }
 
@@ -1255,7 +1621,7 @@ public sealed class DirectNativeImportTests
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "pointer-input");
-        var malformed = MutateVariableRowByte(artifact, 0x001B, 2, 12, 0);
+        var malformed = MutateVariableRowByte(artifact, 0x001B, 3, 16, 0);
 
         Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
     }
@@ -1326,7 +1692,7 @@ public sealed class DirectNativeImportTests
     {
         var source = """
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeOutput(0)]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
             extern int32 ReadValue(write ptr<int32> value);
             public int32 ReadAndReturn() {
                 mut int32 value = 0;
@@ -1374,13 +1740,13 @@ public sealed class DirectNativeImportTests
             ["ProviderValue"], "ProviderValue", NativeRuntimePolicy.FailFast);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeOutput(0)]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
             public extern int32 ReadValue(write ptr<int32> value);
 
             int32 Main() {
                 mut int32 value = 0;
                 unsafe {
-                    if (ReadValue(&value) == 0) { return ProviderValue() + value; }
+                    if (ReadValue(&value) != 0) { return ProviderValue() + value; }
                 }
                 return -1;
             }
@@ -1438,7 +1804,7 @@ public sealed class DirectNativeImportTests
     {
         var source = """
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeOutput(0)]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
             extern int32 ReadValue(write ptr<int32> value);
             public int32 ReadAndReturn() {
                 mut int32 value = 0;
@@ -1543,9 +1909,9 @@ public sealed class DirectNativeImportTests
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.GetFeature(1),
             Is.EqualTo(new TrRmFeatureRow(
-                TrRmFeatureTableReader.WindowsNamedNativeImportsFeatureId,
-                TrRmFeatureTableReader.WindowsNamedNativeImportsRuleRevision)));
-        Assert.That(index.TryGetSection(0x0021, out _, out var nativeImportCount), Is.True);
+                TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+                TrRmFeatureTableReader.NativeBoundaryContractsRuleRevision)));
+        Assert.That(index.TryGetSection(0x0030, out _, out var nativeImportCount), Is.True);
         Assert.That(nativeImportCount, Is.EqualTo(1));
 
         var reference = TrRmExecutableCompiler.CreateReference(artifact);
@@ -1572,6 +1938,15 @@ public sealed class DirectNativeImportTests
     {
         var artifact = EmitPublicImportArtifact();
         var malformed = MutateVariableRowByte(artifact, 0x001B, 1, 8, 0);
+
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
+    }
+
+    [Test]
+    public void TrRmNativeImportRejectsMismatchedNativeAbiRole()
+    {
+        var artifact = EmitPublicImportArtifact();
+        var malformed = MutateVariableRowByte(artifact, 0x001B, 2, 12, 2);
 
         Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(malformed));
     }
@@ -1708,6 +2083,198 @@ public sealed class DirectNativeImportTests
 
         throw new InvalidOperationException("The emitted artifact has no writable native output pointer.");
     }
+
+    private static OutputBodyLayout ReadOutputBodyLayout(byte[] artifact)
+    {
+        var (sectionOffset, count) = FindSection(artifact, 0x0020);
+        if (count != 1)
+        {
+            throw new InvalidOperationException("Expected one executable Body.");
+        }
+
+        var offsetTableBytes = checked((count + 1) * sizeof(uint));
+        var relativeStart = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(sectionOffset, sizeof(uint))));
+        var relativeEnd = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(sectionOffset + sizeof(uint), sizeof(uint))));
+        var bodyStart = sectionOffset + offsetTableBytes + relativeStart;
+        var bodyEnd = sectionOffset + offsetTableBytes + relativeEnd;
+        var widthCode = artifact[bodyStart];
+        if (widthCode > 2)
+        {
+            throw new InvalidOperationException("Unsupported Body local width.");
+        }
+        var width = 1 << widthCode;
+        var cursor = bodyStart + 1;
+        int Local()
+        {
+            var value = checked((int)ReadUnsigned(artifact, cursor, width));
+            cursor += width;
+            return value;
+        }
+
+        var blockCount = Local();
+        var valueCount = Local();
+        var placeCount = Local();
+        if (blockCount != 1)
+        {
+            throw new InvalidOperationException("Expected one straight-line executable Body block.");
+        }
+        _ = Local(); // region count
+        var typeCount = Local();
+        cursor += checked(typeCount * sizeof(uint));
+        var firstPlaceFlagsOffset = placeCount == 0 ? -1 : cursor + (2 * width);
+        cursor += checked(placeCount * ((3 * width) + 1));
+        cursor += checked(valueCount * ((2 * width) + 1));
+        cursor += checked((blockCount + 1) * width);
+        cursor += checked(valueCount * sizeof(uint));
+        var blockOffsets = new uint[blockCount + 1];
+        for (var index = 0; index < blockOffsets.Length; index++)
+        {
+            blockOffsets[index] = checked((uint)ReadUnsigned(artifact, cursor, sizeof(uint)));
+            cursor += sizeof(uint);
+        }
+        var terminatorOffsets = new uint[blockCount];
+        for (var index = 0; index < terminatorOffsets.Length; index++)
+        {
+            terminatorOffsets[index] = checked((uint)ReadUnsigned(artifact, cursor, sizeof(uint)));
+            cursor += sizeof(uint);
+        }
+
+        var blockDataStart = cursor;
+        var blockStart = checked(blockDataStart + (int)blockOffsets[0]);
+        cursor = blockStart;
+        _ = Local(); // region
+        for (var list = 0; list < 3; list++)
+        {
+            var entries = Local();
+            cursor += checked(entries * width);
+        }
+        var inheritedPlaces = Local();
+        cursor += checked(inheritedPlaces * (width + 1));
+        for (var list = 0; list < 2; list++)
+        {
+            var places = Local();
+            cursor += checked(places * width);
+        }
+        for (var list = 0; list < 2; list++)
+        {
+            var uses = Local();
+            cursor += checked(uses * (2 * width));
+        }
+        var operationCount = Local();
+        var operationsOffset = cursor;
+        if (firstPlaceFlagsOffset < 0 || blockStart + terminatorOffsets[0] > bodyEnd
+            || blockDataStart + blockOffsets[^1] != bodyEnd)
+        {
+            throw new InvalidOperationException("Malformed emitted Body framing.");
+        }
+
+        return new OutputBodyLayout(bodyStart, blockStart,
+            checked((int)terminatorOffsets[0]), operationsOffset, operationCount,
+            firstPlaceFlagsOffset, width);
+    }
+
+    private static OutputInstruction[] ReadOutputBodyOperations(byte[] artifact,
+        OutputBodyLayout layout)
+    {
+        var position = layout.OperationsOffset;
+        var end = layout.BlockStart + layout.TerminatorOffset;
+        var operations = new OutputInstruction[layout.OperationCount];
+        for (var index = 0; index < operations.Length; index++)
+        {
+            var offset = position;
+            var opcode = artifact[position++];
+            var referenceWidth = 1;
+            var countWidth = 1;
+            var dataWidth = opcode is 1 or 2 ? 1 : 0;
+            if (opcode == 0xF0)
+            {
+                var envelope = artifact[position++];
+                opcode = artifact[position++];
+                referenceWidth = 1 << (envelope & 3);
+                countWidth = 1 << ((envelope >> 2) & 3);
+                dataWidth = opcode is 1 or 2 ? 1 << ((envelope >> 4) & 3) : 0;
+            }
+
+            switch (opcode)
+            {
+                case 1:
+                case 2:
+                    position += (2 * referenceWidth) + dataWidth;
+                    break;
+                case 0x0B:
+                case 0x0D:
+                case 0x0E:
+                    position += 2 * referenceWidth;
+                    break;
+                case 0x12:
+                    position += 2 * referenceWidth;
+                    var argumentCount = checked((int)ReadUnsigned(artifact, position, countWidth));
+                    position += countWidth + (argumentCount * referenceWidth);
+                    break;
+                case 0x2A:
+                    position += 3 * referenceWidth;
+                    break;
+                case 0x2E:
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Unexpected opcode 0x{opcode:X2} in address-body test fixture.");
+            }
+
+            if (position > end)
+            {
+                throw new InvalidOperationException("Output Body operation exceeds its terminator.");
+            }
+            operations[index] = new OutputInstruction(opcode, offset, referenceWidth);
+        }
+
+        if (position != end)
+        {
+            throw new InvalidOperationException("Output Body operation count does not match its framing.");
+        }
+        return operations;
+    }
+
+    private static ulong ReadUnsigned(byte[] bytes, int offset, int width)
+        => width switch
+        {
+            1 => bytes[offset],
+            2 => BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset, width)),
+            4 => BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, width)),
+            8 => BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(offset, width)),
+            _ => throw new ArgumentOutOfRangeException(nameof(width)),
+        };
+
+    private static void WriteUnsigned(byte[] bytes, int offset, int width, ulong value)
+    {
+        switch (width)
+        {
+            case 1:
+                bytes[offset] = checked((byte)value);
+                break;
+            case 2:
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset, width),
+                    checked((ushort)value));
+                break;
+            case 4:
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset, width),
+                    checked((uint)value));
+                break;
+            case 8:
+                BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(offset, width), value);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(width));
+        }
+    }
+
+    private sealed record OutputBodyLayout(int BodyStart, int BlockStart,
+        int TerminatorOffset, int OperationsOffset, int OperationCount,
+        int FirstPlaceFlagsOffset, int LocalWidth);
+
+    private sealed record OutputInstruction(byte Opcode, int Offset, int ReferenceWidth);
 
     private static (int Offset, int Count) FindSection(byte[] artifact, ushort sectionKind)
     {

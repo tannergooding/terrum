@@ -77,7 +77,7 @@ public sealed class VacantLocalTests
     }
 
     [Test]
-    public void VerifierRejectsMalformedVacantSlotAndWritableForgedDeclaration()
+    public void VerifierRejectsMalformedVacantSlotAndAcceptsWritableVacantDeclaration()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(ScalarSource));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -94,14 +94,18 @@ public sealed class VacantLocalTests
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(index, malformed),
         }))!;
-        var writable = read with {
-            Variables = read.Variables.SetItem(vacant.Variable, read.Variables[vacant.Variable] with {
-                IsMutable = true,
-            }),
-        };
-        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
-            Functions = program.Functions.SetItem(index, writable),
-        }))!;
+
+        var mutableCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                init mut int32 value;
+                value = 1;
+                value = 2;
+                return value;
+            }
+            """));
+        Assert.That(mutableCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, mutableCompilation.Diagnostics));
+        SemanticVerifier.Verify(mutableCompilation.Program!);
     }
 
     [Test]

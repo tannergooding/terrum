@@ -98,34 +98,24 @@ not apparent; that repository rule takes precedence over personal defaults.
 
 ## Native qualification
 
-Build the intended compiler with the standard developer command, then pass
-that output explicitly to the frame, owned-call, owned-buffer and managed-node
-probes. These probes do not build the compiler or silently select Debug.
+The frame, owned-call, owned-buffer and managed-node probes consume the
+prebuilt Debug compiler at
+`artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll`. They do not parse
+a compiler-path argument or build the compiler. Build that exact input first:
 
 ```powershell
-dotnet build sources\terrumc\terrumc.csproj -c Release
-$compiler = (Resolve-Path artifacts\bin\sources\terrumc\Release\net11.0\terrumc.dll).Path
-dotnet run --file scripts\check-native-frame.cs -- --compiler $compiler
-dotnet run --file scripts\check-owned-call-abi.cs -- --compiler $compiler
-dotnet run --file scripts\check-owned-buffer-abi.cs -- --compiler $compiler
-dotnet run --file scripts\check-managed-node-abi.cs -- --compiler $compiler
+.\build.cmd -configuration Debug -fast
+dotnet run --file scripts\check-native-frame.cs
+dotnet run --file scripts\check-owned-call-abi.cs
+dotnet run --file scripts\check-owned-buffer-abi.cs
+dotnet run --file scripts\check-managed-node-abi.cs
 ```
 
-Use the Debug output path to qualify Debug. `dotnet run -c Release` selects
-the file-based harness configuration, not the compiler consumed by these four
-probes. API-based probes with `#:project` references instead use the library
-built by their standard `dotnet run` configuration.
+Run the probes sequentially; they write fixed filenames under `artifacts` and
+can overwrite a previous run's outputs. Their named `*-build.log`,
+`*-proof.log`, and related files record the native build and supervised
+execution results. API-based probes with `#:project` references instead use
+the library built by their standard `dotnet run` configuration.
 The independent C callers require Visual Studio x64 C++ build tools; the
 [aggregate ABI recipe](implementation/native.md#semantic-and-target-boundaries)
 also builds its assembly/C fixture explicitly.
-
-Every probe prints a unique directory under
-`artifacts\log\native-probes\<probe>\<run>`. It retains command arguments,
-stdout, stderr, deadlines and actual/expected exit statuses on success,
-nonzero failure and timeout. Compiler/library input paths and SHA-256 hashes
-identify the exercised build; changed inputs reject completion.
-`completed.txt` is written only after every command and probe assertion
-succeeds. A missing marker denotes an incomplete or failed run; an earlier
-run's logs are not evidence for a later invocation. Probe-generated native
-outputs share that run directory so concurrent invocations do not overwrite
-them; independently prebuilt C caller fixtures remain separate inputs.

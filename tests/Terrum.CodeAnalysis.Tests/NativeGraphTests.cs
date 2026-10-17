@@ -243,12 +243,12 @@ public sealed class NativeGraphTests
         var leaf = Leaf("public int32 Leaf() { return 40; }");
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeOutput(0)]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
             extern int32 ReadValue(write ptr<int32> value);
             public int32 ReadAndReturn() {
                 mut int32 value = 0;
                 unsafe {
-                    if (ReadValue(&value) == 0) { return Leaf() + value; }
+                    if (ReadValue(&value) != 0) { return Leaf() + value; }
                 }
                 return -1;
             }
@@ -265,13 +265,13 @@ public sealed class NativeGraphTests
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("example.dll", "Adjust")]
-            [Terrum.Interop.NativeOutput(0)]
+            [Terrum.Interop.NativeOutput(0, NonZero)]
             extern int32 Adjust(write ptr<int32> value);
 
             int32 Main() {
                 mut int32 value = 1;
                 unsafe {
-                    if (Adjust(&value) == 0) { return ReadAndReturn() + value; }
+                    if (Adjust(&value) != 0) { return ReadAndReturn() + value; }
                 }
                 return -1;
             }

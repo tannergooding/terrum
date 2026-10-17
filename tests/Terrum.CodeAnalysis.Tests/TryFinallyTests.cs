@@ -64,7 +64,7 @@ public sealed class TryFinallyTests
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalid))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(invalid, NativeRuntimePolicy.FailFast))!;
-        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(invalid, ["Main"]))!;
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(invalid, ["Main"]))!;
     }
 
     [Test]

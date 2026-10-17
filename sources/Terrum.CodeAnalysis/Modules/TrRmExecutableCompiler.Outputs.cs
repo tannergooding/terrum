@@ -19,6 +19,21 @@ public static partial class TrRmExecutableCompiler
         return ContainsOutputFeature(function.Body);
     }
 
+    private static bool HasRootlessNativeValues(BoundFunction function)
+    {
+    var found = function.Variables.Take(function.ParameterCount)
+        .Any(static variable => variable.Type == PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(variable.Type));
+    _ = BoundTreeTraversal.RewriteExpressions(function, expression =>
+    {
+        found |= expression.Type == PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(expression.Type)
+            || expression is BoundNativeStorageAddress;
+        return expression;
+    });
+        return found;
+    }
+
     private static bool HasOutputParameters(BoundFunction function)
         => function.Variables.Take(function.ParameterCount)
             .Any(static variable => variable.IsOut || variable.IsInit);
@@ -49,7 +64,7 @@ public static partial class TrRmExecutableCompiler
     {
         return expression switch
         {
-            BoundOutArgument => true,
+            BoundOutArgument or BoundNativeStorageAddress => true,
             BoundBinary binary => ContainsOutputFeature(binary.Left)
                 || ContainsOutputFeature(binary.Right),
             BoundUnary unary => ContainsOutputFeature(unary.Operand),
@@ -62,8 +77,15 @@ public static partial class TrRmExecutableCompiler
         };
     }
 
-    private static byte[] EncodeOutputBody(BoundFunction function, BoundProgram program)
-        => new OutputBodyWriter(function, program).Encode();
+    private static byte[] EncodeOutputBody(BoundFunction function, BoundProgram program,
+        List<ReadOnlyMemory<byte>> typeRows,
+        Dictionary<PrimitiveType, int> nativeParameterTypeRows,
+        Dictionary<PrimitiveType, int> nativeOutputTypeRows,
+        Dictionary<PrimitiveType, int> nativePointerTypeRows,
+        int nativeRawPointerTypeRow)
+        => new OutputBodyWriter(function, program, typeRows,
+            nativeParameterTypeRows, nativeOutputTypeRows, nativePointerTypeRows,
+            nativeRawPointerTypeRow).Encode();
 
     private static void WriteCallInstruction(List<byte> bytes, int referenceWidth, int countWidth)
     {
@@ -81,7 +103,9 @@ public static partial class TrRmExecutableCompiler
     private static ImmutableArray<BoundStatement> DecodeOutputBody(
         TrRmScalarInitOutputBodyReader.Body body, TrRmTypeSpecTableReader types,
         ImmutableArray<BoundVariable>.Builder variables,
-        ImmutableArray<BoundFunction>.Builder functions, uint ruleRevision)
+        ImmutableArray<BoundFunction>.Builder functions,
+        int[] functionIndexByMethodRow,
+        ImmutableArray<BoundStruct> structures, uint ruleRevision)
     {
         var statements = ImmutableArray.CreateBuilder<BoundStatement>(
             body.Operations.Length + body.Places.Length + 1);
@@ -111,12 +135,16 @@ public static partial class TrRmExecutableCompiler
             else
             {
                 placeVariables[index] = variables.Count;
+                var addressableLocal = place.Flags is 5 or 7;
                 variables.Add(new BoundVariable($"place{index + 1}", placeType,
-                    false, default)
+                    (place.Flags & 2) != 0, default)
                 {
-                    IsInitializationLocal = true,
+                    IsInitializationLocal = !addressableLocal,
                 });
-                statements.Add(new BoundVacantLocal(placeVariables[index], default));
+                if (!addressableLocal)
+                {
+                    statements.Add(new BoundVacantLocal(placeVariables[index], default));
+                }
             }
         }
 
@@ -125,11 +153,14 @@ public static partial class TrRmExecutableCompiler
         var valueExpressions = new BoundExpression?[body.Values.Length];
         var conditionalResult = body.Terminator.Opcode == 0x81
             ? body.Terminator.Operands[0] : 0;
+        var conditionalResultIsCall = conditionalResult != 0
+            && body.Blocks[0].Operations.Any(operation =>
+                operation.Result == conditionalResult && operation.Opcode == 0x12);
         for (var index = 0; index < body.Values.Length; index++)
         {
             var value = body.Values[index];
             var type = OutputType(body, types, value.TypeId);
-            if (!IsOutputScalarType(type))
+            if (!IsOutputBodyValueType(type))
             {
                 throw Invalid("The executable place profile requires scalar values.");
             }
@@ -152,7 +183,7 @@ public static partial class TrRmExecutableCompiler
             }
             else
             {
-                if (index + 1 == conditionalResult)
+                if (index + 1 == conditionalResult && conditionalResultIsCall)
                 {
                     continue;
                 }
@@ -211,16 +242,64 @@ public static partial class TrRmExecutableCompiler
 
             var variable = valueVariables[valueId - 1];
             valueExpressions[valueId - 1] = new BoundRead(variable, expression.Type, default);
-            statements.Add(new BoundLocal(variable, expression, default));
+            AddStatement(new BoundLocal(variable, expression, default));
         }
 
-        BoundCall? conditionalCall = null;
-        void DecodeOperations(ImmutableArray<TrRmScalarInitOutputBodyReader.Instruction> operations)
+        var unsafeStatements = ImmutableArray.CreateBuilder<BoundStatement>();
+        var inUnsafeScope = false;
+        var collectingConditionalArm = false;
+        void AddStatement(BoundStatement statement)
+        {
+            (inUnsafeScope && !collectingConditionalArm ? unsafeStatements : statements).Add(statement);
+        }
+
+        BoundExpression? conditionalCondition = null;
+        void DecodeOperations(ImmutableArray<TrRmScalarInitOutputBodyReader.Instruction> operations,
+            TrRmTypeSpecTableReader typeReader)
         {
             foreach (var operation in operations)
             {
                 switch (operation.Opcode)
                 {
+                    case 0x2E:
+                        if (inUnsafeScope)
+                        {
+                            throw Invalid("A place Body contains a duplicate unsafe-scope marker.");
+                        }
+                        inUnsafeScope = true;
+                        break;
+                    case 0x2A:
+                    {
+                        if (operation.Result <= 0 || operation.Result > body.Values.Length
+                            || operation.Operands.Length != 1)
+                        {
+                            throw Invalid("AddressOfPlace requires a result and one place handle.");
+                        }
+
+                        var valueInfo = body.Values[operation.Result - 1];
+                        if (valueInfo.Kind != 2 || valueInfo.PlaceId <= 0
+                            || valueInfo.PlaceId > body.Places.Length)
+                        {
+                            throw Invalid("AddressOfPlace result has no addressable backing.");
+                        }
+                        var variable = PlaceVariable(valueInfo.PlaceId);
+                        var type = variables[variable].Type;
+                        var extent = ValueLayout.Size(type, structures);
+                        var pointerTypeRow = body.Types[valueInfo.TypeId - 1].TypeSpecRow;
+                        var isOutputPointer = TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
+                            typeReader, pointerTypeRow, out var outputPointee)
+                            && outputPointee == type;
+                        if (!IsOutputScalarType(type) || extent <= 0)
+                        {
+                            throw Invalid("AddressOfPlace backing is outside the scalar storage profile.");
+                        }
+
+                        valueExpressions[operation.Result - 1] = new BoundNativeStorageAddress(
+                            variable, new BoundConstant(0, PrimitiveType.Int32, default),
+                            type, type, PrimitiveType.NativeStorageAddress, 1, extent, extent,
+                            IsReadonly: !isOutputPointer, default);
+                        break;
+                    }
                     case 0x0B:
                         if (operation.Result <= 0 || operation.Result > body.Values.Length
                             || body.Values[operation.Result - 1].Kind != 1)
@@ -266,8 +345,17 @@ public static partial class TrRmExecutableCompiler
                         {
                             throw Invalid("Initialize requires a place handle and a value.");
                         }
-                        var place = PlaceVariable(PlaceForHandle(operation.Operands[0]));
-                        statements.Add(new BoundAssignment(place, ReadValue(operation.Operands[1]), default));
+                        var placeId = PlaceForHandle(operation.Operands[0]);
+                        var place = PlaceVariable(placeId);
+                        var initialValue = ReadValue(operation.Operands[1]);
+                        if (body.Places[placeId - 1].Flags is 5 or 7)
+                        {
+                            AddStatement(new BoundLocal(place, initialValue, default));
+                        }
+                        else
+                        {
+                            AddStatement(new BoundAssignment(place, initialValue, default));
+                        }
                         break;
                     }
                     case 0x16:
@@ -304,12 +392,24 @@ public static partial class TrRmExecutableCompiler
                     }
                     case 0x12:
                     {
-                        if (operation.MethodRow <= 0 || operation.MethodRow > functions.Count)
+                        var functionIndex = FunctionIndexForMethodRow(
+                            operation.MethodRow, functionIndexByMethodRow);
+                        if (functionIndex < 0)
                         {
                             throw Invalid("Call target is outside the module.");
                         }
-                        var target = functions[operation.MethodRow - 1];
-                        if (!IsOutputCallResultType(target.ReturnType)
+                        var target = functions[functionIndex];
+                        var isNativeImport = target.DirectNativeImport is not null
+                            && target.IsExternal;
+                        var isNativeVTable = target.NativeVTableMethod is not null
+                            && target.Intrinsic == BoundIntrinsic.NativeVTableCall
+                            && !target.IsExternal;
+                        if ((target.IsExternal && !isNativeImport)
+                            || (target.Intrinsic != BoundIntrinsic.None && !isNativeVTable)
+                            || target.IsConstructor || target.IsClassConstructor
+                            || target.ClassConstructor != -1 || target.DeclaringStruct is not null
+                            || target.IsStatic || target.IsCleanup || target.PropertyName is not null
+                            || !IsOutputCallResultType(target.ReturnType)
                             || operation.Operands.Length != target.ParameterCount)
                         {
                             throw Invalid("Call target is outside the executable place profile.");
@@ -319,7 +419,24 @@ public static partial class TrRmExecutableCompiler
                         {
                             var formal = target.Variables[parameter];
                             var argument = operation.Operands[parameter];
-                            if (formal.IsOut || formal.IsInit)
+                            var nativeOutput = isNativeVTable
+                                ? NativeVTableCallContract.OutputForParameter(target, parameter)
+                                : isNativeImport
+                                    ? DirectNativeImportContract.OutputForParameter(target, parameter)
+                                    : null;
+                            if (nativeOutput is not null)
+                            {
+                                var value = ReadValue(argument);
+                                if (formal.Type != PrimitiveType.NativeStorageAddress
+                                    || value is not BoundNativeStorageAddress address
+                                    || address.IsReadonly
+                                    || address.CarrierType != nativeOutput.PointeeType)
+                                {
+                                    throw Invalid("Native output address does not match its formal contract.");
+                                }
+                                arguments.Add(value);
+                            }
+                            else if (formal.IsOut || formal.IsInit)
                             {
                                 if (!formal.IsOut || !formal.IsInit
                                     || !IsOutputScalarType(formal.Type))
@@ -340,7 +457,23 @@ public static partial class TrRmExecutableCompiler
                             else
                             {
                                 var value = ReadValue(argument);
-                                if (formal.Type != value.Type)
+                                var nativeParameter = isNativeVTable
+                                    ? NativeVTableCallContract.ParameterForParameter(target, parameter)
+                                    : isNativeImport
+                                        ? DirectNativeImportContract.ParameterForParameter(target, parameter)
+                                        : null;
+                                if (value is BoundNativeStorageAddress)
+                                {
+                                    if (nativeParameter is not DirectNativeParameter parameterContract
+                                        || parameterContract.Access != NativeParameterAccess.Read
+                                        || parameterContract.Retention != NativeParameterRetention.NoEscape
+                                        || parameterContract.Extent > 1
+                                        || formal.Type != PrimitiveType.NativeRawPointer)
+                                    {
+                                        throw Invalid("Address argument has no matching read-only native parameter contract.");
+                                    }
+                                }
+                                else if (formal.Type != value.Type)
                                 {
                                     throw Invalid("Call argument type does not match its formal.");
                                 }
@@ -348,16 +481,19 @@ public static partial class TrRmExecutableCompiler
                             }
                         }
 
-                        var call = new BoundCall(operation.MethodRow - 1,
-                            arguments.MoveToImmutable(), target.ReturnType, default);
+                        var call = new BoundCall(functionIndex,
+                            arguments.MoveToImmutable(), target.ReturnType, default)
+                        {
+                            IsUnsafeAuthorized = inUnsafeScope,
+                        };
                         if (conditionalResult != 0 && operation.Result == conditionalResult)
                         {
-                            conditionalCall = call;
+                            conditionalCondition = call;
                             valueExpressions[operation.Result - 1] = call;
                         }
                         else if (operation.Result == 0)
                         {
-                            statements.Add(new BoundExpressionStatement(call, default));
+                            AddStatement(new BoundExpressionStatement(call, default));
                         }
                         else
                         {
@@ -530,11 +666,11 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 var result = terminator.Operands[0];
-                statements.Add(new BoundReturn(result == 0 ? null : ReadValue(result), default));
+                AddStatement(new BoundReturn(result == 0 ? null : ReadValue(result), default));
             }
             else if (terminator.Opcode == 0x87)
             {
-                statements.Add(new BoundRequire(new BoundConstant(0, PrimitiveType.Bool, default), default));
+                AddStatement(new BoundRequire(new BoundConstant(0, PrimitiveType.Bool, default), default));
             }
             else
             {
@@ -544,8 +680,13 @@ public static partial class TrRmExecutableCompiler
 
         if (body.Blocks.Length == 1)
         {
-            DecodeOperations(body.Operations);
+            DecodeOperations(body.Operations, types);
             DecodeTerminator(body.Terminator);
+            if (inUnsafeScope)
+            {
+                statements.Add(new BoundUnsafe(new BoundBlock(unsafeStatements.ToImmutable(), default),
+                    default));
+            }
         }
         else
         {
@@ -554,22 +695,30 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid("Conditional output Body is outside the executable profile.");
             }
 
-            DecodeOperations(body.Blocks[0].Operations);
-            if (conditionalCall is null)
+            DecodeOperations(body.Blocks[0].Operations, types);
+            conditionalCondition ??= ReadValue(body.Terminator.Operands[0]);
+            if (conditionalCondition.Type != PrimitiveType.Bool)
             {
-                throw Invalid("Conditional output Body has no direct Boolean call condition.");
+                throw Invalid("Conditional output Body condition is not Boolean.");
             }
             var rootStatements = statements;
             statements = ImmutableArray.CreateBuilder<BoundStatement>();
-            DecodeOperations(body.Blocks[1].Operations);
+            collectingConditionalArm = true;
+            DecodeOperations(body.Blocks[1].Operations, types);
             DecodeTerminator(body.Blocks[1].Terminator);
             var whenTrue = new BoundBlock(statements.ToImmutable(), default);
             statements = ImmutableArray.CreateBuilder<BoundStatement>();
-            DecodeOperations(body.Blocks[2].Operations);
+            DecodeOperations(body.Blocks[2].Operations, types);
             DecodeTerminator(body.Blocks[2].Terminator);
             var whenFalse = new BoundBlock(statements.ToImmutable(), default);
+            collectingConditionalArm = false;
             statements = rootStatements;
-            statements.Add(new BoundIf(conditionalCall, whenTrue, whenFalse, default));
+            AddStatement(new BoundIf(conditionalCondition, whenTrue, whenFalse, default));
+            if (inUnsafeScope)
+            {
+                statements.Add(new BoundUnsafe(
+                    new BoundBlock(unsafeStatements.ToImmutable(), default), default));
+            }
         }
 
         return statements.ToImmutable();
@@ -583,13 +732,25 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("A place Body type ID is outside its map.");
         }
 
-        return BodyTypeFromRow(types, body.Types[typeId - 1].TypeSpecRow);
+        var typeSpecRow = body.Types[typeId - 1].TypeSpecRow;
+        if (TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
+            types, typeSpecRow, out var pointeeType)
+            && IsOutputScalarType(pointeeType))
+        {
+            return PrimitiveType.NativeRawPointer;
+        }
+
+        return BodyTypeFromRow(types, typeSpecRow);
     }
 
     private static bool IsOutputScalarType(PrimitiveType type)
         => type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
             or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
             or PrimitiveType.Float32 or PrimitiveType.Float64;
+
+    private static bool IsOutputBodyValueType(PrimitiveType type)
+        => IsOutputScalarType(type) || type == PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(type);
 
     private static bool IsOutputIntegerConversionType(PrimitiveType type)
         => IsInteger(type) || type == PrimitiveType.Char16;
@@ -622,6 +783,11 @@ public static partial class TrRmExecutableCompiler
     {
         private readonly BoundFunction _function;
         private readonly BoundProgram _program;
+        private readonly List<ReadOnlyMemory<byte>> _typeRows;
+        private readonly Dictionary<PrimitiveType, int> _nativeParameterTypeRows;
+        private readonly Dictionary<PrimitiveType, int> _nativeOutputTypeRows;
+        private readonly Dictionary<PrimitiveType, int> _nativePointerTypeRows;
+        private readonly int _nativeRawPointerTypeRow;
         private readonly int[] _placeByVariable;
         private readonly int[] _currentValues;
         private readonly List<OutputPlace> _places = [default];
@@ -644,13 +810,33 @@ public static partial class TrRmExecutableCompiler
         private int _failureReason;
         private int _currentBlock;
         private bool _ended;
+        private bool _unsafeScope;
 
-        public OutputBodyWriter(BoundFunction function, BoundProgram program)
+        public OutputBodyWriter(BoundFunction function, BoundProgram program,
+            List<ReadOnlyMemory<byte>> typeRows,
+            Dictionary<PrimitiveType, int> nativeParameterTypeRows,
+            Dictionary<PrimitiveType, int> nativeOutputTypeRows,
+            Dictionary<PrimitiveType, int> nativePointerTypeRows,
+            int nativeRawPointerTypeRow)
         {
             _function = function;
             _program = program;
+            _typeRows = typeRows;
+            _nativeParameterTypeRows = nativeParameterTypeRows;
+            _nativeOutputTypeRows = nativeOutputTypeRows;
+            _nativePointerTypeRows = nativePointerTypeRows;
+            _nativeRawPointerTypeRow = nativeRawPointerTypeRow;
             _placeByVariable = new int[function.Variables.Length];
             _currentValues = new int[function.Variables.Length];
+            var addressableVariables = new HashSet<int>();
+            _ = BoundTreeTraversal.RewriteExpressions(function, expression =>
+            {
+                if (expression is BoundNativeStorageAddress address)
+                {
+                    _ = addressableVariables.Add(address.Variable);
+                }
+                return expression;
+            });
             if (function.Variables.Length > SemanticVerifier.MaximumVariables
                 || function.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
                     && (!HasOutputParameters(function) || !IsOutputReturnType(function.ReturnType)))
@@ -672,9 +858,9 @@ public static partial class TrRmExecutableCompiler
                 }
                 else
                 {
-                    if (!IsOutputScalarType(parameter.Type))
+                    if (!IsOutputBodyValueType(parameter.Type))
                     {
-                        throw Unsupported("The output Body profile requires scalar by-value parameters.");
+                        throw Unsupported("The output Body profile requires scalar or raw-pointer by-value parameters.");
                     }
                     _currentValues[variable] = AddValue(parameter.Type, 0, uint.MaxValue);
                     _parameterValues.Add(_currentValues[variable]);
@@ -696,10 +882,24 @@ public static partial class TrRmExecutableCompiler
                     }
                     AddPlace(variable, isParameter: false);
                 }
+                else if (addressableVariables.Contains(variable))
+                {
+                    if (local.IsOut || local.IsInit || !IsOutputScalarType(local.Type))
+                    {
+                        throw Unsupported("Native addresses require initialized scalar local backing.");
+                    }
+                    AddPlace(variable, isParameter: false, isAddressableLocal: true);
+                }
                 else if (!IsOutputScalarType(local.Type))
                 {
                     throw Unsupported("The output Body profile currently supports only scalar locals.");
                 }
+            }
+            if (addressableVariables.Any(variable => variable < function.ParameterCount
+                    || (uint)variable >= (uint)function.Variables.Length
+                    || _placeByVariable[variable] == 0))
+            {
+                throw Unsupported("Native addresses require addressable scalar local variables.");
             }
 
             for (var place = 1; place < _places.Count; place++)
@@ -718,9 +918,22 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported("The output Body profile requires a module-level ordinary function.");
             }
 
-            foreach (var statement in _function.Body.Statements)
+            for (var statementIndex = 0;
+                statementIndex < _function.Body.Statements.Length; statementIndex++)
             {
-                EmitStatement(statement);
+                var statement = _function.Body.Statements[statementIndex];
+                if (statement is BoundUnsafe unsafeBlock)
+                {
+                    if (statementIndex != _function.Body.Statements.Length - 1 || _unsafeScope)
+                    {
+                        throw Unsupported("The output Body profile supports one terminal unsafe scope.");
+                    }
+                    EmitUnsafeTail(unsafeBlock);
+                }
+                else
+                {
+                    EmitStatement(statement);
+                }
             }
             if (!_ended)
             {
@@ -735,25 +948,52 @@ public static partial class TrRmExecutableCompiler
             return BuildBody();
         }
 
-        private void AddPlace(int variable, bool isParameter)
+        private void EmitUnsafeTail(BoundUnsafe unsafeBlock)
+        {
+            if (unsafeBlock.Body.Statements.IsDefaultOrEmpty)
+            {
+                throw Unsupported("The output Body unsafe scope must contain a terminal statement.");
+            }
+
+            _operations.Add(0x2E);
+            _operationCount++;
+            _unsafeScope = true;
+            foreach (var statement in unsafeBlock.Body.Statements)
+            {
+                EmitStatement(statement);
+            }
+            _unsafeScope = false;
+            if (!_ended)
+            {
+                throw Unsupported("The output Body unsafe scope must extend through a terminal return.");
+            }
+        }
+
+        private void AddPlace(int variable, bool isParameter, bool isAddressableLocal = false)
         {
             var place = _places.Count;
-            _places.Add(new OutputPlace(variable, isParameter));
+            _places.Add(new OutputPlace(variable, isParameter, isAddressableLocal));
             _placeInitialized.Add(false);
-            _placeDeclared.Add(isParameter);
+            _placeDeclared.Add(isParameter || isAddressableLocal);
             _placeHandles.Add(0);
             _placeByVariable[variable] = place;
         }
 
         private int AddValue(PrimitiveType type, byte kind, uint definitionOffset)
+            => AddValue(type, kind, definitionOffset, null);
+
+        private int AddValue(PrimitiveType type, byte kind, uint definitionOffset,
+            int? typeRowOverride)
         {
-            if (!IsOutputScalarType(type) || kind > 1
+            if (!IsOutputBodyValueType(type) || kind > 2
+                || (kind == 1 && !IsOutputScalarType(type))
+                || (kind == 2 && type != PrimitiveType.NativeRawPointer)
                 || _valueTypes.Count >= SemanticVerifier.MaximumVariables)
             {
-                throw Unsupported("The output Body profile supports scalar values within the verifier limit.");
+                throw Unsupported("The output Body profile supports scalar and typed pointer values within the verifier limit.");
             }
 
-            var typeRow = TypeRow(type);
+            var typeRow = typeRowOverride ?? BodyTypeRow(type);
             _ = BodyTypeId(typeRow);
             _valueTypes.Add(typeRow);
             _valueKinds.Add(kind);
@@ -801,13 +1041,25 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundLocal local:
                     if ((uint)local.Variable >= (uint)_currentValues.Length
-                        || _placeByVariable[local.Variable] != 0
                         || !IsOutputScalarType(local.Initializer.Type)
                         || local.Initializer.Type != _function.Variables[local.Variable].Type)
                     {
                         throw Unsupported("The output Body profile supports initialized scalar value locals.");
                     }
-                    _currentValues[local.Variable] = EmitValue(local.Initializer);
+                    var localPlace = _placeByVariable[local.Variable];
+                    if (localPlace != 0)
+                    {
+                        if (!_places[localPlace].IsAddressableLocal
+                            || !_placeDeclared[localPlace] || _placeInitialized[localPlace])
+                        {
+                            throw Unsupported("Addressable locals require one initialized declaration.");
+                        }
+                        EmitAssignment(new BoundAssignment(local.Variable, local.Initializer, local.Span));
+                    }
+                    else
+                    {
+                        _currentValues[local.Variable] = EmitValue(local.Initializer);
+                    }
                     break;
                 case BoundAssignment assignment:
                     EmitAssignment(assignment);
@@ -951,7 +1203,7 @@ public static partial class TrRmExecutableCompiler
             var value = EmitValue(assignment.Value);
             var variableType = _function.Variables[assignment.Variable].Type;
             if (!IsOutputScalarType(variableType)
-                || _valueTypes[value - 1] != TypeRow(variableType))
+                || _valueTypes[value - 1] != BodyTypeRow(variableType))
             {
                 throw Unsupported("Output assignment requires an exactly typed scalar value.");
             }
@@ -1012,7 +1264,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var current = _currentValues[read.Variable];
-                    if (current == 0 || _valueTypes[current - 1] != TypeRow(read.Type))
+                    if (current == 0 || _valueTypes[current - 1] != BodyTypeRow(read.Type))
                     {
                         throw Unsupported("Read of an uninitialized or mismatched scalar value.");
                     }
@@ -1027,7 +1279,7 @@ public static partial class TrRmExecutableCompiler
                         _ => unchecked((ulong)constant.Value),
                     };
                     var dataWidth = Width(bits);
-                    var constantTypeId = BodyTypeId(TypeRow(constant.Type));
+                    var constantTypeId = BodyTypeId(BodyTypeRow(constant.Type));
                     var referenceWidth = Width((ulong)Math.Max(constResult, constantTypeId));
                     var constOffset = _operations.Count;
                     WriteInstruction(_operations, 0x01, referenceWidth, dataWidth);
@@ -1064,7 +1316,7 @@ public static partial class TrRmExecutableCompiler
                     };
                     var castOperand = EmitValue(cast.Operand);
                     var castResult = _valueTypes.Count + 1;
-                    var castTypeId = BodyTypeId(TypeRow(cast.Type));
+                    var castTypeId = BodyTypeId(BodyTypeRow(cast.Type));
                     var castWidth = Width((ulong)Math.Max(castResult,
                         Math.Max(castTypeId, castOperand)));
                     var castOffset = _operations.Count;
@@ -1263,19 +1515,40 @@ public static partial class TrRmExecutableCompiler
             }
 
             var target = _program.Functions[call.Function];
-            if (target.IsExternal || target.IsConstructor || target.IsClassConstructor
+            var isNativeImport = target.IsExternal && target.DirectNativeImport is not null
+                && DirectNativeImportContract.IsValid(target, _program.Structures,
+                    _program.NativeFunctionPointerSignatures, _program.NativePointerTypes);
+            var isNativeVTable = !target.IsExternal
+                && target.NativeVTableMethod is not null
+                && target.Intrinsic == BoundIntrinsic.NativeVTableCall
+                && NativeVTableCallContract.IsValid(target, _program);
+            if ((target.IsExternal && !isNativeImport)
+                || target.IsConstructor || target.IsClassConstructor
                 || target.ClassConstructor != -1 || target.DeclaringStruct is not null
                 || target.IsStatic || target.IsCleanup || target.PropertyName is not null
-                || target.Intrinsic != BoundIntrinsic.None
+                || (target.Intrinsic != BoundIntrinsic.None && !isNativeVTable)
                 || target.ParameterCount != call.Arguments.Length
                 || target.ReturnType != call.Type
                 || !IsOutputCallResultType(target.ReturnType))
             {
                 throw Unsupported("Output calls require a local scalar function with an exact signature.");
             }
+            if (target.RequiresUnsafeCaller && !_unsafeScope)
+            {
+                throw Unsupported("Caller-unsafe calls require an encoded unsafe scope.");
+            }
 
-            var outputTarget = target.Variables.Take(target.ParameterCount)
-                .Any(static parameter => parameter.IsOut || parameter.IsInit);
+            var outputTarget = false;
+            for (var parameterIndex = 0; parameterIndex < target.ParameterCount; parameterIndex++)
+            {
+                var parameter = target.Variables[parameterIndex];
+                if ((parameter.IsOut || parameter.IsInit)
+                    && !(isNativeVTable
+                        && NativeVTableCallContract.OutputForParameter(target, parameterIndex) is not null))
+                {
+                    outputTarget = true;
+                }
+            }
             if (outputTarget && (!target.IsPrivate && !target.IsInternal
                 || target.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32)
                     && !IsOutputReturnType(target.ReturnType)))
@@ -1296,7 +1569,28 @@ public static partial class TrRmExecutableCompiler
 
                 var parameter = target.Variables[argument];
                 var value = call.Arguments[argument];
-                if (parameter.IsOut || parameter.IsInit)
+                var nativeOutput = isNativeVTable
+                    ? NativeVTableCallContract.OutputForParameter(target, argument)
+                    : isNativeImport
+                        ? DirectNativeImportContract.OutputForParameter(target, argument)
+                        : null;
+                if (nativeOutput is not null)
+                {
+                    if (!_unsafeScope || value is not BoundNativeStorageAddress address
+                        || !DirectNativeImportContract.MatchesAddress(
+                            address, nativeOutput, _function, _program)
+                        || !IsOutputScalarType(nativeOutput.PointeeType)
+                        || parameter.Type != PrimitiveType.NativeStorageAddress)
+                    {
+                        throw Unsupported("Native output requires an exact writable scalar address.");
+                    }
+
+                    var pointerTypeRow = NativeOutputTypeRow(_typeRows,
+                        _nativeOutputTypeRows, nativeOutput.PointeeType);
+                    arguments[argument] = EmitNativeStorageAddress(address, pointerTypeRow,
+                        PrimitiveType.NativeRawPointer);
+                }
+                else if (parameter.IsOut || parameter.IsInit)
                 {
                     if (!parameter.IsOut || !parameter.IsInit || !IsOutputScalarType(parameter.Type)
                         || value is not BoundOutArgument
@@ -1322,14 +1616,41 @@ public static partial class TrRmExecutableCompiler
                 }
                 else
                 {
-                    if (value is BoundOutArgument || !IsOutputScalarType(parameter.Type))
+                    var nativeParameter = isNativeVTable
+                        ? NativeVTableCallContract.ParameterForParameter(target, argument)
+                        : isNativeImport
+                            ? DirectNativeImportContract.ParameterForParameter(target, argument)
+                            : null;
+                    if (value is BoundNativeStorageAddress address)
                     {
-                        throw Unsupported("By-value output-profile arguments must be scalar values.");
+                        if (!_unsafeScope || nativeParameter is not DirectNativeParameter parameterContract
+                            || parameterContract.Access != NativeParameterAccess.Read
+                            || parameterContract.Retention != NativeParameterRetention.NoEscape
+                            || parameterContract.Extent > 1
+                            || !IsOutputScalarType(parameterContract.PointeeType)
+                            || parameter.Type != PrimitiveType.NativeRawPointer
+                            || !DirectNativeImportContract.MatchesAddress(
+                                address, parameterContract, _function, _program))
+                        {
+                            throw Unsupported("Address arguments require an exact read-only scalar NativeParameter contract.");
+                        }
+
+                        var pointerTypeRow = NativeParameterTypeRow(_typeRows,
+                            _nativeParameterTypeRows, parameterContract.PointeeType);
+                        arguments[argument] = EmitNativeStorageAddress(address, pointerTypeRow,
+                            PrimitiveType.NativeRawPointer);
                     }
-                    arguments[argument] = EmitValue(value);
-                    if (_valueTypes[arguments[argument] - 1] != TypeRow(parameter.Type))
+                    else
                     {
-                        throw Unsupported("Call argument type does not match its parameter.");
+                        if (value is BoundOutArgument || !IsOutputBodyValueType(parameter.Type))
+                        {
+                            throw Unsupported("By-value output-profile arguments must be scalar or raw-pointer values.");
+                        }
+                        arguments[argument] = EmitValue(value);
+                        if (_valueTypes[arguments[argument] - 1] != BodyTypeRow(parameter.Type))
+                        {
+                            throw Unsupported("Call argument type does not match its parameter.");
+                        }
                     }
                 }
             }
@@ -1379,6 +1700,38 @@ public static partial class TrRmExecutableCompiler
             return result;
         }
 
+        private int EmitNativeStorageAddress(BoundNativeStorageAddress address,
+            int pointerTypeRow, PrimitiveType pointerValueType)
+        {
+            if ((uint)address.Variable >= (uint)_placeByVariable.Length
+                || _placeByVariable[address.Variable] == 0)
+            {
+                throw Unsupported("Native address backing is not an addressable local place.");
+            }
+
+            var place = _placeByVariable[address.Variable];
+            if (!_placeDeclared[place] || !_placeInitialized[place]
+                || !_places[place].IsAddressableLocal)
+            {
+                throw Unsupported("Native address backing must be a declared initialized local.");
+            }
+
+            var pointerTypeId = BodyTypeId(pointerTypeRow);
+            var handle = _placeHandles[place];
+            var result = _valueTypes.Count + 1;
+            var width = Width((ulong)Math.Max(result, Math.Max(pointerTypeId, handle)));
+            var offset = _operations.Count;
+            WriteInstruction(_operations, 0x2A, width, 0);
+            Write(_operations, (ulong)result, width);
+            Write(_operations, (ulong)pointerTypeId, width);
+            Write(_operations, (ulong)handle, width);
+            _ = AddValue(pointerValueType, 2, (uint)offset, pointerTypeRow);
+            UseValue(handle, _operationCount);
+            UsePlace(place, _operationCount);
+            _operationCount++;
+            return result;
+        }
+
         private void EmitReturn(BoundReturn result)
         {
             if (_function.ReturnType == PrimitiveType.Void)
@@ -1396,7 +1749,7 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported("Non-void output functions must return a value.");
                 }
                 _returnValue = EmitValue(result.Value);
-                if (_valueTypes[_returnValue - 1] != TypeRow(_function.ReturnType)
+                if (_valueTypes[_returnValue - 1] != BodyTypeRow(_function.ReturnType)
                     || _function.ReturnType != PrimitiveType.Int32
                         && (!HasOutputParameters(_function) || !IsOutputReturnType(_function.ReturnType)))
                 {
@@ -1564,9 +1917,11 @@ public static partial class TrRmExecutableCompiler
             for (var place = 1; place < _places.Count; place++)
             {
                 var type = _function.Variables[_places[place].Variable].Type;
-                Write(body, (ulong)_bodyTypeIds[TypeRow(type)], localWidth);
+                Write(body, (ulong)_bodyTypeIds[BodyTypeRow(type)], localWidth);
                 Write(body, 0, localWidth); // function-root region
-                body.Add(0x04); // initially vacant, non-unique, non-rebindable
+                body.Add(_places[place].IsAddressableLocal
+                    ? _function.Variables[_places[place].Variable].IsMutable ? (byte)7 : (byte)5
+                    : (byte)4);
                 var useBlockCount = _blocks.Count(block => block.PlaceLastUses.ContainsKey(place));
                 Write(body, (ulong)useBlockCount, localWidth);
             }
@@ -1655,6 +2010,24 @@ public static partial class TrRmExecutableCompiler
             return typeId;
         }
 
+        private int BodyTypeRow(PrimitiveType type)
+        {
+            if (type == PrimitiveType.NativeRawPointer)
+            {
+                return _nativeRawPointerTypeRow != 0
+                    ? _nativeRawPointerTypeRow
+                    : throw Unsupported("A raw-pointer Body value has no opaque pointer TypeSpec row.");
+            }
+
+            if (NativePointerTypes.IsType(type))
+            {
+                return _nativePointerTypeRows.TryGetValue(type, out var row)
+                    ? row : throw Unsupported("A typed native pointer Body value has no TypeSpec row.");
+            }
+
+            return TypeRow(type);
+        }
+
         private void UseValue(int value, int ordinal)
         {
             if (value <= 0 || value > _valueTypes.Count)
@@ -1680,7 +2053,8 @@ public static partial class TrRmExecutableCompiler
         }
     }
 
-    private readonly record struct OutputPlace(int Variable, bool IsParameter);
+    private readonly record struct OutputPlace(
+        int Variable, bool IsParameter, bool IsAddressableLocal);
 
     private sealed record OutputBlock(byte[] Operations, int OperationCount, int ReturnValue,
         int FailureReason, int Condition, Dictionary<int, int> ValueLastUses,

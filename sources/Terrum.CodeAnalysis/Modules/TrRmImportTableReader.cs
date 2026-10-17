@@ -7,12 +7,17 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+internal readonly record struct TrRmImportBinding(string ProducerIdentity, string ExportKey,
+    uint TargetRequirement, uint RuntimePolicy);
+
 /// <summary>Validates retained dependency references and their local expected definitions.</summary>
 /// <remarks>Does not bind the selected producer or compare full declared contracts.</remarks>
 public readonly ref struct TrRmImportTableReader
 {
     private const int RowSize = 12;
-    private readonly Dictionary<uint, (uint TargetRequirement, uint RuntimePolicy)> _expected;
+    private readonly Dictionary<uint, TrRmImportBinding> _expected;
+
+    internal int Count => _expected is null ? 0 : _expected.Count;
 
     public TrRmImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleRefTableReader references,
@@ -25,7 +30,7 @@ public readonly ref struct TrRmImportTableReader
             throw InvalidImport();
         }
 
-        _expected = new Dictionary<uint, (uint TargetRequirement, uint RuntimePolicy)>(recordCount);
+        _expected = new Dictionary<uint, TrRmImportBinding>(recordCount);
         var lastModuleRefRow = 0;
         var lastRequirements = default((int OwnerModule,
             uint TargetRequirement, uint RuntimePolicy));
@@ -64,13 +69,12 @@ public readonly ref struct TrRmImportTableReader
                 throw InvalidImport();
             }
 
-            if (!_expected.TryAdd(expected,
-                (lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy)))
+            if (!_expected.TryAdd(expected, new TrRmImportBinding(
+                references.GetProducerIdentity(moduleRefRow), strings.DecodeName((int)key),
+                lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy)))
             {
                 throw InvalidImport();
             }
-
-            _ = strings.DecodeName((int)key);
         }
     }
 
@@ -86,7 +90,25 @@ public readonly ref struct TrRmImportTableReader
             return false;
         }
 
-        return _expected.TryGetValue(reference, out requirements);
+        if (!_expected.TryGetValue(reference, out var binding))
+        {
+            requirements = default;
+            return false;
+        }
+
+        requirements = (binding.TargetRequirement, binding.RuntimePolicy);
+        return true;
+    }
+
+    internal bool TryGetExpectedBinding(uint reference, out TrRmImportBinding binding)
+    {
+        if (_expected is not null && _expected.TryGetValue(reference, out binding))
+        {
+            return true;
+        }
+
+        binding = default;
+        return false;
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

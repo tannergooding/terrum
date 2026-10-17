@@ -15,11 +15,10 @@ internal static class DirectNativeImportContract
     internal const uint UInt32NonZeroResultCondition = 2;
     internal const uint Int32NonNegativeResultCondition = 3;
 
-    internal static uint DefaultResultCondition(PrimitiveType returnType) => returnType switch {
-        PrimitiveType.Int32 => Int32NonZeroResultCondition,
-        PrimitiveType.UInt32 => UInt32NonZeroResultCondition,
-        _ => 0,
-    };
+    internal static uint ResolveResultCondition(PrimitiveType returnType, uint requestedCondition) =>
+        requestedCondition == Int32NonZeroResultCondition && returnType == PrimitiveType.UInt32
+            ? UInt32NonZeroResultCondition
+            : requestedCondition;
 
     internal static bool IsValidResultCondition(PrimitiveType returnType, uint resultCondition) =>
         (returnType == PrimitiveType.Int32
@@ -96,6 +95,14 @@ internal static class DirectNativeImportContract
         }
         return IsBlittableAggregate(type, structures);
     }
+
+    internal static bool IsCopyablePointee(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
+        IsInputPointee(type, structures) && !IsUniqueValue(type, structures);
+
+    internal static bool IsUniqueValue(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
+        type == PrimitiveType.OwnedInt32Buffer
+        || ((int)type >= 100 && (int)type - 100 < structures.Count
+            && structures[(int)type - 100].IsUnique);
 
     private static bool IsBlittableAggregate(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
     {

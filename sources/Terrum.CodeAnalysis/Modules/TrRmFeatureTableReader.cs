@@ -16,15 +16,30 @@ public readonly record struct TrRmFeatureRow(uint FeatureId, uint MinimumRuleRev
         => new(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
             TrRmFeatureTableReader.ScalarInitOutputRuleRevision);
 
-    /// <summary>The provisional Windows named native import assignment.</summary>
-    public static TrRmFeatureRow WindowsNamedNativeImports
-        => new(TrRmFeatureTableReader.WindowsNamedNativeImportsFeatureId,
-            TrRmFeatureTableReader.WindowsNamedNativeImportsRuleRevision);
+    /// <summary>The provisional native boundary contract assignment.</summary>
+    public static TrRmFeatureRow NativeBoundaryContracts
+        => new(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+            TrRmFeatureTableReader.NativeBoundaryContractsRuleRevision);
 
-    /// <summary>The provisional explicit native Blittable-layout assignment.</summary>
-    public static TrRmFeatureRow NativeBlittableLayouts
-        => new(TrRmFeatureTableReader.NativeBlittableLayoutsFeatureId,
-            TrRmFeatureTableReader.NativeBlittableLayoutsRuleRevision);
+    /// <summary>The provisional native rootless-value assignment.</summary>
+    public static TrRmFeatureRow RootlessNativeValues
+        => new(TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+            TrRmFeatureTableReader.RootlessNativeValuesRuleRevision);
+
+    /// <summary>The provisional direct native-call assignment.</summary>
+    public static TrRmFeatureRow DirectNativeCalls
+        => new(TrRmFeatureTableReader.DirectNativeCallsFeatureId,
+            TrRmFeatureTableReader.DirectNativeCallsRuleRevision);
+
+    /// <summary>The provisional native callable-entry assignment.</summary>
+    public static TrRmFeatureRow NativeCallableEntries
+        => new(TrRmFeatureTableReader.NativeCallableEntriesFeatureId,
+            TrRmFeatureTableReader.NativeCallableEntriesRuleRevision);
+
+    /// <summary>The provisional native vtable-call assignment.</summary>
+    public static TrRmFeatureRow NativeVTableCalls
+        => new(TrRmFeatureTableReader.NativeVTableCallsFeatureId,
+            TrRmFeatureTableReader.NativeVTableCallsRuleRevision);
 }
 
 /// <summary>Validates the required feature assignments supported by provisional TRRM (1, 0).</summary>
@@ -34,23 +49,41 @@ public readonly ref struct TrRmFeatureTableReader
     /// <summary>The provisional feature identifier assigned to ScalarInitOutput.</summary>
     public const uint ScalarInitOutputFeatureId = 1;
 
-    /// <summary>The provisional feature identifier assigned to Windows named native imports.</summary>
-    public const uint WindowsNamedNativeImportsFeatureId = 2;
+    /// <summary>The provisional candidate identifier for native boundary contracts.</summary>
+    public const uint NativeBoundaryContractsFeatureId = 0x0100;
 
-    /// <summary>The provisional feature identifier assigned to native Blittable layouts.</summary>
-    public const uint NativeBlittableLayoutsFeatureId = 4;
+    /// <summary>The provisional candidate identifier for rootless native values.</summary>
+    public const uint RootlessNativeValuesFeatureId = 0x0101;
+
+    /// <summary>The provisional candidate identifier for direct native calls.</summary>
+    public const uint DirectNativeCallsFeatureId = 0x0102;
+
+    /// <summary>The provisional candidate identifier for native callable entries.</summary>
+    public const uint NativeCallableEntriesFeatureId = 0x0103;
+
+    /// <summary>The provisional candidate identifier for native vtable calls.</summary>
+    public const uint NativeVTableCallsFeatureId = 0x0104;
 
     /// <summary>The initial ScalarInitOutput rule revision supported by this implementation.</summary>
     public const uint ScalarInitOutputInitialRuleRevision = 1;
 
     /// <summary>The current ScalarInitOutput rule revision supported by this implementation.</summary>
-    public const uint ScalarInitOutputRuleRevision = 6;
+    public const uint ScalarInitOutputRuleRevision = 8;
 
-    /// <summary>The initial Windows named native imports rule revision supported by this implementation.</summary>
-    public const uint WindowsNamedNativeImportsRuleRevision = 1;
+    /// <summary>The provisional native boundary contract rule revision supported by this implementation.</summary>
+    public const uint NativeBoundaryContractsRuleRevision = 1;
 
-    /// <summary>The provisional native Blittable-layout rule revision supported by this implementation.</summary>
-    public const uint NativeBlittableLayoutsRuleRevision = 1;
+    /// <summary>The provisional rootless native value rule revision supported by this implementation.</summary>
+    public const uint RootlessNativeValuesRuleRevision = 1;
+
+    /// <summary>The provisional direct native-call rule revision supported by this implementation.</summary>
+    public const uint DirectNativeCallsRuleRevision = 1;
+
+    /// <summary>The provisional native callable-entry rule revision supported by this implementation.</summary>
+    public const uint NativeCallableEntriesRuleRevision = 1;
+
+    /// <summary>The provisional native vtable-call rule revision supported by this implementation.</summary>
+    public const uint NativeVTableCallsRuleRevision = 1;
 
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
@@ -81,8 +114,11 @@ public readonly ref struct TrRmFeatureTableReader
             var maximumRevision = featureId switch
             {
                 ScalarInitOutputFeatureId => ScalarInitOutputRuleRevision,
-                WindowsNamedNativeImportsFeatureId => WindowsNamedNativeImportsRuleRevision,
-                NativeBlittableLayoutsFeatureId => NativeBlittableLayoutsRuleRevision,
+                NativeBoundaryContractsFeatureId => NativeBoundaryContractsRuleRevision,
+                RootlessNativeValuesFeatureId => RootlessNativeValuesRuleRevision,
+                DirectNativeCallsFeatureId => DirectNativeCallsRuleRevision,
+                NativeCallableEntriesFeatureId => NativeCallableEntriesRuleRevision,
+                NativeVTableCallsFeatureId => NativeVTableCallsRuleRevision,
                 _ => 0u,
             };
             if (featureId <= previousFeatureId || minimumRuleRevision == 0

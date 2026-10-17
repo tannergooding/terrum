@@ -24,6 +24,10 @@ public static partial class ModuleCompiler
     private const int NativeFunctionPointerVersion = 82;
     private const int NativePointerVersion = 83;
     private const int NativeVTableVersion = 84;
+    private const int NativeVTableOffsetVersion = 85;
+    private const int NativeVTableContractVersion = 86;
+    private const int NativeVTableOutputVersion = 87;
+    private const int NativeCallableEntryVersion = 88;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -676,6 +680,10 @@ public static partial class ModuleCompiler
                 {
                     Add(parameter.PointeeType);
                 }
+                foreach (var output in vtableMethod.Outputs)
+                {
+                    Add(output.PointeeType);
+                }
             }
             if (function.DeclaringStruct is string declaring
                 && declaring != NativeBufferIntrinsics.TypeName
@@ -771,9 +779,19 @@ public static partial class ModuleCompiler
     private static void ValidateProducer(Module producer)
     {
         var names = new Dictionary<string, int>(producer.Functions.Length, StringComparer.Ordinal);
+        var nativeCallableEntryNames = new HashSet<string>(StringComparer.Ordinal);
         for (var index = 0; index < producer.Functions.Length; index++)
         {
-            names.Add(producer.Functions[index].Name, index);
+            var item = producer.Functions[index];
+            names.Add(item.Name, index);
+            if (item.Function is BoundFunction function
+                && function.NativeCallableEntryName is string entryName
+                && (function.NativeFunctionPointerType is null
+                    || !DirectNativeImportContract.IsValidExportName(entryName)
+                    || !nativeCallableEntryNames.Add(entryName)))
+            {
+                throw new ModuleFormatException("Producer contains an invalid or duplicate native callable entry.");
+            }
         }
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(producer.Functions.Length);
         foreach (var function in producer.Functions)
@@ -813,6 +831,18 @@ public static partial class ModuleCompiler
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
             throw new ModuleFormatException("Producer IR failed semantic verification.", exception);
+        }
+    }
+
+    private static void VerifyModuleBoundProgram(Action verification)
+    {
+        try
+        {
+            verification();
+        }
+        catch (ArgumentException exception) when (exception.ParamName == "program")
+        {
+            throw new ModuleContractException("Program violates the module semantic contract.", exception);
         }
     }
 
@@ -863,21 +893,24 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
         }
-        if (program.EntryPoint == -1)
+        VerifyModuleBoundProgram(() =>
         {
-            if (program.Functions.Any(static function => function.DirectNativeImport is not null))
+            if (program.EntryPoint == -1)
             {
-                SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
+                if (program.Functions.Any(static function => function.DirectNativeImport is not null))
+                {
+                    SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
+                }
+                else
+                {
+                    SemanticVerifier.VerifyLibrary(program);
+                }
             }
             else
             {
-                SemanticVerifier.VerifyLibrary(program);
+                SemanticVerifier.Verify(program);
             }
-        }
-        else
-        {
-            SemanticVerifier.Verify(program);
-        }
+        });
         if (program.Classes.IsDefaultOrEmpty && program.Functions.Any(static function =>
                 ManagedClassTypes.IsOptional(function.ReturnType)
                 || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))))
@@ -891,22 +924,44 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("A producer needs exported functions other than Main.");
         }
         var indexes = new HashSet<int>(names.Count);
+        var exportedIndexes = new HashSet<int>(names.Count);
         for (var i = 0; i < program.Functions.Length; i++)
         {
             if (names.Contains(program.Functions[i].Name))
             {
                 _ = indexes.Add(i);
+                _ = exportedIndexes.Add(i);
             }
         }
         if (indexes.Count != names.Count)
         {
             throw new ModuleFormatException("An exported function is missing.");
         }
+        var nativeCallableEntryNames = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < program.Functions.Length; i++)
+        {
+            var function = program.Functions[i];
+            if (function.NativeCallableEntryName is not string entryName)
+            {
+                continue;
+            }
+            if (function.NativeFunctionPointerType is null
+                || !DirectNativeImportContract.IsValidExportName(entryName)
+                || !nativeCallableEntryNames.Add(entryName))
+            {
+                throw new ModuleContractException("Producer contains an invalid or duplicate native callable entry.");
+            }
+            if (!function.IsExternal)
+            {
+                _ = indexes.Add(i);
+            }
+        }
         var hasPrivateManagedState = HasPrivateManagedState(program);
-        if (indexes.Any(index => !Exportable(program.Functions[index], program.Structures,
+        if (exportedIndexes.Any(index => !Exportable(program.Functions[index], program.Structures,
                 program.NativePointerTypes))
             || (hasPrivateManagedState
-                && indexes.Any(index => !ManagedExportShape.Supported(program.Functions[index], program.Structures))))
+                && exportedIndexes.Any(index =>
+                    !ManagedExportShape.Supported(program.Functions[index], program.Structures))))
         {
             throw new ModuleContractException("Producer exports must have public, supported native declarations.");
         }
@@ -915,7 +970,8 @@ public static partial class ModuleCompiler
         Dictionary<string, int>? structureIndexes = null;
         if (cleanupStructures.Length != 0)
         {
-            var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])),
+            var exportedTypes = RequiredStructures(exportedIndexes.Select(index =>
+                Declaration(program.Functions[index])),
                 program.Structures, findStructureIndex: FindStructureIndex,
                 nativePointerTypes: program.NativePointerTypes,
                 nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
@@ -1056,7 +1112,7 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
         }
         ArgumentNullException.ThrowIfNull(referenceProducer);
-        SemanticVerifier.VerifyReferences(program);
+        VerifyModuleBoundProgram(() => SemanticVerifier.VerifyReferences(program));
         var hasPrivateManagedState = HasPrivateManagedState(program);
         if (hasPrivateManagedState && !program.Functions.Any(static function => function.IsExternal))
         {
@@ -1159,6 +1215,14 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Reference declaration for '{function.Name}' differs from the producer.");
                 }
+                var importedNativeVTableMethod = function.ModuleImport is null
+                    ? null : function.NativeVTableMethod;
+                if (!CompatibleImportedNativeVTableMethod(importedNativeVTableMethod,
+                    imported.Function?.NativeVTableMethod))
+                {
+                    throw new ModuleContractException(
+                        $"Reference vtable binding for '{function.Name}' differs from the selected provider.");
+                }
                 var hasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures);
                 if (hasOwnershipTransfer != imported.HasOwnershipTransfer)
                 {
@@ -1166,6 +1230,7 @@ public static partial class ModuleCompiler
                 }
                 declarations.Add(new ModuleFunction(function.Name, imported.Contract, null, true) {
                     HasOwnershipTransfer = hasOwnershipTransfer,
+                    ImportedNativeVTableMethod = importedNativeVTableMethod,
                 });
                 functionCalls?[i] = null;
             }
@@ -1367,6 +1432,9 @@ public static partial class ModuleCompiler
             {
                 if (!available.TryGetValue(declaration.Name, out var replacement)
                     || !CompatibleContract(declaration.Contract, replacement.Contract)
+                    || !CompatibleImportedNativeVTableMethod(
+                        declaration.ImportedNativeVTableMethod,
+                        replacement.Function?.NativeVTableMethod)
                     || declaration.HasOwnershipTransfer != replacement.HasOwnershipTransfer)
                 {
                     throw new ModuleContractException($"Incompatible or missing producer contract for '{declaration.Name}'.");
@@ -1686,6 +1754,9 @@ public static partial class ModuleCompiler
                     {
                         VisitExpression(argument);
                     }
+                    break;
+                case SymbolicNativeFunctionAddress address:
+                    visitSymbolicFunction?.Invoke(address.Name);
                     break;
                 case BoundUnary unary:
                     VisitExpression(unary.Operand);
@@ -2943,6 +3014,16 @@ public static partial class ModuleCompiler
             _ = result.Append("|NativeCallable:")
                 .Append(ContractType(functionPointerType, structures, functionPointerSignatures, nativePointerTypes));
         }
+        if (function.NativeCallableEntryName is string entryName)
+        {
+            if (function.NativeFunctionPointerType is null
+                || !DirectNativeImportContract.IsValidExportName(entryName))
+            {
+                throw new ModuleContractException("Native callable entry name is invalid.");
+            }
+            _ = result.Append("|NativeCallableEntry:")
+                .Append(Convert.ToHexString(Encoding.ASCII.GetBytes(entryName)));
+        }
         if (function.NativeVTableMethod is NativeVTableMethodDefinition vtableMethod)
         {
             foreach (var parameter in vtableMethod.Parameters.OrderBy(
@@ -2955,6 +3036,16 @@ public static partial class ModuleCompiler
                     .Append((byte)parameter.Access).Append(':')
                     .Append((byte)parameter.Retention).Append(':')
                     .Append(parameter.Extent);
+            }
+            foreach (var output in vtableMethod.Outputs.OrderBy(
+                static output => output.ParameterIndex))
+            {
+                _ = result.Append("|NativeVTableOutput:")
+                    .Append(output.ParameterIndex).Append(':')
+                    .Append(ContractType(output.PointeeType, structures,
+                        functionPointerSignatures, nativePointerTypes)).Append(':')
+                    .Append(output.ResultCondition).Append(':')
+                    .Append(output.FailureDisposition);
             }
         }
         _ = result.Append(function.IsNoThrow ? "|NoThrow" : "|MayThrow")
@@ -3016,6 +3107,65 @@ public static partial class ModuleCompiler
     private static char Visibility(BoundStruct structure) =>
         structure.IsPrivate ? 'P' : structure.IsInternal ? 'N' : 'E';
 
+    internal static bool SameNativeVTableMethod(NativeVTableMethodDefinition expected,
+        NativeVTableMethodDefinition actual) =>
+        expected.Slot == actual.Slot
+        && expected.VTableByteOffset == actual.VTableByteOffset
+        && SameNativeVTableParameterBindings(expected.Parameters, actual.Parameters)
+        && SameNativeVTableOutputBindings(expected.Outputs, actual.Outputs);
+
+    private static bool SameNativeVTableParameterBindings(
+        ImmutableArray<DirectNativeParameter> expected,
+        ImmutableArray<DirectNativeParameter> actual)
+    {
+        if (expected.IsDefault || actual.IsDefault || expected.Length != actual.Length)
+        {
+            return false;
+        }
+
+        // Pointee identities are compared by the enclosing function contract after dependency remapping.
+        foreach (var expectedParameter in expected)
+        {
+            var actualParameter = actual.FirstOrDefault(parameter =>
+                parameter.ParameterIndex == expectedParameter.ParameterIndex);
+            if (actualParameter is null
+                || actualParameter.Access != expectedParameter.Access
+                || actualParameter.Retention != expectedParameter.Retention
+                || actualParameter.Extent != expectedParameter.Extent)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool SameNativeVTableOutputBindings(
+        ImmutableArray<DirectNativeOutput> expected,
+        ImmutableArray<DirectNativeOutput> actual)
+    {
+        if (expected.IsDefault || actual.IsDefault || expected.Length != actual.Length)
+        {
+            return false;
+        }
+
+        foreach (var expectedOutput in expected)
+        {
+            var actualOutput = actual.FirstOrDefault(output =>
+                output.ParameterIndex == expectedOutput.ParameterIndex);
+            if (actualOutput is null
+                || actualOutput.ResultCondition != expectedOutput.ResultCondition
+                || actualOutput.FailureDisposition != expectedOutput.FailureDisposition)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    internal static bool CompatibleImportedNativeVTableMethod(
+        NativeVTableMethodDefinition? expected, NativeVTableMethodDefinition? actual) =>
+        expected is null || (actual is not null && SameNativeVTableMethod(expected, actual));
+
     private static string ContractType(PrimitiveType type, ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
@@ -3031,6 +3181,17 @@ public static partial class ModuleCompiler
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
     {
+        var builder = new StringBuilder();
+        var byteCount = 0;
+        AppendTypeName(builder, ref byteCount, type, structures, functionPointerSignatures, nativePointerTypes);
+        return builder.ToString();
+    }
+
+    private static void AppendTypeName(StringBuilder builder, ref int byteCount, PrimitiveType type,
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
+    {
         if (NativePointerTypes.IsType(type))
         {
             var pointerIndex = NativePointerTypes.Index(type);
@@ -3038,9 +3199,12 @@ public static partial class ModuleCompiler
                 && (uint)pointerIndex < (uint)nativePointerTypes.Length)
             {
                 var pointerType = nativePointerTypes[pointerIndex];
-                return (pointerType.IsWritable ? "write " : "")
-                    + "ptr<" + TypeName(pointerType.PointeeType, structures,
-                        functionPointerSignatures, nativePointerTypes) + ">";
+                AppendBoundedTypeName(builder, ref byteCount,
+                    pointerType.IsWritable ? "write ptr<" : "ptr<");
+                AppendTypeName(builder, ref byteCount, pointerType.PointeeType, structures,
+                    functionPointerSignatures, nativePointerTypes);
+                AppendBoundedTypeName(builder, ref byteCount, ">");
+                return;
             }
         }
         if (NativeFunctionPointerTypes.IsType(type))
@@ -3050,15 +3214,39 @@ public static partial class ModuleCompiler
                 && (uint)functionPointerIndex < (uint)functionPointerSignatures.Length)
             {
                 var signature = functionPointerSignatures[functionPointerIndex];
-                var parameters = string.Join(",", signature.ParameterTypes.Select(parameterType =>
-                    TypeName(parameterType, structures, functionPointerSignatures, nativePointerTypes)));
-                return $"fnptr:{signature.CallingConvention}({parameters})->"
-                    + TypeName(signature.ReturnType, structures, functionPointerSignatures, nativePointerTypes);
+                AppendBoundedTypeName(builder, ref byteCount, "fnptr:");
+                AppendBoundedTypeName(builder, ref byteCount, signature.CallingConvention.ToString());
+                AppendBoundedTypeName(builder, ref byteCount, "(");
+                for (var parameterIndex = 0; parameterIndex < signature.ParameterTypes.Length; parameterIndex++)
+                {
+                    if (parameterIndex != 0)
+                    {
+                        AppendBoundedTypeName(builder, ref byteCount, ",");
+                    }
+                    AppendTypeName(builder, ref byteCount, signature.ParameterTypes[parameterIndex], structures,
+                        functionPointerSignatures, nativePointerTypes);
+                }
+                AppendBoundedTypeName(builder, ref byteCount, ")->");
+                AppendTypeName(builder, ref byteCount, signature.ReturnType, structures,
+                    functionPointerSignatures, nativePointerTypes);
+                return;
             }
         }
         var index = (int)type - 100;
-        return index >= 0 && index < structures.Length
-            ? structures[index].Name : ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        AppendBoundedTypeName(builder, ref byteCount, index >= 0 && index < structures.Length
+            ? structures[index].Name
+            : ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static void AppendBoundedTypeName(StringBuilder builder, ref int byteCount, string value)
+    {
+        var valueByteCount = StrictUtf8.GetByteCount(value);
+        if (valueByteCount > MaximumStringBytes - byteCount)
+        {
+            throw new ModuleContractException("Native module type identity exceeds the string limit.");
+        }
+        _ = builder.Append(value);
+        byteCount += valueByteCount;
     }
 
     private static bool Exportable(BoundFunction function, ImmutableArray<BoundStruct> structures,
@@ -3393,8 +3581,12 @@ public static partial class ModuleCompiler
         {
             return function;
         }
+        PrimitiveType RemapType(PrimitiveType type)
+        {
+            return RemapNativeFunctionPointerType(type, mapping);
+        }
         var remapped = BoundTreeTraversal.RewriteExpressions(function,
-            expression => expression with { Type = RemapNativeFunctionPointerType(expression.Type, mapping) });
+            expression => RemapNativeTypeIdentities(expression, RemapType));
         return remapped with {
             ReturnType = RemapNativeFunctionPointerType(function.ReturnType, mapping),
             NativeFunctionPointerType = function.NativeFunctionPointerType is PrimitiveType functionPointerType
@@ -3414,11 +3606,16 @@ public static partial class ModuleCompiler
                     Parameters = [.. vtableMethod.Parameters.Select(parameter => parameter with {
                         PointeeType = RemapNativeFunctionPointerType(parameter.PointeeType, mapping),
                     })],
+                    Outputs = [.. vtableMethod.Outputs.Select(output => output with {
+                        PointeeType = RemapNativeFunctionPointerType(output.PointeeType, mapping),
+                    })],
                 }
                 : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = RemapNativeFunctionPointerType(variable.Type, mapping),
-            })],
+                    NativeFixedArrayLayout = variable.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
+                        ? RemapNativeFixedArrayLayout(layout, RemapType) : null,
+                })],
         };
     }
 
@@ -3445,8 +3642,12 @@ public static partial class ModuleCompiler
         {
             return function;
         }
+        PrimitiveType RemapType(PrimitiveType type)
+        {
+            return RemapNativePointerType(type, mapping);
+        }
         var remapped = BoundTreeTraversal.RewriteExpressions(function,
-            expression => expression with { Type = RemapNativePointerType(expression.Type, mapping) });
+            expression => RemapNativeTypeIdentities(expression, RemapType));
         return remapped with {
             ReturnType = RemapNativePointerType(function.ReturnType, mapping),
             DirectNativeImport = function.DirectNativeImport is DirectNativeImport import
@@ -3464,11 +3665,53 @@ public static partial class ModuleCompiler
                     Parameters = [.. vtableMethod.Parameters.Select(parameter => parameter with {
                         PointeeType = RemapNativePointerType(parameter.PointeeType, mapping),
                     })],
+                    Outputs = [.. vtableMethod.Outputs.Select(output => output with {
+                        PointeeType = RemapNativePointerType(output.PointeeType, mapping),
+                    })],
                 }
                 : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = RemapNativePointerType(variable.Type, mapping),
+                NativeFixedArrayLayout = variable.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
+                    ? RemapNativeFixedArrayLayout(layout, RemapType) : null,
             })],
+        };
+    }
+
+    private static BoundNativeFixedArrayLayout RemapNativeFixedArrayLayout(
+        BoundNativeFixedArrayLayout layout, Func<PrimitiveType, PrimitiveType> remapType) => layout with {
+            CarrierType = remapType(layout.CarrierType),
+            ElementType = remapType(layout.ElementType),
+        };
+
+    private static BoundExpression RemapNativeTypeIdentities(BoundExpression expression,
+        Func<PrimitiveType, PrimitiveType> remapType)
+    {
+        var type = remapType(expression.Type);
+        return expression switch {
+            BoundNativeStorageAddress address => address with {
+                Type = type,
+                CarrierType = remapType(address.CarrierType),
+                ElementType = remapType(address.ElementType),
+                AddressType = remapType(address.AddressType),
+            },
+            BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
+                Type = type,
+                Layout = RemapNativeFixedArrayLayout(fixedArray.Layout, remapType),
+            },
+            BoundNativeFixedArrayElement fixedArrayElement => fixedArrayElement with {
+                Type = type,
+                Layout = RemapNativeFixedArrayLayout(fixedArrayElement.Layout, remapType),
+            },
+            BoundNativeFixedArrayPointerAddress pointerAddress => pointerAddress with {
+                Type = type,
+                Layout = RemapNativeFixedArrayLayout(pointerAddress.Layout, remapType),
+            },
+            BoundNativeFixedArrayWrite fixedArrayWrite => fixedArrayWrite with {
+                Type = type,
+                Layout = RemapNativeFixedArrayLayout(fixedArrayWrite.Layout, remapType),
+            },
+            _ => expression with { Type = type },
         };
     }
 
@@ -3716,6 +3959,10 @@ public static partial class ModuleCompiler
                 ? vtableMethod with {
                     Parameters = [.. vtableMethod.Parameters.Select(parameter => parameter with {
                         PointeeType = RemapType(parameter.PointeeType, source, destination, classOffset,
+                            destinationTypes),
+                    })],
+                    Outputs = [.. vtableMethod.Outputs.Select(output => output with {
+                        PointeeType = RemapType(output.PointeeType, source, destination, classOffset,
                             destinationTypes),
                     })],
                 }
@@ -4043,7 +4290,16 @@ public static partial class ModuleCompiler
         var hasNativeFunctionPointers = !module.NativeFunctionPointerSignatures.IsEmpty;
         var hasNativePointerTypes = !module.NativePointerTypes.IsEmpty;
         var hasNativeVTableMethods = module.Functions.Any(static function =>
-            function.Function?.NativeVTableMethod is not null);
+            function.Function?.NativeVTableMethod is not null
+            || function.ImportedNativeVTableMethod is not null);
+        var hasNativeVTableOutputs = module.Functions.Any(static function =>
+            (function.Function?.NativeVTableMethod is NativeVTableMethodDefinition method
+                && !method.Outputs.IsDefaultOrEmpty)
+            || (function.ImportedNativeVTableMethod is NativeVTableMethodDefinition importedMethod
+                && !importedMethod.Outputs.IsDefaultOrEmpty));
+        var hasNativeCallableEntryNames = module.Functions.Any(static function =>
+            function.Function?.NativeCallableEntryName is not null
+            || function.Contract.Contains("|NativeCallableEntry:", StringComparison.Ordinal));
         if (TokenSpanContract.HasMetadata(program)
             || ScalarFrontendHost.IsInvocationProfileIdentity(module.InvocationProfileId))
         {
@@ -4074,9 +4330,16 @@ public static partial class ModuleCompiler
         }
         if (hasNativeVTableMethods)
         {
-            module = module with { FormatVersion = NativeVTableVersion };
+            module = module with {
+                FormatVersion = hasNativeVTableOutputs
+                    ? NativeVTableOutputVersion : NativeVTableContractVersion,
+            };
         }
         module = SelectFixedLayoutRevision(module);
+        if (hasNativeCallableEntryNames)
+        {
+            module = module with { FormatVersion = NativeCallableEntryVersion };
+        }
         ValidateUnsafeExpressionScopes(program, module);
         if (module.InvocationProfileId is null
             ? !module.InvocationBuffers.IsEmpty
@@ -4127,7 +4390,8 @@ public static partial class ModuleCompiler
             PutString(writer, structure.Name);
             if (module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
                 or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
-                or NativePointerVersion or NativeVTableVersion)
+                or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
+                or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion)
             {
                 writer.Write((byte)structure.TokenSpanRole);
             }
@@ -4211,18 +4475,32 @@ public static partial class ModuleCompiler
         var remaining = MaximumNodes;
         foreach (var item in module.Functions)
         {
+            if (item.ImportedNativeVTableMethod is not null
+                && (!module.Consumer || !item.Import || item.Function is not null))
+            {
+                throw new ModuleFormatException(
+                    "Expected native vtable bindings are only valid on imported consumer declarations.");
+            }
             PutString(writer, item.Name);
             PutString(writer, item.Contract);
             writer.Write(item.Import);
             writer.Write(item.Function is not null);
             writer.Write(item.HasOwnershipTransfer);
+            if (module.FormatVersion >= NativeVTableContractVersion)
+            {
+                PutImportedNativeVTableMethod(writer, item.ImportedNativeVTableMethod,
+                    module.FormatVersion >= NativeVTableOutputVersion);
+            }
             if (item.Function is BoundFunction function)
             {
                 PutFunction(writer, function, names, ref remaining,
                     module.FormatVersion >= DirectNativeImportVersion,
                     module.FormatVersion >= DirectNativeParameterVersion,
                     module.FormatVersion >= NativeFunctionPointerVersion,
-                    module.FormatVersion >= NativeVTableVersion, module.Structures,
+                    module.FormatVersion >= NativeCallableEntryVersion,
+                    module.FormatVersion >= NativeVTableVersion,
+                    module.FormatVersion >= NativeVTableOffsetVersion,
+                    module.FormatVersion >= NativeVTableOutputVersion, module.Structures,
                     module.NativeFunctionPointerSignatures, module.NativePointerTypes);
             }
         }
@@ -4318,7 +4596,8 @@ public static partial class ModuleCompiler
             if (hasPrivateManagedState || (!expectedConsumer
                 && module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
                     or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
-                    or NativePointerVersion or NativeVTableVersion))
+                    or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
+                    or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion))
             {
                 ValidateProducer(module);
             }
@@ -4342,7 +4621,9 @@ public static partial class ModuleCompiler
         var version = reader.ReadInt32();
         if (version is not (Version or PrivateSpanVersion or FixedLayoutVersion
             or DirectNativeImportVersion or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion
-            or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion)
+            or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion
+            or NativeVTableOffsetVersion or NativeVTableContractVersion or NativeVTableOutputVersion
+            or NativeCallableEntryVersion)
             || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
@@ -4359,14 +4640,17 @@ public static partial class ModuleCompiler
         var invocationProfileId = profileIdText.Length == 0 ? null : profileIdText;
         var bufferCount = Count(reader, version is PrivateSpanVersion or DirectNativeImportVersion
             or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
-                or NativePointerVersion or NativeVTableVersion
+                or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
+                or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
                 ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
                     || (invocationProfileId != ScannerHost.InvocationProfileIdentity
                         && (version is not (PrivateSpanVersion or DirectNativeImportVersion
                                 or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion
-                                or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion)
+                                or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion
+                                or NativeVTableOffsetVersion or NativeVTableContractVersion
+                                or NativeVTableOutputVersion or NativeCallableEntryVersion)
                             || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId)))))
             || (invocationProfileId is null && bufferCount != 0))
         {
@@ -4464,7 +4748,8 @@ public static partial class ModuleCompiler
             var role = reader is ModuleReader {
                 FormatVersion: PrivateSpanVersion or DirectNativeImportVersion
                     or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
-                        or NativePointerVersion or NativeVTableVersion,
+                        or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
+                        or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion,
             }
                 ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
             if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
@@ -4583,6 +4868,11 @@ public static partial class ModuleCompiler
             var import = GetBool(reader);
             var hasBody = GetBool(reader);
             var ownershipTransfer = GetBool(reader);
+            var importedNativeVTableMethod =
+                reader is ModuleReader { FormatVersion: >= NativeVTableContractVersion }
+                    ? GetImportedNativeVTableMethod(reader, import, hasBody, contract, structures,
+                        reader is ModuleReader { FormatVersion: >= NativeVTableOutputVersion })
+                    : null;
             if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
@@ -4627,6 +4917,7 @@ public static partial class ModuleCompiler
             }
             var item = new ModuleFunction(name, contract, function, import) {
                 HasOwnershipTransfer = ownershipTransfer,
+                ImportedNativeVTableMethod = importedNativeVTableMethod,
             };
             if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes))
             {
@@ -4637,9 +4928,134 @@ public static partial class ModuleCompiler
         return items.ToImmutable();
     }
 
+    private static NativeVTableMethodDefinition? GetImportedNativeVTableMethod(
+        BinaryReader reader, bool import, bool hasBody, string contract,
+        ImmutableArray<BoundStruct> structures, bool supportsOutputs)
+    {
+        if (!GetBool(reader))
+        {
+            return null;
+        }
+        if (!import || hasBody)
+        {
+            throw new ModuleFormatException("Only imported declarations may retain an expected native vtable binding.");
+        }
+
+        var slot = reader.ReadInt32();
+        var vtableByteOffset = reader.ReadInt32();
+        var parameterCount = Count(reader, MaximumSlots);
+        if (slot < 0 || slot > int.MaxValue / NativeTargetProfile.PointerSize
+            || vtableByteOffset < 0
+            || vtableByteOffset % NativeTargetProfile.PointerSize != 0
+            || vtableByteOffset > int.MaxValue - NativeTargetProfile.PointerSize)
+        {
+            throw new ModuleFormatException("Imported native vtable binding is invalid.");
+        }
+
+        var parameters = ImmutableArray.CreateBuilder<DirectNativeParameter>(parameterCount);
+        var previousParameterIndex = 0;
+        var functionParameterCount = ContractParameterCount(contract);
+        for (var index = 0; index < parameterCount; index++)
+        {
+            var parameterIndex = reader.ReadInt32();
+            var pointeeType = (PrimitiveType)reader.ReadInt32();
+            var access = (NativeParameterAccess)reader.ReadByte();
+            var retention = (NativeParameterRetention)reader.ReadByte();
+            var extent = reader.ReadInt32();
+            if (parameterIndex <= previousParameterIndex
+                || parameterIndex >= functionParameterCount
+                || !DirectNativeImportContract.IsInputPointee(pointeeType, structures)
+                || access is not (NativeParameterAccess.Read or NativeParameterAccess.Write
+                    or NativeParameterAccess.ReadWrite)
+                || retention is not (NativeParameterRetention.NoEscape
+                    or NativeParameterRetention.MayEscape)
+                || extent < 0)
+            {
+                throw new ModuleFormatException("Imported native vtable parameter is invalid.");
+            }
+            parameters.Add(new DirectNativeParameter(parameterIndex, pointeeType,
+                access, retention, extent));
+            previousParameterIndex = parameterIndex;
+        }
+        var outputs = ImmutableArray<DirectNativeOutput>.Empty;
+        if (supportsOutputs)
+        {
+            var outputCount = Count(reader, MaximumSlots);
+            var outputBuilder = ImmutableArray.CreateBuilder<DirectNativeOutput>(outputCount);
+            var previousOutputIndex = 0;
+            for (var index = 0; index < outputCount; index++)
+            {
+                var parameterIndex = reader.ReadInt32();
+                var pointeeType = (PrimitiveType)reader.ReadInt32();
+                var resultCondition = reader.ReadUInt32();
+                var failureDisposition = reader.ReadUInt32();
+                if (parameterIndex <= previousOutputIndex
+                    || parameterIndex >= functionParameterCount
+                    || !DirectNativeImportContract.IsOutputPointee(pointeeType)
+                    || resultCondition is < DirectNativeImportContract.Int32NonZeroResultCondition
+                        or > DirectNativeImportContract.Int32NonNegativeResultCondition
+                    || failureDisposition != 1)
+                {
+                    throw new ModuleFormatException("Imported native vtable output is invalid.");
+                }
+                outputBuilder.Add(new DirectNativeOutput(parameterIndex, pointeeType,
+                    resultCondition, failureDisposition));
+                previousOutputIndex = parameterIndex;
+            }
+            outputs = outputBuilder.MoveToImmutable();
+        }
+        return new NativeVTableMethodDefinition(slot, parameters.MoveToImmutable(), vtableByteOffset)
+        {
+            Outputs = outputs,
+        };
+    }
+
+    private static void PutImportedNativeVTableMethod(BinaryWriter writer,
+        NativeVTableMethodDefinition? method, bool supportsOutputs)
+    {
+        writer.Write(method is not null);
+        if (method is null)
+        {
+            return;
+        }
+        if (method.Parameters.IsDefault)
+        {
+            throw new ModuleFormatException("Imported native vtable parameters are missing.");
+        }
+        writer.Write(method.Slot);
+        writer.Write(method.VTableByteOffset);
+        writer.Write(method.Parameters.Length);
+        foreach (var parameter in method.Parameters.OrderBy(
+            static parameter => parameter.ParameterIndex))
+        {
+            writer.Write(parameter.ParameterIndex);
+            writer.Write((int)parameter.PointeeType);
+            writer.Write((byte)parameter.Access);
+            writer.Write((byte)parameter.Retention);
+            writer.Write(parameter.Extent);
+        }
+        if (supportsOutputs)
+        {
+            if (method.Outputs.IsDefault)
+            {
+                throw new ModuleFormatException("Imported native vtable outputs are missing.");
+            }
+            writer.Write(method.Outputs.Length);
+            foreach (var output in method.Outputs.OrderBy(
+                static output => output.ParameterIndex))
+            {
+                writer.Write(output.ParameterIndex);
+                writer.Write((int)output.PointeeType);
+                writer.Write(output.ResultCondition);
+                writer.Write(output.FailureDisposition);
+            }
+        }
+    }
+
     private static void PutFunction(BinaryWriter writer, BoundFunction function, string[] names,
         ref int remaining, bool supportsDirectNativeImports, bool supportsDirectNativeParameters,
-        bool supportsNativeFunctionPointers, bool supportsNativeVTableMethods,
+        bool supportsNativeFunctionPointers, bool supportsNativeCallableEntries, bool supportsNativeVTableMethods,
+        bool supportsNativeVTableOffsets, bool supportsNativeVTableOutputs,
         ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
@@ -4681,12 +5097,34 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException(
                 "Native-callable declarations require semantic-module revision 82.");
         }
+        if (supportsNativeCallableEntries)
+        {
+            writer.Write(function.NativeCallableEntryName is not null);
+            if (function.NativeCallableEntryName is string entryName)
+            {
+                if (function.NativeFunctionPointerType is null
+                    || !DirectNativeImportContract.IsValidExportName(entryName))
+                {
+                    throw new ModuleFormatException("Native callable entry name is invalid.");
+                }
+                PutString(writer, entryName);
+            }
+        }
+        else if (function.NativeCallableEntryName is not null)
+        {
+            throw new ModuleFormatException(
+                "Native callable entry names require semantic-module revision 88.");
+        }
         if (supportsNativeVTableMethods)
         {
             writer.Write(function.NativeVTableMethod is not null);
             if (function.NativeVTableMethod is NativeVTableMethodDefinition method)
             {
                 writer.Write(method.Slot);
+                if (supportsNativeVTableOffsets)
+                {
+                    writer.Write(method.VTableByteOffset);
+                }
                 writer.Write(method.Parameters.Length);
                 foreach (var parameter in method.Parameters)
                 {
@@ -4695,6 +5133,22 @@ public static partial class ModuleCompiler
                     writer.Write((byte)parameter.Access);
                     writer.Write((byte)parameter.Retention);
                     writer.Write(parameter.Extent);
+                }
+                if (supportsNativeVTableOutputs)
+                {
+                    if (method.Outputs.IsDefault)
+                    {
+                        throw new ModuleFormatException("Native vtable outputs are missing.");
+                    }
+                    writer.Write(method.Outputs.Length);
+                    foreach (var output in method.Outputs.OrderBy(
+                        static output => output.ParameterIndex))
+                    {
+                        writer.Write(output.ParameterIndex);
+                        writer.Write((int)output.PointeeType);
+                        writer.Write(output.ResultCondition);
+                        writer.Write(output.FailureDisposition);
+                    }
                 }
             }
         }
@@ -4783,12 +5237,18 @@ public static partial class ModuleCompiler
         {
             nativeFunctionPointerType = GetType(reader);
         }
+        var nativeCallableEntryName = reader is ModuleReader {
+            FormatVersion: >= NativeCallableEntryVersion,
+        } && GetBool(reader) ? GetString(reader) : null;
         var isExternal = false;
         DirectNativeImport? directNativeImport = null;
         NativeVTableMethodDefinition? nativeVTableMethod = null;
         if (reader is ModuleReader { FormatVersion: >= NativeVTableVersion } && GetBool(reader))
         {
             var slot = reader.ReadInt32();
+            var vtableByteOffset = reader is ModuleReader {
+                FormatVersion: >= NativeVTableOffsetVersion,
+            } ? reader.ReadInt32() : 0;
             var parameterCount = Count(reader, MaximumSlots);
             var vtableParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>(parameterCount);
             for (var index = 0; index < parameterCount; index++)
@@ -4797,7 +5257,23 @@ public static partial class ModuleCompiler
                     (PrimitiveType)reader.ReadInt32(), (NativeParameterAccess)reader.ReadByte(),
                     (NativeParameterRetention)reader.ReadByte(), reader.ReadInt32()));
             }
-            nativeVTableMethod = new NativeVTableMethodDefinition(slot, vtableParameters.MoveToImmutable());
+            var vtableOutputs = ImmutableArray<DirectNativeOutput>.Empty;
+            if (reader is ModuleReader { FormatVersion: >= NativeVTableOutputVersion })
+            {
+                var outputCount = Count(reader, MaximumSlots);
+                var outputBuilder = ImmutableArray.CreateBuilder<DirectNativeOutput>(outputCount);
+                for (var index = 0; index < outputCount; index++)
+                {
+                    outputBuilder.Add(new DirectNativeOutput(reader.ReadInt32(),
+                        (PrimitiveType)reader.ReadInt32(), reader.ReadUInt32(), reader.ReadUInt32()));
+                }
+                vtableOutputs = outputBuilder.MoveToImmutable();
+            }
+            nativeVTableMethod = new NativeVTableMethodDefinition(slot,
+                vtableParameters.MoveToImmutable(), vtableByteOffset)
+            {
+                Outputs = vtableOutputs,
+            };
         }
         if (reader is ModuleReader { FormatVersion: >= DirectNativeImportVersion })
         {
@@ -4875,6 +5351,7 @@ public static partial class ModuleCompiler
             Intrinsic = intrinsic,
             DeclaringStruct = declaringStruct,
             NativeFunctionPointerType = nativeFunctionPointerType,
+            NativeCallableEntryName = nativeCallableEntryName,
             IsClassConstructor = classConstructor,
             ClassConstructor = classFactoryConstructor,
             IsExternal = isExternal,
@@ -6074,16 +6551,30 @@ public static partial class ModuleCompiler
     internal sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import)
     {
         public bool HasOwnershipTransfer { get; init; }
+        public NativeVTableMethodDefinition? ImportedNativeVTableMethod { get; init; }
     }
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
     {
         public ImmutableArray<int> ArgumentParameterIndices { get; init; }
+
+        internal override bool HasValidNestedExpressions =>
+            !Arguments.IsDefault && Arguments.All(static argument => argument is not null);
+        internal override ImmutableArray<BoundExpression> NestedExpressions =>
+            Arguments.IsDefault ? [] : Arguments;
+        internal override BoundExpression RewriteNestedExpressions(
+            Func<BoundExpression, BoundExpression> rewrite) => Arguments.IsDefault ? this
+            : this with { Arguments = [.. Arguments.Select(rewrite)] };
     }
     private sealed record SymbolicNativeFunctionAddress(string Name, PrimitiveType Type, TextSpan Span)
         : BoundExpression(Type, Span);
     private sealed record SymbolicLifetimeEnd(int Variable, string? Name, TextSpan Span) : BoundStatement(Span);
     private sealed record SymbolicNominalUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
-        string Name, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+        string Name, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+    {
+        internal override ImmutableArray<BoundExpression> NestedExpressions => [Place];
+        internal override BoundExpression RewriteNestedExpressions(
+            Func<BoundExpression, BoundExpression> rewrite) => this with { Place = rewrite(Place) };
+    }
     private sealed record SymbolicDrop(int Variable, string? Name, TextSpan Span) : BoundStatement(Span)
     {
         public bool IsOutput { get; init; }

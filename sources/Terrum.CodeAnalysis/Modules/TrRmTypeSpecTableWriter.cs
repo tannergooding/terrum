@@ -17,7 +17,7 @@ public static class TrRmTypeSpecTableWriter
 
     public static byte[] Reference(byte form, uint row, byte qualifiers = 0)
     {
-        if (form is not (0x02 or 0x03 or 0x04))
+        if (form is not (0x02 or 0x03 or 0x04 or 0x0D))
         {
             throw new ArgumentOutOfRangeException(nameof(form));
         }
@@ -66,12 +66,16 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
+    /// <summary>Encodes TypeSpec rows and validates their referenced table counts.</summary>
     public static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows,
-        int typeDefCount, int importCount, int genericParamCount, int typeArgCount)
+        int typeDefCount, int importCount, int genericParamCount, int typeArgCount,
+        int nativeFunctionPointerSignatureCount = 0)
     {
+        ArgumentNullException.ThrowIfNull(rows);
         var result = TrRmVariableTableWriter.EncodeBlobs(rows);
         _ = new TrRmTypeSpecTableReader(result, rows.Count,
-            typeDefCount, importCount, genericParamCount, typeArgCount);
+            typeDefCount, importCount, genericParamCount, typeArgCount,
+            nativeFunctionPointerSignatureCount);
         return result;
     }
 

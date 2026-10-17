@@ -140,6 +140,62 @@ public sealed class NativeLibraryTests
     }
 
     [Test]
+    public void NativeCallableEntryNamesAreIndependentNamedExports()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [NoThrow]
+            [Terrum.Interop.NativeCallable]
+            public int32 Callback(int32 value) { return value; }
+            public int32 Ordinary() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var callback = program.Functions.Single(static function => function.Name == "Callback");
+        var callbackIndex = program.Functions.IndexOf(callback);
+        program = program with
+        {
+            Functions = program.Functions.SetItem(callbackIndex,
+                callback with { NativeCallableEntryName = "Callback|Native" }),
+        };
+
+        var image = NativeEmitter.EmitLibrary(program, ["Ordinary"], NativeRuntimePolicy.FailFast);
+        using var stream = new MemoryStream(image);
+        using var reader = new PEReader(stream);
+        var headers = reader.PEHeaders;
+        var section = headers.SectionHeaders.Single(static candidate => candidate.Name == ".edata");
+        var exportOffset = section.PointerToRawData;
+        var nameTable = Read32(exportOffset + 32);
+        var names = Enumerable.Range(0, Read32(exportOffset + 24))
+            .Select(index => ReadName(Read32(Offset(nameTable) + (4 * index))))
+            .ToArray();
+
+        Assert.That(names, Is.EqualTo(new[] { "Callback|Native", "Ordinary" }));
+
+        var collision = program with
+        {
+            Functions = program.Functions.SetItem(callbackIndex,
+                callback with { NativeCallableEntryName = "Ordinary" }),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.EmitLibrary(collision, ["Ordinary"], NativeRuntimePolicy.FailFast))!;
+
+        int Read32(int offset) => BinaryPrimitives.ReadInt32LittleEndian(image.AsSpan(offset, 4));
+
+        int Offset(int rva) => checked(exportOffset + rva - section.VirtualAddress);
+
+        string ReadName(int rva)
+        {
+            var offset = Offset(rva);
+            var end = Array.IndexOf(image, (byte)0, offset,
+                section.PointerToRawData + section.SizeOfRawData - offset);
+            Assert.That(end, Is.GreaterThan(offset));
+            return System.Text.Encoding.ASCII.GetString(image, offset, end - offset);
+        }
+    }
+
+    [Test]
     public void RejectsNonPublicValueSignatures()
     {
         var privateType = Compile("struct Private { public int32 Value; } public int32 Read(Private value) { return value.Value; }");

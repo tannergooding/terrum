@@ -943,6 +943,32 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
+    public void StandardTrRmRoundTripsTypedPointerOnlyContracts()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public unsafe int32 Ignore(ptr<int32> value) { return 42; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "typed-pointer-only");
+        var artifactIndex = new TrRmArtifactIndex(artifact);
+        Assert.That(artifactIndex.TryGetSection(0x0004, out var featureBytes,
+            out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        Assert.That(features.TryGetFeature(
+            TrRmFeatureTableReader.NativeBoundaryContractsFeatureId, out _), Is.True);
+        Assert.That(features.TryGetFeature(
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId, out _), Is.True);
+
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var ignored = loaded.Functions.Single(static function => function.Name == "Ignore");
+        Assert.That(ignored.RequiresUnsafeCaller, Is.True);
+        Assert.That(NativePointerTypes.IsType(ignored.Variables[0].Type), Is.True);
+        Assert.That(TrRmExecutableCompiler.Emit(loaded, "typed-pointer-only"), Is.EqualTo(artifact));
+    }
+
+    [Test]
     public void RejectsOversizedNestedFunctionPointerTypeIdentityBeforeExpansion()
     {
         var source = new StringBuilder();

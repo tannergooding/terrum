@@ -10,12 +10,14 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>Rejects other assigned operation schemas; it does not execute a Body or validate published effects.</remarks>
 public readonly ref struct TrRmCompactLinearBodyReader
 {
-    // ResolveType's largest key is optional char16 (0x100 | 0x0E).
-    private const int MaximumTypeKey = 0x100 | 0x0E;
+    private const int NativeFunctionPointerTypeKeyStart =
+        TrRmTypeSpecTableReader.NativeFunctionPointerTypeKeyStart;
+    private const int MaximumTypeKey = ushort.MaxValue;
     internal const int TypeKeyBitmapWordCount = (MaximumTypeKey >> 6) + 1;
 
     private readonly ValueInfo[] _values;
     private readonly int _valueCount;
+    private readonly int _nativeFunctionPointerTypeKeyEnd;
 
     public int ValueCount => _valueCount;
     public int OperationCount { get; }
@@ -51,7 +53,18 @@ public readonly ref struct TrRmCompactLinearBodyReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
         TrRmImportTableReader imports)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            nominalTypes, imports, default)
     {
+    }
+
+    internal TrRmCompactLinearBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
+        TrRmImportTableReader imports, TrRmNativeImportTableReader nativeImports)
+    {
+        _nativeFunctionPointerTypeKeyEnd = types.NativeFunctionPointerTypeKeyEnd;
         var bodyRow = methods.GetBodyRow(methodRow);
         if (bodyRow == 0
             || modules.GetRequirements(methods.GetOwnerModule(methodRow)).RuntimePolicy != 0)
@@ -311,7 +324,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     throw InvalidBody();
                 }
 
-                if (imported)
+                if (imported && !nativeImports.HasImportForMethod(target))
                 {
                     if (!imports.TryGetExpectedRequirements(
                             0x1600_0000u | (uint)target, out var requirements))
@@ -579,10 +592,18 @@ public readonly ref struct TrRmCompactLinearBodyReader
         => value > 0 && value <= ValueCount ? (_values[value].Used ? 1 : 0) : throw InvalidBody();
 
     public byte GetTypeCode(int value)
-        => value > 0 && value <= ValueCount ? (byte)(_values[value].TypeKey & 0xFF) : throw InvalidBody();
+        => value > 0 && value <= ValueCount
+            ? _values[value].TypeKey >= NativeFunctionPointerTypeKeyStart
+                && _values[value].TypeKey < _nativeFunctionPointerTypeKeyEnd
+                    ? (byte)0x0D
+                    : _values[value].TypeKey >= _nativeFunctionPointerTypeKeyEnd
+                        ? (byte)0x8C : (byte)(_values[value].TypeKey & 0xFF)
+            : throw InvalidBody();
 
     public bool IsOptional(int value)
-        => value > 0 && value <= ValueCount ? _values[value].TypeKey >= 0x100 : throw InvalidBody();
+        => value > 0 && value <= ValueCount
+            ? _values[value].TypeKey is >= 0x100 and < NativeFunctionPointerTypeKeyStart
+            : throw InvalidBody();
 
     private static ushort MatchType(TrRmTypeSpecTableReader types,
         ReadOnlySpan<ulong> mappedTypeKeys, int row)
@@ -622,40 +643,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
     }
 
     internal static ushort ResolveType(TrRmTypeSpecTableReader types, int row)
-    {
-        var type = types.GetRow(row);
-        if (type.Length == 6 && type[0] == 6 && type[1] == 0)
-        {
-            var innerRow = BinaryPrimitives.ReadUInt32LittleEndian(type[2..]);
-            if (innerRow == 0 || innerRow > (uint)types.Count)
-            {
-                throw InvalidBody();
-            }
-
-            var inner = types.GetRow((int)innerRow);
-            if (inner.Length != 3 || inner[0] != 1 || inner[1] != 0
-                || !IsSupportedOptionalAtom(inner[2]))
-            {
-                throw InvalidBody();
-            }
-
-            return (ushort)(0x100 | inner[2]);
-        }
-
-        if (type.Length != 3 || type[0] != 1 || type[1] != 0
-            || !IsSupportedAtom(type[2]))
-        {
-            throw InvalidBody();
-        }
-
-        return type[2];
-    }
-
-    private static bool IsSupportedAtom(byte type)
-        => IsSupportedOptionalAtom(type) || type is 0x14 or 0x15;
-
-    private static bool IsSupportedOptionalAtom(byte type)
-        => type is 1 or 3 or 8 or 9 or 0x0D or 0x0E;
+        => types.GetCompactValueTypeKey(row);
 
     private ushort Use(ReadOnlySpan<byte> body, ref int position, int width, int result, int ordinal)
     {

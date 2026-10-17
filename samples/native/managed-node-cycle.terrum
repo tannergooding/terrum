@@ -24,6 +24,6 @@ int32 CollectAndRead(write ManagedNode kept) {
 int32 Main() {
     require MakeRetained(out var kept);
     MakeCycle();
-    write ManagedNode alias = kept;
-    return CollectAndRead(alias);
+    write ManagedNode writable = kept;
+    return CollectAndRead(writable);
 }
