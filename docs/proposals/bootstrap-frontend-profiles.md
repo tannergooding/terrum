@@ -4,7 +4,7 @@
 The independently selected code/image publication rule below is not reopened.
 The [composition inventory](../implementation/bootstrap-frontend-composition.md)
 owns current supported combinations and resource values; the
-[self-host inventory](../implementation/self-host.md) owns component coverage.
+[Terrum-authored component inventory](../implementation/terrum-code-analysis.md) owns component coverage.
 Implemented support does not imply profile approval.
 
 This proposal is the decision owner for bootstrap expressions, locals, helper
@@ -285,9 +285,9 @@ explicitly and independently. Required evidence includes:
    alone establishes an independent compiler bootstrap or feature acceptance.
 
 Current evidence entry points are
-[bootstrap component tests](../../tests/Terrum.CodeAnalysis.Tests/BootstrapInt32MainReturnComponentTests.cs),
+[bootstrap component tests](../../tests/Terrum.CodeAnalysis.Tests/Native/Bootstrap/BootstrapInt32MainReturnComponentTests.cs),
 [projection auditor](../../sources/Terrum.CodeAnalysis/Lexing/ScalarFrontendHost.cs),
 [program auditor](../../sources/Terrum.CodeAnalysis/Lexing/ScalarFrontendHost.Program.cs)
-and [persisted complete-program tests](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.CompleteProgram.cs).
+and [persisted complete-program tests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.CompleteProgram.cs).
 Use the support inventories for coverage; these links are not a claim that
 every recommended simplification or boundary case is implemented or qualified.

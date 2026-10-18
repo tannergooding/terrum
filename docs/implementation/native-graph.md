@@ -73,19 +73,19 @@ Build `terrumc`, then from the repository root run:
 
 ```powershell
 $c = "artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.exe"
-& $c compile-native producer samples\native\graph\leaf.terrum NodeB --export Leaf -o leaf.trmn --runtime fail-fast
-& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider leaf.trmn --export Middle -o middle.trng --runtime fail-fast
-& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider middle.trng -o root.trng --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\leaf.terrum NodeB --export Leaf -o leaf.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\DependencyGraphServicing\middle.terrum NodeA --provider leaf.trmn --export Middle -o middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\DependencyGraphServicing\consumer.terrum --provider middle.trng -o root.trng --runtime fail-fast
 & $c validate-native-graph root.trng --provider middle.trng --provider leaf.trmn
 & $c run-native-graph root.trng --provider leaf.trmn --provider middle.trng --runtime fail-fast
 $LASTEXITCODE # 42
-& $c compile-native producer samples\native\graph\leaf-replacement.terrum NodeB --export Leaf -o leaf-new.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\leaf-replacement.terrum NodeB --export Leaf -o leaf-new.trmn --runtime fail-fast
 & $c validate-native-graph root.trng --provider middle.trng --provider leaf-new.trmn
 & $c run-native-graph root.trng --provider middle.trng --provider leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 43
 & $c run-native-graph-jit root.trng --provider middle.trng --provider leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 43
-& $c compile-native producer samples\native\graph\leaf.terrum Extra --export Leaf -o extra.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\leaf.terrum Extra --export Leaf -o extra.trmn --runtime fail-fast
 & $c resolve-native-graph root.trng --candidate extra.trmn --candidate leaf-new.trmn --candidate middle.trng --json
 & $c resolve-native-graph root.trng --candidate leaf.trmn --candidate leaf-new.trmn --candidate middle.trng
 # Ambiguous: both NodeB implementations satisfy the persisted contracts.
@@ -147,12 +147,12 @@ To replace a leaf without changing the root or intermediate, use the scalar
 `Leaf()` package first, then compile the implementation with an internal view:
 
 ```powershell
-& $c compile-native producer samples\native\graph\scoped-view-leaf.terrum NodeB --export Leaf -o scoped-leaf.trmn --runtime fail-fast
-& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider scoped-leaf.trmn --export Middle -o scoped-middle.trng --runtime fail-fast
-& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider scoped-middle.trng -o scoped-root.trng --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\scoped-view-leaf.terrum NodeB --export Leaf -o scoped-leaf.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\DependencyGraphServicing\middle.terrum NodeA --provider scoped-leaf.trmn --export Middle -o scoped-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\DependencyGraphServicing\consumer.terrum --provider scoped-middle.trng -o scoped-root.trng --runtime fail-fast
 & $c run-native-graph-jit scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf.trmn --runtime fail-fast
 $LASTEXITCODE # 42
-& $c compile-native producer samples\native\graph\scoped-view-leaf-replacement.terrum NodeB --export Leaf -o scoped-leaf-new.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\scoped-view-leaf-replacement.terrum NodeB --export Leaf -o scoped-leaf-new.trmn --runtime fail-fast
 & $c validate-native-graph scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf-new.trmn
 & $c run-native-graph scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 44
@@ -168,21 +168,21 @@ contracts or escape their lexical scopes. The package reader checks profiles
 and contracts before loading any native image.
 
 ```powershell
-& $c compile-native producer samples\native\graph\writable-view-leaf-original.terrum NodeB --export Leaf -o writable-old.trmn --runtime fail-fast
-& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider writable-old.trmn --export Middle -o writable-middle.trng --runtime fail-fast
-& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider writable-middle.trng -o writable-root.trng --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\writable-view-leaf-original.terrum NodeB --export Leaf -o writable-old.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\DependencyGraphServicing\middle.terrum NodeA --provider writable-old.trmn --export Middle -o writable-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\DependencyGraphServicing\consumer.terrum --provider writable-middle.trng -o writable-root.trng --runtime fail-fast
 & $c run-native-graph writable-root.trng --provider writable-middle.trng --provider writable-old.trmn --runtime fail-fast
 $LASTEXITCODE # 42
-& $c compile-native producer samples\native\graph\scoped-view-leaf-replacement.terrum NodeB --export Leaf -o writable-readonly.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\scoped-view-leaf-replacement.terrum NodeB --export Leaf -o writable-readonly.trmn --runtime fail-fast
 & $c run-native-graph writable-root.trng --provider writable-middle.trng --provider writable-readonly.trmn --runtime fail-fast
 $LASTEXITCODE # 44
-& $c compile-native producer samples\native\graph\writable-view-leaf.terrum NodeB --export Leaf -o writable-new.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\writable-view-leaf.terrum NodeB --export Leaf -o writable-new.trmn --runtime fail-fast
 & $c validate-native-graph writable-root.trng --provider writable-middle.trng --provider writable-new.trmn
 & $c run-native-graph writable-root.trng --provider writable-middle.trng --provider writable-new.trmn --runtime fail-fast
 $LASTEXITCODE # 46
 & $c run-native-graph-jit writable-root.trng --provider writable-middle.trng --provider writable-new.trmn --runtime fail-fast
 $LASTEXITCODE # 46
-& $c compile-native-graph producer samples\native\graph\writable-view-middle.terrum NodeA --provider writable-old.trmn --export Middle -o writable-middle-new.trng --runtime fail-fast
+& $c compile-native-graph producer samples\DependencyGraphServicing\writable-view-middle.terrum NodeA --provider writable-old.trmn --export Middle -o writable-middle-new.trng --runtime fail-fast
 & $c run-native-graph-jit writable-root.trng --provider writable-middle-new.trng --provider writable-new.trmn --runtime fail-fast
 $LASTEXITCODE # 46
 ```
@@ -198,10 +198,10 @@ image. It does not export managed handles, transfer roots across DLLs, or
 promise cleanup of live heap objects on DLL unload.
 
 ```powershell
-& $c compile-native producer samples\native\graph\managed-node-leaf-original.terrum NodeB --export Leaf -o node-original.trmn --runtime fail-fast
-& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider node-original.trmn --export Middle -o node-middle.trng --runtime fail-fast
-& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider node-middle.trng -o node-root.trng --runtime fail-fast
-& $c compile-native producer samples\native\graph\managed-node-leaf.terrum NodeB --export Leaf -o node-new.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\managed-node-leaf-original.terrum NodeB --export Leaf -o node-original.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\DependencyGraphServicing\middle.terrum NodeA --provider node-original.trmn --export Middle -o node-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\DependencyGraphServicing\consumer.terrum --provider node-middle.trng -o node-root.trng --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\managed-node-leaf.terrum NodeB --export Leaf -o node-new.trmn --runtime fail-fast
 & $c run-native-graph node-root.trng --provider node-middle.trng --provider node-new.trmn --runtime fail-fast
 $LASTEXITCODE # 44
 & $c run-native-graph-jit node-root.trng --provider node-middle.trng --provider node-new.trmn --runtime fail-fast
@@ -216,7 +216,7 @@ without optional handles selects `native-19`. Neither class layout nor handle
 is part of the imported `Leaf()` declaration, and no other DLL can share the
 leaf's managed roots.
 
-The [Copy-field variant](../../samples/native/graph/managed-copy-class-leaf.terrum)
+The [Copy-field variant](../../samples/DependencyGraphServicing/managed-copy-class-leaf.terrum)
 can replace that same leaf with nested inline Copy values alongside its optional
 edges. Use it in place of `managed-class-leaf.terrum` in the producer command
 below. It writes current semantic-module revision 78 while retaining the
@@ -225,10 +225,10 @@ The unchanged root and intermediate do not import its nested struct layouts;
 retired semantic-module revisions are rejected and must be rebuilt from source.
 
 ```powershell
-& $c compile-native producer samples\native\graph\managed-class-leaf-original.terrum NodeB --export Leaf -o class-original.trmn --runtime fail-fast
-& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider class-original.trmn --export Middle -o class-middle.trng --runtime fail-fast
-& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider class-middle.trng -o class-root.trng --runtime fail-fast
-& $c compile-native producer samples\native\graph\managed-class-leaf.terrum NodeB --export Leaf -o class-new.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\managed-class-leaf-original.terrum NodeB --export Leaf -o class-original.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\DependencyGraphServicing\middle.terrum NodeA --provider class-original.trmn --export Middle -o class-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\DependencyGraphServicing\consumer.terrum --provider class-middle.trng -o class-root.trng --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\managed-class-leaf.terrum NodeB --export Leaf -o class-new.trmn --runtime fail-fast
 & $c run-native-graph class-root.trng --provider class-middle.trng --provider class-new.trmn --runtime fail-fast
 $LASTEXITCODE # 44
 & $c run-native-graph-jit class-root.trng --provider class-middle.trng --provider class-new.trmn --runtime fail-fast
@@ -249,9 +249,9 @@ foreach ($policy in $policies) {
     $original = "copy-original-$policy.trmn"
     $replacement = "copy-managed-$policy.trmn"
     $root = "copy-root-$policy.trng"
-    & $c compile-native producer samples\native\graph\copy-contract-original.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
-    & $c compile-native producer samples\native\graph\copy-contract-managed.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
-    & $c compile-native-graph consumer samples\native\graph\copy-contract-consumer.terrum --provider $original -o $root --runtime $policy
+    & $c compile-native producer samples\DependencyGraphServicing\copy-contract-original.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
+    & $c compile-native producer samples\DependencyGraphServicing\copy-contract-managed.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
+    & $c compile-native-graph consumer samples\DependencyGraphServicing\copy-contract-consumer.terrum --provider $original -o $root --runtime $policy
     & $c run-native-graph $root --provider $original --runtime $policy
     $LASTEXITCODE # 40
     & $c run-native-graph $root --provider $replacement --runtime $policy
@@ -277,10 +277,10 @@ foreach ($policy in $policies) {
     $replacement = "copy-managed-$policy.trmn"
     $middle = "managed-copy-middle-$policy.trng"
     $root = "managed-copy-root-$policy.trng"
-    & $c compile-native producer samples\native\graph\copy-contract-original.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
-    & $c compile-native producer samples\native\graph\copy-contract-managed.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
-    & $c compile-native-graph producer samples\native\graph\managed-copy-middle.terrum NodeA --provider $original --export ForwardSnapshot --export MiddleValue -o $middle --runtime $policy
-    & $c compile-native-graph consumer samples\native\graph\managed-copy-root.terrum --provider $middle --provider $original -o $root --runtime $policy
+    & $c compile-native producer samples\DependencyGraphServicing\copy-contract-original.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
+    & $c compile-native producer samples\DependencyGraphServicing\copy-contract-managed.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
+    & $c compile-native-graph producer samples\DependencyGraphServicing\managed-copy-middle.terrum NodeA --provider $original --export ForwardSnapshot --export MiddleValue -o $middle --runtime $policy
+    & $c compile-native-graph consumer samples\DependencyGraphServicing\managed-copy-root.terrum --provider $middle --provider $original -o $root --runtime $policy
     & $c run-native-graph $root --provider $middle --provider $original --runtime $policy
     $LASTEXITCODE # 42
     & $c run-native-graph-jit $root --provider $middle --provider $original --runtime $policy
@@ -307,12 +307,12 @@ the root and drops them using the leaf's cleanup. Its middle DLL and root EXE
 are unchanged when the leaf is replaced:
 
 ```powershell
-& $c compile-native producer samples\native\graph\owned-leaf.terrum Leaf --export Make --export Ticket.Close -o owned-leaf.trmn --runtime fail-fast
-& $c compile-native-graph producer samples\native\graph\owned-middle.terrum Middle --provider owned-leaf.trmn --export Forward --export TryForward -o owned-middle.trng --runtime fail-fast
-& $c compile-native-graph consumer samples\native\graph\owned-consumer.terrum --provider owned-middle.trng --provider owned-leaf.trmn -o owned-root.trng --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\owned-leaf.terrum Leaf --export Make --export Ticket.Close -o owned-leaf.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\DependencyGraphServicing\owned-middle.terrum Middle --provider owned-leaf.trmn --export Forward --export TryForward -o owned-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\DependencyGraphServicing\owned-consumer.terrum --provider owned-middle.trng --provider owned-leaf.trmn -o owned-root.trng --runtime fail-fast
 & $c run-native-graph owned-root.trng --provider owned-middle.trng --provider owned-leaf.trmn --runtime fail-fast
 $LASTEXITCODE # 42
-& $c compile-native producer samples\native\graph\owned-leaf-replacement.terrum Leaf --export Make --export Ticket.Close -o owned-leaf-new.trmn --runtime fail-fast
+& $c compile-native producer samples\DependencyGraphServicing\owned-leaf-replacement.terrum Leaf --export Make --export Ticket.Close -o owned-leaf-new.trmn --runtime fail-fast
 & $c run-native-graph owned-root.trng --provider owned-middle.trng --provider owned-leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 44
 & $c run-native-graph-jit owned-root.trng --provider owned-middle.trng --provider owned-leaf-new.trmn --runtime fail-fast

@@ -4,7 +4,7 @@
 exercise generic native mechanisms; they prescribe no compiler-owned DX11
 catalog, source seal, special carrier or synthesized renderer. Current
 maintained sources and historical stages are distinguished in the
-[sample reference](../../samples/design/win32-dx11-triangle/README.md).
+[sample reference](../../samples/Win32Dx11Triangle/README.md).
 
 ## Source-authored submission and cleanup
 

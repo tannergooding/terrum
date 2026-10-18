@@ -27,7 +27,7 @@ synchronously through the bounded scalar parser on Windows x64:
 
 The [hosted view inventory](../implementation/view-and-owner-profiles.md#tokencursor-view)
 owns the exact accepted envelope and current coverage, including the bounded
-64-token parser/window path. The [self-host inventory](../implementation/self-host.md)
+64-token parser/window path. The [Terrum-authored component inventory](../implementation/terrum-code-analysis.md)
 separately records full cursor traversal and component execution. Those
 different operations must not be collapsed into a universal 64-token Span
 length limit.
@@ -75,8 +75,8 @@ and invalidation by a later argument. Retiring only a descriptor does not
 retire its backing; retiring every dependent descriptor permits only otherwise
 valid owner operations.
 
-The [cursor tests](../../tests/Terrum.CodeAnalysis.Tests/TokenCursorTests.cs)
-and [Terrum component runner](../../tests/self-host/TokenCursorComponentTestRunner.terrum)
+The [cursor tests](../../tests/Terrum.CodeAnalysis.Tests/Lexing/TokenCursorTests.cs)
+and [Terrum component runner](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/TokenCursorComponentTestRunner.terrum)
 are evidence entry points, not adoption gates for the unapproved extensions.
 Maintain both-policy execution, exhaustion and indexed non-consumption checks
 separately from persistence or general view claims.

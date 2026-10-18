@@ -63,7 +63,7 @@ special-value and boundary behavior. This is internal helper support only,
 not proof that primitive members or generic-math interfaces are implemented.
 No implemented primitive export, exact Core failure event or source-free
 witness codec follows from those helpers. Current support belongs in the
-[self-host implementation reference](../implementation/self-host.md).
+[Terrum-authored implementation reference](../implementation/terrum-code-analysis.md).
 
 Use the accepted [Abs](../specs/conformance/source-absolute-value.md),
 [selection](../specs/conformance/source-numeric-selection.md),

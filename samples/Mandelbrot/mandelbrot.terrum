@@ -1,0 +1,81 @@
+// DESIGN ONLY: target initialization destinations and text/stream APIs.
+// Writes an ASCII PBM image to stdout.
+using Terrum;
+
+public static int32 Main(Span<TextSpan> args)
+{
+    mut int32 width = 80;
+    mut int32 height = 40;
+
+    if (args.Length != 0)
+    {
+        if (args.Length != 2 ||
+            !int32.TryParse(args[0], init var parsedWidth) ||
+            !int32.TryParse(args[1], init var parsedHeight) ||
+            parsedWidth < 2 || parsedWidth > 4096 ||
+            parsedHeight < 2 || parsedHeight > 4096)
+        {
+            Terminal.WriteLine("usage: mandelbrot [width height], each 2..4096", output: TerminalOutput.Error);
+
+            return 2;
+        }
+
+        width = parsedWidth;
+        height = parsedHeight;
+    }
+
+    Terminal.WriteLine("P1");
+    Terminal.Write(width);
+    Terminal.Write(' ');
+    Terminal.WriteLine(height);
+
+    mut int32 y = 0;
+
+    while (y < height)
+    {
+        float32 cy = float32(y) / float32(height - 1) * 2 - 1;
+        mut int32 x = 0;
+
+        while (x < width)
+        {
+            float32 cx = float32(x) / float32(width - 1) * 3 - 2;
+            bool bounded = IsBounded(cx, cy, 64);
+
+            Terminal.Write(bounded ? '1' : '0');
+            Terminal.Write(x == width - 1 ? '\n' : ' ');
+
+            x = x + 1;
+        }
+
+        y = y + 1;
+    }
+
+    return 0;
+}
+
+[Pure]
+public static bool IsBounded(float32 cx, float32 cy, int32 budget)
+{
+    mut float32 zx = 0;
+    mut float32 zy = 0;
+    mut int32 iteration = 0;
+
+    while (iteration < budget)
+    {
+        float32 xx = zx * zx;
+        float32 yy = zy * zy;
+
+        if (xx + yy > 4)
+        {
+            return false;
+        }
+
+        float32 nextY = (2 * zx) * zy + cy;
+        zx = xx - yy + cx;
+        zy = nextY;
+        iteration = iteration + 1;
+    }
+
+    // Include the final update; bounded iteration is not proof of set membership.
+    return zx * zx + zy * zy <= 4;
+}

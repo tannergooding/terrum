@@ -30,7 +30,7 @@ dotnet run --file scripts\check-native-seh.cs
 ```
 
 The script discovers the installed toolchain with `vswhere`, builds
-[`seh-probe.c`](../tests/native/seh-probe.c) with `/W4 /WX`, and executes it
+[`seh-probe.c`](../tests/Terrum.CodeAnalysis.Tests/Native/Unwind/Probes/seh-probe.c) with `/W4 /WX`, and executes it
 in a ten-second supervised child. The executable is under
 `artifacts\bin\native-probes\native-seh`, the compiler listing and object are
 under `artifacts\obj\native-probes\native-seh`, and build/execution logs are

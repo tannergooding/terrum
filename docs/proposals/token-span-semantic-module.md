@@ -120,8 +120,8 @@ Require exact schema/profile adoption and:
 
 Current evidence is in the
 [private-span reader/writer](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.TokenSpans.cs),
-[private-span regressions](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.PrivateSpans.cs)
-and [complete-program regressions](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.CompleteProgram.cs).
+[private-span regressions](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.PrivateSpans.cs)
+and [complete-program regressions](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.CompleteProgram.cs).
 The [module](../implementation/modules.md) and
 [composition](../implementation/bootstrap-frontend-composition.md) inventories
 own current support, not this list of acceptance requirements.

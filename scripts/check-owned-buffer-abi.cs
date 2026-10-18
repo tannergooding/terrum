@@ -31,7 +31,8 @@ if (installation.Length == 0 || !File.Exists(environment))
 }
 var executable = Path.Combine(binaries, "owned-buffer-abi-probe.exe");
 var objectFile = Path.Combine(objects, "owned-buffer-abi-probe.obj");
-var source = Path.GetFullPath(Path.Combine("tests", "native", "owned-buffer-abi-probe.c"));
+var source = Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native",
+    "Ownership", "Probes", "owned-buffer-abi-probe.c"));
 var nativeBuild = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
     ?? throw new InvalidOperationException("ComSpec is unset.")) {
     Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /TC /Fo\"{objectFile}\" /Fe\"{executable}\" \"{source}\" /link /incremental:no\"",
@@ -44,13 +45,13 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var dll = Path.Combine(binaries, $"owned-buffer-abi-{policy}.dll");
     var compile = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
-        Path.GetFullPath(Path.Combine("tests", "native", "owned-buffer-abi.terrum")),
+        Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Ownership", "Fixtures", "owned-buffer-abi.terrum")),
         "--export", "TryAcquire", "--export", "Build", "--export", "Relay", "--export", "Consume",
         "--export", "Rebuild", "--export", "TryRebuild", "--export", "Composite",
         "--export", "FieldMutation", "--export", "FieldViewMutation",
         "--export", "FormattingWorkspace", "--export", "FormatDigits", "--export", "FormatSignedDigits",
-        "--source", Path.GetFullPath(Path.Combine("sources", "self-host", "IntegerFormatting.terrum")),
-        "--source", Path.GetFullPath(Path.Combine("sources", "self-host", "WideIntegerFacts.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("sources", "Terrum.CodeAnalysis.Terrum", "Utilities", "Numerics", "IntegerFormatting.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("sources", "Terrum.CodeAnalysis.Terrum", "Utilities", "Numerics", "WideIntegerFacts.terrum")),
         "-o", dll, "--runtime", policy })
     {
         compile.ArgumentList.Add(argument);
@@ -58,7 +59,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     if (policy == "checked-exceptions")
     {
         compile.ArgumentList.Add("--source");
-        compile.ArgumentList.Add(Path.GetFullPath(Path.Combine("tests", "native", "owned-buffer-abi.checked.terrum")));
+        compile.ArgumentList.Add(Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Ownership", "Fixtures", "owned-buffer-abi.checked.terrum")));
         compile.ArgumentList.Add("--export");
         compile.ArgumentList.Add("Recover");
         compile.ArgumentList.Add("--export");
@@ -91,9 +92,8 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     Console.Write(failureProof);
 }
 
-var decimalSource = Path.GetFullPath(Path.Combine("sources", "self-host", "DecimalFloatLiteral.terrum"));
-var sourceGrantProbe = Path.GetFullPath(Path.Combine(
-    "tests", "native", "decimal-float-source-grant-abi.terrum"));
+var decimalSource = Path.GetFullPath(Path.Combine("sources", "Terrum.CodeAnalysis.Terrum", "Lexing", "DecimalFloatLiteral.terrum"));
+var sourceGrantProbe = Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "SourceGrants", "Fixtures", "decimal-float-source-grant-abi.terrum"));
 foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
 {
     var dll = Path.Combine(binaries, $"decimal-float-source-grant-{policy}.dll");

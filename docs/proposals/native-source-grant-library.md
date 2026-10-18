@@ -20,7 +20,7 @@ resource and result contract chosen for its consumer.
 Do not promote the minimal design solely because it is implemented, or preserve
 its isolated classifiers and scalar encodings as desired permanent API policy.
 A real consumer may justify the substantive explicit-input design instead.
-The [self-host inventory](../implementation/self-host.md) owns the current
+The [Terrum-authored component inventory](../implementation/terrum-code-analysis.md) owns the current
 export list and component coverage.
 
 ## Spec integration
@@ -286,8 +286,8 @@ API, whole-input/resource policy and compatible failure transport. Then require:
 Evidence entry points are the
 [native classifier](../../sources/Terrum.CodeAnalysis/Native/NativeSourceGrantClassifier.cs),
 [companion builder](../../sources/Terrum.CodeAnalysis/Native/NativeSourceGrantLibrary.cs),
-[native tests](../../tests/Terrum.CodeAnalysis.Tests/NativeSourceGrantLibraryTests.cs),
-[CLI tests](../../tests/Terrum.CodeAnalysis.Tests/CliTests.SourceGrantLibrary.cs)
-and [decimal ABI probe](../../tests/native/decimal-float-source-grant-abi.terrum).
+[native tests](../../tests/Terrum.CodeAnalysis.Tests/Native/SourceGrants/NativeSourceGrantLibraryTests.cs),
+[CLI tests](../../tests/Terrum.CodeAnalysis.Tests/Cli/CliTests.SourceGrantLibrary.cs)
+and [decimal ABI probe](../../tests/Terrum.CodeAnalysis.Tests/Native/SourceGrants/Fixtures/decimal-float-source-grant-abi.terrum).
 They preserve provisional evidence, not a claim that every gate has been
 exercised, that a stable ABI exists or that a compiler is bootstrapped.

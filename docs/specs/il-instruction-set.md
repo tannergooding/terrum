@@ -99,7 +99,7 @@ bounded subset has already encoded. If these informative examples move to a
 companion document, retain this contract map and links from the
 normative rules; splitting the examples must not orphan the fast-import
 story or silently promote unsupported Body shapes to executable status.
-The existing [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmBodyExampleTests.cs)
+The existing [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)
 use explicit development-schema bytes, as distinguished in the
 [encoding inventory](../implementation/trrm-encoding-history.md).
 They illustrate independent fixture checking, not current-registry

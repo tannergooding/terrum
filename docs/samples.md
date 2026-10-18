@@ -1,174 +1,172 @@
-# Design samples
+# Sample catalog
 
-This catalog describes **design sketches, not executable tests or compiled MVP programs**. Richer semantics remain unimplemented; the bounded source-class/`ManagedNode` access slice is exercised by migrated native samples. `.api.terrum` files sketch signatures and selected bodies, not complete implementations or foreign imports.
+Terrum samples are grouped by scenario or language feature, not by output
+backend or implementation status. A successful parse does not establish
+binding, emission, execution, or approval of a provisional contract. See the
+[sample entry point](../samples/README.md) for the directory map.
 
-The sketches distinguish `mut` places/receivers from `write` reference/view access. `init ref<T>` and `init value` are approved target forms for vacancy-only destinations; the [output inventory](implementation/output-profiles.md) records bounded current support, while general references and migration from `out` remain pending. Inline destination declarations follow the [source argument rules](specs/grammar-spec.md#32-types-parameters-and-arguments), not an additional sketch-only parameter mode. Legacy `out`/`ref` call patterns are not target invocation syntax. The executable profile retains legacy `bool`/`out` beside distinct `bool`/`init ref<T>` contracts.
+## Sample groups
 
-The numeric subset supports contextual decimal, hexadecimal and binary integers with digit separators; based literals use the expected target width as a bit pattern. Native buffer-view samples still use separate legacy access rules, not general `Span<T>` or reference/view support. Treat sketch outputs as acceptance criteria, not observed compiler results. [`samples/native`](../samples/native) contains runnable recursion (factorial: 720), loop/mutation (45), and six-argument call (91) examples under the [native runtime profile](implementation/native.md). See [language](language.md), [lifetimes](specs/lifetimes.md), [libraries](specs/libraries.md) and [implementation](implementation.md).
+| Location | Purpose and evidence boundary |
+|---|---|
+| [`LanguageFeatures`](../samples/LanguageFeatures/README.md) | Focused Terrum examples grouped by language topic. Some exercise implemented behavior; others are target-language designs. |
+| [`Calculator`](../samples/Calculator/README.md), [`HelloWorld`](../samples/HelloWorld/README.md), [`Mandelbrot`](../samples/Mandelbrot/README.md) | Target-language scenarios whose intended behavior requires support beyond the current implementation. |
+| [`CrossModuleRecovery`](../samples/CrossModuleRecovery/README.md) | A provider and consumer demonstrating checked recovery across a module boundary. |
+| [`ModuleReplacement`](../samples/ModuleReplacement/README.md) | Provider, consumer, replacement, and incompatible-module examples. |
+| [`ModuleSetServicing`](../samples/ModuleSetServicing/README.md) | Two providers and replacements servicing a shared consumer. |
+| [`DependencyGraphServicing`](../samples/DependencyGraphServicing/README.md) | Leaf/middle/root dependency graphs, ownership, and scoped-view examples. |
+| [`Win32MessageBox`](../samples/Win32MessageBox/README.md) | A Terrum-authored raw Win32 import example; emission is testable, execution is interactive. |
+| [`Win32Dx11Triangle`](../samples/Win32Dx11Triangle/README.md) | Terrum-authored WARP and hardware window/rendering scenarios with explicit runtime gates. |
 
-The runnable [NoThrow example](../samples/native/no-throw.terrum) returns 42
-through annotated value construction, widening and conditional outputs; its
-effect contracts do not require or imply the future catch/cleanup runtime.
-The [no-return example](../samples/native/no-return.terrum) returns 42 when its
-conditional output succeeds; the failure branch has no normal continuation.
-The [checked recovery sample](../samples/native/checked-recovery.terrum)
-returns 42 in both AOT and JIT with `--runtime checked-exceptions`: a
-cross-function division failure unwinds the inner `finally` before entering
-an unsafe `catch`. The separate
-[checked bounds component](../samples/native/checked-bounds.terrum) uses the
-same policy when compiled with an entry and an explicit host-buffer grant.
-The [owned transfer sample](../samples/native/owner-transfer.terrum) returns 42
-after a named move through a by-value parameter and failed then successful
-owning outputs. Its compact owners have lexical cleanup but hold no OS resource.
-The [unique-owner sample](../samples/native/unique-owner.terrum) returns 42
-with `--runtime checked-exceptions`: a mutable receiver updates the named
-owner, and a subsequent failed replacement leaves that owner and its updated
-value intact for the readonly query in `catch`.
-The [composite owner sample](../samples/native/composite-owner.terrum) returns
-42 with `--runtime checked-exceptions`: a failed constructor releases its
-already acquired child before recovery constructs a complete owner.
-The [owned buffer sample](../samples/native/owned-buffer.terrum) returns 42
-under either runtime policy after appending, reading and updating the
-initialized prefix of a fixed-capacity native buffer. It then moves that
-allocation into a unique owner whose methods update, clear and reuse its
-private writable buffer field without moving it out. One method updates the
-first element through a scoped mutable field slice; readonly queries resume
-after that loan ends.
-The [readonly buffer-view sample](../samples/native/readonly-buffer-view.terrum)
-returns 42 after checking a lexical slice of the initialized prefix and
-reading it in a loop; the owner remains live until the view's scope ends.
-The [writable buffer-view sample](../samples/native/mutable-buffer-view.terrum)
-returns 42 after an exclusive scoped update and a NoThrow in-place `Clear`
-followed by reuse of the same fixed-capacity owner.
-The [`MessageBoxW` sample](../samples/native/message-box.terrum) declares the
-ordinary `user32.dll` import with `ptr<void>` and read-only, no-escape pointer
-contracts. It passes a null owner and static UTF-16-NUL literals from an
-explicit unsafe call. Build it with `build-native-import`; it returns success
-only when the user dismisses the dialog with OK. Unattended tests inspect the
-image without displaying the dialog.
+Parser-only inputs belong to
+[`tests/Terrum.CodeAnalysis.Tests/Syntax/Fixtures`](../tests/Terrum.CodeAnalysis.Tests/Syntax/Fixtures),
+not to the user-facing sample tree. Test-only ABI and module fixtures remain
+with their C# test areas. [`library`](../library) contains non-executable API
+sketches, not reference assemblies. The bounded Terrum-authored compiler
+components have their own [source project](../sources/Terrum.CodeAnalysis.Terrum/README.md)
+and are not language samples.
+
+## Checking and building
+
+Build the compiler through the [normal developer workflow](building.md).
+From the repository root after a Debug build:
 
 ```powershell
+$terrumc = Resolve-Path artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll
+dotnet $terrumc check tests\Terrum.CodeAnalysis.Tests\Syntax\Fixtures\hello.terrum
+dotnet $terrumc analyze samples\LanguageFeatures\ControlFlow\factorial.terrum
 New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
-terrumc build-native-import samples\native\message-box.terrum -o artifacts\bin\samples\message-box.exe --runtime fail-fast
+dotnet $terrumc build samples\LanguageFeatures\ControlFlow\factorial.terrum -o artifacts\bin\samples\factorial.exe --runtime fail-fast
+.\artifacts\bin\samples\factorial.exe
+$LASTEXITCODE # 720
 ```
 
-The [nested struct-receiver sample](../samples/native/nested-struct-receiver.terrum)
-returns 42 under either runtime policy. It mutates nested counters in both
-a Copy local and a unique owner through field paths and forwarded `this`
-receivers, while adjacent readonly fields retain their values. The methods
-update the original subobject rather than a copy.
-The [managed-node cycle sample](../samples/native/managed-node-cycle.terrum)
-returns 42 under either runtime policy: collection reclaims an unreachable
-two-node cycle while preserving a rooted node and its child. This exercises
-the bounded managed-node runtime, not general class syntax or a collection library.
-The [managed-class sample](../samples/native/managed-classes.terrum) returns 42
-under both policies. It constructs source-defined classes with multiple managed
-edges, collects during partial construction without publishing it, and updates
-a shared writable referent through an alias. This is not inheritance, optional
-reference fields, a public managed-handle ABI or a general collection library.
-The [optional-cycle sample](../samples/native/managed-optional-cycle.terrum)
-adds explicitly initialized optional edges, source-defined cycles and non-null
-presence snapshots. The [managed token-chain candidate](../sources/self-host/ManagedTokenChain.terrum)
-uses these edges and compact inline Copy fields for bounded linked storage of
-complete tokens, with checked count/version updates and independent copied results.
-The [private managed-node leaf](../samples/native/graph/managed-node-leaf.terrum)
-replaces a scalar-only producer without changing its persisted consumer or
-intermediate DLL. Its cycle allocation and explicit collection stay inside the
-leaf under AOT and root-only JIT; see the [graph commands](implementation/native-graph.md).
-The [private class leaf](../samples/native/graph/managed-class-leaf.terrum)
-extends that replacement proof to source-defined optional cycles and checked
-class metadata, without exposing a managed module ABI.
-The [Copy-field class leaf](../samples/native/graph/managed-copy-class-leaf.terrum)
-persists nested private Copy layouts and replaces the
-same unchanged consumer/intermediate images.
-The [managed Copy export original](../samples/native/graph/copy-contract-original.terrum)
-and [managed Copy export replacement](../samples/native/graph/copy-contract-managed.terrum)
-share the same public `Snapshot` value contract; the replacement collects its
-private two-node managed cycle before returning the copied snapshot. The
-[unchanged consumer](../samples/native/graph/copy-contract-consumer.terrum)
-returns 40 with the original and 42 with the replacement, demonstrating
-by-value and legacy `bool`/`out` Copy exports without exposing the
-producer's private managed records. Exact AOT and root-only JIT commands are
-in the [native graph guide](implementation/native-graph.md).
-The [managed Copy middle](../samples/native/graph/managed-copy-middle.terrum)
-and [managed Copy root](../samples/native/graph/managed-copy-root.terrum)
-extend the same replacement to a managed intermediate and root. Both images
-keep private managed records while exchanging only the leaf's public
-handle-free `Snapshot` and scalar values; the unchanged graph returns 42 with
-the original leaf and 44 with the managed replacement under AOT and root-only
-JIT. See the [graph commands](implementation/native-graph.md).
-The [managed Copy semantic consumer](../samples/native/modules/managed-copy-consumer.terrum)
-uses the original and managed `Snapshot` providers above through the current
-single-provider semantic consumer contract. Its private `Record` deliberately
-shares a name with provider-private state, and remains rooted across provider
-collection. The same persisted consumer artifact returns 42 or 44 when
-`run-module` selects the original or managed provider; each `link-module`
-command emits a fresh PE for its selected provider. Exact commands for both
-runtime policies are in the [module guide](implementation/modules.md).
-The [multi-type generic sample](../samples/native/multi-type-generics.terrum)
-infers `int32` and the 16-byte `WidePair` independently in
-`TrySelectPair<TFirst, TSecond>`. Its reversed helper forwards the ordered
-specialization with type arguments swapped and publishes two different `out`
-types; false results leave both outputs vacant. The executable returns 42.
-This demonstrates bounded multi-parameter inference and helper composition,
-not partial holes, general inference or heterogeneous operator protocols.
-The [managed generic selection sample](../samples/native/managed-generic-selection.terrum)
-combines a 16-byte `Stamp` with qualified source-class handles and optional
-conditional outputs. It exercises readonly and
-writable aliases, collection during a generic call, and retirement of one
-unreachable cycle; the executable returns 42 without exposing a managed ABI.
-The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
-returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
-source-defined addition/multiplication protocols used by one constrained
-generic expression. The [integer-power sample](../samples/native/static-protocol-power.terrum)
-returns 42 using a structured generic algorithm and square helper for 32- and 64-bit wrappers.
-Each helper in this example has one `T`, inferred from typed `Copy` struct
-arguments; the caller supplies the identity. Scalar loop control does
-not grant extra operations on the type parameter, and helper calls must be
-justified by the caller's declared constraints. These remain closed
-compilation-local specializations, not general generic-library or public
-witness support.
-The [binary-protocol sample](../samples/native/static-protocol-binary.terrum)
-returns 42 using subtraction, division and remainder to compute two values,
-then `&`, `|` and `^` to select bits from them. Its generic helpers declare
-only the nominal protocols they use; the concrete wrapper implements all six.
-The example uses ordinary inferred specializations, not primitive conformance,
-operator-body inference or built-in numeric interface names.
-The [comparison-protocol sample](../samples/native/static-protocol-comparison.terrum)
-exercises the six separately declared equality/comparison protocols through
-generic `Clamp`/`Within`/`Different` helpers and conditional equality
-selection. Its probe returns 42 under AOT and direct JIT, with scanner parity
-and private semantic/native servicing under both policies. It does not imply
-derived comparison laws or universal equality/hash behavior.
+`check` is syntax-only; `analyze` binds. `build` emits an ordinary native
+program; source-native imports use `build-native-import`. Execution is a
+separate action and returns the program's status, which need not be zero.
+Use the built DLL for JSON protocols so build output cannot contaminate them.
 
-| Program | Source | Design contract / expected behavior |
+The [native profile](implementation/native.md) owns support details. Runnable
+examples use the implemented legacy `bool`/`out` profile where required; it is
+distinct from canonical vacancy-only `init ref<T>` contracts. Do not
+mechanically rewrite runnable sources into unsupported target forms.
+The implemented numeric subset also accepts contextual decimal, hexadecimal
+and binary integer literals with digit separators; based literals use the
+expected target width as a bit pattern. Buffer-view examples exercise bounded
+legacy access profiles, not general `Span<T>` or reference/view support.
+
+## Implemented language-feature examples
+
+These examples exercise selected implemented compiler behavior; the catalog
+does not claim that every neighboring language or library facility is
+implemented.
+
+| Sources | Purpose and expected observation | Runtime policy / evidence |
 |---|---|---|
-| Hello world | [hello-world](../samples/design/hello-world.terrum) | `void Main`; `Hello, world!`, exit 0 |
-| Async hello | [hello-async](../samples/design/hello-async.terrum) | `MainAsync`, `Task == Task<void>`, rooted arguments through completion; two lines with optional first argument |
-| Mandelbrot | [mandelbrot](../samples/design/mandelbrot.terrum) | Strict float32, explicit conversions, PBM; `5 3` yields rows `0 0 0 0 0`, `1 1 1 1 0`, `0 0 0 0 0`; invalid dimensions exit 2 |
-| Calculator | [calculator](../samples/design/calculator.terrum) | Checked `int32`, status-conditional `init ref<int32>` publication, ASCII operator tokens; `7 / 3 = 2`, `-7 % 3 = -1`, min-int remainder `-1 = 0`; overflow/errors exit 2 |
-| Collections | [collections](../samples/design/collections.terrum) | List/LinkedList collection builders, guarded writable span (accessor name provisional), fresh linked nodes and detach/reinsert identity, present-null versus missing; output `20`, `40`, `20`, `11`, `11`, `present, absent payload`, `missing element` |
-| Random composition | [random-composition](../samples/design/random-composition.terrum) | Accepted target direction for constructor inference from the inner RNG and concrete `IRandom` dispatch without payload copy; generic constructor inference and interface dispatch remain unsupported, while contextual decimal/hexadecimal `uint32` literals are supported; stored generic needs `[Sized]`; four words `A5A5A5A5`, `A5A5A5A4`, `A5A5A5A7`, `A5A5A5A6` |
-| Values/ownership | [types-and-ownership](../samples/design/types-and-ownership.terrum) | Copy struct vs readonly/writable shared class handles vs moved unique class, normalized optional, generic decimal parse, and `own<val<Text>>` native inline-payload direction (construction/conversion/cleanup notation unresolved) |
-| Text/spans | [text-and-spans](../samples/design/text-and-spans.terrum) | One `TextSpan<TCodeUnit = void>` family, encoding-erased identity and checked typed projection, explicit `Span` interface projection, single-source forwarding, immutable text validity, `init ref` destinations, ASCII-only numeric tokens; `hello`, `1`, `Unicode lookalikes rejected.` |
-| Formatting/construction | [construction-and-formatting](../samples/design/construction-and-formatting.terrum) | Typed nested Point/scalar writer forwarding, borrowed hole, `require`, owning text target and collection builder; `point = (3, 4)`, `saved = (3, 4)`, `4` |
-| Requirements and contracts | [requirements](../samples/design/requirements.terrum) | Declaration pre/postconditions, private static proofs, body-local runtime checks and single-output `require Try` lifting with optional failure-type selection; illustrative syntax, intended return 21, not executable yet |
-| Numerics/tensors | [numerics-and-tensors](../samples/design/numerics-and-tensors.terrum) | Generic math/SIMD composition with vector/lane ABI distinct from logical multidimensional `TensorSpan<T>` views; distinct lane masks, masked tails, `write Span<T>`/`write TensorSpan<T>` destinations, and explicit dense-view reduction; no execution or performance claim |
-| Win32 + Direct3D 11 triangle | [overview](../samples/design/win32-dx11-triangle/README.md), [WARP entrypoint](../samples/design/win32-dx11-triangle/main.terrum), [hardware entrypoint](../samples/design/win32-dx11-triangle/main-hardware.terrum), [Win32 declarations](../samples/design/win32-dx11-triangle/win32-api.terrum), [DX11 declarations](../samples/design/win32-dx11-triangle/dx11-api.terrum), [shader](../samples/design/win32-dx11-triangle/triangle.hlsl), [NOTICE](../samples/design/win32-dx11-triangle/NOTICE.txt) | Both source-authored entrypoints emit Windows x64 native images using ordinary imports, layouts, ABI-level vtable slots, and Terrum ownership wrappers. Intended cyan triangle on dark blue; close exits 0 and device removal reports and exits 3. UI and hardware execution are not implied |
+| [`factorial`](../samples/LanguageFeatures/ControlFlow/factorial.terrum), [`control-flow`](../samples/LanguageFeatures/ControlFlow/control-flow.terrum), [`stack-arguments`](../samples/LanguageFeatures/Functions/stack-arguments.terrum), [`for-loops`](../samples/LanguageFeatures/ControlFlow/for-loops.terrum), [`requirements`](../samples/LanguageFeatures/Contracts/requirements.terrum) | Recursion, mutation, stack arguments, loops, checked requirements; respective statuses 720, 45, 91, 285, 10 | `fail-fast`; actual-source [native tests](../tests/Terrum.CodeAnalysis.Tests/Native/NativeTests.cs) |
+| [`integers64`](../samples/LanguageFeatures/NumericTypes/integers64.terrum) | Signed/unsigned 64-bit arithmetic and conversions | Ordinary native build; [64-bit tests](../tests/Terrum.CodeAnalysis.Tests/Semantics/Integer64Tests.cs) |
+| [`no-throw`](../samples/LanguageFeatures/Contracts/no-throw.terrum), [`no-return`](../samples/LanguageFeatures/Contracts/no-return.terrum) | Effect contracts and conditional outputs; status 42 | `fail-fast`; actual-source native tests |
+| [`try-finally`](../samples/LanguageFeatures/EffectsAndCleanup/try-finally.terrum) | Nested normal-exit cleanup preserves a pending return; status 42 | `fail-fast`; failure terminates rather than unwinding |
+| [`checked-recovery`](../samples/LanguageFeatures/EffectsAndCleanup/checked-recovery.terrum) | Cross-function division failure runs `finally` before an unsafe `catch`; status 42 | `checked-exceptions`; AOT/JIT |
+| [`owner-transfer`](../samples/LanguageFeatures/Ownership/owner-transfer.terrum), [`unique-owner`](../samples/LanguageFeatures/Ownership/unique-owner.terrum), [`composite-owner`](../samples/LanguageFeatures/Ownership/composite-owner.terrum) | Moves, conditional ownership publication, receiver mutation, failed replacement, and partial construction; status 42 | Use `checked-exceptions` for recovery examples; compact owners hold no OS resource |
+| [`owned-buffer`](../samples/LanguageFeatures/Ownership/owned-buffer.terrum), [`readonly-buffer-view`](../samples/LanguageFeatures/Views/readonly-buffer-view.terrum), [`mutable-buffer-view`](../samples/LanguageFeatures/Views/mutable-buffer-view.terrum) | Fixed-capacity owned buffers, initialized prefixes, and scoped loans; status 42 | Both policies; bounded buffer/view profiles, not general `Span<T>` |
+| [`nested-struct-receiver`](../samples/LanguageFeatures/Views/nested-struct-receiver.terrum) | Writable nested receiver paths update the original subobject; status 42 | Both policies |
+| [`managed-node-cycle`](../samples/LanguageFeatures/ManagedStorage/managed-node-cycle.terrum), [`managed-classes`](../samples/LanguageFeatures/ManagedStorage/managed-classes.terrum), [`managed-optional-cycle`](../samples/LanguageFeatures/ManagedStorage/managed-optional-cycle.terrum) | Rooted nodes/classes, optional edges, partial construction, and cycle collection; status 42 | Both policies; no public managed-handle ABI or general collection library |
+| [`multi-type-generics`](../samples/LanguageFeatures/Generics/multi-type-generics.terrum), [`managed-generic-selection`](../samples/LanguageFeatures/Generics/managed-generic-selection.terrum) | Closed generic inference, helper composition, and distinct conditional outputs; status 42 | Bounded compilation-local specialization, not public generic witnesses |
+| [`static-protocol-quadratic`](../samples/LanguageFeatures/StaticProtocols/static-protocol-quadratic.terrum), [`static-protocol-power`](../samples/LanguageFeatures/StaticProtocols/static-protocol-power.terrum), [`static-protocol-binary`](../samples/LanguageFeatures/StaticProtocols/static-protocol-binary.terrum), [`static-protocol-comparison`](../samples/LanguageFeatures/StaticProtocols/static-protocol-comparison.terrum) | Source-defined nominal arithmetic/comparison protocols; quadratic returns 46, the others 42 | AOT/JIT; see [generic support](implementation.md#bounded-generic-functions) |
 
-The calculator must reject U+0661/U+FF11 digits, U+2212 minus and U+FF0B operator rather than normalize them into ASCII. `mandelbrot` marks points bounded after 64 updates, not proven set membership. Async entry returns only after both writes and required cleanup. The table records intended behavior, not uniform runtime qualification; compilation, emitted-image inspection, and execution are distinct evidence.
+## Multi-file and platform scenarios
 
-Single ASCII operators/delimiters use target-typed character intent where helpful;
-casts replace per-source numeric helpers without changing the proposed output.
-The hosted compiler and compiled-scanner path support character literals
-representable as `char16`; target-type checks remain separate from lexical
-scalar validation. General family conformance, generic constructor inference
-and builders are still design-only. Checked casts among `int32`, `uint32`,
-`int64`, `uint64` and `char16`, boolean `require`, and legacy bool/out
-publication for supported copy values run in the native profile. These
-sketches' richer types and cleanup still need
-later semantics.
-See [conversion contracts](specs/conversions.md)
-and [type families](specs/type-families.md), not parser success, for their rationale.
+Provider and component files without `Main` are deliberate members of a
+composition, not standalone programs. Their scenario READMEs and the linked
+implementation guides identify required inputs and recipes.
 
-The triangle's `NOTICE.txt` contains the Microsoft Tutorial02 attribution and license. Its README describes platform contracts and deliberate exclusions rather than a runnable recipe. Design examples combine accepted target forms with separately identified provisional API/representation sketches; an example neither approves an unselected form nor establishes compiler support. For current executable parser/syntax fixtures, consult [implementation](implementation.md) instead.
+| Scenario | Composition and observation |
+|---|---|
+| [`CrossModuleRecovery`](../samples/CrossModuleRecovery/README.md) | Separate provider `Divide` and recovering consumer; status 42 under `checked-exceptions`; see [semantic modules](implementation/modules.md). |
+| [`ModuleReplacement`](../samples/ModuleReplacement/README.md) | Reference/replacement/consumer examples, incompatible replacements, component entries, and a private managed-Copy consumer; see [semantic modules](implementation/modules.md). |
+| [`ModuleSetServicing`](../samples/ModuleSetServicing/README.md) | Two providers, compatible replacements, and a shared consumer; see [module sets](implementation/module-sets.md). |
+| [`DependencyGraphServicing`](../samples/DependencyGraphServicing/README.md) | Leaf/middle/root servicing, owning exports, scoped views, and private managed implementations behind handle-free public values; see [native graphs](implementation/native-graph.md). |
+| [`Win32MessageBox`](../samples/Win32MessageBox/README.md) | `build-native-import` emits a program using a raw Win32 pointer import; successful dialog dismissal returns success. Execution is interactive. |
+| [`Win32Dx11Triangle`](../samples/Win32Dx11Triangle/README.md) | WARP or direct-hardware entry plus both `win32-api.terrum` and `dx11-api.terrum`; copy `triangle.hlsl` beside the executable. |
+
+The Win32/DX11 entries author window creation, shader loading, rendering,
+resizing, message processing, and cleanup in Terrum. The shader uses
+`SV_VertexID`, so the render path needs no input layout or vertex buffer.
+WARP and hardware are separate choices, with no automatic driver fallback.
+Launch scripts use `checked-exceptions`; ordinary CLI tests emit both entries
+under both runtime policies without running them.
+
+The expected image is a cyan triangle on dark blue. Normal close returns 0;
+setup/render/message failures return 1, and window/class cleanup failure
+terminates with 87. The sample's
+[NOTICE](../samples/Win32Dx11Triangle/NOTICE.txt) preserves the Microsoft
+Tutorial02 attribution.
+
+Execution requires Windows x64 and the selected graphics runtime.
+[`CliTests.Dx11Sample`](../tests/Terrum.CodeAnalysis.Tests/Cli/CliTests.Dx11Sample.cs)
+uses explicit `TERRUM_RUN_INTERACTIVE_WINDOW_TESTS=1` or
+`TERRUM_RUN_DX11_HARDWARE=1` gates for visible-window resize, displayed-color,
+and normal-close checks. These observations depend on the display/desktop
+environment. They do **not** establish mapped back-buffer pixels, exact raster
+coverage, GPU completion, scanout, or every native release-order effect.
+The separate [provider-failure fixture](../tests/Terrum.CodeAnalysis.Tests/Native/Interop/Fixtures/dx11-provider-failure-outputs.terrum)
+emits in ordinary tests; its explicit WARP execution observes selected raw
+failure outputs using the maintained API companions and one hidden window.
+Skipped or unselected integrations are not runtime evidence.
+
+The native FFI/vtable source forms and metadata remain **UNAPPROVED**.
+Sample execution does not approve them or give the compiler Windows/DX11
+ownership, API, IID, slot, or application policy.
+The triangle's [NOTICE](../samples/Win32Dx11Triangle/NOTICE.txt) preserves the
+Microsoft Tutorial02 attribution and license. Its README describes platform
+contracts and deliberate exclusions rather than a runnable recipe.
+
+## Target-language design examples
+
+These examples require unimplemented language or library facilities. Their
+outputs are intended behavior, not observed compiler results. See
+[language contracts](specs/language-contracts.md),
+[library contracts](specs/libraries.md), and the
+[implementation inventory](implementation.md).
+Some sketches combine accepted target forms with separately identified
+provisional API or representation choices; an example neither approves those
+choices nor establishes compiler support.
+
+| Example | Target contract / intended behavior |
+|---|---|
+| [Hello world](../samples/HelloWorld/hello-world.terrum) | `void Main`, text output, exit 0 |
+| [Async hello](../samples/HelloWorld/hello-async.terrum) | `MainAsync`, rooted arguments through completion and cleanup |
+| [Mandelbrot](../samples/Mandelbrot/mandelbrot.terrum) | Strict float32, explicit conversions, PBM; dimensions checked, points bounded after 64 updates rather than proven set membership |
+| [Calculator](../samples/Calculator/calculator.terrum) | Checked int32 and conditional `init ref<int32>` publication; reject Unicode digit/operator lookalikes rather than normalizing them |
+| [Collections](../samples/LanguageFeatures/Collections/collections.terrum) | Builders, guarded writable spans, node identity, and present-null versus missing |
+| [Random composition](../samples/LanguageFeatures/Generics/random-composition.terrum) | Generic constructor inference and concrete interface dispatch without payload copying; those facilities remain unsupported |
+| [Values/ownership](../samples/LanguageFeatures/Ownership/types-and-ownership.terrum) | Copy values, shared readonly/write handles, moved unique classes, optionals, and an explicitly unresolved inline-payload ownership sketch |
+| [Text/spans](../samples/LanguageFeatures/TextAndSpans/text-and-spans.terrum) | Encoding-erased identity, checked typed projection, explicit span projection, and ASCII-only numeric tokens |
+| [Formatting/construction](../samples/LanguageFeatures/ConstructionAndFormatting/construction-and-formatting.terrum) | Descriptor forwarding, borrowed interpolation, owning text, and builders |
+| [Declaration requirements](../samples/LanguageFeatures/Contracts/declaration-requirements.terrum) | Declaration contracts, private proofs, and lifted initialization outputs; distinct from the runnable `requirements.terrum` |
+| [Numerics/tensors](../samples/LanguageFeatures/Numerics/numerics-and-tensors.terrum) | Generic math/SIMD, distinct lane masks, multidimensional views, and explicit writable destinations; no execution/performance claim |
+
+Existing reference variables denote descriptors: form one with `ref place`,
+pass an existing descriptor directly, and use `->` or explicit dereference
+for referent access. Initialization destinations write through `*destination`
+and forward with `init *destination`. `mut` permits rebinding; `write` grants
+referent access. `init ref<T>` and `init value` are approved target forms for
+vacancy-only destinations. Inline destination declarations follow the accepted
+source argument rules, not an extra sketch-only parameter mode. Legacy
+`out`/`ref` call patterns are not target invocation syntax; the executable
+profile retains legacy `bool`/`out` beside distinct `bool`/`init ref<T>`
+contracts. See [references](specs/language/references.md).
+
+## Test-owned inputs
+
+Syntax fixtures under
+[`tests/Terrum.CodeAnalysis.Tests/Syntax/Fixtures`](../tests/Terrum.CodeAnalysis.Tests/Syntax/Fixtures)
+are parser round-trip inputs. The
+[`aggregate-abi`](../tests/Terrum.CodeAnalysis.Tests/Native/Interop/Fixtures/aggregate-abi.terrum),
+[`checked-bounds`](../tests/Terrum.CodeAnalysis.Tests/Native/SourceGrants/Fixtures/checked-bounds.terrum),
+and [`frame-unwind`](../tests/Terrum.CodeAnalysis.Tests/Native/Unwind/Fixtures/frame-unwind.terrum)
+inputs are compiler/test fixtures with dedicated callers, host grants, or ABI
+assertions; they are not standalone samples. Their execution and qualification
+claims are limited to the active tests and probes documented in
+[building and native qualification](building.md#native-qualification).

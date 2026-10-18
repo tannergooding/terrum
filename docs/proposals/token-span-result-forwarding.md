@@ -108,7 +108,7 @@ Require the consumer, then:
    returned-span contracts; adopting private parameter persistence must not
    admit result metadata accidentally.
 
-The [cursor/forwarding regressions](../../tests/Terrum.CodeAnalysis.Tests/TokenCursorTests.cs)
+The [cursor/forwarding regressions](../../tests/Terrum.CodeAnalysis.Tests/Lexing/TokenCursorTests.cs)
 and [token-span verifier](../../sources/Terrum.CodeAnalysis/Semantics/TokenSpanContract.cs)
 are evidence sources. This proposal makes no new semantic, metadata or target
 acceptance claim.

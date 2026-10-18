@@ -32,9 +32,9 @@ From the repository root, after building `terrumc`:
 
 ```powershell
 $c = "artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.exe"
-& $c compile-native producer samples\native\module-sets\first.terrum First --export Alpha -o first.trmn --runtime fail-fast
-& $c compile-native producer samples\native\module-sets\second.terrum Second --export Beta -o second.trmn --runtime fail-fast
-& $c compile-native-set samples\native\module-sets\consumer.terrum --provider second.trmn --provider first.trmn -o consumer.tnset --runtime fail-fast
+& $c compile-native producer samples\ModuleSetServicing\first.terrum First --export Alpha -o first.trmn --runtime fail-fast
+& $c compile-native producer samples\ModuleSetServicing\second.terrum Second --export Beta -o second.trmn --runtime fail-fast
+& $c compile-native-set samples\ModuleSetServicing\consumer.terrum --provider second.trmn --provider first.trmn -o consumer.tnset --runtime fail-fast
 & $c validate-native-set consumer.tnset --provider first.trmn --provider second.trmn
 & $c run-native-set consumer.tnset --provider second.trmn --provider first.trmn --runtime fail-fast
 ```

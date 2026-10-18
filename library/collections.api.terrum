@@ -36,7 +36,7 @@ public mut class List<T>
             return false;
         }
 
-        value = _items.ReadInitialized(index);
+        *value = _items.ReadInitialized(index);
 
         return true;
     }

@@ -86,8 +86,8 @@ surface, retain and independently verify its complete structure there.
 
 Evidence entry points:
 [verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.SwitchDispatch.cs),
-[counted-loop regressions](../../tests/Terrum.CodeAnalysis.Tests/ManagedScannerComponentTests.CleanupCountedFor.cs),
-[switch regressions](../../tests/Terrum.CodeAnalysis.Tests/ManagedScannerComponentTests.CleanupSwitchTransfers.cs)
-and [CLI integration](../../tests/Terrum.CodeAnalysis.Tests/CliTests.FrontendCleanupSwitchTransfers.cs).
+[counted-loop regressions](../../tests/Terrum.CodeAnalysis.Tests/Lexing/ManagedScannerComponentTests.CleanupCountedFor.cs),
+[switch regressions](../../tests/Terrum.CodeAnalysis.Tests/Lexing/ManagedScannerComponentTests.CleanupSwitchTransfers.cs)
+and [CLI integration](../../tests/Terrum.CodeAnalysis.Tests/Cli/CliTests.FrontendCleanupSwitchTransfers.cs).
 These establish only the behavior actually exercised, not the general ranking
 alternative or adoption of this strategy.

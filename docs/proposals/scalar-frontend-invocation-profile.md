@@ -134,8 +134,8 @@ Required evidence:
 Current evidence entry points are the
 [host adapter](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs),
 [invocation auditor](../../sources/Terrum.CodeAnalysis/Lexing/ScalarFrontendHost.Invocation.cs),
-[complete-program regressions](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
-and [private-span regressions](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.PrivateSpans.cs).
+[complete-program regressions](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
+and [private-span regressions](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.PrivateSpans.cs).
 The [composition inventory](../implementation/bootstrap-frontend-composition.md)
 owns current support. No independent compiler bootstrap or accepted profile
 follows from those tests.

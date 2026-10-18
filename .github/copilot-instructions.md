@@ -18,7 +18,7 @@
 - Tests use NUnit with `Microsoft.NET.Test.Sdk` and `NUnit3TestAdapter`. After building the relevant configuration, run a single test through the existing runner:
 
 ```powershell
-dotnet test tests\Terrum.CodeAnalysis.Tests\Terrum.CodeAnalysis.Tests.csproj --no-build --no-restore --filter "FullyQualifiedName=Terrum.CodeAnalysis.Tests.TestFileCleanupTests.DeleteWithRetryWaitsForFileLockToClearAsync"
+dotnet test tests\Terrum.CodeAnalysis.Tests\Terrum.CodeAnalysis.Tests.csproj --no-build --no-restore --filter "FullyQualifiedName=Terrum.CodeAnalysis.Tests.Infrastructure.TestFileCleanupTests.DeleteWithRetryWaitsForFileLockToClearAsync"
 ```
 
 - Combine related filters in one run. Use `--no-build` only when the selected configuration's outputs cover the current changes. Test regressions through public compiler APIs rather than adding `InternalsVisibleTo`.
@@ -30,7 +30,7 @@ dotnet test tests\Terrum.CodeAnalysis.Tests\Terrum.CodeAnalysis.Tests.csproj --n
 - `Terrum.CodeAnalysis` is a C# host with lossless text, lexing, and syntax APIs; `Semantics` binds source snapshots into checked bound programs; `Native` emits Terrum-owned Windows x64 code and PE images. The C# implementation does not imply CIL or managed output.
 - `Modules` contains dependency binding, private semantic/native artifact paths, and standard TRRM readers, writers, and executable profiles. Only `.trrm` is normative serialized semantic interchange. Do not infer standard TRRM support from a private module, `.trmn`, or `.trng` path.
 - Preserve mandatory semantic verification for source, reconstructed metadata, JIT, and AOT inputs. Serialized or producer-generated inputs are not trusted substitutes for consumer-side validation.
-- `self-host` contains bounded Terrum-authored compiler components. They still depend on hosted verification/emission and do not establish a bootstrapped compiler. `samples\syntax` are parser fixtures; `samples\native` are executable examples; `samples\design` and library sketches are not blanket support claims.
+- `sources\Terrum.CodeAnalysis.Terrum` contains bounded Terrum-authored compiler components. They still depend on hosted verification/emission and do not establish a bootstrapped compiler; see its project README and the implementation inventory. `tests\Terrum.CodeAnalysis.Terrum.Tests` contains Terrum test sources consumed by the C# NUnit project. Samples are grouped by scenario or language feature under `samples`; parser fixtures belong to `tests\Terrum.CodeAnalysis.Tests\Syntax\Fixtures`. Consult the sample catalog for support and execution evidence.
 - `terrumc check` is syntax-only; `analyze` performs semantic analysis. For machine protocols, invoke the built `terrumc.dll` rather than mixing `dotnet run` build output into protocol data. Inspection/build commands use diagnostic exit statuses; execution workers return the program's status and require supervision.
 
 ## Contracts and source examples

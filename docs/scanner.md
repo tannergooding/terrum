@@ -1,8 +1,9 @@
 # Compiled Terrum scanner component
 
-The `self-host` source bundle (`SourceRange.terrum`, `CharacterFacts.terrum`,
-`Utf16CodeUnits.terrum`, `Utf16Scalar.terrum`, `CharacterLiteral.terrum`,
-`StringEscape.terrum`, then `Scanner.terrum`)
+The `Terrum.CodeAnalysis.Terrum` source project (`Text/SourceRange.terrum`,
+`Lexing/CharacterFacts.terrum`, `Text/Utf16CodeUnits.terrum`,
+`Text/Utf16Scalar.terrum`, `Lexing/CharacterLiteral.terrum`,
+`Lexing/StringEscape.terrum`, then `Lexing/Scanner.terrum`)
 contains an executable
 lossless scanner component, not a bootstrapped compiler. `Scanner.terrum`
 implements scalar decoding, Unicode identifier
@@ -85,9 +86,9 @@ validates one scalar but leaves target-type representability to the hosted
 binder.
 
 ```powershell
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component sources\self-host input.txt --runtime fail-fast --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component sources\Terrum.CodeAnalysis.Terrum input.txt --runtime fail-fast --json
 New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component self-host samples\native\factorial.terrum -o artifacts\bin\samples\scanned-factorial.exe --runtime fail-fast --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component sources\Terrum.CodeAnalysis.Terrum samples\LanguageFeatures\ControlFlow\factorial.terrum -o artifacts\bin\samples\scanned-factorial.exe --runtime fail-fast --json
 ```
 
 For these commands a directory argument explicitly selects the ordered
@@ -187,7 +188,7 @@ are separate protocols, not scanner records or semantic-module revision
 numbers. See the
 [composition inventory](implementation/bootstrap-frontend-composition.md#exact-private-identities-and-resources)
 for current bounds and audit limitations, and the
-[module revision inventory](implementation/self-host.md#private-semantic-module-revisions)
+[module revision inventory](implementation/terrum-code-analysis.md#private-semantic-module-revisions)
 for feature-selected persistence.
 
 The ordinary indexed frontend is source-bounded rather than limited to 64
@@ -371,7 +372,7 @@ numeric forms; repeated scans reset the published count.
 
 ## Quoted-literal decoding candidate
 
-`sources/self-host/StringLiteral.terrum` separately validates and decodes quoted source
+`sources/Terrum.CodeAnalysis.Terrum/Lexing/StringLiteral.terrum` separately validates and decodes quoted source
 spelling against the same fixed immutable `Host.Source` grant. It is not a new
 scanner side table or a runtime `Text` implementation. `StringLiteral.TryCreate`
 checks the complete range, delimiters, raw scalars and escapes before publishing

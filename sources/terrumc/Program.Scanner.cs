@@ -234,14 +234,22 @@ internal static partial class Program
             return [SyntaxTree.Parse(ReadSource(fullPath) + "\nint32 Main() { return Scan(); }\n", path)];
         }
 
-        string[] componentNames = ["SourceRange.terrum", "CharacterFacts.terrum", "Utf16CodeUnits.terrum", "Utf16Scalar.terrum",
-            "CharacterLiteral.terrum", "StringEscape.terrum", "Scanner.terrum"];
-        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(componentNames.Length);
+        string[] componentPaths = [
+            Path.Combine("Text", "SourceRange.terrum"),
+            Path.Combine("Lexing", "CharacterFacts.terrum"),
+            Path.Combine("Text", "Utf16CodeUnits.terrum"),
+            Path.Combine("Text", "Utf16Scalar.terrum"),
+            Path.Combine("Lexing", "CharacterLiteral.terrum"),
+            Path.Combine("Lexing", "StringEscape.terrum"),
+            Path.Combine("Lexing", "Scanner.terrum"),
+        ];
+        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(componentPaths.Length);
         const string NamespaceDeclaration = "namespace Terrum.CodeAnalysis;";
-        foreach (var componentName in componentNames)
+        foreach (var componentPath in componentPaths)
         {
-            var componentPath = Path.Combine(fullPath, componentName);
-            var componentSource = ReadSource(componentPath);
+            var fullComponentPath = Path.Combine(fullPath, componentPath);
+            var componentName = Path.GetFileName(fullComponentPath);
+            var componentSource = ReadSource(fullComponentPath);
             if (componentName != "SourceRange.terrum"
                 && !componentSource.StartsWith(NamespaceDeclaration, StringComparison.Ordinal))
             {
@@ -252,7 +260,7 @@ internal static partial class Program
             {
                 componentSource += "\nint32 Main() { return Scan(); }\n";
             }
-            trees.Add(SyntaxTree.Parse(componentSource, componentPath));
+            trees.Add(SyntaxTree.Parse(componentSource, fullComponentPath));
         }
 
         return trees.MoveToImmutable();

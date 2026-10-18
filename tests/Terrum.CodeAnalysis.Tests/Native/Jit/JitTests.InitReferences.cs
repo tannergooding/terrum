@@ -1,0 +1,332 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System.Threading.Tasks;
+using NUnit.Framework;
+
+using Terrum.CodeAnalysis.Tests.Semantics;
+
+namespace Terrum.CodeAnalysis.Tests.Native.Jit;
+
+public sealed partial class JitTests
+{
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task PrivateInitReferencePublishesOnlyOnSuccessAsync(bool checkedFailures)
+    {
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(InitReferenceTests.ScalarSource, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(InitReferenceTests.ScalarSource, 42).ConfigureAwait(true);
+        }
+    }
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task FloatingInitReferencePublishesOnSuccessAsync(bool checkedFailures)
+    {
+        const string Source = """
+            bool Publish64(init ref<float64> value) {
+                value = 0x1.fp+2;
+                return true;
+            }
+            bool Publish32(init ref<float32> value) {
+                value = 3.5;
+                return true;
+            }
+            int32 Main() {
+                init float64 value64;
+                init float32 value32;
+                if (!Publish64(init value64) || !Publish32(init value32)) { return 1; }
+                return value64 == 7.75 && value32 == 3.5 ? 42 : 0;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task FloatingOutPublishesOnEveryNormalReturnAsync(bool checkedFailures)
+    {
+        const string Source = """
+            float64 Get64(float64 source, out float64 value) {
+                value = source;
+                return source;
+            }
+            float32 Get32(float32 source, out float32 value) {
+                value = source;
+                return source;
+            }
+            int32 Main() {
+                mut float64 value64 = 0.0;
+                mut float32 value32 = 0.0;
+                float64 result64 = Get64(7.75, out value64);
+                float32 result32 = Get32(3.5, out value32);
+                return result64 == value64 && value64 == 7.75
+                    && result32 == value32 && value32 == 3.5 ? 42 : 0;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task FloatingVoidOutPublishesOnReturnAsync(bool checkedFailures)
+    {
+        const string Source = """
+            void Fill64(out float64 value) { value = 7.75; }
+            void Fill32(out float32 value) { value = 3.5; }
+            int32 Main() {
+                mut float64 value64 = 0.0;
+                mut float32 value32 = 0.0;
+                Fill64(out value64);
+                Fill32(out value32);
+                return value64 == 7.75 && value32 == 3.5 ? 42 : 0;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Test]
+    public Task CheckedInitReferenceFailurePropagatesWithoutPublicationAsync()
+    {
+        const string Source = """
+            bool Fail(init ref<int32> value) {
+                require false;
+                value = 42;
+                return true;
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        if (Fail(init var missing)) { return 1; }
+                        return 2;
+                    }
+                    catch { return 42; }
+                }
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
+    [Test]
+    public Task CheckedEarlierArgumentFailureLeavesInitDestinationVacantAsync() =>
+        AssertCheckedExecutionAsync("""
+            bool Fill(int32 ignored, init ref<int32> value) {
+                value = 42;
+                return true;
+            }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                init int32 value;
+                unsafe {
+                    try {
+                        if (Fill(Fail(), init value)) { return 1; }
+                        return 2;
+                    } catch {
+                        return value is init ? 43 : 42;
+                    }
+                }
+            }
+            """, 42);
+
+    [Test]
+    public Task CheckedLaterArgumentFailureLeavesStagedInitDestinationVacantAsync() =>
+        AssertCheckedExecutionAsync("""
+            [NoThrow] bool Fill(init ref<int32> value, int32 ignored) {
+                value = 42;
+                return true;
+            }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                init int32 value;
+                unsafe {
+                    try {
+                        Fill(init value, Fail());
+                        return 1;
+                    } catch {
+                        return value is init ? 43 : 42;
+                    }
+                }
+                return 0;
+            }
+            """, 42);
+
+    [Test]
+    public Task CheckedReorderedNamedLaterArgumentFailureLeavesInitDestinationVacantAsync() =>
+        AssertCheckedExecutionAsync("""
+            [NoThrow] bool Fill(int32 ignored, init ref<int32> value) {
+                value = 42;
+                return true;
+            }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                init int32 value;
+                unsafe {
+                    try {
+                        Fill(value: init value, ignored: Fail());
+                        return 1;
+                    } catch {
+                        return value is init ? 43 : 42;
+                    }
+                }
+                return 0;
+            }
+            """, 42);
+
+    [Test]
+    public Task CheckedEarlierArgumentFailureLeavesOutDestinationUnchangedAsync() =>
+        AssertCheckedExecutionAsync("""
+            [NoThrow] void Fill(int32 ignored, out int32 value) { value = 42; }
+            int32 Fail() { require false; return 0; }
+            int32 Main() {
+                mut int32 value = 7;
+                unsafe {
+                    try {
+                        Fill(Fail(), out value);
+                        return 1;
+                    } catch {
+                        return value == 7 ? 42 : 43;
+                    }
+                }
+            }
+            """, 42);
+
+    [Test]
+    public Task CheckedNonBooleanUniqueInitFailureDoesNotPublishAsync()
+    {
+        const string Source = """
+            unique struct Owner {
+                public int32 Value;
+                public Owner(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Fail(init ref<Owner> value) {
+                value = new Owner(42);
+                require false;
+                return 0;
+            }
+            int32 Main() {
+                init Owner value;
+                unsafe {
+                    try {
+                        int32 status = Fail(init value);
+                        return status;
+                    } catch {
+                        return value is init ? 42 : 43;
+                    }
+                }
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 43);
+    }
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task CopyAggregateInitReferencePublishesCompleteValueAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Pair {
+                public int32 First;
+                public int32 Second;
+                public Pair(int32 first, int32 second) {
+                    First = first;
+                    Second = second;
+                }
+            }
+            bool Fill(bool publish, init ref<Pair> value) {
+                if (!publish) { return false; }
+                value = new Pair(40, 2);
+                return true;
+            }
+            int32 Main() {
+                if (Fill(false, init var pair)) { return 1; }
+                require Fill(true, init pair);
+                return pair.First + pair.Second;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task OwningInitReferenceTransfersTheCompleteValueAsync(bool checkedFailures)
+    {
+        const string Source = """
+            unique struct Owner {
+                public mut OwnedInt32Buffer Buffer;
+                public Owner(int32 number) {
+                    require OwnedInt32Buffer.TryCreate(1, out var buffer);
+                    Buffer = move buffer;
+                    require Buffer.TryAppend(number);
+                }
+            }
+            bool Create(bool publish, init ref<Owner> result) {
+                if (!publish) { return false; }
+                result = new Owner(42);
+                return true;
+            }
+            int32 Main() {
+                if (Create(false, init var owner)) { return 1; }
+                require Create(true, init owner);
+                return owner.Buffer.Read(0);
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task ManagedInitReferenceRootsOnlyPublishedHandlesAsync(bool checkedFailures) =>
+        checkedFailures ? AssertCheckedExecutionAsync(InitReferenceTests.ManagedSource, 42)
+            : AssertFailFastExecutionAsync(InitReferenceTests.ManagedSource, 42);
+    [TestCase(false)]
+    [TestCase(true)]
+    public Task ManagedInitPublishesAnInitializedNullDistinctFromVacancyAsync(bool checkedFailures)
+    {
+        const string Source = """
+            bool Fill(bool publish, init ref<ManagedNode?> value) {
+                if (!publish) { return false; }
+                value = null;
+                return true;
+            }
+            int32 Main() {
+                if (Fill(false, init var node)) { return 1; }
+                require Fill(true, init node);
+                if (node is some present) { return present.Value; }
+                return 42;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Test]
+    public Task CheckedManagedInitFailureDoesNotPublishOrRetainTheScratchHandleAsync() =>
+        AssertCheckedExecutionAsync("""
+            bool Fail(init ref<write ManagedNode> value) {
+                require ManagedNode.TryCreate(42, out var created);
+                value = created;
+                require false;
+                return true;
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        if (Fail(init var missing)) { return 1; }
+                        return 2;
+                    } catch {
+                        if (ManagedHeap.Collect() != 1) { return 3; }
+                        return 42;
+                    }
+                }
+            }
+            """, 42);
+}

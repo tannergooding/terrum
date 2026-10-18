@@ -26,7 +26,7 @@ move verification or emission from the hosted compiler.
 
 The deferred candidate was one compiler-owned registration from
 `StringLiteral` to `StringNameRowUtf8`. Its helper shape already exists in
-[`StringRow.terrum`](../../sources/self-host/StringRow.terrum):
+[`StringRow.terrum`](../../sources/Terrum.CodeAnalysis.Terrum/Modules/StringRow.terrum):
 
 ```terrum
 bool TryBuildStringNameRowUtf8(
@@ -52,9 +52,9 @@ a separate standard table or a reserved target identity.
 The candidate registration, invocation lifecycle and any future target type
 remain unapproved; helper implementation does not approve them.
 
-[`StringLiteralComponentTests`](../../tests/Terrum.CodeAnalysis.Tests/StringLiteralComponentTests.cs)
+[`StringLiteralComponentTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/Strings/StringLiteralComponentTests.cs)
 contains ordinary helper cases for complete publication, refusal and
-maximum-grant exact capacity; [`StringRowModuleTests`](../../tests/Terrum.CodeAnalysis.Tests/StringRowModuleTests.cs)
+maximum-grant exact capacity; [`StringRowModuleTests`](../../tests/Terrum.CodeAnalysis.Tests/Modules/Strings/StringRowModuleTests.cs)
 exercises private semantic-module reuse across source grants. Neither is a
 registered literal path or independent standard-TRRM constant program.
 

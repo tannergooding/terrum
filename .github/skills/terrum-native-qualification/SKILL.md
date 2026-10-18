@@ -57,7 +57,7 @@ interactive tests merely to produce a passing count.
 - Inspect the selected script's argument parsing, compiler/library selection,
   working directory, output paths, and assertions before copying its documented
   invocation. Useful entry points include `scripts\check-native-frame.cs`,
-  `scripts\check-owned-call-abi.cs`, `scripts\check-owned-buffer-abi.cs`, and
+  `scripts\check-native-seh.cs`, `scripts\check-owned-buffer-abi.cs`, and
   `scripts\check-managed-node-abi.cs`.
 - Use `--compiler` only if the script actually parses and consumes it. An
   ignored argument or `dotnet run -c Release` does not select the compiler
@@ -81,7 +81,7 @@ interactive tests merely to produce a passing count.
 - Keep normal runs headless. Visible-window and hardware integration require
   their documented explicit opt-ins. A skipped integration is an evidence gap,
   not runtime success; do not weaken the gate or substitute another device.
-- Follow process patterns in `tests\Terrum.CodeAnalysis.Tests\CliTests.cs`:
+- Follow process patterns in `tests\Terrum.CodeAnalysis.Tests\Cli\CliTests.cs`:
   capture stdout/stderr, enforce deadlines, inspect the actual exit/result,
   and kill only the owned process/tree on timeout before waiting for exit.
   Do not use broad process-name termination.
@@ -89,7 +89,7 @@ interactive tests merely to produce a passing count.
   A nonzero program result can be expected by a test; compare the actual
   result and output to the specific assertions rather than assuming zero.
 - Wait for processes to exit before deleting generated executable outputs.
-  Reuse `tests\Terrum.CodeAnalysis.Tests\TestFileCleanup.cs` for bounded
+  Reuse `tests\Terrum.CodeAnalysis.Tests\Infrastructure\TestFileCleanup.cs` for bounded
   file/directory cleanup retries; persistent failures must remain visible.
 - Retain fresh command arguments, outputs, exit statuses, deadlines, input
   identity, and assertions under `artifacts\log` or the existing probe results.

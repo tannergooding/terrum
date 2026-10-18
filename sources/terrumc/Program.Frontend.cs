@@ -39,14 +39,35 @@ internal static partial class Program
         SourceText source;
         string? outputPath = null;
         List<SyntaxTree> trees = new();
-        string[] names = ["SourceRange", "CharacterFacts", "Utf16CodeUnits", "Utf16Scalar", "Token", "ManagedTokenChain",
-            "StringEscape", "Scanner",
-            "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
-            "WideIntegerFacts", "IntegerParsing", "TokenIntegerSnapshot", "TokenDiagnosticSnapshot", "ScalarParserTypes",
-            "CharacterLiteral", "HexDigitValue", "BasedIntegerFloatLiteral", "HexFloatLiteral",
-            "DecimalFloatLiteral", "IntegerFloatConversion", "Char16FloatConversion",
-            "ScalarFrontend", "TokenCursor",
-            "ScalarFrontendProgram", "ScalarFrontendProjection"];
+        string[] componentPaths = [
+            Path.Combine("Text", "SourceRange.terrum"),
+            Path.Combine("Lexing", "CharacterFacts.terrum"),
+            Path.Combine("Text", "Utf16CodeUnits.terrum"),
+            Path.Combine("Text", "Utf16Scalar.terrum"),
+            Path.Combine("Lexing", "Token.terrum"),
+            Path.Combine("Lexing", "ManagedTokenChain.terrum"),
+            Path.Combine("Lexing", "StringEscape.terrum"),
+            Path.Combine("Lexing", "Scanner.terrum"),
+            Path.Combine("Lexing", "ManagedScanner.terrum"),
+            Path.Combine("Lexing", "TokenSnapshot.terrum"),
+            Path.Combine("Lexing", "TokenTriviaSnapshot.terrum"),
+            Path.Combine("Utilities", "Numerics", "WideIntegerFacts.terrum"),
+            Path.Combine("Utilities", "Numerics", "IntegerParsing.terrum"),
+            Path.Combine("Lexing", "TokenIntegerSnapshot.terrum"),
+            Path.Combine("Lexing", "TokenDiagnosticSnapshot.terrum"),
+            Path.Combine("Syntax", "ScalarParserTypes.terrum"),
+            Path.Combine("Lexing", "CharacterLiteral.terrum"),
+            Path.Combine("Lexing", "HexDigitValue.terrum"),
+            Path.Combine("Lexing", "BasedIntegerFloatLiteral.terrum"),
+            Path.Combine("Lexing", "HexFloatLiteral.terrum"),
+            Path.Combine("Lexing", "DecimalFloatLiteral.terrum"),
+            Path.Combine("Utilities", "Numerics", "IntegerFloatConversion.terrum"),
+            Path.Combine("Utilities", "Numerics", "Char16FloatConversion.terrum"),
+            Path.Combine("Semantics", "ScalarFrontend.terrum"),
+            Path.Combine("Lexing", "TokenCursor.terrum"),
+            Path.Combine("Semantics", "ScalarFrontendProgram.terrum"),
+            Path.Combine("Semantics", "ScalarFrontendProjection.terrum"),
+        ];
         try
         {
             if (build)
@@ -67,9 +88,9 @@ internal static partial class Program
                 WriteInputError(json, "TRM2001", "The frontend input exceeds its bounded source limit.");
                 return 2;
             }
-            foreach (var name in names)
+            foreach (var componentPath in componentPaths)
             {
-                var path = Path.Combine(args[1], name + ".terrum");
+                var path = Path.Combine(args[1], componentPath);
                 trees.Add(SyntaxTree.Parse(ReadSource(path), path));
             }
         }

@@ -124,7 +124,7 @@ prerequisite has already been met.
     consumers and complete invocation, lifetime, size/resource and admission
     rules; provisional implementation does not establish those contracts.
     Current component support and the hosted verifier/emitter boundary are
-    recorded in the [self-host inventory](implementation/self-host.md).
+    recorded in the [Terrum-authored component inventory](implementation/terrum-code-analysis.md).
 
 These are pending contracts, not support claims. Exact grammar, metadata and
 implementation remain subject to their canonical specifications and proposals.

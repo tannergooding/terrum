@@ -1,0 +1,78 @@
+[NoThrow]
+public unsafe int32 ReleaseCleanupSemaphore(ptr<void> semaphore, int32 count, ptr<int32> previous) {
+    return 0;
+}
+
+public unique struct Child {
+    ptr<void> Semaphore;
+    public unsafe Child(ptr<void> semaphore) { unsafe { Semaphore = semaphore; } }
+    [NoThrow] [Cleanup] public void Close() {
+        unsafe { ReleaseCleanupSemaphore(Semaphore, 1, null); }
+    }
+}
+
+public unique struct Parent {
+    internal Child Value;
+    internal int64 Marker;
+    public unsafe Parent(ptr<void> semaphore) {
+        unsafe { Value = new Child(semaphore); }
+        Marker = int64.MinValue;
+    }
+    [NoThrow] [Cleanup] public void Close() {}
+}
+
+public unique struct Envelope {
+    internal Parent Value;
+    public unsafe Envelope(ptr<void> semaphore) { unsafe { Value = new Parent(semaphore); } }
+}
+
+public unsafe int32 Check(ptr<void> semaphore) {
+    unsafe { { Parent value = new Parent(semaphore); } }
+    return 42;
+}
+
+public unsafe int32 CheckReplacement(ptr<void> semaphore) {
+    unsafe {
+        mut Parent value = new Parent(semaphore);
+        value = new Parent(semaphore);
+        require value.Marker == int64.MinValue;
+        return 42;
+    }
+}
+
+public bool Replace(Parent input, out Parent output) {
+    output = move input;
+    return true;
+}
+
+public unsafe int32 CheckStaged(ptr<void> semaphore) {
+    unsafe {
+        mut Parent value = new Parent(semaphore);
+        require Replace(new Parent(semaphore), out value);
+        require value.Marker == int64.MinValue;
+        return 42;
+    }
+}
+
+unsafe Parent ReturnOwner(ptr<void> semaphore) {
+    unsafe {
+        Parent old = new Parent(semaphore);
+        return new Parent(semaphore);
+    }
+}
+
+public unsafe int32 CheckPendingReturn(ptr<void> semaphore) {
+    unsafe {
+        Parent value = ReturnOwner(semaphore);
+        require value.Marker == int64.MinValue;
+        return 42;
+    }
+}
+
+public unsafe int32 CheckNested(ptr<void> semaphore) {
+    unsafe {
+        Envelope value = new Envelope(semaphore);
+        require value.Value.Marker == int64.MinValue;
+        return 42;
+    }
+}

@@ -33,7 +33,8 @@ var logs = Path.Combine(artifacts, "log", "native-probes", "native-seh");
 Directory.CreateDirectory(binaries);
 Directory.CreateDirectory(objects);
 Directory.CreateDirectory(logs);
-var source = Path.GetFullPath(Path.Combine("tests", "native", "seh-probe.c"));
+var source = Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native",
+    "Unwind", "Probes", "seh-probe.c"));
 var executable = Path.Combine(binaries, "seh-probe.exe");
 var listing = Path.Combine(objects, "seh-reference.asm");
 var objectFile = Path.Combine(objects, "seh-reference.obj");

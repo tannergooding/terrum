@@ -18,7 +18,7 @@ Keep ordinary compilation-local scanner use unless persisted execution serves
 a real integrated path. A general host-buffer capability or explicit view ABI
 is a substantive alternative with wider ownership and compatibility work;
 do not introduce either implicitly through this fixed component profile.
-The [self-host inventory](../implementation/self-host.md) owns current
+The [Terrum-authored component inventory](../implementation/terrum-code-analysis.md) owns current
 provisional support.
 
 ## Candidate identity and binding
@@ -102,6 +102,6 @@ design rather than treating them as incidental scanner support.
    verifier and emitter without a hosted-lexer fallback.
 
 The [`ScannerHost`](../../sources/Terrum.CodeAnalysis/Lexing/ScannerHost.cs),
-[`Scanner`](../../sources/self-host/Scanner.terrum) and
+[`Scanner`](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/Scanner.terrum) and
 [`NativeJit`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs) implementations
 are evidence entry points. Their existence does not discharge these gates.

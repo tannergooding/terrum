@@ -160,6 +160,6 @@ Repository evidence:
   retired development numbers from those assignments.
 - [Linear reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmCompactLinearBodyReader.cs)
   historically derives `0x1D` results from equal floating operands and rejects other kinds;
-  [compiler tests](../../tests/Terrum.CodeAnalysis.Tests/TrRmExecutableCompilerTests.cs)
+  [compiler tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmExecutableCompilerTests.cs)
   cover floating arithmetic and malformed kinds/integer operands. Existing
   implementation and tests are evidence, not approval of future families.

@@ -10,7 +10,7 @@ and [native profile](native.md); pending standard records are in the
 
 The compiler sources contain no DX11 API catalog, sample/window-owner
 recognizer, COM ownership/acquisition rule or synthesized renderer.
-Maintained [sample entry points](../../samples/design/win32-dx11-triangle/README.md)
+Maintained [sample entry points](../../samples/Win32Dx11Triangle/README.md)
 author imports, SDK layouts, numeric-slot calls, callbacks, message processing
 and resource cleanup. The compiler mechanisms are generic imports, pointers,
 function pointers, fixed layouts, vtable ABI lowering and ordinary

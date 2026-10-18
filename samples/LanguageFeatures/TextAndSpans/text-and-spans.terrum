@@ -1,0 +1,61 @@
+// DESIGN ONLY: family/conditional-member syntax is provisional.
+// Reference descriptors retain explicit referent access and backing dependencies.
+using Terrum;
+
+public static bool HasContent<TSequence>(ref<TSequence> source)
+    where TSequence : IContiguousSequence<char8>
+{
+    return source->AsSpan().Length != 0;
+}
+
+public static Span<char8> ReadUnits<TSequence>(ref<TSequence> source)
+    where TSequence : IContiguousSequence<char8>
+{
+    return source->AsSpan();
+}
+
+public static int32 Main()
+{
+    TextSpan<char8> typed = "hello";
+    TextSpan erased = typed.AsTextSpan();
+    TextSpan<void> sameErasedMember = erased;
+    if (erased.IsEmpty || !erased.EqualsOrdinal(typed.AsTextSpan()) ||
+        !erased.TryProject<char8>(init var projected) ||
+        erased.TryProject<char16>(init var wrongEncoding))
+    {
+        Terminal.WriteLine("Expected checked projection of the original encoding.",
+            output: TerminalOutput.Error);
+
+        return 2;
+    }
+
+    Span<char8> units = ReadUnits(ref projected);
+
+    char8 ascii = 'h'; // Design-only target-typed ASCII character literal.
+
+    if (!HasContent(ref typed) || !HasContent(ref units) || units[0] != ascii)
+    {
+        Terminal.WriteLine("Expected both sequence projections to be nonempty.", output: TerminalOutput.Error);
+
+        return 2;
+    }
+
+    // Erasure and checked projection retain the same immutable backing/lease;
+    // only typed views expose a code-unit span. There is no Span<void>.
+    Terminal.WriteLine(sameErasedMember);
+
+    if (!int32.TryParse("1", init var one) ||
+        int32.TryParse("\u0661", init var arabicIndic) ||
+        int32.TryParse("\uFF11", init var fullWidth) ||
+        int32.TryParse("\u22121", init var unicodeMinus))
+    {
+        Terminal.WriteLine("Expected ordinal-plus-invariant numeric parsing.", output: TerminalOutput.Error);
+
+        return 2;
+    }
+
+    Terminal.WriteLine(one);
+    Terminal.WriteLine("Unicode lookalikes rejected.");
+
+    return 0;
+}

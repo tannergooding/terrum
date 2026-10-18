@@ -1,6 +1,4 @@
 // DESIGN ONLY: API signatures with selected implementations. Inventory across modules.
-// Loan expressions in bodies retain legacy spelling and are schematic; the
-// target call-site syntax is unresolved.
 using Terrum.Threading.Tasks;
 
 namespace Terrum;
@@ -83,7 +81,7 @@ public struct rune : IFormattable
     {
         require format.IsEmpty;
 
-        return writer.TryWriteScalar(this);
+        return writer->TryWriteScalar(this);
     }
 }
 
@@ -108,7 +106,7 @@ public class Text : IFormattable
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter
     {
-        return AsSpan().TryFormat(mut ref writer, format);
+        return AsSpan().TryFormat(writer, format);
     }
 
     [TextTarget(nameof(content))]
@@ -133,7 +131,7 @@ public static class TextFormatting
         where TWriter : ITextWriter
         where TContent : IFormattable
     {
-        return writer.TryWriteFormatted(ref content, "");
+        return writer->TryWriteFormatted(ref content, "");
     }
 }
 

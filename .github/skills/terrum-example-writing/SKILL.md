@@ -28,15 +28,15 @@ marked unapproved; an illustrative example must not silently decide them.
 
 | Subject | Starting evidence |
 |---|---|
-| Runnable scalar source | `samples\native\factorial.terrum` and related CLI tests |
-| Caller-unsafety | `tests\Terrum.CodeAnalysis.Tests\CallerUnsafeTests.cs` |
-| Initialization outputs | `tests\Terrum.CodeAnalysis.Tests\PublicInitReferenceTests.cs` |
+| Runnable scalar source | `samples\LanguageFeatures\ControlFlow\factorial.terrum` and related CLI tests |
+| Caller-unsafety | `tests\Terrum.CodeAnalysis.Tests\Semantics\CallerUnsafeTests.cs` |
+| Initialization outputs | `tests\Terrum.CodeAnalysis.Tests\Semantics\PublicInitReferenceTests.cs` |
 | Reference and pointer authority | `docs\specs\language\references.md` |
 | Ownership and cleanup | `docs\specs\language\ownership-and-cleanup.md` |
 | Layout and foreign calls | `docs\specs\data-layout-and-abi.md` and `docs\specs\targets\windows-x64-call-interface.md` |
 | Standard metadata | `docs\specs\representation\README.md` and its referenced registry/contracts |
 
-Parser fixtures in `samples\syntax` do not establish executable support.
+Parser fixtures in `tests\Terrum.CodeAnalysis.Tests\Syntax\Fixtures` do not establish executable support.
 Design samples, library sketches, excluded tests, and private persistence
 paths do not establish accepted syntax or standard TRRM support.
 

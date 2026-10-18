@@ -23,8 +23,8 @@ skipping work cannot erase a possible publication, vacancy, cleanup or
 exception effect. Avoid constructing unused states only when no consumer
 needs their facts.
 
-The [initialization regressions](../../tests/Terrum.CodeAnalysis.Tests/InitReferenceTests.cs)
-and [value regressions](../../tests/Terrum.CodeAnalysis.Tests/ValueTests.cs)
+The [initialization regressions](../../tests/Terrum.CodeAnalysis.Tests/Semantics/InitReferenceTests.cs)
+and [value regressions](../../tests/Terrum.CodeAnalysis.Tests/Semantics/ValueTests.cs)
 exercise correctness and explicit exhaustion. They are not throughput
 benchmarks or a guarantee that every syntactically valid program fits.
 The [composition inventory](../implementation/bootstrap-frontend-composition.md)

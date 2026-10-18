@@ -35,13 +35,15 @@ var dll = Path.Combine(binaries, "frame-unwind.dll");
 var executable = Path.Combine(binaries, "frame-unwind-probe.exe");
 var objectFile = Path.Combine(objects, "frame-unwind-probe.obj");
 var buildLibrary = new ProcessStartInfo("dotnet");
-foreach (var argument in new[] { cli, "build-library", Path.GetFullPath(Path.Combine("samples", "native", "frame-unwind.terrum")),
+foreach (var argument in new[] { cli, "build-library", Path.GetFullPath(Path.Combine("tests",
+    "Terrum.CodeAnalysis.Tests", "Native", "Unwind", "Fixtures", "frame-unwind.terrum")),
     "--export", "Mix", "--export", "TryWrite", "-o", dll, "--runtime", "fail-fast" })
 {
     buildLibrary.ArgumentList.Add(argument);
 }
 var libraryOutput = await Run(buildLibrary, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-var source = Path.GetFullPath(Path.Combine("tests", "native", "frame-unwind-probe.c"));
+var source = Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native",
+    "Unwind", "Probes", "frame-unwind-probe.c"));
 var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
     ?? throw new InvalidOperationException("ComSpec is unset.")) {
     Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /Od /GS- /Fo\"{objectFile}\" /Fe\"{executable}\" \"{source}\" /link /incremental:no\"",

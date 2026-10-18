@@ -1,0 +1,164 @@
+// Provider observations, not a compiler-owned DX11 contract. Execute only with
+// the explicit WARP integration test; the window is never shown.
+namespace Triangle.Interop;
+
+[Blittable] [Layout(Sequential)]
+struct ClientRectangle {
+    int32 Left;
+    int32 Top;
+    int32 Right;
+    int32 Bottom;
+}
+
+[Blittable] [Layout(Sequential)]
+struct FailureSwapChainDescription {
+    uint32 Width;
+    uint32 Height;
+    uint32 RefreshNumerator;
+    uint32 RefreshDenominator;
+    uint32 Format;
+    uint32 ScanlineOrdering;
+    uint32 Scaling;
+    uint32 SampleCount;
+    uint32 SampleQuality;
+    uint32 BufferUsage;
+    uint32 BufferCount;
+    ptr<void> OutputWindow;
+    int32 Windowed;
+    uint32 SwapEffect;
+    uint32 Flags;
+
+    public unsafe FailureSwapChainDescription(ptr<void> window) {
+        Width = 32;
+        Height = 32;
+        RefreshNumerator = 0;
+        RefreshDenominator = 0;
+        Format = 28;
+        ScanlineOrdering = 0;
+        Scaling = 0;
+        SampleCount = 1;
+        SampleQuality = 0;
+        BufferUsage = 32;
+        BufferCount = 1;
+        unsafe { OutputWindow = window; }
+        Windowed = 1;
+        SwapEffect = 0;
+        Flags = 0;
+    }
+}
+
+unique struct FailureWindowOwner {
+    ptr<void> Pointer;
+    public unsafe FailureWindowOwner(ptr<void> pointer) { unsafe { Pointer = pointer; } }
+    [NoThrow] [Cleanup] public void Close() {
+        unsafe { if (Pointer != null) { DestroyWindow(Pointer); } }
+    }
+}
+
+[Terrum.Interop.NativeImport("D3DCompiler_47.dll", "D3DCompileFromFile")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(4, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(8, Write, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(9, Write, NoEscape, 1)]
+extern unsafe int32 ObserveCompile(
+    ptr<char16> path, ptr<void> defines, ptr<void> include,
+    ptr<void> entry, ptr<void> target, uint32 flags1, uint32 flags2,
+    ptr<ptr<void>> code, ptr<ptr<void>> diagnostics);
+
+[Terrum.Interop.NativeImport("d3d11.dll", "D3D11CreateDeviceAndSwapChain")]
+[Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(3, Read, NoEscape, 0)]
+[Terrum.Interop.NativeParameter(5, Read, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(8, Read, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(9, Write, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(10, Write, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(11, Write, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(12, Write, NoEscape, 1)]
+[NoThrow]
+extern unsafe int32 ObserveAcquire(
+    ptr<void> adapter, int32 driver, ptr<void> software, uint32 flags,
+    ptr<uint32> featureLevels, uint32 featureCount, uint32 sdkVersion,
+    ptr<FailureSwapChainDescription> description,
+    ptr<ptr<void>> swapChain, ptr<ptr<void>> device,
+    ptr<uint32> selectedFeature, ptr<ptr<void>> context);
+
+[Terrum.Interop.NativeVTableMethod(12)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+[NoThrow]
+extern unsafe int32 ObserveVertexFailure(ptr<void> receiver, ptr<uint32> bytecode,
+    uint64 bytecodeSize, ptr<void> classLinkage, ptr<ptr<void>> output);
+
+[Terrum.Interop.NativeVTableMethod(15)]
+[Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+[Terrum.Interop.NativeParameter(5, Write, NoEscape, 1)]
+[NoThrow]
+extern unsafe int32 ObservePixelFailure(ptr<void> receiver, ptr<uint32> bytecode,
+    uint64 bytecodeSize, ptr<void> classLinkage, ptr<ptr<void>> output);
+
+int32 Main() {
+    unsafe {
+        mut ptr<void> code = null;
+        mut ptr<void> diagnostics = null;
+        int32 compileStatus = ObserveCompile(utf16z("triangle.hlsl"), null, null,
+            utf8z("MissingEntry"), utf8z("vs_5_0"), 0, 0, &code, &diagnostics);
+        ShaderBlobOwner codeOwner = new ShaderBlobOwner(code);
+        ShaderBlobOwner diagnosticsOwner = new ShaderBlobOwner(diagnostics);
+        if (compileStatus >= 0 || code != null) { return 1; }
+        if (diagnostics == null) { return 2; }
+
+        uint32 featureLevel = 45056;
+        FailureSwapChainDescription invalid = new FailureSwapChainDescription(null);
+        mut ptr<void> failedSwapChain = null;
+        mut ptr<void> failedDevice = null;
+        mut uint32 failedFeature = 0;
+        mut ptr<void> failedContext = null;
+        int32 invalidStatus = ObserveAcquire(null, 5, null, 0, &featureLevel, 1, 7, &invalid,
+            &failedSwapChain, &failedDevice, &failedFeature, &failedContext);
+        SampleSwapChainOwner failedSwapChainOwner = new SampleSwapChainOwner(failedSwapChain);
+        SampleDeviceOwner failedDeviceOwner = new SampleDeviceOwner(failedDevice);
+        SampleContextOwner failedContextOwner = new SampleContextOwner(failedContext);
+        if (invalidStatus >= 0 || failedSwapChain != null
+            || failedDevice != null || failedContext != null) { return 3; }
+
+        ptr<void> window = CreateWindowExW(0, utf16z("STATIC"), utf16z(""),
+            13565952, 0, 0, 32, 32, null, null, GetModuleHandleW(null), null);
+        FailureWindowOwner windowOwner = new FailureWindowOwner(window);
+        if (window == null) { return 4; }
+        FailureSwapChainDescription description = new FailureSwapChainDescription(window);
+        mut ptr<void> swapChain = null;
+        mut ptr<void> device = null;
+        mut uint32 selectedFeature = 0;
+        mut ptr<void> context = null;
+        int32 status = ObserveAcquire(null, 5, null, 0, &featureLevel, 1, 7, &description,
+            &swapChain, &device, &selectedFeature, &context);
+        SampleDeviceOwner deviceOwner = new SampleDeviceOwner(device);
+        SampleSwapChainOwner swapChainOwner = new SampleSwapChainOwner(swapChain);
+        SampleContextOwner contextOwner = new SampleContextOwner(context);
+        if (status < 0 || swapChain == null || device == null || context == null) { return 5; }
+
+        InterfaceId textureId = new InterfaceId(0x6F15AAF2, 0x4E89D208, 0x9C4FD3359548B49A);
+        mut ptr<void> backBuffer = null;
+        int32 getBufferStatus = GetBufferRaw(swapChain, uint32.MaxValue, &textureId, &backBuffer);
+        BackBufferOwner backBufferOwner = new BackBufferOwner(backBuffer);
+        if (getBufferStatus >= 0 || backBuffer != null) { return 6; }
+
+        uint32 invalidBytecode = 0;
+        mut ptr<void> vertex = null;
+        int32 vertexStatus = ObserveVertexFailure(device, &invalidBytecode, 4, null, &vertex);
+        VertexShaderOwner vertexOwner = new VertexShaderOwner(vertex);
+        if (vertexStatus >= 0 || vertex != null) { return 7; }
+        mut ptr<void> pixel = null;
+        int32 pixelStatus = ObservePixelFailure(device, &invalidBytecode, 4, null, &pixel);
+        PixelShaderOwner pixelOwner = new PixelShaderOwner(pixel);
+        if (pixelStatus >= 0 || pixel != null) { return 8; }
+        mut ptr<void> renderTarget = null;
+        int32 viewStatus = CreateRenderTargetViewRaw(device, null, null, &renderTarget);
+        RenderTargetViewOwner renderTargetOwner = new RenderTargetViewOwner(renderTarget);
+        if (viewStatus >= 0 || renderTarget != null) { return 9; }
+        return 0;
+    }
+}

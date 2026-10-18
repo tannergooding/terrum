@@ -1,12 +1,14 @@
 # Bootstrap and scalar-frontend composition
 
 This is the current documented support inventory, not an implementation audit
-or adoption of a private format. The [self-host reference](self-host.md)
-owns component-level coverage and
-[feature-selected module revisions](self-host.md#private-semantic-module-revisions).
+or adoption of a private format. The
+[Terrum-authored component reference](terrum-code-analysis.md) owns
+component-level coverage and
+[feature-selected module revisions](terrum-code-analysis.md#private-semantic-module-revisions).
 The [bootstrap/frontend proposal](../proposals/bootstrap-frontend-profiles.md)
-owns pending support and representation decisions; the grant, invocation and
-span profiles retain their separate proposal owners.
+owns the remaining profile decisions; the grant, invocation and span profiles
+retain their separate proposal owners. Superseded per-increment worklists are
+removed.
 Language grammar, lookup, arithmetic and dependency contracts remain
 independent of these narrower paths.
 
@@ -54,9 +56,9 @@ byte assignments or historical readers.
 Same-leaf alias support is narrower than selected enclosing-scope/namespace-prefix
 [lookup](../specs/language/names-and-binding.md); Terrum does not prohibit
 parent aliases. The
-[direct-source folder](../../tests/self-host/BootstrapInt32MainSource.terrum)
+[direct-source folder](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Native/Bootstrap/BootstrapInt32MainSource.terrum)
 currently declines signed minimum remainder by -1, and its
-[component fixtures](../../tests/Terrum.CodeAnalysis.Tests/BootstrapInt32MainReturnComponentTests.cs)
+[component fixtures](../../tests/Terrum.CodeAnalysis.Tests/Native/Bootstrap/BootstrapInt32MainReturnComponentTests.cs)
 expect that refusal. This is narrower support than the canonical zero result,
 not language remainder overflow. Division and combined DivRem retain their
 quotient-overflow rule.
@@ -111,8 +113,8 @@ Current writer selection and reader gates are in
 [`ModuleCompiler`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
 [`SelectFixedLayoutRevision`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.FixedLayout.cs)
 and the [private-span reader](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.TokenSpans.cs);
-[private-span](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.PrivateSpans.cs)
-and [complete-frontend](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
+[private-span](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.PrivateSpans.cs)
+and [complete-frontend](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
 fixtures contain the revision and capacity assertions. No proposal approval
 or requirement to preserve every unpublished reader follows.
 

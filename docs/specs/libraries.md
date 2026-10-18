@@ -8,7 +8,7 @@ contracts and deliberate framework-design departures. The canonical
 chapters linked below own semantics; the broader layered inventory remains
 the [core-library proposal](../proposals/core-library-reference.md). The
 `.api.terrum` files in [`library`](../../library) and
-[numerics/tensors example](../../samples/design/numerics-and-tensors.terrum)
+[numerics/tensors example](../../samples/LanguageFeatures/Numerics/numerics-and-tensors.terrum)
 are **DESIGN ONLY**. Current compiler support is tracked in
 [implementation](../implementation.md) and [library implementation notes](../implementation/libraries.md).
 [Language](language.md) defines

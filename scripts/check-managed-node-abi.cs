@@ -31,7 +31,8 @@ if (installation.Length == 0 || !File.Exists(environment))
 }
 var executable = Path.Combine(binaries, "managed-node-abi-probe.exe");
 var objectFile = Path.Combine(objects, "managed-node-abi-probe.obj");
-var source = Path.GetFullPath(Path.Combine("tests", "native", "managed-node-abi-probe.c"));
+var source = Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native",
+    "Ownership", "Probes", "managed-node-abi-probe.c"));
 var nativeBuild = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
     ?? throw new InvalidOperationException("ComSpec is unset.")) {
     Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /nologo /W4 /WX /O2 /TC /Fo\"{objectFile}\" /Fe\"{executable}\" \"{source}\" /link /incremental:no\"",
@@ -45,7 +46,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var dll = Path.Combine(binaries, $"managed-node-abi-{policy}.dll");
     var compile = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
-        Path.GetFullPath(Path.Combine("tests", "native", "managed-node-abi.terrum")),
+        Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Storage", "Fixtures", "managed-node-abi.terrum")),
         "--export", "Cycles", "--export", "CollectWithScalar",
         "--export", "AllocationFailure", "--export", "RetainAcrossAllocationFailure",
         "-o", dll, "--runtime", policy })
@@ -81,7 +82,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
 var unwindDll = Path.Combine(binaries, "managed-unwind-abi.dll");
 var compileUnwind = new ProcessStartInfo("dotnet");
 foreach (var argument in new[] { cli, "build-library",
-    Path.GetFullPath(Path.Combine("tests", "native", "managed-unwind-abi.terrum")),
+    Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Unwind", "Fixtures", "managed-unwind-abi.terrum")),
     "--export", "SameFrame", "--export", "EscapingFrame", "--export", "LaterArgument",
     "--export", "OutputFailure", "--export", "ReturnAcrossCleanup", "--export", "EscapeToNative",
     "--export", "CollectWithScalar", "-o", unwindDll, "--runtime", "checked-exceptions" })
@@ -108,7 +109,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var classes = Path.Combine(binaries, $"managed-class-abi-{policy}.dll");
     var compileClasses = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
-        Path.GetFullPath(Path.Combine("tests", "native", "managed-class-abi.terrum")),
+        Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Storage", "Fixtures", "managed-class-abi.terrum")),
         "--export", "MixedEdges", "--export", "AliasUpdates", "--export", "DuringConstruction",
         "--export", "AssignmentAcrossCollection",
         "--export", "CreateLoose", "--export", "ScalarNonRoot", "--export", "AllocationFailure",
@@ -124,7 +125,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     {
         compileClasses.ArgumentList.Add("--source");
         compileClasses.ArgumentList.Add(Path.GetFullPath(
-            Path.Combine("tests", "native", "managed-class-unwind-abi.terrum")));
+            Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Unwind", "Fixtures", "managed-class-unwind-abi.terrum")));
         compileClasses.ArgumentList.Add("--export");
         compileClasses.ArgumentList.Add("ConstructorFailure");
         compileClasses.ArgumentList.Add("--export");
@@ -183,7 +184,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var optional = Path.Combine(binaries, $"managed-optional-abi-{policy}.dll");
     var compileOptional = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
-        Path.GetFullPath(Path.Combine("tests", "native", "managed-optional-abi.terrum")),
+        Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Storage", "Fixtures", "managed-optional-abi.terrum")),
         "--export", "OptionalCycles", "--export", "OptionalSnapshots", "--export", "OptionalNullOutput",
         "--export", "OptionalAllocationFailure", "--export", "OptionalRetainAcrossFailure",
         "--export", "CollectWithScalar", "-o", optional, "--runtime", policy })
@@ -195,7 +196,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     {
         compileOptional.ArgumentList.Add("--source");
         compileOptional.ArgumentList.Add(Path.GetFullPath(
-            Path.Combine("tests", "native", "managed-optional-unwind-abi.terrum")));
+            Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Unwind", "Fixtures", "managed-optional-unwind-abi.terrum")));
         compileOptional.ArgumentList.Add("--export");
         compileOptional.ArgumentList.Add("OptionalRecovery");
         compileOptional.ArgumentList.Add("--export");
@@ -225,10 +226,10 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var chain = Path.Combine(binaries, $"managed-token-chain-abi-{policy}.dll");
     var compileChain = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
-        Path.GetFullPath(Path.Combine("tests", "native", "managed-token-chain-abi.terrum")),
-        "--source", Path.GetFullPath(Path.Combine("sources", "self-host", "ManagedTokenChain.terrum")),
-        "--source", Path.GetFullPath(Path.Combine("sources", "self-host", "SourceRange.terrum")),
-        "--source", Path.GetFullPath(Path.Combine("sources", "self-host", "Token.terrum")),
+        Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Storage", "Fixtures", "managed-token-chain-abi.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("sources", "Terrum.CodeAnalysis.Terrum", "Lexing", "ManagedTokenChain.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("sources", "Terrum.CodeAnalysis.Terrum", "Text", "SourceRange.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("sources", "Terrum.CodeAnalysis.Terrum", "Lexing", "Token.terrum")),
         "--export", "ChainReuse", "--export", "ChainAllocationFailure", "--export", "CollectWithScalar",
         "-o", chain, "--runtime", policy })
     {
@@ -255,7 +256,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var capacity = Path.Combine(binaries, $"managed-class-capacity-abi-{policy}.dll");
     var compileCapacity = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
-        Path.GetFullPath(Path.Combine("tests", "native", "managed-class-capacity-abi.terrum")),
+        Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Storage", "Fixtures", "managed-class-capacity-abi.terrum")),
         "--export", "CapacityCycle", "--export", "CollectWithScalar",
         "-o", capacity, "--runtime", policy })
     {
@@ -282,7 +283,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var transfers = Path.Combine(binaries, $"managed-loop-transfer-abi-{policy}.dll");
     var compileTransfers = new ProcessStartInfo("dotnet");
     foreach (var argument in new[] { cli, "build-library",
-        Path.GetFullPath(Path.Combine("tests", "native", "managed-loop-transfer-abi.terrum")),
+        Path.GetFullPath(Path.Combine("tests", "Terrum.CodeAnalysis.Tests", "Native", "Storage", "Fixtures", "managed-loop-transfer-abi.terrum")),
         "--export", "LoopTransfers", "--export", "CollectWithScalar",
         "-o", transfers, "--runtime", policy })
     {

@@ -3,7 +3,7 @@
 **Status: UNAPPROVED application/evidence recommendations.** These are
 source-authored Windows application scenarios, not new language rules or
 compiler-recognized loop shapes. The
-[sample reference](../../samples/design/win32-dx11-triangle/README.md) owns
+[sample reference](../../samples/Win32Dx11Triangle/README.md) owns
 current entry points; the [pipeline proposal](dx11-direct-pipeline.md) owns
 submission and bounded image evidence.
 

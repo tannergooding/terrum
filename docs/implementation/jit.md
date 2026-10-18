@@ -38,7 +38,7 @@ Windows x64 runtime regressions also call `CompareStringOrdinal` through
 readonly addresses of local `char16` values in standalone and graph-JIT roots.
 
 ```powershell
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll jit samples\native\factorial.terrum --runtime fail-fast
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll jit samples\LanguageFeatures\ControlFlow\factorial.terrum --runtime fail-fast
 $LASTEXITCODE # 720
 ```
 

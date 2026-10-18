@@ -322,7 +322,7 @@ behavior. These records do not establish namespaces/imports, members,
 templates, external bindings, callable values, general reference arguments,
 default/params arguments or standalone compilation. Supported aliases and
 the scalar expression domain are tracked in the
-[self-host inventory](self-host.md).
+[Terrum-authored component inventory](terrum-code-analysis.md).
 Source-free TRRM has its separate fail-fast indexed routing/Body contract;
 frontend projection support does not extend it.
 
@@ -615,7 +615,7 @@ Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general
 `ref<T>`/view/`own<T>` and general `init ref<T>` call-site implementations
 remain unsupported beyond the bounded conditional-init subset.
-The [class sample](../../samples/native/managed-classes.terrum)
+The [class sample](../../samples/LanguageFeatures/ManagedStorage/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
 allocation failure, direct/indirect Copy arguments, collection during construction,
@@ -644,7 +644,7 @@ successful extraction. Optional fields still require explicit initialization,
 and failed `bool`/`out` calls do not publish even an absent value.
 Descriptors include optional reference slots; tracing ignores zero without
 treating it as uninitialized source storage. The
-[cycle sample](../../samples/native/managed-optional-cycle.terrum) exercises
+[cycle sample](../../samples/LanguageFeatures/ManagedStorage/managed-optional-cycle.terrum) exercises
 source-defined cycles and snapshots across edge clearing and collection.
 Current modules retain optional IR and types inside private source-class state.
 They do not expose an optional or managed-reference ABI. An optional-node-only module remains
@@ -668,16 +668,16 @@ checks that capacity refusal makes no extra allocation, then accounts for every
 release and repeats full-capacity reuse. AOT/JIT fixtures exercise the same
 limit and interleaved class/node descriptors, aliases and scalar nonroots.
 
-The [static-protocol quadratic sample](../../samples/native/static-protocol-quadratic.terrum)
+The [static-protocol quadratic sample](../../samples/LanguageFeatures/StaticProtocols/static-protocol-quadratic.terrum)
 uses source-declared `+` and `*` constraints and two nominal Copy wrappers,
 returning 46 through AOT and JIT. Closed specialization emits ordinary concrete
 calls through this backend; there is no second evaluator or generic runtime.
-The [integer-power sample](../../samples/native/static-protocol-power.terrum)
+The [integer-power sample](../../samples/LanguageFeatures/StaticProtocols/static-protocol-power.terrum)
 returns 42 using a structured generic body, scalar exponent and a separately
 specialized constrained square helper. Its repeated-squaring loop skips the final unused square:
 that operation could overflow even when the requested result is representable.
 An exponent of zero returns the supplied identity without multiplying.
-The [binary-protocol sample](../../samples/native/static-protocol-binary.terrum)
+The [binary-protocol sample](../../samples/LanguageFeatures/StaticProtocols/static-protocol-binary.terrum)
 also returns 42, using explicitly declared subtraction, division, remainder
 and bitwise `&`, `|`, `^` witnesses. The same concrete call lowering preserves
 ordinary checked arithmetic and declaration-site effect checks; bitwise
@@ -714,7 +714,7 @@ early rejection, checked unwinding after an owner move and checked allocation
 failure with no live block. The probe does not expose an owner in the DLL
 export ABI.
 
-The [owned source-line index](../../sources/self-host/SourceLineIndex.terrum) builds a
+The [owned source-line index](../../sources/Terrum.CodeAnalysis.Terrum/Text/SourceLineIndex.terrum) builds a
 line-start table with exactly one word per line start and publishes a unique immutable index.
 Its position queries use binary search over initialized words, without a
 retained source pointer or a general span/allocator API.
@@ -724,8 +724,8 @@ retained source pointer or a general span/allocator API.
 ```powershell
 .\build.cmd -restore
 New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll analyze samples\native\control-flow.terrum --json
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\native\control-flow.terrum -o artifacts\bin\samples\control-flow.exe --runtime fail-fast --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll analyze samples\LanguageFeatures\ControlFlow\control-flow.terrum --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\LanguageFeatures\ControlFlow\control-flow.terrum -o artifacts\bin\samples\control-flow.exe --runtime fail-fast --json
 .\artifacts\bin\samples\control-flow.exe
 $LASTEXITCODE # 45
 ```
@@ -754,7 +754,7 @@ diagnostic; a successful build adds the same `artifact` object.
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\native\modules\wide-entry.terrum --source sources\self-host\WideIntegerFacts.terrum --source tests\self-host\WideIntegerTests.terrum -o artifacts\bin\samples\wide.exe --runtime fail-fast
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\ModuleReplacement\wide-entry.terrum --source sources\Terrum.CodeAnalysis.Terrum\Utilities\Numerics\WideIntegerFacts.terrum --source tests\Terrum.CodeAnalysis.Terrum.Tests\Utilities\Numerics\WideIntegerTests.terrum -o artifacts\bin\samples\wide.exe --runtime fail-fast
 ```
 
 This compiles source together; it does not replace the persisted, independently
@@ -768,7 +768,7 @@ exports produce `TRM4002`; source visibility alone never exports a declaration.
 
 ```powershell
 New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
-dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-library sources\self-host\SourceRange.terrum --export Terrum.CodeAnalysis.SourceRange.TryCreate --export Terrum.CodeAnalysis.SourceRange.GetEnd -o artifacts\bin\samples\ranges.dll --runtime fail-fast
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-library sources\Terrum.CodeAnalysis.Terrum\Text\SourceRange.terrum --export Terrum.CodeAnalysis.SourceRange.TryCreate --export Terrum.CodeAnalysis.SourceRange.GetEnd -o artifacts\bin\samples\ranges.dll --runtime fail-fast
 ```
 
 ### Contract-checked native packages
@@ -783,8 +783,8 @@ combined input; package reads are bounded to 16 MiB.
 ```powershell
 $cli = "artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll"
 New-Item -ItemType Directory -Force artifacts\bin\modules | Out-Null
-dotnet $cli compile-native producer sources\self-host\WideIntegerFacts.terrum CompilerValues --export Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\bin\modules\wide-provider.trmn --runtime fail-fast
-dotnet $cli compile-native consumer tests\self-host\WideIntegerTests.terrum artifacts\bin\modules\wide-provider.trmn --source samples\native\modules\wide-entry.terrum -o artifacts\bin\modules\wide-consumer.trmn --runtime fail-fast
+dotnet $cli compile-native producer sources\Terrum.CodeAnalysis.Terrum\Utilities\Numerics\WideIntegerFacts.terrum CompilerValues --export Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\bin\modules\wide-provider.trmn --runtime fail-fast
+dotnet $cli compile-native consumer tests\Terrum.CodeAnalysis.Terrum.Tests\Utilities\Numerics\WideIntegerTests.terrum artifacts\bin\modules\wide-provider.trmn --source samples\ModuleReplacement\wide-entry.terrum -o artifacts\bin\modules\wide-consumer.trmn --runtime fail-fast
 dotnet $cli validate-native artifacts\bin\modules\wide-consumer.trmn artifacts\bin\modules\wide-provider.trmn --json
 dotnet $cli run-native artifacts\bin\modules\wide-consumer.trmn artifacts\bin\modules\wide-provider.trmn --runtime fail-fast
 ```
@@ -855,7 +855,7 @@ numeric range or user-invariant inference; unreachable operations are still
 checked conservatively. NoThrow says nothing about termination or fatal
 operating-system faults.
 
-The [no-throw sample](../../samples/native/no-throw.terrum) returns 42 through
+The [no-throw sample](../../samples/LanguageFeatures/Contracts/no-throw.terrum) returns 42 through
 checked constructors, methods, widening conversion and conditional output
 publication, using the same AOT/JIT encoder. `CharacterFacts` publishes
 NoThrow on its two comparison-only classification helpers.
@@ -922,7 +922,7 @@ storage never overlap cleanup-call spills. Fail-fast termination still does
 not unwind. The separate `OwnedInt32Buffer` intrinsic allocates and frees
 one fixed-capacity process-heap block; arbitrary owning graphs, general
 OS-resource handles, stored loans and GC are not implied by this proof.
-The [sample](../../samples/native/unique-owner.terrum)
+The [sample](../../samples/LanguageFeatures/Ownership/unique-owner.terrum)
 updates an owner through a mutating method, then exercises checked recovery
 after a failed replacement while preserving the updated, still-live owner.
 
@@ -946,13 +946,13 @@ may be combined for an infallible nonterminating body, while `require false`
 satisfies only the no-normal-return guarantee. Both promises persist in module
 contracts and may independently strengthen, but not weaken, during replacement.
 
-The [no-return sample](../../samples/native/no-return.terrum) returns 42 on success.
+The [no-return sample](../../samples/LanguageFeatures/Contracts/no-return.terrum) returns 42 on success.
 Changing its entry to `Select(false)` reaches the nonreturning failure helper
 and terminates with the explicit requirement-failure status. AOT and JIT retain
 the same native call ABI; the no-return proof does not require a fabricated
 return value. General catch objects and GC root tracking remain unimplemented.
 
-Structured [`try`/`finally`](../../samples/native/try-finally.terrum) executes
+Structured [`try`/`finally`](../../samples/LanguageFeatures/EffectsAndCleanup/try-finally.terrum) executes
 cleanup on ordinary fallthrough, every normal return and exiting loop transfers, from inner region
 to outer. Body locals are not in scope in the cleanup block; shared outer
 locals remain accessible. Cleanup independently obeys NoThrow even within a
@@ -1063,8 +1063,8 @@ owner survives continue and retires on loop exit. Transfers out of `finally`
 are rejected; loops entirely within a `finally` may use their own transfers.
 Checked cleanup failures take the exception path instead of completing the
 transfer; fail-fast termination still does not unwind.
-[The loop sample](../../samples/native/for-loops.terrum) returns 285.
-The [native loop-transfer fixture](../../tests/native/managed-loop-transfer-abi.terrum)
+[The loop sample](../../samples/LanguageFeatures/ControlFlow/for-loops.terrum) returns 285.
+The [native loop-transfer fixture](../../tests/Terrum.CodeAnalysis.Tests/Native/Storage/Fixtures/managed-loop-transfer-abi.terrum)
 combines a retained initializer buffer, nested transfers/finally and managed
 cycles. Its C caller checks exact allocation/release counts under both policies.
 
@@ -1142,7 +1142,7 @@ fields, conditional outputs and persisted modules. Widening a signed negative
 value preserves its sign; narrowing or crossing signedness checks the numeric
 range rather than reinterpreting bits. The same signed-minimum division and
 remainder rules apply at both signed widths. The
-[wide integer candidate](../../sources/self-host/WideIntegerFacts.terrum) uses these rules
+[wide integer candidate](../../sources/Terrum.CodeAnalysis.Terrum/Utilities/Numerics/WideIntegerFacts.terrum) uses these rules
 for non-overflowing signed-addition checks and bounded decimal accumulation
 through `uint64.MaxValue`, with true-only output publication.
 
@@ -1178,10 +1178,10 @@ same verified scratch/publication and native output ABI. Exported init
 contracts remain distinct from out contracts. General references and
 predicate-based postconditions remain scheduled.
 
-[`self-host/SourceRange`](../../sources/self-host/SourceRange.terrum),
-[`CharacterFacts`](../../sources/self-host/CharacterFacts.terrum),
-[`RangeTests`](../../tests/self-host/RangeTests.terrum) and
-[`Token`](../../sources/self-host/Token.terrum) execute through this profile.
+[`Terrum.CodeAnalysis.Terrum/Text/SourceRange`](../../sources/Terrum.CodeAnalysis.Terrum/Text/SourceRange.terrum),
+[`CharacterFacts`](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum),
+[`RangeTests`](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Text/RangeTests.terrum) and
+[`Token`](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/Token.terrum) execute through this profile.
 The [scanner component](../scanner.md) additionally uses fixed checked buffers;
 this does not implement a general span ABI or a complete lifetime checker.
 
@@ -1207,7 +1207,7 @@ This is executable semantic code, not a debug assertion, unchecked assumption
 or inferred public precondition. The fail-fast profile terminates; the bounded
 checked policy raises a privately identified native exception.
 A predicate's own arithmetic failure retains that failure
-status. `samples/native/requirements.terrum` demonstrates a parameter-dependent
+status. `samples/LanguageFeatures/Contracts/requirements.terrum` demonstrates a parameter-dependent
 requirement and returns 10.
 
 Division truncates toward zero; signed minimum remainder -1 is zero, not an
@@ -1288,39 +1288,32 @@ overwrites its by-value input storage.
 The receiver-loan ABI composes with a hidden result pointer and stack arguments;
 it neither transfers ownership nor makes the owner copyable.
 
-The independent ABI fixture uses a C caller, rather than validating calls only
-by having Terrum call itself. From an x64 Visual Studio developer shell at the
-repository root:
-
-```powershell
-New-Item -ItemType Directory -Force artifacts\obj\native-probes\native-abi, artifacts\bin\native-probes\native-abi | Out-Null
-ml64 /nologo /c /Foartifacts\obj\native-probes\native-abi\abi-carrier.obj tests\native\abi-carrier.asm
-cl /nologo /W4 /WX /O2 /TC tests\native\abi-probe.c /Foartifacts\obj\native-probes\native-abi\abi-probe.obj /Feartifacts\bin\native-probes\native-abi\abi-probe.exe /link artifacts\obj\native-probes\native-abi\abi-carrier.obj /INCREMENTAL:NO
-dotnet run --file scripts\check-native-abi.cs
-```
-
-It checks flat and nested direct and indirect aggregates passed/returned by value,
-including one-field transparent scalar wrappers independently called from C,
+The independent [aggregate ABI test](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeLoaderInteropTests.Aggregates.cs)
+uses .NET unmanaged function pointers, rather than validating calls only by
+having Terrum call itself. It compiles the actual
+[`aggregate-abi.terrum`](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/Fixtures/aggregate-abi.terrum) sample and
+checks flat and nested direct and indirect aggregates passed/returned by value,
+including one-field transparent scalar wrappers,
 hidden results and register/stack arguments, true/false output publication, guard storage
 around scalar and aggregate output destinations, and narrow
-arguments with deliberately unspecified upper register bits. The provisional
-private `[Layout(Sequential)]` fixture also checks independent C `sizeof`,
-`__alignof` and `offsetof` for nested fields with interior and tail padding,
+arguments with deliberately dirty upper register bits supplied by a 64-bit
+caller signature. Independent sequential CLR carriers check sizes and field
+offsets for nested fields with interior and tail padding,
 followed by by-value and output calls. This is physical classification
 evidence for the existing Windows x64 profile, not an exported native layout
-commitment. The script
+commitment. The test
 also checks readonly unique receivers of 4, 8 and 16 bytes, preserved caller
 storage, and a borrowed receiver combined with an indirect result and five
-explicit arguments. These C fixtures provide initialized primitive payloads
+explicit arguments. These callers provide initialized primitive payloads
 at a trusted test boundary; they are not a general source interop facility.
-The script
+The test
 obtains function addresses from encoder ranges; the development executable
 does not advertise an exported native API.
 
 The separate checked-policy generated-DLL
-[owned-call fixture](../../scripts/check-owned-call-abi.cs), using the same
-explicit compiler selection, exercises unique
-direct/indirect by-value parameters and returns from an independent C caller,
+[owned-call test](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeOwnedCallAbiTests.cs)
+exercises unique direct/indirect by-value parameters and returns from an
+independent .NET caller,
 including hidden-result RAX storage identity and a sixth owning argument.
 It checks owning output stack placement, true-only publication, unchanged
 false/partial/caught-failure output bytes, guard storage, repeated calls,
@@ -1328,21 +1321,23 @@ and caught later-argument failure. Composite cases cover 8- and 16-byte owners,
 nested child loans, nonzero field offsets, and failed partial construction.
 The nonzero field offsets in these cases are computed from normal field order,
 size and alignment; they are not user-selected explicit offsets.
-The C fixture's cleanup methods are empty;
+This fixture's cleanup methods are empty;
 Host.Trace execution tests, not this ABI probe, establish cleanup order and
 exactly-once effects. This remains a bounded test boundary, not a general
 native interop or resource-release contract.
 
-`dotnet run --file scripts\check-cleanup-copy-abi.cs` supplies independently
-compiled C cleanup callees instead. The parent cleanup deliberately overwrites
-its entire indirect by-value argument; child cleanup must still observe the
-original payload. Both runtime policies exercise normal destruction, replacement,
+The same test fixture also binds parent/child cleanup through the verified IR's
+explicit native-import boundary. A .NET unmanaged callback observes parent
+calls and ordering, then calls `GetSystemTimeAsFileTime` to overwrite the
+parent's indirect by-value scratch where the child semaphore handle lives.
+Child cleanup must still release the original semaphore; count checks preserve
+the parent-before-child and exactly-once assertions. Both runtime policies
+exercise normal destruction, replacement,
 an owning output call with a staged owning argument, destruction while a
 return value is pending, and recursive cleanup through an outer owner with no
 custom cleanup.
-The bounded worker checks cleanup order and counts as
-well as returned values. This uses the verified IR's explicit native-import
-boundary, not a source-level interop extension.
+This is a test-only system/native-call boundary, not a source-level interop
+extension or an OS resource-owner library.
 
 Images prefer base `0x1_4000_0000`, with 4 KiB section alignment and 512-byte
 file alignment. `.text` is read/execute, `.idata` read/write and
@@ -1355,10 +1350,15 @@ stripped. The [PE format](https://learn.microsoft.com/en-us/windows/win32/debug/
 defines relocation entries for addresses needing correction; the
 [`RELOCS_STRIPPED` flag](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-image_file_header)
 would instead require loading at the preferred base. A separate Windows
-loader probe reserves that address, loads two images concurrently, and calls
+loader [test](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeLoaderInteropTests.cs)
+reserves that address, loads two images concurrently, and calls
 their RVA-addressed functions. It also observes ordinary executable image
 bases through Windows debug events, checking successful and fail-fast exits
 after relocation.
+The DLL cases independently call aggregates, check unwind registration and
+export visibility, unload modules, and replace the same provider DLL while
+preserving the consumer executable bytes; the observed result changes from
+42 to 43. A separate consumer observes fail-fast from inside the DLL.
 This RVA-based executable probe is not a module hot-swap mechanism or
 general-purpose loader; separately deployed images use the DLL/package APIs.
 

@@ -7,7 +7,7 @@ modules needs a concrete persisted source-processing consumer. Existing
 ## Decision and integration
 
 The candidate lets a persisted component require one immutable source snapshot
-per synchronous invocation. The [self-host inventory](../implementation/self-host.md)
+per synchronous invocation. The [Terrum-authored component inventory](../implementation/terrum-code-analysis.md)
 owns the current source/line/decoder/provider coverage; the
 [module inventory](../implementation/modules.md) owns its private artifact
 support. Reusing provider bytes may still involve fresh hosted verification
@@ -98,6 +98,6 @@ promotion:
 
 Evidence entry points are
 [`NativeJit.ExecuteWithSourceGrant`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs)
-and [module regressions](../../tests/Terrum.CodeAnalysis.Tests/ModuleTests.cs).
+and [module regressions](../../tests/Terrum.CodeAnalysis.Tests/Modules/ModuleTests.cs).
 They document implementation evidence, not acceptance or an independently
 verified/self-hosted compiler.

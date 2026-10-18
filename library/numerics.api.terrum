@@ -1,10 +1,8 @@
 // DESIGN ONLY: target API contracts with selected implementations. Primitive representation omitted.
 // Bodyless static interface operators denote required witnesses; only the
 // bounded compilation-local operator subset is currently executable.
-// The executable profile currently uses legacy bool/out publication; this
-// inventory shows its planned init ref<T> destination form. Call-site spelling
-// and coordinated migration are not yet implemented.
-// Bodies retain legacy out/ref call expressions as schematic examples.
+// Initialization destinations and ordinary reference descriptors use explicit
+// indirection; these target signatures are not the legacy executable out profile.
 namespace Terrum;
 
 // Integer associated relations such as Wider/Signed/Unsigned bind through a
@@ -110,17 +108,17 @@ public struct int32
 
     public static bool TryAdd(int32 left, int32 right, init ref<int32> result)
     {
-        return TryNarrow(int64(left) + int64(right), out result);
+        return TryNarrow(int64(left) + int64(right), init *result);
     }
 
     public static bool TrySubtract(int32 left, int32 right, init ref<int32> result)
     {
-        return TryNarrow(int64(left) - int64(right), out result);
+        return TryNarrow(int64(left) - int64(right), init *result);
     }
 
     public static bool TryMultiply(int32 left, int32 right, init ref<int32> result)
     {
-        return TryNarrow(int64(left) * int64(right), out result);
+        return TryNarrow(int64(left) * int64(right), init *result);
     }
 
     private static bool TryNarrow(int64 value, init ref<int32> result)
@@ -130,14 +128,10 @@ public struct int32
             return false;
         }
 
-        result = int32(value);
+        *result = int32(value);
 
         return true;
     }
-
-    // Temporary syntax-only self-host fixture hook until type-call conversion
-    // syntax is supported in the self-host fixture. Not the proposed API.
-    public static int32 FromChar16Checked(char16 value);
 
     public static int32 FromBits(uint32 bits);
 }

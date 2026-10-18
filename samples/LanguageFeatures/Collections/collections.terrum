@@ -1,0 +1,51 @@
+// DESIGN ONLY: target initialization destinations and collection APIs.
+// Graph-backed containers, local access authority.
+using Terrum;
+using Terrum.Collections;
+
+public static int32 Main()
+{
+    write List<int32> values = [10, 20];
+
+    using (var access = values.GetWriteAccess())
+    {
+        // The writable view is borrowed from the guard, not copied.
+        var elements = access.Span;
+        elements[0] = elements[0] * 2;
+        elements[1] = elements[1] * 2;
+    }
+
+    Terminal.WriteLine(values[0]); // 20
+    Terminal.WriteLine(values[1]); // 40
+
+    write LinkedList<int32> pending = [10, 20];
+    require pending.First is some first;
+    require pending.Last is some second;
+
+    pending.Remove(first);
+    pending.AddAfter(second, first);
+    first.Value = 11;
+
+    foreach (var value in pending)
+    {
+        Terminal.WriteLine(value); // 20, then 11
+    }
+
+    pending.Clear();
+    Terminal.WriteLine(first.Value); // 11; the detached node is still usable.
+
+    write List<int32?> optionalValues = new List<int32?>();
+    optionalValues.Add(null);
+    if (optionalValues.TryGet(0, init var present))
+    {
+        Terminal.WriteLine(present is null ? "present, absent payload" : "present payload");
+    }
+
+    if (!optionalValues.TryGet(1, init var missing))
+    {
+        Terminal.WriteLine("missing element");
+        // missing is uninitialized here; reading it would be a diagnostic.
+    }
+
+    return 0;
+}

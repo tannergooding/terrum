@@ -84,7 +84,7 @@ development-schema fixtures; private/native and output experiments retain
 other assignments. See
 [ModuleCompiler](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
 [Feature admission](../../sources/Terrum.CodeAnalysis/Modules/TrRmFeatureTableReader.cs),
-[Body fixtures](../../tests/Terrum.CodeAnalysis.Tests/TrRmBodyExampleTests.cs)
+[Body fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)
 and the [module inventory](modules.md). Existing test success would not establish
 current-registry decoding.
 
@@ -114,7 +114,7 @@ remain unapproved physical integration.
 
 **Current/evidence:** the [output inventory](output-profiles.md) distinguishes
 bounded hosted/generic paths from ScalarInitOutput's experimental mode, Feature
-and Body rules. [Scalar output reader cases](../../tests/Terrum.CodeAnalysis.Tests/TrRmScalarInitOutputBodyReaderTests.cs)
+and Body rules. [Scalar output reader cases](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmScalarInitOutputBodyReaderTests.cs)
 are not the complete accepted reference/output model.
 
 **Routes/gate:** preserve complete descriptor types, receiver versus formal
@@ -146,7 +146,7 @@ agree before broader standard Body execution is claimed.
 [output support](output-profiles.md) describe bounded checked failure,
 recovery and cleanup, not all typed payload/filter/capture or standard
 exceptional-region semantics.
-[Provider output/failure cases](../../tests/Terrum.CodeAnalysis.Tests/NativeProviderOutputFailureTests.cs)
+[Provider output/failure cases](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeProviderOutputFailureTests.cs)
 cover a bounded separate-compilation surface.
 
 **Routes/gate:** carry protected operation identity, pending failure/cause,
@@ -175,8 +175,8 @@ compiler behavior are already settled.
 and [native support](native.md) inventory current experimental native
 sections/clauses/Features, copied vtable bindings and private revisions.
 These are not the candidate next-draft schema. Active
-[function-pointer](../../tests/Terrum.CodeAnalysis.Tests/NativeFunctionPointerTests.cs)
-and [vtable](../../tests/Terrum.CodeAnalysis.Tests/NativeVTableCallTests.cs)
+[function-pointer](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeFunctionPointerTests.cs)
+and [vtable](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeVTableCallTests.cs)
 cases are bounded implementation evidence, not approval.
 
 **Routes/gate after selection:** migrate declaration producers/readers,
@@ -204,7 +204,7 @@ need reopening because support is incomplete.
 **Current/evidence:** [layout support](layout-profiles.md) describes natural
 Sequential/bounded Transparent source support and pending wider controls,
 Union, standard commitment persistence and qualification.
-[PublicFixedLayoutStorageTests](../../tests/Terrum.CodeAnalysis.Tests/PublicFixedLayoutStorageTests.cs)
+[PublicFixedLayoutStorageTests](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/PublicFixedLayoutStorageTests.cs)
 and `Binder`'s layout-attribute path exercise that bounded support.
 Neither compact ValueLayout limits nor native-pointer staging limits are
 Windows ABI size ceilings.
@@ -311,8 +311,8 @@ complete values, structural partial move/repair, authored cleanup and
 reverse-declaration versus reverse-acquisition retirement.
 
 **Current/evidence:** [native support](native.md), [owner/view support](view-and-owner-profiles.md),
-[OwnershipTests](../../tests/Terrum.CodeAnalysis.Tests/OwnershipTests.cs)
-and [native origin cases](../../tests/Terrum.CodeAnalysis.Tests/NativeGraphOriginTests.cs)
+[OwnershipTests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/OwnershipTests.cs)
+and [native origin cases](../../tests/Terrum.CodeAnalysis.Tests/Native/Graphs/NativeGraphOriginTests.cs)
 cover bounded owners/cleanup/origin. They do not by themselves establish all
 accepted partial-field, failure and crossing combinations; no new universal
 runtime defect is asserted.
@@ -405,8 +405,8 @@ permit any admitted declared result type, retaining ordinary typing.
 
 **Current/evidence:** `Binder` reports TRM3018 for non-void DoesNotReturn;
 `SemanticVerifier` independently rejects the same combination.
-[NoThrowTests](../../tests/Terrum.CodeAnalysis.Tests/NoThrowTests.cs)
-and [module cases](../../tests/Terrum.CodeAnalysis.Tests/NoThrowModuleTests.cs)
+[NoThrowTests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/NoThrowTests.cs)
+and [module cases](../../tests/Terrum.CodeAnalysis.Tests/Semantics/NoThrowModuleTests.cs)
 exercise the bounded declaration/flow machinery, not the complete rule.
 
 **Routes/gate:** remove the void-only restriction consistently in binding,
@@ -463,7 +463,7 @@ callee/argument identities rather than masking an out-of-range value.
 and [verification budget](../proposals/self-host-frontend-verification-budget.md)
 are distinct decisions.
 
-**Current/evidence:** [self-host support](self-host.md) and
+**Current/evidence:** [Terrum-authored component support](terrum-code-analysis.md) and
 [composition](bootstrap-frontend-composition.md) describe bounded hosted
 verification/emission and private projection routes. Route-specific parsing,
 local and capacity restrictions are implementation facts, not accepted

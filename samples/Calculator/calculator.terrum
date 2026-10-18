@@ -1,0 +1,108 @@
+// DESIGN ONLY: target initialization destinations require explicit indirection.
+// Conditional-output annotation spelling is provisional.
+using Terrum;
+
+public enum CalculateStatus : int32
+{
+    Success,
+    UnknownOperator,
+    DivideByZero,
+    Overflow
+}
+
+public static int32 Main(Span<TextSpan> args)
+{
+    if (args.Length != 3 ||
+        !int32.TryParse(args[0], init var left) ||
+        !int32.TryParse(args[2], init var right))
+    {
+        Terminal.WriteLine("usage: calculator <int32> <+|-|*|/|%> <int32>", output: TerminalOutput.Error);
+
+        return 2;
+    }
+
+    var status = TryCalculate(left, args[1], right, init var result);
+
+    if (status == CalculateStatus.Success)
+    {
+        Terminal.WriteLine(result);
+
+        return 0;
+    }
+
+    Terminal.WriteLine(status switch
+    {
+        CalculateStatus.UnknownOperator => "unknown operator",
+        CalculateStatus.DivideByZero => "division by zero",
+        CalculateStatus.Overflow => "int32 overflow",
+        _ => "invalid calculator status"
+    }, output: TerminalOutput.Error);
+
+    return 2;
+}
+
+[OutputWhen(nameof(result), CalculateStatus.Success)]
+public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32 right, init ref<int32> result)
+{
+    if (operation.EqualsOrdinal('+'))
+    {
+        if (int32.TryAdd(left, right, init var sum))
+        {
+            *result = sum;
+
+            return CalculateStatus.Success;
+        }
+
+        return CalculateStatus.Overflow;
+    }
+
+    if (operation.EqualsOrdinal('-'))
+    {
+        if (int32.TrySubtract(left, right, init var difference))
+        {
+            *result = difference;
+
+            return CalculateStatus.Success;
+        }
+
+        return CalculateStatus.Overflow;
+    }
+
+    if (operation.EqualsOrdinal('*'))
+    {
+        if (int32.TryMultiply(left, right, init var product))
+        {
+            *result = product;
+
+            return CalculateStatus.Success;
+        }
+
+        return CalculateStatus.Overflow;
+    }
+
+    if (operation.EqualsOrdinal('/') || operation.EqualsOrdinal('%'))
+    {
+        if (right == 0)
+        {
+            return CalculateStatus.DivideByZero;
+        }
+
+        if (left == int32.MinValue && right == -1)
+        {
+            if (operation.EqualsOrdinal('/'))
+            {
+                return CalculateStatus.Overflow;
+            }
+
+            *result = 0;
+
+            return CalculateStatus.Success;
+        }
+
+        *result = operation.EqualsOrdinal('/') ? left / right : left % right;
+
+        return CalculateStatus.Success;
+    }
+
+    return CalculateStatus.UnknownOperator;
+}

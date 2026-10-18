@@ -65,7 +65,7 @@ not run analysis by itself.
 | Identity | Terrum solution, product, description, root namespaces and category property. No repository/package URL is invented before a public repository is selected. |
 | SDK/framework | Retain the exact available .NET 11 RC pin and `net11.0` targets; the local installer reads that pin rather than downloading upstream's floating .NET 10 SDK. |
 | Platform | Do not stamp the portable compiler with TerraFX's Windows-only assembly attribute. |
-| Dependencies | Centralize the existing xUnit packages and TerraFX's test SDK version; retain nuget.org mapping without unused native interop dependencies or the TerraFX feed. |
+| Dependencies | Centralize NUnit, its adapter, Microsoft.NET.Test.Sdk and the other package versions; retain nuget.org mapping without unused native interop dependencies or the TerraFX feed. |
 | Tests | Preserve public-API tests, without `InternalsVisibleTo`. The test host is not packable, trimmed or AOT-compatible and does not require public XML documentation. |
 | CLI | The executable is not a library NuGet package. Its human token rendering uses reflection-free JSON escaping so trimming/AOT diagnostics remain enabled. |
 
@@ -103,7 +103,32 @@ not apparent; that repository rule takes precedence over personal defaults.
 
 ## Native qualification
 
-The frame, owned-call, owned-buffer and managed-node probes consume the
+Ordinary NUnit tests use public compiler APIs, .NET unmanaged callers and
+Win32/CRT interop for scalar and aggregate ABI, owner publication, DLL
+servicing/unload, relocation and actual process results. They do not need a
+C application bridge. The [sample catalog](samples.md) identifies standalone
+programs, dependency groups and explicitly gated graphics integrations.
+
+After building the matching Debug outputs, related native replacement checks
+can run together through the existing runner:
+
+```powershell
+dotnet test tests\Terrum.CodeAnalysis.Tests\Terrum.CodeAnalysis.Tests.csproj -c Debug --no-build --no-restore --filter "FullyQualifiedName~NativeLoaderInteropTests|FullyQualifiedName~NativeOwnedCallAbiTests"
+```
+
+Only five narrow C inputs remain under the test project's probe areas. Their retained
+assertions require the particular unmanaged exception or stack environment,
+not merely an independent caller or heap instrumentation:
+
+| Input | Distinct observation / consumer |
+|---|---|
+| `tests\Terrum.CodeAnalysis.Tests\Native\Bootstrap\Probes\bootstrap-unwind-probe.c` | Raw native-thread stack guard and synthetic unwind without managed entry/callback frames; NUnit bootstrap tests |
+| `tests\Terrum.CodeAnalysis.Tests\Native\Unwind\Probes\frame-unwind-probe.c` | MSVC SEH around real foreign faults, fault CONTEXT/RBP/funclets and partial prologs; frame script |
+| `tests\Terrum.CodeAnalysis.Tests\Native\Unwind\Probes\seh-probe.c` | MSVC `__try`/`__finally`/filter semantics compared with a hand-built dynamic SEH table; SEH script |
+| `tests\Terrum.CodeAnalysis.Tests\Native\Ownership\Probes\owned-buffer-abi-probe.c` | Allocation/release failure and dirty BOOL injection combined with escaping native exception filters and cleanup callbacks during native unwind |
+| `tests\Terrum.CodeAnalysis.Tests\Native\Ownership\Probes\managed-node-abi-probe.c` | Root/allocation accounting and native failure injection combined with native exception-filter and unwind observations |
+
+The frame, owned-buffer and managed-node scripts consume the
 prebuilt Debug compiler at
 `artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll`. They do not parse
 a compiler-path argument or build the compiler. Build that exact input first:
@@ -111,7 +136,7 @@ a compiler-path argument or build the compiler. Build that exact input first:
 ```powershell
 .\build.cmd -configuration Debug -fast
 dotnet run --file scripts\check-native-frame.cs
-dotnet run --file scripts\check-owned-call-abi.cs
+dotnet run --file scripts\check-native-seh.cs
 dotnet run --file scripts\check-owned-buffer-abi.cs
 dotnet run --file scripts\check-managed-node-abi.cs
 ```
@@ -120,8 +145,11 @@ Run probes sequentially when they share a probe directory. Native executables
 go under `artifacts\bin\native-probes\<probe>`, intermediate objects under
 `artifacts\obj\native-probes\<probe>`, and logs under
 `artifacts\log\native-probes\<probe>`. Fixed filenames can overwrite a
-previous run's outputs. API-based probes with `#:project` references instead
-use the library built by their standard `dotnet run` configuration.
-The independent C callers require Visual Studio x64 C++ build tools; the
-[aggregate ABI recipe](implementation/native.md#semantic-and-target-boundaries)
-also builds its assembly/C fixture explicitly.
+previous run's outputs. The frame, owned-buffer and managed-node scripts use
+the selected prebuilt Debug compiler. The SEH script is an independent
+platform reference: it compiles and runs its C implementation of static and
+dynamic SEH behavior without consuming Terrum compiler output. All four
+scripts require Visual Studio x64 C++ build tools. Keep their MSVC setup and
+compilation in the same process; managed catches are not a substitute for the
+native SEH assertions. Pure ABI/layout and loader checks instead belong in the
+maintained NUnit suite.

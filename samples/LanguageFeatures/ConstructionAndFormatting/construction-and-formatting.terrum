@@ -1,0 +1,50 @@
+// DESIGN ONLY: require-expression output lifting is target direction, not
+// bounded compiler syntax.
+// Target/handler registration remains provisional; statement-form require is
+// current bounded syntax.
+// `own<val<Text>>` shows the native inline-payload direction, not settled lifecycle syntax.
+using Terrum;
+using Terrum.Collections;
+
+public struct Point : IFormattable
+{
+    public int32 X;
+    public int32 Y;
+
+    public Point(int32 x, int32 y)
+    {
+        X = x;
+        Y = y;
+    }
+
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter
+    {
+        require format.IsEmpty;
+
+        return TextFormatting.TryWrite(writer, $"({X}, {Y})");
+    }
+}
+
+[TextTarget(nameof(content))]
+public static void Forward<TContent>(write TextWriter destination, TContent content)
+    where TContent : IFormattable
+{
+    destination.WriteLine(move content);
+}
+
+public static int32 Main()
+{
+    int32 x = require int32.TryParse("3");
+
+    var point = new Point(x, 4);
+    Forward(Terminal.Output, $"point = {ref point}");
+
+    using own<val<Text>> saved = $"saved = {ref point}";
+    Terminal.WriteLine(saved.AsSpan());
+
+    List<int32> values = [x, 4];
+    Terminal.WriteLine(values[1]);
+
+    return 0;
+}

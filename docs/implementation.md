@@ -116,7 +116,7 @@ not a bootstrap compiler. The scalar frontend audits source projections before
 passing them to the hosted verifier/emitter. Its support does not imply that
 verification or emission has moved into Terrum. The source-free compiler
 primitives DLL is likewise distinct from source-grant companion profiles.
-See the [self-host component inventory](implementation/self-host.md),
+See the [Terrum-authored compiler component inventory](implementation/terrum-code-analysis.md),
 [bootstrap/frontend composition inventory](implementation/bootstrap-frontend-composition.md),
 and [scanner boundary](scanner.md).
 
@@ -306,7 +306,7 @@ indirect calls, private semantic modules (revision 82), native module sets and
 graph consumers. Address formation and indirect invocation require an explicit
 unsafe scope; native-callable entries are `NoThrow` and caller-unsafe. Function
 pointers carry code addresses only: they do not root or extend the lifetime of
-the image containing the target. A supervised independent C caller exercises
+the image containing the target. An independent .NET unmanaged caller exercises
 the exported native ABI, and JIT/module regressions exercise provider callback
 transport. Bounded provisional `.trrm` support is described above; the
 accepted standard schema does not admit these experimental declarations,

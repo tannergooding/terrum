@@ -20,9 +20,9 @@ general imported-call linking and checked-exception Body support are not
 implemented. Its development encoding is not verified conformance to the
 current unified registry.
 
-The bounded [Terrum-authored scalar source frontend](docs/implementation/self-host.md)
-projects one source snapshot into bounded scalar functions and direct calls,
-including forward calls and recursion. Its source-bound multi-function
+The bounded [Terrum-authored scalar source frontend](docs/implementation/terrum-code-analysis.md)
+projects one snapshot of uniquely named global functions with direct scalar
+calls, including forward calls and recursion. Its source-bound multi-function
 reader audits target identities and void-call statement roots before using
 the hosted verifier/emitter. This is separate
 from source-free TRRM support and is not a bootstrap compiler.
@@ -32,8 +32,9 @@ contracts independently of compiler support. Places default to readonly,
 `mut` qualifies writable places/receivers, and `write` grants writable
 reference/view access. The implementation retains legacy `bool`/`out` beside
 distinct vacancy-only `bool`/`init ref<T>` outputs; `out T` is not canonical
-target syntax. `samples\design` and library proposals are
-informative, not implemented APIs.
+target syntax. The design-only scenario samples and library proposals are
+informative, not implemented APIs; the sample catalog distinguishes them from
+implemented language-feature examples.
 
 ## Build
 
@@ -49,10 +50,10 @@ existing installation; `-architecture x64` installs that SDK under
 .\build.cmd -configuration Release -test
 .\test.cmd
 .\pack.cmd
-dotnet run --project sources\terrumc -- check samples\syntax\hello.terrum
-dotnet run --project sources\terrumc -- analyze samples\native\factorial.terrum
+dotnet run --project sources\terrumc -- check tests\Terrum.CodeAnalysis.Tests\Syntax\Fixtures\hello.terrum
+dotnet run --project sources\terrumc -- analyze samples\LanguageFeatures\ControlFlow\factorial.terrum
 New-Item -ItemType Directory -Force artifacts\bin\samples | Out-Null
-dotnet run --project sources\terrumc -- build samples\native\factorial.terrum -o artifacts\bin\samples\factorial.exe --runtime fail-fast
+dotnet run --project sources\terrumc -- build samples\LanguageFeatures\ControlFlow\factorial.terrum -o artifacts\bin\samples\factorial.exe --runtime fail-fast
 .\artifacts\bin\samples\factorial.exe
 $LASTEXITCODE # 720
 ```
@@ -70,24 +71,26 @@ Build outputs are under `artifacts\bin`; intermediates, logs, test results and
 packages are under `artifacts\obj`, `artifacts\log`, `artifacts\tst` and
 `artifacts\pkg`. On Windows, the solution also builds a native
 compiler-primitives DLL from maintained Terrum sources. That library is not a
-self-host compiler or executable scanner/parser; see
-[self-host components](docs/implementation/self-host.md).
+self-host compiler or executable scanner/parser; see the
+[Terrum-authored source project](sources/Terrum.CodeAnalysis.Terrum/README.md)
+and its [implementation inventory](docs/implementation/terrum-code-analysis.md).
 
 ## Layout
 
 | Location | Purpose |
 |---|---|
-| `sources/Terrum.CodeAnalysis` | Source/syntax APIs, binding, verification, native backend and semantic modules |
+| [`sources/Terrum.CodeAnalysis`](sources/Terrum.CodeAnalysis) | C# compiler host: source/syntax APIs, binding, verification, native backend and semantic modules |
+| [`sources/Terrum.CodeAnalysis.Terrum`](sources/Terrum.CodeAnalysis.Terrum/README.md) | Bounded Terrum-authored compiler components; still verified and emitted by the hosted compiler |
 | `sources/terrumc` | Human- and machine-facing CLI |
-| `tests/Terrum.CodeAnalysis.Tests` | Library and process-level CLI tests |
-| `samples/syntax` | Parser fixtures; not executable Terrum |
-| `samples/native` | Windows x64 executable examples |
-| `samples/design`, `library` | Language and API sketches |
-| `sources/self-host`, `tests/self-host` | Candidate compiler components and their test fixtures |
+| [`tests/Terrum.CodeAnalysis.Tests`](tests/Terrum.CodeAnalysis.Tests/README.md) | C# NUnit harness organized by test area, with test-owned fixtures and narrow native ABI probes |
+| [`tests/Terrum.CodeAnalysis.Terrum.Tests`](tests/Terrum.CodeAnalysis.Terrum.Tests/README.md) | Terrum test sources and ABI adapters consumed by the C# test harness |
+| [`samples`](samples/README.md) | Terrum code grouped by scenario or language feature; implementation status and evidence are in the catalog |
+| `tests/Terrum.CodeAnalysis.Tests/Syntax/Fixtures` | Parser fixtures owned by syntax tests; no binding or execution claim |
+| `library` | Non-executable API sketches |
 
 Read the [language design](docs/language.md), [language contracts](docs/specs/language-contracts.md),
 [lifetime contracts](docs/specs/lifetimes.md), [library design](docs/specs/libraries.md),
-[sample catalog](docs/samples.md), and [roadmap](docs/roadmap.md).
+[sample entry point](samples/README.md), [sample catalog](docs/samples.md), and [roadmap](docs/roadmap.md).
 The [proposal index](docs/proposals/README.md) distinguishes unapproved
 amendments from accepted contracts. The
 [pre-v1 acceptance policy](docs/specs/overview/conformance.md) does not freeze
