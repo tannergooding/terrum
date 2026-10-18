@@ -214,11 +214,12 @@ a magnitude, suppress overflow or silently invoke a different member.
 An unused compiler-only dependency need not become a runtime dependency when
 no retained value, contract or execution path requires it.
 
-Exact generic-math interfaces, primitive member-registration records, other
-failure catalogs, complete floating effect/cohort choices and physical
-constant/call/handler codecs remain separate completion work. This chapter
-does not admit a numeric opcode by name, waive selective-reader boundaries
-or migrate the current implementation.
+Physical generic-math witness and primitive member-registration records,
+complete effect/program contracts, and constant/call/handler codecs remain
+separate completion work. The selected numeric groups, scalar failures and
+floating representation contracts do not supply those encodings or programs.
+This chapter does not admit a numeric opcode by name, waive selective-reader
+boundaries or migrate the current implementation.
 
 [Conformance cases](../conformance/source-absolute-value.md) distinguish finite
 mathematical/type/state evidence from actual source binding, full floating

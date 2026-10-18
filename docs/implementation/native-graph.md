@@ -140,7 +140,8 @@ their original profiles and machine images when the implementation is replaced.
 Views cannot escape through public parameters, returns or fields. The checked
 package reader rejects unknown or inconsistent profiles before loading a DLL;
 the native image validator permits owned-buffer heap imports only for the
-`native-15`, `native-16` and `native-17` profiles.
+`native-15` through `native-20` profiles, with managed runtime data limited
+to `native-18` through `native-20`.
 
 To replace a leaf without changing the root or intermediate, use the scalar
 `Leaf()` package first, then compile the implementation with an internal view:

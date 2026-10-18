@@ -13,15 +13,16 @@ the standard library are not implemented. See the
 [implementation reference](docs/implementation.md) for supported features and
 limits.
 
-The additive [TRRM scalar path](docs/implementation.md#executable-trrm-scalar-interchange)
-emits approved metadata and compact-linear/indexed Bodies for a bounded
+The development [TRRM scalar path](docs/implementation.md#executable-trrm-scalar-interchange)
+emits metadata and compact-linear/indexed Bodies for a bounded
 source-free, fail-fast scalar subset. It uses the shared verifier and backend;
 general imported-call linking and checked-exception Body support are not
-implemented.
+implemented. Its development encoding is not verified conformance to the
+current unified registry.
 
 The bounded [Terrum-authored scalar source frontend](docs/implementation/self-host.md)
-projects one snapshot of global functions with unique names and direct scalar
-calls, including forward calls and recursion. Its source-bound multi-function
+projects one source snapshot into bounded scalar functions and direct calls,
+including forward calls and recursion. Its source-bound multi-function
 reader audits target identities and void-call statement roots before using
 the hosted verifier/emitter. This is separate
 from source-free TRRM support and is not a bootstrap compiler.
@@ -88,7 +89,9 @@ Read the [language design](docs/language.md), [language contracts](docs/specs/la
 [lifetime contracts](docs/specs/lifetimes.md), [library design](docs/specs/libraries.md),
 [sample catalog](docs/samples.md), and [roadmap](docs/roadmap.md).
 The [proposal index](docs/proposals/README.md) distinguishes unapproved
-alternatives from accepted contracts.
+amendments from accepted contracts. The
+[pre-v1 acceptance policy](docs/specs/overview/conformance.md) does not freeze
+the current design or require compatibility with unpublished drafts.
 
 The C# compiler host does not imply managed output. The native backend emits
 Terrum-owned Windows x64 code for AOT and JIT; CIL is neither a dependency nor

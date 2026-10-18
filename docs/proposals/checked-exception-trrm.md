@@ -12,8 +12,17 @@ The current beta executable subset is fail-fast-only and rejects
 It is not the GA contract. The candidate profile below also excludes output
 parameters, so it cannot by itself satisfy both accepted TRRM 1.0 GA
 requirements for exceptions and output modes.
+The [joint output/failure/ownership proposal](trrm-output-failure-ownership.md)
+owns that composition gate; this document retains the distinct candidate
+first exception-execution slice.
 
 ## Remaining design
+
+After approval, integrate the selected region, operation-site state, handler
+and cleanup codecs into the instruction/metadata owners, registry and
+conformance cases. Prefer the shared joint model over freezing this
+root-free slice as an independent permanent exception system. Its physical
+records may replace draft shapes; no old-reader compatibility is required.
 
 The accepted language semantics and TRRM 1.0 GA requirement are recorded in
 the [language contracts](../specs/language-contracts.md#33-normal-and-exceptional-exits)

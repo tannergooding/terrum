@@ -207,7 +207,7 @@ inputs and frozen-value admission. The target registers an ordinary
 sign/carrier API:
 
 ```terrum
-[Literal(LiteralKind.Integer), ConstEval]
+[Literal(LiteralKind.Integer)] [ConstEval]
 public static bool TryParse(TextSpan text, init ref<Port> value);
 ```
 

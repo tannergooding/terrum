@@ -35,7 +35,7 @@ Its authority over current assignments does **not** make metadata frozen,
 complete or closed to extensions. Missing records are design work to specify,
 not a reason to reject the needed language/compiler route indefinitely.
 
-Recommend an additive next draft, with the candidate agreement label
+Recommend one integrated next draft, with the candidate agreement label
 `trrm/1-draft-native-boundaries-1` and the existing version pair `(1, 0)`.
 The label is out-of-band draft agreement, not a new header field. Consumers
 must select that exact schema and its governing semantics; equal version
@@ -100,7 +100,8 @@ reject an otherwise admitted raw call.
 
 ## Proposed physical records
 
-All new numbers in this section are **unapproved candidates**. Existing
+All new numbers and changes to reserved shapes in this section are
+**unapproved candidates**. Existing
 Module, ModuleRef, TypeDef, FieldDef, Layout, MethodDef, MethodSig, Param,
 TypeSpec, Import, Export, Contract and Body framing remain unchanged.
 New semantic sections use required policy `0x0000`, not the optional
@@ -108,39 +109,47 @@ nonsemantic extension range. Typed references remain little-endian `u32`
 row indexes with a zero high byte and the existing 24-bit bounds; only fields
 marked `?` admit zero. No semantic references are hidden in Blob bytes.
 
-### Candidate allocation and collision check
+### Candidate allocation and integration choice
 
 | Namespace | Candidate allocation | Existing assignments checked |
 |---|---|---|
-| Required section kind (`u16`) | `0x0030` NativeImport, `0x0031` NativeCallable, `0x0032` NativeVTable, `0x0033` NativeFunctionPointerSignature | Canonical tables end at `0x0020`, with SourceMap at `0x7F00`; the branch experiment separately uses `0x0021`. |
-| Contract kind (`u16`) | `0x0010` NativeAbi, `0x0011` NativeParameter, `0x0012` NativeOutput, `0x0013` NativeRepresentation, `0x0014` InteropDependency | Canonical kinds are `0x0001..0x0005`; avoid experimental kinds 6, 10 and 12 and retired COM kinds 7–9 and 11. |
+| Required section kind (`u16`) | `0x0021` NativeImport, `0x0022` NativeCallable, `0x0023` NativeVTable, `0x0024` NativeFunctionPointerSignature | Continue the required-table sequence after `0x0020`; SourceMap remains a separate namespace role at `0x7F00`. |
+| Contract kind (`u16`) | `0x0006` NativeAbi, `0x0007` NativeParameter, `0x0008` NativeOutput, `0x0009` NativeRepresentation; complete shared Dependency `0x0004` | Extend the assigned clause sequence and give the reserved general dependency owner reviewed variants instead of a permanent native-only duplicate. |
 | TypeSpec form (`u8`) | `0x0D` native function-pointer signature-table reference | Canonical forms are `0x01..0x0C`. This is not a new atomic/family type code. |
-| Body primary opcode (`u8`) | `0x2A..0x2D` raw address/memory operations; `0x2E` provisional unsafe-tail marker; `0x31..0x32` native address/indirect operations | Canonical place shapes occupy `0x20..0x29`; Call is `0x30`. Vtable calls reuse Call with a role-4 MethodDef target, avoiding a duplicate call encoding. `0x2E` is an experimental profile candidate, not an assigned canonical opcode. |
-| Feature identity (`u32`) | `0x0100..0x0104`, exact revision `1` | The canonical Feature list is empty; avoid experimental IDs 1, 2 and 4 and retired COM experiments. |
+| Body primary opcode (`u8`) | `0x2A` AddressOfPlace, `0x2B` ReinterpretPointer, `0x60` ReadPointer, `0x61` WritePointer, `0x31..0x32` native address/indirect calls | Keep place/address operations after `0x20..0x29`, raw memory in the `0x60..0x6F` band, and invocation after Call `0x30`. Vtable calls reuse Call. No unsafe-tail opcode is proposed. |
+| Feature identity (`u32`) | `1..5`, exact revision `1` | The current catalog registers none; use one coordinated sequence with the generic/construction candidates `6..8`, not holes reserved for experiments. |
 
-These are separate namespaces: section `0x0031` does not collide with opcode
-`0x31`. No new DefId discriminator, qualifier bit, MethodDef flag, target
+These are separate namespaces: a section kind does not collide with an equal
+opcode byte. No new DefId discriminator, qualifier bit, MethodDef flag, target
 requirement, runtime-policy value or type-family code is proposed.
 ABI/role/access/condition domains below belong to these new records only.
 
-The allocation check used
-`docs/specs/representation/trrm-1.registry.json`, schema
-`trrm/1-draft-unified-3`, SHA-256
-`6ad18dcb65a00a0cf742fade77234f745dd036b7ae5deb7b2f5ab8d2bc23b470`.
-Its section, clause, TypeSpec, opcode and Feature sets have no intersection
-with the corresponding candidates. A search of the existing proposals found
-only historical opcode `0x0D` in the output-profile inventory, not a TypeSpec
-form assignment. The provisional native readers separately use the old
-section/clause/Feature numbers listed above. A reservation is **not** created
-by this check; repeat it when consolidating the then-current registry.
+The smaller additive alternative keeps native-only InteropDependency and
+places every new operation in an unused nearby slot. Recommend the substantive
+integration above: one dependency vocabulary, semantic operation bands and
+one candidate table/capability sequence with
+[generic/construction metadata](generic-nominal-construction-metadata.md).
+The shared Dependency variants require an explicit amendment to the current
+reserved shape and applicability; they are not current-schema meanings.
+
+Fixed-width metadata IDs do not become smaller on disk merely because their
+numbers are lower. These choices improve ownership and allocation structure,
+not a measured size result. Experimental assignments, including Feature 1
+ScalarInitOutput and the former native clause numbers, may be retired or
+reassigned. They reserve nothing in this draft.
+
+Before registration, check the then-current registry and all candidate
+namespaces, replace every affected table/operand/manifest reference and
+independent vector, and revalidate decoded artifacts. Do not substitute raw
+bytes or alias the historical experiments to these same-number candidates.
 
 ### Native binding tables
 
 | Section | Exact ordered row payload | Stride |
 |---|---|---:|
-| `0x0030` NativeImport | `u32 methodDef, str libraryName, str entryName, u32 resolutionPolicy` | 16 |
-| `0x0031` NativeCallable | `u32 methodDef, str entryName?` | 8 |
-| `0x0032` NativeVTable | `u32 methodDef, u32 receiverOrdinal, u32 vptrByteOffset, u32 slot` | 16 |
+| `0x0021` NativeImport | `u32 methodDef, str libraryName, str entryName, u32 resolutionPolicy` | 16 |
+| `0x0022` NativeCallable | `u32 methodDef, str entryName?` | 8 |
+| `0x0023` NativeVTable | `u32 methodDef, u32 expectedMethodDef?, u32 receiverOrdinal, u32 vptrByteOffset, u32 slot` | 20 |
 
 Rows inherit their module through MethodDef; no new Module partition cursor
 is needed. Each provider method has exactly one binding row of its declared
@@ -156,6 +165,13 @@ references, init modes, managed/owning descriptors and unrepresented optional
 layouts do not become raw ABI parameters through this record.
 NativeVTable.receiverOrdinal must select an ordinary data-pointer parameter;
 it is not MethodSig.receiverTypeSpec or an extra physical argument.
+An authored local binding has `expectedMethodDef=0`. A materialized consumer
+dispatch declaration uses that field to retain its separately imported
+expected role-4 declaration; the latter has no local binding row. Require
+matching complete callable contracts and a genuine ordinary Import on the
+expected declaration. Reject self-links, chains and cycles. The local binding
+retains the exact slot/offset facts used by the consumer and checks them
+against the selected provider before affected execution or replacement.
 
 An unresolved imported expected MethodDef has no local implementation or
 native binding row: its ordinary Import selects the provider. Compare its
@@ -163,8 +179,10 @@ declared ABI role and complete callable contract, then obtain binding data from
 that selected provider. Do not require a consumer to duplicate a DLL binding
 or invent a local code address for its bodyless proxy. For a role-4 vtable
 declaration, this provider lookup is distinct from a consumer-local dispatch
-stub materialized after source binding. Signature-only contract declarations
-can likewise be selected through ordinary declaration imports.
+stub materialized after source binding. Signature-only anchors are
+artifact-local structural carriers, not independently exported or imported
+declarations; a selected callable's complete contract supplies the signature
+when reconstructing a local anchor.
 
 Library/entry names are nonempty, NUL-free decoded text. Library identities
 are names, not filesystem paths; named native exports use exact target
@@ -188,17 +206,15 @@ The default recommendation is explicit authored `HostResolved`, not an
 immutable compiler API catalog. No source-supplied path, plugin discovery,
 automatic DLL staging or implicit ownership is added. A static PE import's
 DLL basename alone cannot satisfy SystemDirectory; a backend must establish
-the actual loader/deployment basis or decline. The current Windows x64 direct
-import emitter enforces its persisted `SystemDirectory` policy by rewriting
-executable and library import names to fully qualified system-directory
-paths; unsupported platforms or system-directory paths are rejected.
-Renaming a policy value does not enforce it. Ordinal imports and
+the actual loader/deployment basis or decline. Renaming a policy value does not enforce it. Current loading restrictions
+belong in the [native support inventory](../implementation/native.md), not
+in this candidate policy's meaning. Ordinal imports and
 platform-specific decorated/member conventions need later explicit shapes,
 not overloads of `entryName`.
 
 ### Native ABI and callable-signature identity
 
-Contract `0x0010` NativeAbi is a MethodDef-owned singleton. Its payload is
+Contract `0x0006` NativeAbi is a MethodDef-owned singleton. Its payload is
 `u32 abiId, u8 role, u8 exceptionMode, u16 reserved=0`: 16 bytes including the
 existing eight-byte Contract header. Candidate ABI ID `1` denotes the exact
 selected Windows x64 system call interface and requires Module target `1`.
@@ -217,7 +233,7 @@ fallback or a universal interpretation of integer status.
 
 Candidate TypeSpec form `0x0D` is exactly
 `u8 form=0x0D, u8 qualifiers=0, u32 nativeFunctionPointerSignatureRow`
-(six bytes). Required section `0x0033` has fixed eight-byte rows:
+(six bytes). Required section `0x0024` has fixed eight-byte rows:
 `u32 signatureContractMethodDef, u32 reserved=0`. Each row targets a bodyless,
 non-exported role-3 MethodDef carrying the complete MethodSig, Effects,
 NativeAbi and applicable pointer/output/dependency clauses. A TypeSpec refers
@@ -245,7 +261,7 @@ environment or extend code lifetime.
 
 ### Explicit fixed representation
 
-Contract `0x0013` NativeRepresentation is a TypeDef-owned singleton:
+Contract `0x0009` NativeRepresentation is a TypeDef-owned singleton:
 `u32 targetRequirement, u32 explicitAlignment, u32 valueKind`, for 20 bytes
 including the header. Target is `1`. Metadata `explicitAlignment=0` means
 omitted; otherwise it records the source's actual power-of-two requirement
@@ -283,7 +299,7 @@ representation work, not a reason to reject the minimal scalar/pointer route.
 
 ### Pointer access and retention
 
-Contract `0x0011` NativeParameter is MethodDef-owned and keyed by
+Contract `0x0007` NativeParameter is MethodDef-owned and keyed by
 `(parameterOrdinal, pointerDepth)`. Its exact payload is:
 
 ```text
@@ -301,7 +317,7 @@ they cannot upgrade known readonly backing.
 
 Retention codes are `0` unspecified, `1` call-extent/no-retention on every
 outcome, and `2` declared capture into a surviving destination. Code `2`
-requires the matching InteropDependency capture relationship; it does not
+requires the matching shared Dependency capture relationship; it does not
 allocate or prolong that destination. Code `0` is not no-retention and does
 not grant a safe escaping loan. These are provider promises at an unsafe
 boundary, not a demand for provider-specific proof.
@@ -334,7 +350,7 @@ Complete C/C++ const/direction import syntax remains separate work.
 
 ### Result-correlated native outputs
 
-Contract `0x0012` NativeOutput is MethodDef-owned, with the same
+Contract `0x0008` NativeOutput is MethodDef-owned, with the same
 `(parameterOrdinal, pointerDepth)` key:
 
 ```text
@@ -344,7 +360,10 @@ u64 comparisonBits
 ```
 
 The row is 28 bytes. The destination is a writable data-pointer region in
-the exact signature. Conditions are `1` always, `2` integer nonzero,
+the exact signature with a complete, positive-extent admitted pointee.
+`ptr<void>` alone does not identify an output cell; a pointer-valued cell
+instead uses its full pointer-to-pointer type. Zero-data logical output
+initialization is not a raw memory write. Conditions are `1` always, `2` integer nonzero,
 `3` integer zero, `4` signed integer nonnegative, `5` integer equal and
 `6` integer not equal, plus `7` Boolean true. Codes 2–6 use the exact
 immediate integer result, at most 64 bits; code `4` needs a signed result.
@@ -377,9 +396,10 @@ defines the required publication/cleanup composition.
 
 ### Whole-source relationships
 
-Contract `0x0014` InteropDependency is a proposed scoped carrier for the
-accepted DependsOn/Captures/ForwardsBacking semantics, not a native owner
-model. Its MethodDef-owned payload is:
+Recommend completing general Dependency clause `0x0004` with shared
+DependsOn/Captures/ForwardsBacking variants rather than introducing a native
+owner model or permanent InteropDependency codec. Its proposed
+MethodDef-owned payload is:
 
 ```text
 u8 destinationKind, u8 sourceKind, u8 relationship, u8 phase,
@@ -421,10 +441,18 @@ The verifier derives actual instance versions and nested closure from values
 and calls; annotations do not serialize fresh lifetime authority.
 Function-pointer copies preserve code dependencies as well as data backing.
 This concrete interop provider/consumer path supplies the trigger for
-revisiting the previously deferred physical dependency work. Consolidation
-may move these fields into a shared general dependency codec; it must not
-reinterpret the existing reserved Dependency payload or its earlier candidate
-tags without review.
+revisiting the previously deferred physical dependency work. The same rows
+serve ordinary reference/view and native declarations. Review their owner,
+keys, variants, defaults and phases with the reference-call proposal and
+replace the current reserved interpretation explicitly; this does not activate
+every wider dependency/async/field-path variant or silently reinterpret an
+older artifact.
+
+Sharing a clause does not make ordinary reference/view use depend on the
+Windows native ABI capability. NativeBoundaryContracts admits its native
+declaration uses; an ordinary reference/output capability must admit its own
+complete types, phases and execution under the same selected clause semantics.
+Recognizing the shared metadata does not enable all those Bodies.
 
 ## Executable Body carriers
 
@@ -436,81 +464,35 @@ width rules; the method operand keeps its typed artifact-wide escape.
 | Opcode | Candidate shape | Required meaning |
 |---:|---|---|
 | `0x2A` AddressOfPlace | `rNew, tPointer, rPlace` | Form an exact typed data address from positive-extent initialized, addressable backing; retain access, extent, actual alignment and every backing/pin dependency. |
-| `0x2B` ReadPointer | `rNew, rPointer` | Read the complete admitted Copy pointee under its exact access, validity, extent/alignment and dependency contract. |
-| `0x2C` WritePointer | `rPointer, rValue` | Write the exact complete pointee type under ordinary authority and state obligations; neither initialize an unrelated checked output nor discard dependencies stored in a pointer field. |
-| `0x2D` ReinterpretPointer | `rNew, tPointer, rSource` | Explicit unsafe data-pointer reinterpretation/erasure; retain actual backing and alignment, with no authority upgrade or fresh-backing inference. |
-| `0x2E` UnsafeTail | no operands | Experimental one-block marker or revision-8 conditional-entry marker for an explicit unsafe lexical scope through all terminal successors; reconstructs a `BoundUnsafe` scope. This is not the accepted indexed-Body region kind `0x06`. |
+| `0x2B` ReinterpretPointer | `rNew, tPointer, rSource` | Explicit unsafe data-pointer reinterpretation/erasure; retain actual backing and alignment, with no authority upgrade or fresh-backing inference. |
+| `0x60` ReadPointer | `rNew, rPointer` | Read the complete admitted Copy pointee under its exact access, validity, extent/alignment and dependency contract. |
+| `0x61` WritePointer | `rPointer, rValue` | Write the exact complete pointee type under ordinary authority and state obligations; neither initialize an unrelated checked output nor discard dependencies stored in a pointer field. |
 | `0x31` NativeAddress | `rNew, tNativeFnPtr, m` | Resolve a native import or explicit native entry, check its callable contract, and retain the selected symbol/provider/code origin. Never use the consumer proxy's absent body offset. |
 | `0x32` CallIndirect | `rNew?, rNativeFnPtr, arguments` | Invoke the complete native function-pointer contract, preserving staged arguments, output correlations, effects, backing and code lifetime. |
 
-**Current experimental support, not approval:** ScalarInitOutput rule revision
-7 can encode `0x2A` only for an initialized scalar local passed to an exact
-typed, read-only, `NoEscape` scalar `NativeParameter`, within an explicit
-unsafe suffix. Revision 8 additionally permits writable scalar `NativeOutput`
-addresses and the existing three-block terminal conditional form in that
-scope: the entry block contains the unsafe marker, and both terminal arms
-remain within the reconstructed unsafe block. The same path supports
-direct-import and role-4 vtable calls, including a consumer re-emitting a
-vtable dispatch stub call. Such a body may carry opaque raw-pointer by-value
-formals, but does not thereby gain general pointer locals, fields, or memory
-operations. The writer emits the candidate `RootlessNativeValues` feature;
-the reader compares the pointer TypeSpec to both the backing and formal,
-reconstructs `BoundNativeStorageAddress` and retains mandatory semantic
-verification. Fixed arrays, aggregates and pointer memory operations remain
-unsupported in this standard Body path. The consumer verifier ties each
-output destination to its producing call and declared result condition. It
-accepts direct zero comparisons for `NonZero` and signed `NonNegative`
-conditions, as well as body-verified single-parameter Boolean predicates that
-reduce to those comparisons, including predicates reconstructed from TRRM.
-Overwriting the status or destination, another output call, or an unmodeled
-pointer write invalidates the correlation; unguarded, mismatched, and stale
-observations reject. The `0x2E` encoding is profile-specific and remains a
-consolidation decision; future general Bodies should use a reviewed structural
-unsafe-region encoding rather than infer lexical authority from a declaration's
-unsafe effect.
+Reuse the accepted bounded indexed Unsafe region `0x06` and its complete
+region/edge validation. Its number is not a new allocation. Generalize its
+admitted operations for the reviewed native contracts, extending other Body
+forms only under a reviewed equivalent structural model. Do not standardize experimental
+UnsafeTail `0x2E`, infer authorization from a declaration's effect, or maintain
+two permanent scope systems. Its current scalar experiment is described in
+the [output inventory](../implementation/output-profiles.md#provisional-trrm-output-bodies).
 
-The current standard-TRRM implementation additionally supports `0x31` and
-`0x32` for local `NativeCallable` entries and bodyless imported callable
-declarations in compact-indexed Bodies. Ordinary ModuleRef/Import rows retain
-the expected provider identity and export key; address formation validates the
-imported local declaration against its callable signature and requires the
-existing indexed unsafe region kind `0x06`. The provisional
-`DirectNativeCalls` and `NativeCallableEntries` Features are emitted and checked
-for this path. Native single-provider and graph consumers enforce the retained
-provider identity and compare selected callable contracts before emission.
-The NativeAddress method target retains the imported MethodDef identity, whose
-ModuleRef/Import rows select the provider/export; address-only uses participate
-in dependency selection. This preserves code origin, not ownership of the
-loaded image: the runtime function pointer does not extend image lifetime, and
-deployment must keep the image live. Loaded indexed TRRM consumers are not yet
-repackaged through the private semantic-module path. These implementation
-assignments and supported cases remain experimental and unapproved.
+Imported vtable binding has two phases. An unresolved expected declaration
+selects a provider through ordinary Import. Materialization creates a distinct
+local dispatch declaration whose NativeVTable row retains both that expected
+MethodDef and the exact receiver/offset/slot/signature. Re-emission preserves
+the typed link and derived obligations; it does not turn dispatch into a call
+of the provider's code export. The explicit link is preferable to copying an
+unidentified row or losing the dependency because only the local stub is
+called. Retaining a declaration dependency does not itself require loading a
+provider code image for the vtable call.
 
-For role-4 vtable imports, the current prototype retains the selected provider
-identity/export key in ModuleRef/Import and copies the role-4 binding row into
-the consumer so source-free loading can verify and lower its call body.
-Native-package single-provider, set, and graph consumers validate that
-identity against the selected provider, compare the exact slot, offset, and
-pointer-parameter contract, and rebind the local stub to the provider export.
-Private semantic revision 86 retains the expected binding for consumer-side
-revalidation. This copied-row/provider-export path remains experimental and
-unapproved.
-
-The recommended model has two distinct phases. An unresolved imported
-declaration obtains its binding from the selected provider. Once source
-binding materializes a consumer-local dispatch stub, that stub retains its
-complete role-4 contract (receiver, offset, slot, and full signature) and
-remains a vtable dispatch call, not a provider-code call. Re-emission must
-preserve that local dispatch contract. This recommendation does not assign a
-canonical row or approve the current copied-row/provider-export encoding; keep
-those implementation details experimental pending proposal consolidation.
-A source-consumer artifact has also been emitted, loaded, lowered to a native
-library, and executed through a non-null one-slot receiver. The same bounded
-Body profile supports scalar `NativeOutput` parameters with result-condition
-verification and preserves admitted typed native-pointer signatures and
-arguments. These cases do not enable general pointer address/read/write
-operations, fixed-array or aggregate addresses, or arbitrary pointer locals
-and memory operations.
+Current imported-address, local callable, role-4 and scalar-output prototypes
+remain bounded experiments. Their copied binding rows, private revisions and
+supported Body shapes are inventoried in
+[modules](../implementation/modules.md#persisted-caller-unsafe-operations) and
+[native support](../implementation/native.md), not approved by this design.
 
 The new pointer/address operations and vtable-targeted Calls require
 structurally reconstructed unsafe authorization, including scalar-only
@@ -574,11 +556,11 @@ runtime-policy obligations. The canonical catalog currently registers none.
 
 | Candidate Feature | Coherent scope | Prerequisites |
 |---|---|---|
-| `0x0100` NativeBoundaryContracts | Declaration tables/clauses, native callable-signature TypeSpec, fixed representation, complete binding/rewrite rules and malformed rejection. No new Body execution is implied. | Edition/target rules above; applicable base metadata/effect contracts |
-| `0x0101` RootlessNativeValues | Exact admitted native scalar/address/function-pointer and marked Copy-aggregate values, fields/places, operations `0x2A..0x2D`, initialization and backing-flow verification. | `0x0100/1` |
-| `0x0102` DirectNativeCalls | Standard-TRRM direct imports and selected dependency calls, target ABI staging/results and source-independent consumers. | `0x0100/1`, `0x0101/1` |
-| `0x0103` NativeCallableEntries | Explicit native entry Bodies/exports, NativeAddress and CallIndirect, pointer transport and retained code origins. | `0x0102/1` |
-| `0x0104` NativeVTableCalls | Generic explicit-receiver/offset/slot calls through role-4 MethodDef targets of ordinary Call, including supported pointer/function-pointer/output arguments. | `0x0100/1`, `0x0101/1` |
+| `1` NativeBoundaryContracts | Declaration tables/clauses, shared dependency variants, native callable-signature TypeSpec, fixed representation, complete binding/rewrite rules and malformed rejection. No new Body execution is implied. | Edition/target rules above; applicable base metadata/effect contracts |
+| `2` RootlessNativeValues | Exact admitted native scalar/address/function-pointer and marked Copy-aggregate values, fields/places, operations `0x2A`, `0x2B`, `0x60`, `0x61`, initialization and backing-flow verification. | `1/1` |
+| `3` DirectNativeCalls | Standard-TRRM direct imports and selected dependency calls, target ABI staging/results and source-independent consumers. | `1/1`, `2/1` |
+| `4` NativeCallableEntries | Explicit native entry Bodies/exports, NativeAddress and CallIndirect, pointer transport and retained code origins. | `3/1` |
+| `5` NativeVTableCalls | Generic explicit-receiver/offset/slot calls through role-4 MethodDef targets of ordinary Call, including supported pointer/function-pointer/output arguments. | `1/1`, `2/1` |
 
 `NativeVTableCalls` does not depend on native address formation or indirect
 function-pointer invocation: it reuses ordinary `Call` with a role-4 target.
@@ -594,7 +576,7 @@ arithmetic for newly carried scalar identities.
 Start with declaration-library consumption and the direct scalar/pointer
 route, then complete native entries/function-pointer transport and vtable
 execution using these same records. This is an implementation sequence, not
-deferral of their design. A declaration-only library can require `0x0100`
+deferral of their design. A declaration-only library can require `1/1`
 without executable pointer Bodies. A provider retaining native entry Bodies
 must declare their actual execution requirements too. Rich checked outputs,
 owners, async retention, witnesses or failure bridges additionally require
@@ -666,28 +648,19 @@ promise is authored separately. This is an ABI schematic, not new source
 annotation syntax or a claim that the current TRRM consumer implements the
 proposal.
 
-## Review feedback: defects versus contract gaps
+## Implementation gaps versus design work
 
-The original review rejected frozen revision
-`578032c9190938708f6d7134e91edbf906e45ea2`. The follow-up did not inspect the
-requested later snapshot/diff and therefore neither cleared those findings
-nor ruled out new defects. The classifications below do not assert that an
-old defect is present in a newer working tree, and do not certify its fix.
+Scratch sizing, selected address origin, preserved known backing, transitive
+layout validation, nested unsafe traversal, address-only dependency accounting
+and output cleanup already have general correctness obligations. A violation
+is an implementation defect, not a reason to add provider-specific policy,
+another permission bit or an artificial ABI size cap.
 
-| Reported concern | Classification and required disposition |
-|---|---|
-| F1: scratch overlap for aggregates larger than 16 bytes | Implementation/ABI lowering defect. Size/alignment-based live storage is required; no new metadata permission or artificial size cap cures it. |
-| F2: imported callable address becomes consumer offset zero | Binding/relocation defect. Preserve the selected provider/symbol and resolve its origin; the proposed NativeAddress record makes that obligation explicit, not optional. |
-| F3: indirect calls drop known pointer backing | Traversal/verification/lowering defect wherever facts already exist. Missing standard value/dependency carriers are a separate interchange gap addressed above; unsafe never licenses erasing known facts. |
-| F4: typed imports expose uncommitted struct layout | Both a missing explicit standard representation carrier and a consumer-validation defect if layout is inferred. Add the commitment and validate transitive actual layouts. |
-| F5: nested unsafe operations escape verification | Shared traversal/authorization defect, not a need for another “trusted” metadata bit. Every nested operation retains structural scope and ordinary obligations. |
-| Address-only import-use accounting | Dependency-retention defect. Function-address use is a real symbol/code/load obligation even without a direct invocation. |
-| Output publication and cleanup | Ordering/cleanup defects wherever required facts already exist; general source-free output/failure/owner composition also needs the shared records discussed in the joint proposal. Native annotations do not replace them. |
-| Standard declaration/reference route absent | Design/implementation gap, not a frozen-format prohibition. Specify, review, register and implement the extension rather than reject the route as unnecessary metadata. |
-
-Design approval cannot close implementation findings. Conversely, a local
-implementation fix cannot approve a wire schema or establish standard
-interchange, foreign ABI correctness or runtime qualification.
+Missing standard carriers are separate design/implementation work. The
+[conformance inventory](../implementation/conformance-gaps.md) records both
+categories and their evidence boundaries. Historical findings are not current
+patch verdicts; design approval cannot certify their fix, and a local fix
+cannot approve this schema or establish native qualification.
 
 ## Malformed, incompatible and unsupported input
 
@@ -724,9 +697,9 @@ artifact; rejected production must not truncate an existing destination or
 leave a partial executable that looks successful. Cleanup only the
 producer-owned staging/output artifacts.
 
-## Consolidation decisions and experimental history
+## Consolidation decisions
 
-Recommend approving the additive boundary model and the explicit candidate
+Recommend reviewing the integrated boundary model and explicit candidate
 shapes together, then assigning the exact draft/catalog and migrating every
 producer/consumer. Keep source spelling a separate review: prefer ordinary
 extern declarations plus explicit ABI/native-entry/type-use annotations,
@@ -739,26 +712,20 @@ The material remaining choices are:
 - Confirm HostResolved as the raw default, or require an explicitly supported
   stronger deployment policy. Recommendation: permit the former under unsafe;
   never claim SystemDirectory from a tag or PE basename alone.
-- Confirm MethodDef contract anchors and the scoped rootless-Copy/dependency
-  carriers, or consolidate them into shared callable/value/dependency records
-  with identical facts before allocation. Recommendation: reuse these existing
-  declaration/Contract owners now, preserving a later explicit draft rewrite.
+- Confirm MethodDef contract anchors and the rootless-Copy value scope, or
+  use broader shared callable/value records with identical facts. Recommendation:
+  reuse declaration/Contract owners, consolidate dependency variants now,
+  and reconcile nominal Copy/Unique facts with the generic metadata proposal
+  before registration rather than maintaining contradictory category owners.
 - Select source annotation ergonomics and the exact reviewed draft/IDs.
-  Recommendation: retain ABI-shaped source and the fresh allocations above;
+  Recommendation: retain ABI-shaped source and the coordinated allocations above;
   do not couple implementation to library/API names or wait for a frozen GA
   schema.
 
-Historical experiments used NativeImport section `0x0021` (16-byte rows),
-NativeOutput Contract kind 6 (16-byte payload), NativeParameter kind 10,
-NativeBlittableLayouts kind 12 and Feature IDs 2/4; the private scalar-output
-experiment uses Feature 1. Source/private callable and numeric-slot vtable
-prototypes are not standard assignments. Earlier COM kinds 7–9/11 remain
-withdrawn. Preserve this distinction when reading older artifacts or notes.
-
-Do not alias those experimental bytes to this candidate schema. Migration
-explicitly decodes the selected old draft, reconstructs complete types and
-contracts, writes the new draft and revalidates it, or declines incomplete
-input. In particular, historical DefId-like Contract owners and
-minimum-revision acceptance are not the standard typed-owner/exact-revision
-rules. Draft compatibility shims are not required. No compiler, test,
-canonical registry or acceptance document is changed by this proposal.
+The [encoding inventory](../implementation/trrm-encoding-history.md) and
+current support chapters distinguish historical experiments. They are not
+alternate meanings of this draft's IDs, even when a number is reused.
+Recreate artifacts from source, or explicitly decode a selected old schema,
+reconstruct complete contracts, write the new schema and revalidate; decline
+incomplete inputs. No old decoder, alias or conversion is required.
+This proposal changes no compiler, test or normative allocation.

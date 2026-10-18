@@ -20,7 +20,7 @@ text or a native DLL. It is distinct from the approved current
 [`TRRM` metadata design](../specs/il-metadata.md), whose candidate `(1, 0)`
 framing and rows are not this development semantic-module writer's output.
 The separate [`compile-trrm` execution path](../implementation.md#executable-trrm-scalar-interchange)
-emits approved metadata and compact-linear/indexed Bodies to `.trrm` files
+emits development metadata and compact-linear/indexed Bodies to `.trrm` files
 for a self-contained, fail-fast scalar subset with bounded branches and loops,
 integer shifts, initialized writable-local compounds/updates and direct
 module-local scalar calls. Call targets use the module's MethodDef ordinals,
@@ -50,7 +50,7 @@ then lowers supported constructs to the same verified operations used by these
 module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
-approved-TRRM loop envelope described above is a different wire format.
+development-TRRM loop envelope described above is a different wire format.
 Revision 76 is the semantic-module base. Private revisions 77 through 80 add
 private span metadata, fixed-layout commitments, direct imports and outputs,
 and direct `NativeParameter` input metadata, respectively; revisions 79 and 80
@@ -73,8 +73,10 @@ vptr byte offset. Revision 86 persists the expected vtable binding on imported
 consumer declarations, allowing native-package single-provider, set, and graph
 routes to revalidate the selected provider identity, slot, offset, and parameter
 contracts when rebinding a TRRM-derived import stub to its provider export.
+Revision 87 additionally retains expected vtable output contracts, and
+revision 88 retains explicit native-callable export names.
 Ordinary private-module replacement remains slot-flexible. Readers accept
-the supported private revisions through 86 while rejecting unsupported
+the supported private revisions through 88 while rejecting unsupported
 combinations. Older artifacts must
 be recreated from source. These private formats preserve verified, typed,
 source-mapped structured IR and the supported declaration, layout,
@@ -93,9 +95,9 @@ not persisted as an independent capability; removing the only scope rejects.
 | Field-value reads and getters inside `unsafe(expr)` | Eligible public `Copy` paths/owners and recursively exportable results. Getter identity remains canonical; linking permits only established producer qualification. This slice does not admit field/getter mutation. |
 | Readonly instance calls inside `unsafe(expr)` | One by-value receiver with recursively exportable by-value parameters/results. The method identifier is owner-relative; producer qualification is admitted only during linking. |
 | Mutable field-receiver calls inside `unsafe(expr)` | A nonescaping receiver loan is source argument zero mapped to formal zero of an ordinary or caller-unsafe synchronous mutable method. At least one field edge is caller-unsafe; every edge's declared access and the complete `MutReceiver`, initialization, place, mutability, ownership and reservation contracts are checked. Public non-unique `Copy` layouts and explicit by-value parameters/results must be recursively exportable. Wrapped/remapped or readonly receiver loans, mutable receiver imports, direct mutable-method exports, unsafe-block calls in this slice and other reference/output modes reject. |
-| Native function addresses and indirect calls | Revision 82 retains explicit Windows x64 `NativeAbi` signatures, native-callable function identities, address targets, and indirect-call operands/results. The target must exactly match its declared signature and retain `NoThrow` plus caller-unsafety; address formation and invocation require reconstructed unsafe scopes. Function-pointer values are non-owning code addresses and do not extend image lifetime. Standard TRRM also persists local callable entries and imported expected declarations, including provider identity/export key, but does not bind the provider or retain code lifetime; direct native imports can carry native-function-pointer parameters and results through their complete signature TypeSpecs. |
-| Typed native pointers | Revision 83 retains pointer identities, pointee types, write access, and address/read/write body nodes. Pointer and function-pointer tables are recursively validated and structurally remapped through private dependency sets and graphs; unsafe scopes are reconstructed and verified. Standard TRRM carries typed-pointer TypeSpecs and native-pointer rows for admitted declarations and call arguments, including direct-import pointer parameters and results. `NativeParameter` remains optional and adds no access, retention, extent, or alignment promise when absent; general pointer address/read/write Body nodes remain unsupported. |
-| Numeric-slot native vtable methods | Revisions 84-85 retain the slot, aligned vptr offset, and pointer parameter contracts; revision 86 retains the expected binding on imported consumer declarations, and revision 87 retains their output contracts. Provisional standard TRRM encodes bodyless declarations in section `0x0032` and same-artifact compact-indexed calls through ordinary `Call` targets. A source reference preserves provider identity/export key in ModuleRef/Import and copies the role-4 binding row for source-free verification and lowering. Native-package single-provider, set, and graph routes validate the selected identity and exact binding, then rebind the local stub to the provider export. Ordinary private-module replacement remains slot-flexible. Bounded bodies preserve admitted typed-pointer signatures and arguments and support scalar output destinations with result-condition verification through ScalarInitOutput. General address/pointer operations remain unsupported. Loaded indexed bodies are not yet reserializable by the private semantic-module writer. |
+| Native function addresses and indirect calls | Revision 82 retains explicit Windows x64 `NativeAbi` signatures, native-callable function identities, address targets, and indirect-call operands/results. The target must exactly match its declared signature and retain `NoThrow` plus caller-unsafety; address formation and invocation require reconstructed unsafe scopes. Function-pointer values are non-owning code addresses and do not extend image lifetime. The development `.trrm` path also persists local callable entries and imported expected declarations, including provider identity/export key, but does not bind the provider or retain code lifetime; direct native imports can carry native-function-pointer parameters and results through their complete signature TypeSpecs. |
+| Typed native pointers | Revision 83 retains pointer identities, pointee types, write access, and address/read/write body nodes. Pointer and function-pointer tables are recursively validated and structurally remapped through private dependency sets and graphs; unsafe scopes are reconstructed and verified. The development `.trrm` path carries typed-pointer TypeSpecs and native-pointer rows for admitted declarations and call arguments, including direct-import pointer parameters and results. `NativeParameter` remains optional and adds no access, retention, extent, or alignment promise when absent; general pointer address/read/write Body nodes remain unsupported. |
+| Numeric-slot native vtable methods | Revisions 84-85 retain the slot, aligned vptr offset, and pointer parameter contracts; revision 86 retains the expected binding on imported consumer declarations, and revision 87 retains their output contracts. The development `.trrm` path encodes bodyless declarations in section `0x0032` and same-artifact compact-indexed calls through ordinary `Call` targets. A source reference preserves provider identity/export key in ModuleRef/Import and copies the role-4 binding row for source-free verification and lowering. Native-package single-provider, set, and graph routes validate the selected identity and exact binding, then rebind the local stub to the provider export. Ordinary private-module replacement remains slot-flexible. Bounded bodies preserve admitted typed-pointer signatures and arguments and support scalar output destinations with result-condition verification through ScalarInitOutput. General address/pointer operations remain unsupported. Loaded indexed bodies are not yet reserializable by the private semantic-module writer. |
 | Static binary nominal operators inside `unsafe(expr)` | Two exact owner-typed by-value operands and an owner result, or `bool` for comparisons. Public non-unique `Copy` owners have recursively exportable layouts, and the complete call retains canonical positional mapping. |
 | Static unary nominal operators inside `unsafe(expr)` | Unary plus, negation, logical-not and ones-complement use one exact owner-typed by-value operand. The declared result may be a distinct recursively exportable scalar or `Copy` type; the complete call retains canonical default mapping. |
 | Nominal prefix/postfix `++` and `--` inside `unsafe(expr)` | The matching static operator has the exact owner operand/result and a public recursively exportable non-unique `Copy` owner. The place is ordinarily writable; unsafe field paths are excluded from expression update places. |
@@ -705,7 +707,7 @@ launch. This low-level artifact API does not perform contract validation;
 the package layer below adds that check. Neither provides a multi-provider
 contract linker, live patching or hot-unload protocol.
 
-Direct source-import declarations retained by TRRM currently use the
+Direct source-import declarations retained by the development `.trrm` path use the
 `SystemDirectory` resolution policy. `NativeEmitter.EmitLibraryWithNativeImports`
 enforces it by emitting the fully qualified Windows system-directory path in
 the library's PE import table, matching executable direct-import emission;
@@ -718,7 +720,7 @@ or consumer EXE with its corresponding semantic `.trm` contract. Producer and
 consumer containers use version 2 and include a machine-import table; producer
 tables are empty, while consumer tables record imports reported by that
 emission. The reader accepts only version 2. The container records the exact
-native profile (native-10 through native-17), runtime policy,
+native profile (native-10 through native-20), runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded

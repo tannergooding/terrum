@@ -226,10 +226,13 @@ Later transport/resource failure follows the selected propagation contract;
 it cannot restore a consumed source, return normally or guess another E.
 
 Preserve every completed operand/construction effect and the call's real
-destination states. A false requirement or constructor failure does not
-vacate initialized explicit outputs, undo a write or turn an initialized
-null into vacancy. Required output checks precede any owning extraction;
-a failed all-output check must not read or move its unavailable slots.
+destination states. Under the ordinary call/output contract, a false
+requirement or constructor failure does not vacate initialized explicit
+outputs, undo a write or turn an initialized null into vacancy. Outputs still
+private or reserved under a selected protocol retain that protocol's
+exceptional-cleanup and publication obligations. Required output checks
+precede any owning extraction; a failed all-output check must not read or move
+its unavailable slots.
 Ignored live outputs and reusable hidden destinations retain their ordinary
 supporting-scope ownership and dependencies, not full-expression retirement.
 

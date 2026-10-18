@@ -2,8 +2,9 @@
 
 These are accepted semantic directions expressed as design contracts, not
 implemented APIs. The [source grammar](grammar-spec.md) specifies approved
-alias, interface and associated-member forms. The spelling of family declarations,
-conditional members, extension declaration/import eligibility and witnesses remains open; participation
+alias, interface, associated-member and witness forms. The spelling of family
+declarations, conditional members and extension declaration/import eligibility
+remains open; participation
 itself requires an explicit family opt-in with declared projections and
 constraints. The local pseudo-code below labels relationships rather than
 specifying Terrum grammar. Current compiler support for any part of this
@@ -251,7 +252,7 @@ borrowed input descriptor to escape as an unsupported frozen constant.
 
 ## Character fragments
 
-A target-typed single-scalar `'x'` literal has **no fallback type**. For `char8` it must be ASCII (one standalone UTF-8 code unit); for `char16` it must be a non-surrogate BMP scalar (one standalone UTF-16 code unit). `char32` and `rune` admit any Unicode scalar. Surrogates and out-of-range values never denote scalars. A text target's character fragment context is `rune`, including where the target writer uses UTF-8 or UTF-16: encoding happens at the writer boundary. `rune : IFormattable` forwards to `ITextWriter.TryWriteScalar(rune)` without constructing temporary `Text`; `SpanTextWriter<TCodeUnit>` checks space for the *entire* encoded scalar before writing. This adds one scalar primitive to the existing typed-writer path, not a matrix of character/text overloads. Scalar literal grammar and contextual target rules are specified by lexical grammar and conversions; registered fragment forwarding and writer contracts remain library work.
+A target-typed single-scalar `'x'` literal has **no fallback type**. For `char8` it must be ASCII (one standalone UTF-8 code unit); for `char16` it must be a non-surrogate BMP scalar (one standalone UTF-16 code unit). `char32` and `rune` admit any Unicode scalar. Surrogates and out-of-range values never denote scalars. A text target's character fragment context is `rune`, including where the target writer uses UTF-8 or UTF-16: encoding happens at the writer boundary. `rune : IFormattable` forwards to `ITextWriter.TryWriteScalar(rune)` without constructing temporary `Text`; `SpanTextWriter<TCodeUnit>` checks space for the *entire* encoded scalar before writing. This adds one scalar primitive to the existing typed-writer path, not a matrix of character/text overloads. Scalar literal grammar and contextual target rules are specified by lexical grammar and conversions; [standard text operations](language/construction-handlers.md#standard-text-operations) select fragment forwarding and writer contracts. Their implementation and additional profiles remain separate work.
 
 ## Callable values and tuples
 
@@ -328,9 +329,9 @@ not settled contracts:
   binding and explicit extension-provider selection are already specified
   by the source grammar; their generalized witness/registration records
   remain to be completed.
-- Registered character-fragment forwarding and writer contracts. The
-  scalar literal grammar, contextual targets, and representability rules
-  are already specified by lexical grammar and conversions.
+- Additional character-fragment/writer profiles beyond the selected standard
+  text operations. Scalar literal grammar, contextual targets and
+  representability follow lexical grammar and conversions.
 - Exact spelling of a bound-receiver marker, and of foreign-calling-convention
   attribute names/grammar.
 - Family/associated-member grammar for fixed-vector registration, including

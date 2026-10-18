@@ -47,22 +47,39 @@ unchanged and remap only indexed rows; it must still validate the
 revised artifact's type contracts. A Body-local map keeps its compact
 IDs and must reject duplicate resolved types, including an inline/row
 alias. This avoids the TypeSpec dereference, not the map lookup.
-Adoption needs a format revision and updated readers/writers; current
-readers must reject these candidate words.
+Adoption needs an explicitly selected schema and updated readers/writers;
+current-schema readers reject these candidate words. Under the
+[draft-version policy](../specs/representation/format-versioning.md), that
+schema may retain `(1, 0)`. A new version pair, old-reader compatibility or
+automatic downgrade is not a prerequisite for a pre-release design change.
 
-**Decision recorded:** defer allocating kind `0xFE` to this extension until
-the format revision, negotiation and downgrade rules are specified and
-compatibility and performance evidence is available. The candidate remains
-rejected by the approved `(1, 0)` schema; this decision does not change its
-reference-word contract.
+**Pending allocation:** keep `0xFE` unassigned until the field matrix,
+resolved identity, canonical writer and measured benefit are reviewed.
+Recommend changing the complete typed-reference fields in one selected draft,
+not adding a legacy decoder or a second meaning to current-schema words.
+The candidate remains rejected by the currently accepted schema.
 
 ### Decisions before adoption
 
 | Open decision | Evidence required |
 |---|---|
-| Revision and negotiation | Specify the schema revision and whether a required feature additionally gates kind `0xFE` in every eligible typed-reference field; a feature alone cannot change the `(1, 0)` schema. An `(1, 0)` reader must continue to reject it; a new reader must not interpret an unknown inline code as an indexed TypeSpec or silently drop its qualifiers. Determine when a writer can rewrite an artifact to an earlier revision by expanding every inline reference into valid TypeSpec rows. |
+| Selected schema and admission | Specify the exact draft and every eligible typed-reference field, including whether a coherent required capability is additionally needed. A Feature cannot teach an old decoder a new word, but the draft itself may change while retaining `(1, 0)`. Reject unknown codes and qualifiers; do not guess indexed TypeSpecs or promise older-schema conversion. |
 | Canonical identity | Specify resolved-type equality across inline words and indexed TypeSpec rows, including outer versus argument `write` and field-specific restrictions. Test that a Body map rejects duplicate resolved types even when one spelling is inline and the other indexed; raw-word equality is insufficient. |
 | Measured benefit | Compare emitted bytes, TypeSpec row count, cold decode and selective-import cost on representative scalar and generic-heavy artifacts. Count rows still needed as operands of nested TypeSpec forms; an inline word is not evidence that all corresponding TypeSpec rows disappear. |
+
+### Minimal versus substantive integration
+
+A Body-map-only experiment changes fewer fields but leaves duplicate type-word
+rules throughout metadata. Recommend evaluating the shared complete-type-field
+design above against that baseline, including generic/construction and native
+signature carriers. Preserve typed row/range references as rows rather than
+turning every `u32` into a polymorphic reference. Revisit `0xFE` and the held
+`0xFF` indirection together if a better namespace structure emerges; their
+unpublished values are not compatibility constraints.
+
+On approval, update the registry, metadata field matrix, Body type maps,
+canonicality, packing/remapping and independent conformance vectors together.
+Do not register the word from a size experiment alone.
 
 ## Compact-profile selection and follow-up
 

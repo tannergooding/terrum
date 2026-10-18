@@ -99,10 +99,13 @@ bounded subset has already encoded. If these informative examples move to a
 companion document, retain this contract map and links from the
 normative rules; splitting the examples must not orphan the fast-import
 story or silently promote unsupported Body shapes to executable status.
-The [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmBodyExampleTests.cs)
-independently decode the compact bytes below and general-form bytes kept
-in the tests; they are test-only checks of the approved bytes, not an
-executable TRRM Body reader.
+The existing [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmBodyExampleTests.cs)
+use explicit development-schema bytes, as distinguished in the
+[encoding inventory](../implementation/trrm-encoding-history.md).
+They illustrate independent fixture checking, not current-registry
+conformance or an executable standard Body reader. The
+[registry conformance vectors](conformance/il-registry.md) supply the current
+independent normative examples.
 
 The examples progress from a checked scalar sum in one block to a
 conditional sum and repeated additions around a loop header. A separate
@@ -134,14 +137,15 @@ FieldDef row operands use fixed `u32` references directly. Neither a
 local type ID nor an instruction's `ref` width changes a metadata row
 number, bypasses its TypeSpec or changes its typed-reference rules.
 
-The [approved reference word](il-metadata.md#metadata-logical-tables-and-row-semantics)
-is a fixed `u32` split into an 8-bit kind and 24-bit row data; no separate
-`uint24` storage type is required. The present `typeMap` holds indexed
-TypeSpec references. The separately described
+The [metadata reference rules](il-metadata.md#metadata-logical-tables-and-row-semantics)
+distinguish typed `u32` row indexes with reserved-zero high byte from
+polymorphic DefIds with an 8-bit kind and 24-bit row. No separate `uint24`
+storage type is required. The present `typeMap` holds typed TypeSpec row
+references, not DefIds. The separately described
 [inline built-in extension](../proposals/il-extensions.md#inline-built-in-type-reference)
-would assign kind `0xFE` to complete built-in type words and requires a
-future metadata revision and reader/writer support; the approved `u32`
-split alone does not adopt that additional kind. Body-local `t` IDs
+would assign kind `0xFE` to complete built-in type words and requires an
+explicit schema amendment and reader/writer support, not necessarily a new
+pre-release format pair. Current fixed-word layouts do not adopt that kind. Body-local `t` IDs
 remain one/two/four bytes and are distinct from artifact-wide references.
 
 The `layout` byte selects widths independently by operand class; bits
@@ -1177,7 +1181,7 @@ means the selected reference width, `count` the selected count width,
 | `r?` | `ref` | Value ID or zero only when the declared result is void |
 | `rNew?` | `ref` | New value ID; zero is permitted only for a selected void result and defines nothing. A nonzero void result defines the unit value |
 | `p` | `ref` | Body-local place descriptor ID `1..placeCount` |
-| `t` | `ref` | Body-local type ID `1..typeCount`; `typeMap[t - 1]` is currently a fixed `u32` typed reference to a TypeSpec row, interpreted in this body's module context; an inline built-in word needs the matching metadata revision |
+| `t` | `ref` | Body-local type ID `1..typeCount`; `typeMap[t - 1]` is currently a fixed `u32` typed reference to a TypeSpec row, interpreted in this body's module context; an inline built-in word needs an explicitly adopted schema amendment |
 | `m` | `ref`, then typed `u32` only when `m=0` | Nonzero: one-based MethodDef row within the body module's MethodDef range, resolved by checked `methodDefStart + m - 1`; retained imports use its bound expected MethodDef. Zero: resolved direct call to an authored MethodDef in another packed module, with an exact little-endian artifact-wide MethodDef row index, high byte zero. No table-kind selector; invalid in a single-module artifact |
 | `fieldDefRow` | fixed `u32` | Typed FieldDef reference, high byte zero, row `1..FieldDef.recordCount` owned by the selected type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
 | `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
@@ -1322,7 +1326,7 @@ references and revalidating every affected use.
 
 Places are numbered `1..placeCount`. Their `typeId` resolves through the
 type map to the referent's complete TypeSpec. Flags `0x01`, `0x02` and `0x04` mean
-rebindable, unique storage and initially vacant (including `out`),
+rebindable, unique storage and initially vacant (including `init` destinations),
 respectively; other bits reject. The complete TypeSpec determines referent
 access and representation; flags cannot grant `write` through a readonly
 handle. Non-value parameters map to places in parameter order, followed by
@@ -2369,8 +2373,8 @@ contract:
 | Logical root inventory | Specify producer-recorded, directly indexed safepoint locations and live logical root/owner/interior-place dependencies (including exceptional continuation and cleanup), with precise lifetime and verification rules. The format should avoid making each interpreter/JIT reconstruct logical GC liveness from every use; it must not prescribe post-allocation native register/stack maps or assume that ordinary value liveness covers roots. |
 | Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
 | Operations | Checked indexing/backing, raw/unaligned and atomic memory order, wider floating/decimal/remainder and SIMD/tensor operations, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
-| Revision and reader policy | Future on-wire feature/revision negotiation and diagnostic/recovery codecs remain open. [Resource accounting](representation/resource-accounting.md) defines scoped capacity and deterministic structural/audit recipes; numerical portable minima remain unassigned. [Encoding canonicality](representation/encoding-canonicality.md) admits equivalent nonminimal encodings during ordinary reading while keeping writers and explicit audits strict. [Reader trust](representation/reader-trust.md) permits selective access without a preliminary all-block scan; accessed unknown/unsupported forms reject. |
-| Type-map conformance | Producers supply valid, distinct fixed-`u32` TypeSpec map entries and complete agreement with MethodSig and selected definitions. Readers check accessed map/local IDs and exposed type agreement; whole-map validation is a separate scoped claim. The separate inline built-in extension requires a metadata format revision and explicit identity checks across indexed and inline forms; no Body-local ID may be mistaken for an artifact-wide metadata reference. |
+| Revision and reader policy | The [Module manifest](representation/semantic-manifests.md) supplies exact edition/Feature admission; broader capability definitions and diagnostic/recovery codecs remain open, not that selected protocol. [Resource accounting](representation/resource-accounting.md) defines scoped capacity and deterministic structural/audit recipes; numerical portable minima remain unassigned. [Encoding canonicality](representation/encoding-canonicality.md) admits equivalent nonminimal encodings during ordinary reading while keeping writers and explicit audits strict. [Reader trust](representation/reader-trust.md) permits selective access without a preliminary all-block scan; accessed unknown/unsupported forms reject. |
+| Type-map conformance | Producers supply valid, distinct fixed-`u32` TypeSpec map entries and complete agreement with MethodSig and selected definitions. Readers check accessed map/local IDs and exposed type agreement; whole-map validation is a separate scoped claim. The separate inline built-in extension requires an explicit selected-schema amendment and identity checks across indexed and inline forms, not necessarily a new pre-release format pair; no Body-local ID may be mistaken for an artifact-wide metadata reference. |
 
 These are requirements for future broader executable profiles and complete
 interchange, not permissions to invent semantics or serialize the current

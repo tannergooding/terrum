@@ -141,7 +141,7 @@ provider, resource/OOM fixture or independent physical codec.
 | NSAD-10 | Trusted selected-record access | Visit the retained closure, not unrelated Bodies |
 | NSAD-11 | Required constant use without opt-in/program/value/choice/cost/resource support | No implicit authorization or runtime fallback |
 | NSAD-12 | Pure/NoThrow inferred solely from integer selection or zero-data payloads | Require the actual complete guarantee/proof |
-| NSAD-13 | Registry, prior corpora, historical tools and accepted evidence | Preserve byte-exact inputs; allocate no new wire IDs or codecs |
+| NSAD-13 | Logical member rules are offered as physical schema registration | No new wire IDs or codecs follow; interpret retained artifacts only under their exact selected schema |
 | NSAD-14 | Independent member/value/precondition/program/event/handler/cause codecs | Document-only: logical supplied facts are not source-free physical conformance |
 
 ## Evidence boundary

@@ -35,9 +35,10 @@ ownership or borrow codecs remain unsupported before independent use.
 Neither an optional Attr row nor reserved bits activate this profile.
 
 This is a normative design contract, not a claim about compiler support.
-The [bounded implementation slice](../../proposals/public-fixed-layout-profile.md)
-and [development native guide](../../implementation/native.md) retain their
-narrower support and implementation scopes.
+The [layout support inventory](../../implementation/layout-profiles.md)
+and [development native guide](../../implementation/native.md) describe current
+support. The [layout integration proposal](../../proposals/public-fixed-layout-profile.md)
+tracks pending physical records and wider qualification.
 
 ## 2. Standard foreign mapping versus Terrum defaults
 

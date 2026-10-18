@@ -107,10 +107,10 @@ For example, assume `NeverNegativeInt32` has the checked wrapper commitments
 above and an accessible, eligible ConstEval `Create` factory:
 
 ```terrum
-struct FixedBuffer<T, const NeverNegativeInt32 Length> { }
+internal struct FixedBuffer<T, const NeverNegativeInt32 Length> { }
 
-alias A = FixedBuffer<uint8, (NeverNegativeInt32.Create(16))>;
-alias B = FixedBuffer<uint8, (NeverNegativeInt32.Create(8 + 8))>;
+internal alias A = FixedBuffer<uint8, (NeverNegativeInt32.Create(16))>;
+internal alias B = FixedBuffer<uint8, (NeverNegativeInt32.Create(8 + 8))>;
 ```
 
 `A` and `B` denote the same complete type. Another nominal wrapper containing

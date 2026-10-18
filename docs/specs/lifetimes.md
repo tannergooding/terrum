@@ -142,9 +142,11 @@ this site has not previously initialized its local, that local remains
 vacant; otherwise skipping leaves its existing value unchanged. The local
 follows ordinary initialization, replacement, ownership/root cleanup and
 unwind rules. Borrowing alone requires neither `[Copy]` nor ownership transfer.
+The following reference signature and call fragments omit the method body
+and surrounding declarations:
 
 ```terrum
-void Inspect(implicit ref<LargeRecord> record);
+public void Inspect(implicit ref<LargeRecord> record);
 
 Inspect(record);
 Inspect(CreateRecord());

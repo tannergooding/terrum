@@ -311,8 +311,12 @@ The logical fields above are selected.
 [Dependencies and views](dependencies-and-views.md) supplies general
 DependsOn/Captures/ForwardsBacking targets, direct receiver `this` and
 exact formal recipes, including member-contract constraints.
-An init-formal target describes the published inner descriptor; return-targeted
-DependsOn still describes the ordinary Boolean/task result instead.
+An init-formal target describes the published inner descriptor.
+Return-targeted DependsOn describes the declaration's ordinary result: the
+Boolean for a synchronous advance, the completed Boolean payload for an
+ordinary async implementation, or the task for a non-async task-returning
+implementation. It does not select the initialized descriptor or the
+responsible completion operation.
 ForwardsBacking alone supplies no advance/close preservation guarantee.
 Physical relationship codecs remain separately gated. This lending rule
 does not adopt Item<'a>, MatchedAccess or a Stable marker.

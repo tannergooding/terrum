@@ -89,9 +89,11 @@ ISA availability must not determine interchange semantics.
 
 Keep one deterministic operand schema per opcode, little-endian operands,
 independent instruction widths and bounded decoding. Unknown opcodes,
-unknown family kinds and unsupported operation/type combinations reject,
-including in blocks not selected for compilation. An explicit type never
-permits trusting the producer or bypassing descriptor/signature checks.
+unknown family kinds and unsupported operation/type combinations reject at
+the applicable access/admission boundary. An accessed Body does not excuse
+malformed inactive blocks; a trusted selective consumer need not pre-scan
+every unrelated Body. An explicit type never bypasses descriptor/signature
+checks or the selected reader-trust rules.
 
 Compact linear must reconstruct every result's complete type, result count,
 uses and ordered effects from the schema and selected declarations; inferred
@@ -121,6 +123,14 @@ dispatch/lowering cost. Compare identical semantics, not FMA against a
 different two-rounding operation. Existing size fixtures establish Body
 tradeoffs, not a performance result for these candidates.
 
+A minimal new subcode is appropriate when its full semantics fit an existing
+family. Otherwise revise the family or its reservation before adding another
+escape/short form. Reassign unpublished primary bytes when that makes the
+combined integer, floating, native-memory and invocation layout clearer.
+Allocation review must include the native and generic metadata proposals,
+not only a collision test against today's registry. No preservation of an
+experimental byte is required.
+
 Any additional adoption needs an explicit schema decision. Pre-release
 `(1, 0)` can evolve only with exact-schema agreement; matching version bytes
 are insufficient. Preserve semantic contracts, not overlapping unpublished
@@ -137,8 +147,8 @@ Repository evidence:
   [type/result rules](../specs/il-instruction-set.md#type-and-definition-model-for-operands)
   establish the accounting, reconstruction and exact-type constraints.
 - [Operation schemas](../specs/il-instruction-set.md#operation-encoding-and-normalized-effects)
-  already separate integer kinds, eager selection and checked multi-result
-  operations. That approved IL table is not the draft floating registry.
+  separate integer kinds, eager selection and checked multi-result operations;
+  the same unified registry now owns the selected floating allocations.
 - [Metadata TypeSpecs](../specs/il-metadata.md#metadata-logical-tables-and-row-semantics),
   [revision scope](../specs/il-metadata.md#format-identity-and-revision-scope) and
   [section rules](../specs/il-metadata.md#section-kinds-and-row-layouts)

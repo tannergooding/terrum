@@ -8,8 +8,10 @@
 Accepted call and lifetime rules live in [language](language.md),
 [lifetimes](lifetimes.md) and [language contracts](language-contracts.md);
 source forms and their open boundaries are in the
-[grammar](grammar-spec.md), and candidate proof rules are in the
-[static-proof proposal](../proposals/static-proof-and-constant-evaluation.md).
+[grammar](grammar-spec.md). The
+[proof/evaluation chapter](language/proof-and-constant-evaluation.md) owns
+the selected floor; its remaining physical integration and extensions are in
+the [static-proof proposal](../proposals/static-proof-and-constant-evaluation.md).
 [Data layout and ABI contracts](data-layout-and-abi.md) separates required
 primitive guarantees from physical layout, interchange and procedure calls;
 its remaining [profile and implementation work](data-layout-and-abi.md#profile-specification-and-implementation-work)

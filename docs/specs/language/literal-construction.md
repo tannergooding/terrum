@@ -114,7 +114,7 @@ The following is a signature-only schema example, not a complete function
 definition:
 
 ```terrum
-[Literal(LiteralKind.Integer), ConstEval]
+[Literal(LiteralKind.Integer)] [ConstEval]
 public static bool TryParse(TextSpan text, init ref<Port> value);
 ```
 

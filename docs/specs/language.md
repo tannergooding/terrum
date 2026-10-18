@@ -358,8 +358,9 @@ or special safe subset. This does not prohibit unsafe pointer-based
 aliasing/reinterpretation or compiler-private overlapping representations. A
 safe non-Blittable discriminated-union/sum type is a separate higher language
 feature: case/tag checks must preserve ordinary validity, ownership, roots and
-cleanup, and do not grant raw reinterpretation. Its grammar and representation
-remain open.
+cleanup, and do not grant raw reinterpretation. The source grammar selects
+nominal union declarations and qualified case patterns; physical safe-sum
+representation and metadata remain open.
 
 ### Interfaces, access and generic properties
 
@@ -382,6 +383,14 @@ auto-property and ref-return semantics are separate. The current supported
 property subset is documented in [implementation](../implementation.md).
 
 `where T : IFoo` requires a checked behavioral witness; `where T : [Sized]`, `[Copy]`, `[ManagedStorable]`, `[ThreadTransferable]`, `[ThreadShareable]`, `[TextCodeUnit]` or `[NativeComInterface]` asks for a compiler-verified property of the complete qualified form, **not** implementation of an `I...` interface or the mere presence of an attribute. Thread capabilities describe which checked transfer or concurrent-use contracts a complete form can satisfy; they do not imply that a value is currently shared, authorize mutation, or perform synchronization. Thread confinement is the default but does not bind a value to one OS thread or executor. `[Sized]` does not promise a size constant in shared generic code. `[TextCodeUnit]` admits `char8`, `char16`, `char32`, not arbitrary valid encoded text. Native COM additionally requires checked IID, inherited slots, signatures, layout and lifetime. User shape generation can provide witnesses or adapters only after checking costs, ownership and ABI.
+
+The NativeComInterface item is an overview-level direction, not a completed
+source/property schema or implementation claim. The
+[native cleanup amendment](../proposals/unsafe-ffi-vtable-cleanup.md#source-overview-amendment)
+recommends replacing that compiler-COM property with generic native/vtable
+facts and authored library IID/acquisition/ownership contracts. Do not infer
+a selected intrinsic from the illustrative attribute name or implement
+additional COM policy merely to preserve this draft example.
 
 Thread-capability proofs can be derived from complete definitions and
 dependencies, but consumer-visible guarantees come from declaration contracts
@@ -677,8 +686,9 @@ coverage merely by naming a case, and
 the initial form is a final unguarded wildcard. Missing-case warnings can be
 elevated; ordinary `_` suppresses them. For integer enums, diagnostics concern
 declared names while a fallback still accepts unnamed underlying values.
-Complete nominal/destructuring pattern grammar and closed-case metadata
-encoding remain open; the declaration marker is `[ClosedCases]`. Unknown payloads
+Nominal union-case and structural tuple patterns are selected by the source
+grammar; arbitrary object extractors and closed-case metadata
+encoding remain open. The declaration marker is `[ClosedCases]`. Unknown payloads
 must be safely rooted,
 forwarded and disposed or the representation is rejected.
 
@@ -738,8 +748,9 @@ when the target has no direct instruction for a format. The catalog does not
 require a managed heap, scheduler, or operating-system service.
 `simd64/128/256/512<T>` are separately admitted fixed ABI shapes; `simd<T>`
 is genuinely hardware-scalable and initially sizeless, not an unspecified
-preferred width. BID versus DPD decimal storage and precise vector-family
-syntax remain to be selected; decimal value semantics are not CLR `System.Decimal`.
+preferred width. The [Windows x64 profile](targets/windows-x64-data-layout.md#3-ieee-decimal-bid)
+selects BID decimal storage; other target encodings and precise vector-family
+syntax need their own selection. Decimal value semantics are not CLR `System.Decimal`.
 
 Numeric literals have **no fallback type**: an expected type or explicit
 target must disambiguate; `var x = 1` and unconstrained `F(1)` diagnose.
@@ -800,8 +811,9 @@ are permitted; emitted constants require Blittable/frozen Copy validity and an
 admitted target value recipe. The attribute does not promise ordinary-form
 `NoThrow`, totality or every-input constant success.
 There is no ambient I/O or arbitrary native/source-reading JIT execution.
-Unspecified arithmetic NaNs use a deterministic constant-only policy, without
-weakening copy/bit contracts or fixing runtime NaN payloads. Required requests
+Admitted constant NaN-processing arithmetic, nonidentity numeric conversion
+and numeric selection use the selected positive quiet zero-payload recipe,
+without weakening copy/sign-only bit contracts or fixing runtime NaN payloads. Required requests
 preserve producer/rule/value-ABI dependencies and never fall back to runtime.
 Incompatible documented constant-result changes are breaking; purity alone
 does not preserve an old computed answer. Required evaluation does not change
@@ -900,10 +912,10 @@ not cleared while earlier arguments are still being evaluated.
 `fnptr` uses the Terrum callable convention by default, analogous to a C#
 managed function-pointer contract but not CLR execution. Foreign conventions
 are explicit checked type-use attributes on the callable entry, retained
-through pointer nesting, aliases, parameters, and results. For example,
-`[CallConv(NativeCallingConvention.Winapi)] fnptr<...>` and
-`NativeExport(CallingConvention = ...)` illustrate existing design vocabulary,
-but exact names/grammar and import/export ergonomics remain open. No implicit
+through pointer nesting, aliases, parameters, and results. The
+[native interop proposal](../proposals/trrm-native-interop-metadata.md)
+recommends concrete source-to-metadata mappings; their exact names/grammar
+and import/export ergonomics remain unapproved. No implicit
 convention casts are allowed, and ABI choice alone makes no promise about GC,
 allocation, exception containment, or marshalling. A `func` invokes through its
 Terrum contract and may explicitly adapt a target with a different ABI. Open
@@ -1072,10 +1084,12 @@ or lambda and does not reevaluate the return expression. A `void` function's
 normal result is `()`, with no exposable payload address.
 Static postconditions initially apply only to the
 outer function body. Proofs respect mutation/alias invalidation.
-The exact supported proof forms and resource limits are documented in
-[implementation](../implementation.md). Static proofs do not execute or publish
-a contract; symbolic runtime-dependent proofs, declaration clauses and result
-references remain separate design work.
+The [proof/evaluation chapter](language/proof-and-constant-evaluation.md)
+owns the selected scalar facts, transfers, predicate catalog and guaranteed
+resources; [implementation](../implementation.md) records the narrower current
+support. Static proofs do not execute or publish a runtime contract.
+The admitted symbolic facts, declaration clauses and contextual result
+references are selected logical/source rules, not evidence of a physical codec.
 
 Required static proofs have a versioned portable floor: every conforming
 compiler must support its minimum rules/complexity and guaranteed resource
@@ -1086,15 +1100,17 @@ disproved or not established, compilation fails with the distinction reported
 (including a complexity/analysis-limit reason where applicable), never a
 runtime fallback. The accepted v1 scope covers local scalar, boolean, and
 initialization facts plus refinement for supported built-in branch predicates
-under target arithmetic. The exact predicate catalog, fact domain, transfer
-rules, conformance vectors, and guaranteed resource values remain to specify;
-loop induction, call summaries, and alias-sensitive facts are outside this
+under target arithmetic, with the exact predicate catalog, fact domain,
+transfer rules, conformance cases and guaranteed resources defined by that
+chapter. Numeric loop induction, private-body call summaries and
+alias-sensitive numeric facts are outside this
 initial floor. Ordinary pre/postconditions remain runtime-checked unless
 sound analysis proves a check redundant, and elimination must preserve required
 evaluation, effects and failures. Required constant evaluation is separate:
 successful results retain exact target semantics and never fall back to
-runtime; its supported operations, accounting and limits remain specification
-work.
+runtime; its admitted domain, path eligibility, accounting and limits follow
+the same canonical owner. Additional domains and physical program/value
+records remain separate work.
 
 Where runtime values or checks are permitted, an author may explicitly choose
 an ordinary expression or executable `require` instead of requiring constant
@@ -1103,8 +1119,8 @@ never silently demotes it. Ordinary expressions may still be folded as sound
 optimization, and an ordinary `require` remains runtime-enforced unless
 proven redundant. This choice is unavailable where a compile-time value is
 inherently required, such as layout, type or metadata formation, and does not
-weaken structural lifetime or initialization safety. Illustrative syntax does
-not select the exact spelling.
+weaken structural lifetime or initialization safety. Illustrations do not
+add source forms beyond the selected grammar.
 
 The contract phase boundary is `prologue -> preconditions -> method body ->
 postconditions -> epilogue`. Preconditions and postconditions are public
@@ -1171,8 +1187,10 @@ continues to later catches at that scope; if none matches, unwinding proceeds
 outward. The selected body is entered only after type/filter success. Pending
 failure state remains valid for filters, without retaining invalid inner-frame
 references or deferring cleanup effects until a match. This is not a
-transaction or a pre-unwind first-pass filter search. General local failure
-transport and native runtime integration remain specification work.
+transaction or a pre-unwind first-pass filter search. The
+[local failure chapter](language/local-failures.md) owns the selected logical
+source contract; physical transport and native runtime integration remain
+separate work.
 The separately selected [contained foreign bridge](runtime/foreign-failure-bridge.md)
 returns an owned domain packet before resuming local propagation; it does
 not substitute foreign filter timing or supply other failure catalogs,
@@ -1323,11 +1341,11 @@ contract or caller obligations. Inherited prose cannot strengthen an
 implementation's checked guarantees. Extraction is deterministic and does not
 execute examples, fetch remote content or expose private declarations just to
 resolve a link; a separately configured documentation build may opt into
-example checks. Exact tokenization and escaping, metadata-looking heading
-classification, partial-document merge precedence, member identities, schema,
-diagnostics
-and packaging remain specification work in the
-[source grammar](grammar-spec.md#514-documentation-comment-grammar-and-tooling).
+example checks. Tokenization, escaping and metadata-heading classification
+follow the lexical contract and
+[documentation grammar](grammar-spec.md#514-documentation-comment-grammar-and-tooling).
+Partial-document merge precedence, complete member identities, the structured
+artifact schema, diagnostic catalog and packaging remain separate work.
 
 ### Storage, concurrency, entry and boundaries
 
@@ -1453,8 +1471,10 @@ use, then rely on published dependency contracts rather than re-proving bodies.
 Contract-bound and implementation-pinned replacement are distinct from static
 and dynamic linkage; replacement must preserve capture, output, access, layout
 and effect guarantees. The `TRRM` identifier names the evolving semantic-IL and
-module format; its wire schema and revision encoding remain open. Actual module
-and backend support is documented in [implementation](../implementation.md).
+module format. Its [selected representation](representation/README.md) defines
+the current registry, framing and revision rules; additional physical
+contracts and proposed draft amendments are not implied by logical support.
+Actual module and backend support is documented in [implementation](../implementation.md).
 
 <a id="provisional-source-notation-and-open-decisions"></a>
 
@@ -1513,21 +1533,23 @@ Typed/captured failure transport and
 catch-filter source forms do not silently swallow filter failures; general
 exception transport and ABI remain separate work.
 
-The design examples use canonical `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`,
-`own<T>`, `init ref<T>`, `mut`, and `write` forms, plus `move`, bracketed
-checked predicates, `[DependsOn(...)]`, `[ForwardsBacking(...)]`, `[Captures(...)]`, `[Pure]`, `[NoAlias]`,
-`[MatchedAccess]`, `[Layout(Transparent)]`, `require`, `[TextTarget]`,
-`[TextBuilder(typeof(...))]`, `[CollectionBuilder(typeof(...))]`,
-`[Literal(...)]`, `[ConstEval]`, `[Specialize(...)]`, `[NativeExport]`,
-`utf8z("...")`/`utf16z("...")` calls and generic trailing defaults as
-**illustrations**, not implementation promises. Implementation-specific
+The source contracts select the admitted `ref<T>`, `ptr<T>`, `box<T>`,
+`val<T>`, `own<T>`, `init ref<T>`, `mut`, `write` and `move` forms,
+checked predicates, the three dependency schemas, Pure/NoAlias,
+Layout/Blittable, `require`, TextTarget, the registered builder/literal
+schemas, ConstEval and trailing generic defaults within their stated scopes.
+This is not an implementation promise. Ordinary
+`utf8z("...")`/`utf16z("...")` call syntax alone does not establish a
+registered target or provided API. MatchedAccess, ViewOf, Specialize and
+NativeExport remain additional annotation sketches, not selected schemas.
+Implementation-specific
 suffix diagnostics, historical output forms and current conversion/loan
 support are documented in the
 [development native profile](../implementation/native.md), not additional
 source productions or a required migration from legacy parameter modes.
 The three dependency schemas above use exact checked source/target rules,
-not arbitrary runtime attributes. Remaining ViewOf and MatchedAccess sketches
-do not establish a general lifetime, exclusivity or registration contract.
+not arbitrary runtime attributes. The remaining sketches do not establish a
+general lifetime, exclusivity, specialization or native-export contract.
 Physical generic/witness serialization, unsupported family registration,
 closed-case metadata, generalized pattern forms and compatibility-forwarder
 source schemas remain open. Ordinary source visibility follows the

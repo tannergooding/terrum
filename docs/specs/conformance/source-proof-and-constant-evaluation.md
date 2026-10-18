@@ -178,7 +178,7 @@ declarations, not name-based intrinsic registration.
 | EFORM-11 | An admitted nominal enum constant is formed | Keep nominal identity and admitted encoding |
 | EFORM-12 | An inline Copy tuple/aggregate has Blittable and value-codec admission | Execute actual eligible construction and complete all required fields |
 | EFORM-13 | A nominal aggregate only happens to have scalar-shaped private fields | No inferred encoder or constructor registration |
-| EFORM-14 | An explicitly opted-in constant-formal wrapper is constructed | Enforce its validity/complete initialization and canonical value domain |
+| EFORM-14 | An eligible Transparent integer/Boolean wrapper supplies a constant argument | Enforce its validity/complete initialization and canonical nominal/carrier value identity; no second domain opt-in is required |
 | EFORM-15 | An ordinary aggregate/floating constant is used as a generic value formal | Apply the narrow formal-domain rule; ordinary const eligibility does not expand it |
 | EFORM-16 | A Blittable/codec-admitted inline optional/union has an inactive payload arm | Preserve active-tag/arm validity; do not read vacant inactive data |
 | EFORM-17 | Private evaluator locals are mutated in a bounded loop | Allowed under ordinary initialization/access/check rules |

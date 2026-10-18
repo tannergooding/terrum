@@ -12,6 +12,14 @@ compatibility with unpublished alpha source, implementation projections, or
 retired artifact schemas. A retained artifact must be identified and admitted
 under its actual schema; draft status is not permission to guess its meaning.
 
+Accepted does not mean immutable before stabilization. A
+[proposal](../../proposals/README.md) may recommend replacing accepted rules,
+reorganizing chapters or reservations, and reassigning draft numeric values.
+Such a recommendation is reviewed as a proposed change, not rejected merely
+for differing from this baseline. Until approved and incorporated, it does
+not change current conformance requirements. Canonical ownership identifies
+where the current rule lives, not a promise to preserve it in future drafts.
+
 ## Normative status and authority
 
 An unqualified requirement in a specification chapter is normative within

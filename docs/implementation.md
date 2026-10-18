@@ -5,6 +5,10 @@ separately. The [specifications](specs/README.md) define intended behavior;
 the [roadmap](roadmap.md) lists pending contracts and dependencies; and
 [proposals](proposals/README.md) contain unapproved choices.
 
+The [compiler conformance inventory](implementation/conformance-gaps.md)
+separates accepted-contract implementation gaps from work conditional on
+proposal approval, with evidence boundaries and acceptance gates.
+
 The [library support inventory](implementation/libraries.md) keeps bounded
 examples and API sketches separate from the selected library/protocol
 inventory and its provider/consumer contracts.
@@ -47,7 +51,7 @@ exports and executable TRRM support remain separate. The native backend emits
 Terrum-owned code; CIL is neither a dependency nor the default.
 
 Required constants and static proofs currently use the hosted scalar evaluator:
-`bool`, `char16`, and fixed-width integers with eligible `[ConstEval]` bodies
+`bool`, `char16`, `int32`, `uint32`, `int64`, and `uint64` with eligible `[ConstEval]` bodies
 supporting scalar locals, assignments, branches, loops, returns, and calls to
 other `[ConstEval]` functions. Its implementation limits are 4,096 interpreted
 statement steps and a call-depth limit of 64; these are not portable
@@ -56,7 +60,7 @@ predicate-refinement catalog for runtime values, so it does not fulfill the
 accepted v1 proof-floor scope.
 
 Current profile markers are syntax language version 46, semantic-module base
-revision 76 with private feature revisions through 83, and native profiles
+revision 76 with private feature revisions through 88, and native profiles
 native-10 through native-20. These markers describe supported implementations,
 not approval of the remaining language contracts. The exact source, layout,
 metadata, ABI, and runtime contracts are in the
@@ -98,7 +102,7 @@ revisions, reader limits and commands. The
 [native execution specification](specs/native.md) separately retains ABI,
 binding, ownership and code-lifetime obligations.
 
-The additive TRRM scalar path emits approved metadata and compact-linear or
+The development TRRM scalar path emits metadata and compact-linear or
 indexed Bodies for a bounded source-free, fail-fast scalar subset. It uses the
 shared hosted verifier and backend; general imported-call linking and checked
 exception Body support are not implemented.
@@ -122,7 +126,6 @@ source-free ABI or establish general source-dependent DLL, graph, module-set,
 or persisted-AOT support. The [proposal index](proposals/README.md) records
 those boundaries and pending promotion decisions.
 
-The first Windows x64 source-native-import slice is also implemented
 Native DLL imports are a provisional source feature under the unapproved
 [TRRM native interop proposal](proposals/trrm-native-interop-metadata.md).
 Source declarations name a library and export directly and carry generic
@@ -174,12 +177,12 @@ named Windows System32 imports. Its section, clause, and Feature assignments
 are not canonical TRRM assignments. It also persists `NativeCallable` entries
 through a provisional NativeCallable table and ABI role; source-free references
 expose those entries as caller-unsafe external declarations. Provisional
-function-pointer signature anchors in section `0x0033` and TypeSpec form `0x0D`
+function-pointer signature anchors in experimental section `0x0033` and TypeSpec form `0x0D`
 preserve recursively nested signatures over scalar, raw-pointer, and
 function-pointer values. Duplicate normalized signatures reject, and each
 module using a callable or function-pointer signature must declare the
 provisional `RootlessNativeValues` feature. Compact Body type keys are limited
-to 65,024 signature rows. Standard TRRM now supports function-address formation
+to 65,024 signature rows. This provisional `.trrm` path supports function-address formation
 and indirect calls to local `NativeCallable` entries and bodyless imported
 callable declarations in compact-indexed Bodies. Ordinary ModuleRef/Import rows
 retain the selected provider identity and export key through loading; the writer
@@ -216,9 +219,10 @@ compact-indexed bodies can call role-4 declarations
 through ordinary `Call`, transporting raw pointers only through
 signature-matched call results/arguments or zero-valued constants; ordinary
 pointer/address operations remain unsupported.
-Vtable-bearing artifacts provisionally require candidate Features `0x0101`
+Vtable-bearing artifacts provisionally require experimental Features `0x0101`
 (`RootlessNativeValues`) and `0x0104` (`NativeVTableCalls`) in addition to
-`0x0100` (`NativeBoundaryContracts`); these assignments remain unapproved.
+`0x0100` (`NativeBoundaryContracts`); these implementation assignments remain unapproved
+and differ from the proposal's coordinated next-draft candidates.
 The writer can emit this body from source, and the loader reconstructs and
 verifies it; a loaded indexed body is not yet reserializable by the standard
 writer. Native-package binding and consumer-side revalidation are covered for
@@ -273,7 +277,7 @@ the candidate `RootlessNativeValues` feature alongside
 `NativeBoundaryContracts`. Fixed-array or aggregate addresses, pointer
 reads/writes, and broader control flow remain unsupported. The candidate
 `0x2E` unsafe marker remains unapproved and is documented in the
-[native interop proposal](proposals/trrm-native-interop-metadata.md). The
+[output inventory](implementation/output-profiles.md#provisional-trrm-output-bodies). The
 verifier now ties each output destination to the producing call and its result
 condition, and admits reads only on paths that prove availability. It supports
 direct comparisons against zero for the declared `NonZero` and signed
@@ -304,9 +308,10 @@ unsafe scope; native-callable entries are `NoThrow` and caller-unsafe. Function
 pointers carry code addresses only: they do not root or extend the lifetime of
 the image containing the target. A supervised independent C caller exercises
 the exported native ABI, and JIT/module regressions exercise provider callback
-transport. Standard TRRM explicitly rejects this feature until its declaration,
-type, and body records are reviewed; the source forms and private revision are
-not normative grammar or interchange assignments.
+transport. Bounded provisional `.trrm` support is described above; the
+accepted standard schema does not admit these experimental declarations,
+types or Bodies. Source forms and private revisions are not normative
+grammar or interchange assignments.
 
 The source-only prototype also supports a generic numeric-slot vtable call
 declaration with an explicit receiver and ordinary Windows x64 argument
@@ -318,8 +323,9 @@ arguments and results, and output publication. The provisional
 revision 84 persists and revalidates the slot and parameter contract; revision
 85 additionally persists the aligned vptr byte offset. Exported methods are
 exposed to consumers as ordinary caller-unsafe external functions.
-Native module packages use the same producer/consumer path. Standard TRRM
-continues to reject these declarations until its metadata contract is reviewed.
+Native module packages use the same producer/consumer path. Provisional
+`.trrm` declarations and bounded calls are described above; they are not
+admitted by the accepted standard schema.
 
 The earlier COM-specific source metadata path has been retired. COM-shaped
 attributes have no compiler-owned meaning; unsupported qualified interop
@@ -384,17 +390,22 @@ They do not establish general reference metadata or executable TRRM support.
 
 ## Executable TRRM scalar interchange
 
-`compile-trrm` emits approved `(1, 0)` metadata and compact-linear or indexed
+`compile-trrm` emits development `(1, 0)` metadata and compact-linear or indexed
 Bodies for a bounded source-free, fail-fast scalar subset, separately from
-development semantic-module encoding. Consumers load artifact bytes, validate
+private semantic-module encoding. Its semantics overlap accepted contracts,
+but its retired allocations and manifests do not establish conformance to
+`trrm/1-draft-unified-3`. Consumers load artifact bytes, validate
 metadata and Bodies, reconstruct typed inputs, and invoke the shared mandatory
 verifier and backend; there is no producer-trust bypass. General imported-call
 linking and checked-exception Body support are not implemented. Body-local
 optional scalar values use independent presence and payload state, with the
 assigned optional operations covered by linear/indexed JIT and AOT tests.
 Optional floating types remain rejected, and optional `char16` is limited to
-its assigned optional operations and equality. This does not add optional
-source types, optional call signatures or native ABI support. This path does
+its assigned optional operations and equality. `MakeOptional`, `None`,
+`IsPresent`, `Copy` and eager `Select` retain their exact presence/payload
+rules. This does not add optional source types, optional call signatures,
+native ABI support, optional managed values or broader optional operators
+to this Body path. This path does
 not move source verification or emission into Terrum-authored components.
 Static initialization is not encoded or executed by the current TRRM path.
 The accepted first implementation gate is a self-contained, single-module
@@ -409,28 +420,21 @@ remain in the module. This is an implementation boundary, not a source
 restriction or a complete TRRM 1.0 GA profile. The
 [proposal](proposals/static-initialization-metadata.md) tracks unresolved
 schemas, encoding and runtime integration.
-The unreleased `(1, 0)` draft also accepts opcode `0x1F` for the eight accepted
-checked floating-to-integer pairs; the implementation and linear/indexed
-coverage are present. Opcode `0x1E` is accepted for explicit `char16` to
-`float32`/`float64`, with unsigned code-unit semantics and total `NoThrow`
-behavior; its implementation and linear/indexed coverage are also present.
-Opcode `0x19` and `ConstBits` are accepted for same-format `float32`/`float64`
-comparisons and exact raw-bit constants; float TypeSpecs also use the existing
-type-directed signature, `Copy` and eager `Select` rules. These draft-only
-encodings also include opcode `0x1A` for distinct `float32`/`float64`
-conversions under nearest/ties-to-even target-format semantics. Their
-implementations and linear/indexed coverage are present. Opcode `0x1B` is
-accepted for the eight fixed-width integer-to-`float32`/`float64` pairs with
-nearest/ties-to-even target-format semantics; its implementation and
-linear/indexed coverage are present. Opcode `0x1C` is accepted for total
-same-format `float32`/`float64` negation by sign-bit toggling, preserving all
-other bits; its implementation and linear/indexed coverage are present. These
-draft-only encodings do not change the approved IL specifications or promise
-post-release compatibility. Opcode `0x1D` is accepted for same-format
-`float32`/`float64` addition, subtraction, multiplication and division under
-the working profile's NaN-result-class contract; implementation and
-linear/indexed coverage are present. Remaining source-free TRRM floating
-operations remain under unapproved proposals.
+The development reader/compiler also supports same-format binary32/binary64
+comparisons, raw-bit constants, Copy/Select, format conversion, fixed-width
+integer conversion, char16-to-floating conversion, sign-bit negation and
+same-format addition/subtraction/multiplication/division. Float-to-integer
+conversion covers the eight accepted checked pairs. Target rounding, code-unit
+semantics and the processing-result NaN contract remain independent of their
+encoding. Linear/indexed regression cases exist for these operations; this
+documentation change does not establish fresh execution evidence.
+
+The [encoding inventory](implementation/trrm-encoding-history.md) maps their
+retired `19..1F` bytes to the current `40..46` family. The compiler must migrate
+its complete selected schema, references, indexes, manifests and independent
+fixtures before claiming current standard interchange. Unsupported additional
+formats or operations remain explicit boundaries, not reasons to freeze the
+accepted design.
 
 ## Platform and validation
 

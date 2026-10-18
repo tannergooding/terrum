@@ -55,9 +55,11 @@ declaration would require an identifier. Contextual `via` recognizes its
 post-dot type selector syntactically for witness/provider/conversion-owner
 use, not by testing the selected type's declaration or a library name.
 The `@` escape does not admit arbitrary-string identifiers.
-Future keyword reservations and contextual recognition must preserve the
-interpretation of valid source within its specified source-language version;
-breaking recognition changes require a version boundary.
+Vocabulary evolution follows the
+[pre-v1 acceptance policy](overview/conformance.md#scope): reviewed unpublished
+draft changes need not preserve earlier recognition or introduce a new version.
+If a stable source-version compatibility promise is selected, breaking
+recognition changes must respect that promise's explicit version boundary.
 The standalone `_ = expression;` statement evaluates the bound expression
 once, with its effects and failures, and cleans up an owning result at statement
 exit. It does not name a destination or infer a type for a context-free literal.

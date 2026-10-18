@@ -176,10 +176,26 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 | `Host.EscapeKeywords` | `int32` | Read-only | Closed canonical escape spellings, packed in the same kind/length/code-unit format with Identifier kind |
 
 The first nine grants have indices 0–8; the escape catalog is grant 9.
-The scalar frontend adds its 392-word output grant at index 10 and
-`Host.FrontendProgram` at index 11 for complete multi-function snapshots.
-Current projection layouts and reader bounds are in the
-[self-host inventory](implementation/self-host.md); scanner grants and records are separate.
+The scalar frontend adds writable `int32` `Host.Frontend` at index 10
+(2,274 words) and `Host.FrontendProgram` at index 11 (25,025 words).
+The latter holds up to 32 complete-program frames of 780 words, with 64
+expression nodes and 64 corresponding call-target words per function, plus
+61 temporary alias words cleared before publication. `Frontend` carries
+standalone v87 results, zero complete-publication scratch, or the decoded v88
+comparison summary; a completed program uses v88 headers/frame bodies. These
+are separate protocols, not scanner records or semantic-module revision
+numbers. See the
+[composition inventory](implementation/bootstrap-frontend-composition.md#exact-private-identities-and-resources)
+for current bounds and audit limitations, and the
+[module revision inventory](implementation/self-host.md#private-semantic-module-revisions)
+for feature-selected persistence.
+
+The ordinary indexed frontend is source-bounded rather than limited to 64
+tokens. The separate, unapproved
+[summary invocation profiles](proposals/scalar-frontend-invocation-profile.md)
+select 64 or at most 16,385 total tokens including EOF and require complete
+v88 publication. Neither widens the scanner's ten-buffer identity or accepts
+a persisted profile merely because buffer creation is implemented.
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.

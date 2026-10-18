@@ -36,9 +36,13 @@ dotnet test tests\Terrum.CodeAnalysis.Tests\Terrum.CodeAnalysis.Tests.csproj --n
 ## Contracts and source examples
 
 - Use `docs\specs` for accepted grammar and contracts, `docs\implementation.md` and its linked inventories for documented support, and code/tests to establish actual behavior. `docs\roadmap.md` records pending sequencing; `docs\proposals` records unapproved choices.
+- The pre-v1 specification records current acceptance, not immutable design. A canonical owner or current registry assignment does not freeze a rule, reservation, numeric ID, or chapter structure. Compatibility with unpublished source and draft artifacts is not an automatic requirement; see `docs\specs\overview\conformance.md` and `docs\specs\representation\format-versioning.md`.
+- In proposal/design work, evaluate intentional replacements on their merits. Recommend concrete grammar, records, or assignments as explicitly unapproved candidates; compare minimal integration with substantive redesign where material, including reallocating current draft IDs. Do not reject an amendment merely because it differs from the current spec or force it into unused space to preserve unpublished numbers. Use the `terrum-spec-design-review` skill.
 - Keep approval, implementation, and stability separate. Existing prototypes, passing samples, SDK probes, and accepted directions do not approve adjacent syntax, metadata schemas, APIs, or ABI choices. Apply explicit user decisions without reopening settled questions or silently deciding unresolved ones.
+- In implementation/conformance work, name the accepted contract or explicitly authorized experimental design being exercised. A pending proposal does not silently change that baseline. Mutable drafts still require exact-schema agreement; do not guess old encodings, erase obligations, or add compatibility readers merely because version bytes match.
 - Read the relevant grammar and nearby source/tests before writing Terrum examples. Do not import C# syntax or API conventions by analogy. Identify whether an example uses accepted target syntax, currently implemented syntax, or proposal-only forms; use the corresponding syntax, semantic, emission, or runtime checks for the claim being made.
 - Keep normative contracts, support inventories, and proposals consistent with their distinct roles. Record current support and remaining work rather than duplicating commit history in maintained prose.
+- Keep temporary task tracking in session state. When the user requests a maintained conformance/gap inventory, preserve it in the repository with contract links, approval status, dependencies, and actionable acceptance gates; a generic tracking default must not override that deliverable.
 
 ## Native boundaries
 

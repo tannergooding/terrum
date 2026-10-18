@@ -1,83 +1,127 @@
 # Persisted private `Span<Token>` values and operations
 
-**Status: UNAPPROVED bounded recommendation, with provisional implementation
-under semantic-module revision 77. No persisted span contract or metadata is
-accepted. Returned-view forwarding remains outside this slice.**
+**Status: unapproved bounded private-persistence recommendation.**
+Provisional implementation is not an accepted span metadata schema.
+Returned-view forwarding remains outside this slice.
 
-## Summary
+## Consumer and integration
 
-The complete `ScalarFrontend` publication and `ScalarFrontendProgramReader`
-consumer supply the previously missing concrete use case. The frontend needs
-private readonly token descriptors projected from validated snapshots, passed
-through private calls, copied, indexed and retired. It does not need
-`TokenCursor` capture storage or a returned-view ABI to publish v88 and summarize
-it against a fresh source grant.
+The complete `ScalarFrontend` producer and `ScalarFrontendProgramReader`
+consumer need private readonly descriptors projected from validated snapshots,
+passed through private calls, copied, indexed and retired. Their
+[invocation profile](scalar-frontend-invocation-profile.md) is a concrete
+corpus, not approval of persistence, profile identity or a public span ABI.
 
-## Bounded recommendation
+Recommend preserving the complete private structured IR needed by that
+corpus rather than rewriting span reads into source-shaped host-buffer policy.
+The [private-persistence contract](../specs/representation/persistence.md)
+continues to distinguish this development format from normative TRRM.
+The [dependency](../specs/language/dependencies-and-views.md) and
+[lifetime](../specs/lifetimes.md#three-independent-dependencies) contracts
+remain authoritative for backing, storage and cleanup.
 
-Proceed provisionally with a new exact semantic-module revision for the private
-operations this corpus actually uses. Keep revision 76 byte-compatible and
-span-free; reject private span IR under that revision rather than reinterpreting
-it. Emit revision 77 only for the admitted source-grant span path or the separate
-[v88 frontend invocation profile](scalar-frontend-invocation-profile.md).
-Existing non-span scanner modules retain revision 76 and the unchanged
-`scanner-10` identity and ten-buffer shape.
+## Admitted private IR
 
-Retain the full admitted structured IR: snapshot projection, native-width
-length, unsigned indexing with by-value Token results, readonly descriptor
-copies/conditional selection, private parameter passing, and lexical descriptor
-retirement. Retain ordinary call argument mappings, structured cleanup and
-checked recovery. Keep span-bearing implementation callables private to the
-artifact even when a source method is accessible within its private managed
-implementation. Imported/exported signatures must remain span-free.
+Retain:
 
-Preserve explicit compiler-known Token, SourceRange and TokenSnapshot roles
-through type-table selection, remapping and private renaming. Roles identify
-which layout to validate; they do not attest that a layout or lifetime is
-valid. Mandatory verification must rederive backing sets, staged-argument
-obligations, initialized/live owners and descriptor retirement after reading
-and again after linking every replacement. Do not serialize trusted analysis
-results or turn private backing dependencies into external compatibility
-contracts.
+- Snapshot-to-readonly-token-span construction, native-width length and
+  unsigned indexed by-value Token reads.
+- Readonly descriptor copies and conditional selection, private parameter
+  passing, named-argument mappings and lexical descriptor retirement.
+- The complete surrounding structured control flow, staged calls, cleanup
+  and checked recovery. A list of span opcodes without that context cannot
+  establish lifetime correctness.
+- Explicit compiler-known Token, SourceRange and TokenSnapshot roles across
+  selected type tables, remapping and private renaming. Roles identify a
+  layout to check; they do not certify it.
 
-## Exact provisional encoding
+Keep span-bearing callables private to the artifact, regardless of source
+accessibility within a private implementation. Imported/exported signatures
+remain span-free. No public type identity is inferred from private spelling
+or `$producer` renaming.
 
-Revision 77 adds one role byte after each struct name: none, Token, SourceRange
-or TokenSnapshot. Existing declared type identifiers and remapping still
-identify each field and result type. Expression tags 32, 33 and 34 retain
-`BoundSnapshotSpan` (owner slot/source-buffer ordinal), `BoundSpanLength`
-(view expression), and `BoundSpanRead` (view/index expressions and Token result
-type). Statement tag 28 retains `BoundDropSpan`'s descriptor slot. The existing
-type/span headers, recursive node/size limits and function/variable metadata
-remain checked.
+## Exact private schema
 
-Role layouts, uniqueness, snapshot provenance, source-buffer access, unsigned
-index carrier, scope shape and backing liveness are independently verified.
-The roles survive `$producer` renaming; private spelling is not a public type
-identity. New tags reject in revision 76. Unsupported revisions and malformed
-roles/tags reject without falling back to another interpretation.
+Require an exact selected schema, not “revision 77 or equivalent.” The
+prototype's span extension uses roles `none`, `Token`, `SourceRange`,
+`TokenSnapshot`; expression tags 32/33/34 for snapshot projection, span length
+and span read; and statement tag 28 for descriptor drop. The role byte follows
+the struct name, while existing type IDs and IR headers describe fields,
+operands, results and source spans. Snapshot projection retains the owner slot
+and source-buffer ordinal; length retains the view; read retains view/index
+and Token result type; drop retains the descriptor slot.
 
-## Evidence and remaining boundary
+These are **private implementation encodings**, not proposed TRRM allocations.
+The span schema first appeared under development revision 77, but later exact
+combined schemas also carry it: active private-span/frontend fixtures use
+revision 81, including fixed-layout information. No “77-only” rule follows.
 
-The focused source-provider/consumer corpus round-trips private span creation,
-named/transitive reads, copies, conditional backing, retirement and cleanup
-under both policies through fresh scanner grants. An unchanged revision-76
-scalar consumer also accepts a replacement revision-77 provider with reordered
-type declarations and changed private calls; linking renames its private types
-and rechecks their roles. Forgery regressions reject altered roles/layouts,
-source provenance, index width, descriptor retirement and a later output
-argument that invalidates already-staged backing. Checked recovery exercises
-descriptor cleanup before owners are reused.
+Before adoption, tags/revisions may be replaced, consolidated or reassigned
+if the selected producer and reader agree exactly. Do not require revision-76
+compatibility or a fresh version for each incremental experiment without a
+consumer need. If an older exact reader remains supported, it must retain
+its old interpretation and reject new operations; it cannot guess based on
+trailing bytes or silently reinterpret a private tag.
 
-The separate frontend profile additionally executes complete v88 publication
-and summary decoding with fresh grants. Actual evidence and precise limits are
-recorded in the [implementation reference](../implementation.md) and
-[self-host inventory](../implementation/self-host.md), not as acceptance here.
+## Mandatory reconstruction and linking
 
-Returned `Span<Token>` values, `[return: DependsOn(...)]` result metadata,
-`TokenCursor` captures/advance, span fields, output/vacant/mutable span slots,
-exported/imported span signatures and generic declaration metadata remain
-excluded. General views/references, source-dependent native DLLs/packages,
-graphs/module sets, persisted AOT and source-free TRRM are not established.
-This recommendation changes neither canonical lifetime contracts nor the
-accepted 64-token cursor/window bound.
+After reading and again after linking **each** replacement, independently
+validate:
+
+1. Supported exact schema, checked node/type/count/size limits, role values,
+   uniqueness, field/result type remapping and actual role layouts.
+2. Validated snapshot provenance, source-buffer identity/access and index
+   width. A serialized role or owner slot is not trusted source provenance.
+3. Initialization, live owners, backing sets, access, scope/drop shape and
+   cleanup. Copies/joins/private adapters must preserve all dependencies.
+4. Evaluation-order staging through later arguments that could replace/drop
+   backing, including output/init arguments. Retire descriptors before owner
+   reuse only when all remaining dependencies allow it.
+5. Retained invocation requirements and rejection on source-free surfaces.
+
+Persist no trusted liveness, loan, origin or verification certificate.
+Producer-generated artifacts do not bypass consumer verification. Replacement
+may reorder private types or alter private calls, but cannot turn private
+backing facts into a weaker externally replaceable promise.
+
+## Alternatives and exclusions
+
+Keeping spans compilation-local is a valid alternative, but cannot execute
+this producer/reader corpus through persisted private artifacts unchanged.
+A general public view schema would be substantially broader: it needs
+declaration relationships, cross-module compatibility and target layouts.
+Prefer the private full-IR slice for the bounded experiment rather than
+pretending that generic metadata is already supported.
+
+Do not include returned spans or result-dependency metadata, TokenCursor
+captures/advance, span fields, output/vacant/mutable span slots, generic
+declaration metadata or imported/exported span signatures. The separately
+[deferred result profile](token-span-result-forwarding.md) is not a
+prerequisite here. Native DLLs/packages, graphs/module sets, persisted AOT,
+source-free TRRM and general references/views remain outside this slice.
+It neither changes source semantics nor widens the accepted cursor window.
+
+## Acceptance gates
+
+Require exact schema/profile adoption and:
+
+- Source-provider/consumer round trips for construction, named/transitive
+  calls, copies, conditional backing, unsigned reads, retirement and cleanup
+  under both policies and fresh grants.
+- Replacement with reordered declarations and renamed/remapped private types;
+  rederive facts after linking instead of trusting the original provider.
+- Forged roles/layouts, mismatched type IDs, wrong source ordinal/access,
+  index width, invalid lifetime/drop order and a later argument invalidating
+  staged backing. All must reject before emission/execution.
+- Checked recovery with descriptor cleanup before owner reuse, normal
+  cleanup, missing grants and source-free rejection.
+- Complete v88 producer/reader invocation without hosted-parser fallback,
+  while the public/exported/result-span exclusions remain enforced.
+
+Current evidence is in the
+[private-span reader/writer](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.TokenSpans.cs),
+[private-span regressions](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.PrivateSpans.cs)
+and [complete-program regressions](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.CompleteProgram.cs).
+The [module](../implementation/modules.md) and
+[composition](../implementation/bootstrap-frontend-composition.md) inventories
+own current support, not this list of acceptance requirements.

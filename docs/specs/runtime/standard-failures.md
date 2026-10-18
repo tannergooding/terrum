@@ -61,9 +61,12 @@ failure propagates unchanged; it is not a false predicate or a fabricated
 PostconditionException. The failed path does not check later clauses.
 
 False ensure publishes no successful callable completion. It does not replay
-completed cleanup, reevaluate a return expression, undo transfers or vacate
-already initialized explicit outputs. Saved results and phase-local owners
-retire under their actual ownership state on defined unwinding.
+completed cleanup, reevaluate a return expression or undo transfers.
+Under ordinary output contracts, it does not vacate already initialized
+explicit outputs. Outputs still private or reserved under a selected protocol
+follow that protocol's exceptional-cleanup and publication rules instead.
+Saved results and phase-local owners retire under their actual ownership
+state on defined unwinding.
 The exact output/async/producer contract still selects the failure channel.
 Fail-fast and unsafe recovery retain their independent rules.
 Static ensure remains a proof request whose failure is a compiler diagnostic,

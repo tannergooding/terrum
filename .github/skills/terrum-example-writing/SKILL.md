@@ -7,6 +7,9 @@ description: Write, revise, or check Terrum code examples in documentation, prop
 
 Use repository-relative paths below. Follow `.github\copilot-instructions.md`;
 this skill supplies the example-writing workflow, not new language rules.
+Use `terrum-spec-design-review` for choosing or replacing those rules. A
+design proposal may recommend concrete new forms or assignments, explicitly
+marked unapproved; an illustrative example must not silently decide them.
 
 ## Establish the example's contract
 
@@ -50,8 +53,10 @@ paths do not establish accepted syntax or standard TRRM support.
   to understand the behavior. If a fragment omits setup, identify it instead
   of presenting the fragment as a self-contained executable.
 - For proposal-only forms, label the proposed syntax or metadata explicitly.
-  Do not invent attributes, APIs, qualifiers, or numeric record assignments
-  to fill an unresolved contract. Surface the actual missing decision.
+  Use the governing proposal's recommendation. Do not invent attributes,
+  APIs, qualifiers, or numeric assignments merely to make an example complete.
+  If the task includes designing that missing contract, state the candidate
+  and its integration consequences in the proposal before illustrating it.
 
 ### Native examples
 

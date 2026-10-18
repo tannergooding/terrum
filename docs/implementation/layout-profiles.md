@@ -28,7 +28,7 @@ The address-based storage limit is 128 bytes, independent of the 16-byte
 executable value profile. The pointer contract remains one element,
 `NoEscape`, and backed by an initialized local; verification checks that all
 aggregate fields are initialized. Private semantic metadata revision 80
-preserves and remaps the pointee type. Standard TRRM `NativeParameter`
+preserves and remaps the pointee type. Development `.trrm` `NativeParameter`
 persistence remains rejected pending an approved encoding, and direct native
 outputs remain limited to scalar and raw-pointer pointees.
 When fixed-layout commitments coexist with private span roles, semantic-module

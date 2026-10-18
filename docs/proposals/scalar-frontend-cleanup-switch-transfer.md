@@ -1,73 +1,93 @@
 # Scalar frontend cleanup-contained switch transfers
 
-**Status: unapproved implementation recommendation.** This records an
-implementation proof boundary only. It does not change the accepted
-statement-switch transfer semantics or any canonical specification.
+**Status: unapproved implementation proof strategy.** Statement-switch
+transfers and finite cleanup are already
+[source contracts](../specs/grammar-spec.md#512-modifiers-cleanup-and-finalization).
+No grammar or source-semantics decision is pending here.
 
-## Problem
+## Proof boundary
 
-The bounded complete-program scalar frontend lowers a cross-arm transfer to a
-private arm-ordinal dispatcher loop. The grammar permits transfers between
-arms of the same statement switch but forbids them from escaping a cleanup
-action. The hosted cleanup verifier originally rejected any such dispatcher
-because it could not establish termination. There is no source-semantics
-decision pending here; the implementation gap is proving that cleanup-contained
-control flow terminates.
+The bounded scalar frontend represents cross-arm transfers using a private
+arm-ordinal dispatcher loop. Recommend a structural finite-progress proof in
+the shared hosted verifier, not a frontend exemption from cleanup checking.
+Use the [composition inventory](../implementation/bootstrap-frontend-composition.md)
+for current support.
 
-## Recommendation
+Source-audited transfers establish the intended switch, but reconstructed
+bound trees must independently satisfy the dispatcher shape:
 
-Add a bounded arm-graph termination proof to the hosted cleanup-verification
-path. Derive transitions only from the already source-audited transfer records,
-account for ordinary arm completion and nested cleanup, and admit a cleanup
-dispatcher only when termination within that cleanup action is proven. Keep
-the existing cleanup loop checks for all other loops; do not treat a cross-arm
-transfer as permission to escape cleanup or waive termination verification.
+- A private ordinal state, complete arm selection and only recognized
+  adjacent constant-ordinal assignments followed by the matching dispatcher
+  continue establish edges. A marker or variable name is eligibility
+  information, never a trusted termination certificate.
+- Account for ordinary completion, every possible entry arm, nested
+  dispatchers and cleanup, break/continue depth and all transfer paths.
+  An admitted acyclic graph reaches a finite exit from every possible entry.
+- Preserve initialization, vacancy/publication, `NoThrow`, ownership,
+  exceptional cleanup and scope checks. Cross-arm transfer cannot escape
+  its cleanup action or bypass required cleanup.
+- Charge analysis to the existing verifier budget. A frontend-generated
+  structure is not a reason to omit consumer verification.
 
-Keep this proof internal to the provisional scalar frontend. Do not add
-ordinary hosted parser support, source-free TRRM records, or a new language
-construct. Unproven paths and graphs that may not terminate must continue to
-reject.
+The proof concerns the general dispatcher/flow facts, not exact sample names
+or a whitelist of successful switch bodies.
 
-## Provisional implementation evidence
+## Bounded counted loops
 
-The verifier now independently checks the private dispatcher structure and
-derives arm transitions only from adjacent constant-ordinal state assignments
-and dispatcher continues. Acyclic graphs must reach a finite exit from every
-possible entry arm. The existing scope, initialization, `NoThrow`, cleanup and
-exception checks remain mandatory; the marker is eligibility metadata, not a
-termination certificate. Nested dispatchers and cleanup compose. Within an
-audited dispatcher, a pre-tested counted `for` can now prove finite unit-step
-progress over a mutable local `int32`: constant initializer/bound,
-strict `<` with `counter = counter + 1`, or strict `>` with
-`counter = counter - 1`, and no body write or alias of the counter. Both scalar
-lowering shapes (appended iterator and separate iterator for local `continue`)
-are recognized structurally; a continue bypassing an appended iterator rejects.
-The initializer may declare the local or assign a constant to an existing local.
-The strict bound keeps every step representable in `int32`, including extrema;
-the proof does not subtract endpoints in `int32` or enumerate iterations.
-A false initial condition exits without executing the body. Only the proved
-iterator arithmetic gains a non-overflowing `NoThrow` proof; body effects and
-exits still undergo the existing checks. Cycles, other unproved intra-arm
-iteration and cleanup escapes still reject. Analysis uses the existing
-semantic-verification budget.
+Inside a proved dispatcher, a pre-tested counted `for` may establish finite
+progress when:
 
-Implementation may proceed using this recommendation as provisional evidence;
-doing so does not accept this proposal or alter the grammar contract.
+1. A mutable local `int32` has a constant in-range initializer and bound.
+   Initialization can declare the local or assign an existing one.
+2. The condition is strict `counter < bound` with exact `counter + 1`, or
+   strict `counter > bound` with exact `counter - 1`.
+3. No body path writes, updates or aliases the counter, including through
+   nested cleanup, output arguments or calls.
+4. Every local continue reaches the proved iterator. Recognize both the
+   appended-iterator and separate-iterator lowering shapes; reject an
+   appended-iterator bypass.
+5. All other body effects/exits pass the ordinary cleanup verifier.
 
-## Remaining boundary
+A false initial condition is a zero-iteration exit. Strict bounds and a unit
+step keep each update representable, including signed extrema. Prove progress
+mathematically; do not subtract endpoints in `int32`, enumerate iterations or
+execute a multi-billion-step extreme case to establish termination. Only
+the proved iterator arithmetic gains the non-overflowing `NoThrow` fact;
+that fact does not authorize unrelated body arithmetic.
 
-Supporting cyclic arm graphs or data-dependent intra-arm iteration requires a
-sound progress/ranking proof. Runtime termination of an individual example is
-not enough to accept it, and this implementation does not approximate that
-proof by weakening cleanup verification.
+This is a bounded proof-recognition strategy, not a restriction on accepted
+source `for` syntax. Unknown starts, non-unit/data-dependent steps, inclusive
+bounds, body mutation, other unproved loops and cleanup escapes remain
+unsupported by this proof.
 
-The counted-loop provisional recognition admits only a pre-tested `for` loop
-over a mutable local `int32` counter with a constant initializer and bound, a strict
-`counter < bound` / `counter > bound` condition, and an exact `counter + 1` /
-`counter - 1` iterator in the matching direction. The body must not write or
-alias the counter and must still pass the existing cleanup-flow checks. The
-unit step reaches the constant bound without overflowing; a false initial
-condition is a zero-iteration exit. Keep non-unit or data-dependent steps,
-inclusive bounds, unknown initial values, counter mutation, and data-dependent
-`while` loops rejected. This is a verifier-recognition boundary, not a source
-language restriction or acceptance of this proposal.
+## Alternatives and remaining decisions
+
+The minimal strategy proves acyclic arm graphs and the bounded counted form.
+A general control-flow/ranking analysis could admit cycles and data-dependent
+iteration, but needs a sound progress argument with valid scope and transfer
+semantics. Runtime termination of examples is not such an argument. Recommend
+the bounded strategy without weakening rejection of unproved paths.
+
+This does not add ordinary parser support, standard TRRM dispatcher records
+or new language constructs. If dispatcher IR later crosses another persistence
+surface, retain and independently verify its complete structure there.
+
+## Acceptance gates
+
+- Multi-arm, nested and zero-iteration cases; ordinary completion and every
+  transfer/entry shape; finite cleanup during normal return and checked unwind.
+- Both iterator layouts, local and nested continue routing, nested cleanup and
+  assignment/declaration initializers. Verify extrema structurally.
+- Forged ordinal targets, missing adjacency, exposed/aliased state, cycles,
+  invalid depth, body counter writes/aliases, iterator bypass and unknown or
+  overflowing arithmetic. Reject before native emission.
+- Preserve effects, initialization, cleanup and budget failures under both
+  runtime policies; parser/source audit success alone is insufficient.
+
+Evidence entry points:
+[verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.SwitchDispatch.cs),
+[counted-loop regressions](../../tests/Terrum.CodeAnalysis.Tests/ManagedScannerComponentTests.CleanupCountedFor.cs),
+[switch regressions](../../tests/Terrum.CodeAnalysis.Tests/ManagedScannerComponentTests.CleanupSwitchTransfers.cs)
+and [CLI integration](../../tests/Terrum.CodeAnalysis.Tests/CliTests.FrontendCleanupSwitchTransfers.cs).
+These establish only the behavior actually exercised, not the general ranking
+alternative or adoption of this strategy.

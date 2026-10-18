@@ -1,143 +1,103 @@
-# Invocation-scoped source grant proposal
+# Invocation-scoped source grant
 
-**Status: Deferred. Accepted semantic-module execution remains
-source-independent; `Host.Source` JIT support is provisional
-implementation evidence only.**
+**Status: deferred.** Accepting a source requirement on persisted semantic
+modules needs a concrete persisted source-processing consumer. Existing
+`Host.Source` JIT support is provisional, not approval of that boundary.
 
-## Summary
+## Decision and integration
 
-The bounded `SourceLines`, scanner and scalar-frontend components read the
-immutable UTF-16 `Host.Source` grant. Hosted compilation can bind that grant as
-a read-only `char16` host buffer. The current semantic-module JIT adapter
-provisionally supports the invocation-scoped facade described below.
-The maintained source-free compiler-primitives DLL remains separate from the
-[provisional native source-grant companion](native-source-grant-library.md).
+The candidate lets a persisted component require one immutable source snapshot
+per synchronous invocation. The [self-host inventory](../implementation/self-host.md)
+owns the current source/line/decoder/provider coverage; the
+[module inventory](../implementation/modules.md) owns its private artifact
+support. Reusing provider bytes may still involve fresh hosted verification
+and machine-code emission.
 
-This proposal concerns only how persisted modules may declare and receive the
-existing source grant. It does not change source decoding, UTF-16 coordinates,
-line-break behavior, the scanner contract, or the bounded frontend's reliance
-on hosted verification and emission.
+This is a module binding/execution capability, not a new language source
+primitive or a change to [source input](../specs/language/source-input.md).
+It would add an explicitly selected invocation profile to private
+reconstruction/linking and JIT admission. It makes no standard TRRM allocation
+or native calling-convention assignment. Graphs, module sets, persisted AOT
+and native packages remain outside this candidate.
 
-## Decision question
+The alternatives are to keep persisted modules source-independent, pass
+source only in a compilation-local host layer, or design explicit general
+view parameters and their module ABI. Recommend keeping the first boundary
+until a real consumer justifies this narrower capability. Do not infer
+approval of the broader view ABI from the convenience of a source grant.
 
-Should a persisted module be allowed to require an immutable source snapshot
-supplied by its caller for each invocation?
+## Candidate contract
 
-## Deferred decision
+- The reserved requirement is exactly readonly `char16` `Host.Source`,
+  module-level and propagated through retained dependencies and references.
+  Linking and replacement compare the recorded requirement; host-neutral
+  modules acquire none merely because their caller has a grant.
+- The caller explicitly supplies a snapshot. Empty is valid and is not a
+  missing grant. The provisional envelope is 16,384 UTF-16 code units;
+  missing, duplicate, writable, wrong-element, non-code-unit and oversized
+  bindings reject before entry.
+- One synchronous entry, nested calls and defined cleanup observe that same
+  immutable snapshot. Bind fresh invocation-owned backing; no process/thread
+  current source, rebinding, suspension, retention or capture.
+- Persist only the symbolic requirement, length-query and read operations.
+  Never persist source contents, length/address values or sample-derived
+  bounds, effect or initialization proofs. Reconstruct and verify after
+  reading/linking and again with the selected invocation binding.
+- The capability does not become a source value, pointer, field, returned
+  view or retained handle. Copied code units, scalar coordinates and
+  `SourceRange` values can escape, but contain neither backing nor implicit
+  snapshot identity. A range from one invocation cannot authorize reads of
+  another.
+- Preserve checked indexing and conditional-output initialization. A failed
+  read leaves its output vacant under the existing operation contract;
+  missing source is not a successful empty read.
 
-Do not accept `Host.Source` as a semantic-module execution dependency. The
-current tests establish provisional implementation support, not a requirement
-for executing compiled modules. Source is needed while compiler or tooling
-components process an input file; keep that input in the host/source-processing
-layer unless a concrete persisted tooling API demonstrates a need for this
-module boundary. This deferral does not approve arbitrary buffers or change
-source decoding, UTF-16 coordinates, line-break behavior, scanner semantics,
-or the bounded frontend's reliance on hosted verification and emission.
+The grant receives **already-decoded** UTF-16: preserve NUL, malformed
+surrogates, BOM code units and original line endings without normalization.
+Compilation **file-byte input** still requires complete strict UTF-8
+validation before snapshot publication. A grant invents neither an
+original-byte mapping nor permission to bypass that file-input boundary.
 
-## Provisional first implementation slice
+The prototype lowers host `char16` reads through checked host-buffer storage;
+that storage choice is not a public two-byte/four-byte ABI commitment.
+The four-operation source facade, source-neutral helpers and source-aware
+leaf decoders share the requirement without giving arbitrary caller buffers
+the same privilege.
 
-**Status: implemented provisionally; contract deferred.**
+## Independent profiles
 
-**Summary:** The broad recommendation does not define invocation extent,
-dependency propagation, source-length binding, or the initial execution
-backend. The existing `SourceText` and `SourceLines` facades need only four
-read operations; the scanner and scalar frontend additionally depend on
-writable interchange buffers and other contracts outside this proposal.
+The [scanner invocation](scanner-invocation-profile.md) additionally needs
+canonical readonly tables, writable outputs and owned record publication.
+The [frontend invocation](scalar-frontend-invocation-profile.md) additionally
+needs private span IR, complete program publication and source/semantic audit.
+Neither is implied by successful source-only execution.
 
-**Provisional implementation shape:** The prototype persists only the
-four-operation source facade as one development semantic producer module, with
-`SourceRange` and `CharacterFacts` as host-neutral dependencies. It invokes
-that facade through an independently persisted consumer using an explicit
-source-binding JIT adapter. Source length and reads stay symbolic in the
-module; each invocation binds the supplied snapshot into fresh
-execution-owned storage, lowers those operations to the existing checked
-host-buffer representation, verifies the linked program, then uses the hosted
-JIT emitter. Reusing module bytes does not require reusing generated machine
-code. This implementation shape is not an accepted execution contract.
+The [native companion](native-source-grant-library.md) is a separate deferred
+ABI experiment, not execution of this private semantic-module profile.
+Embedding a snapshot into an AOT image or retaining an invocation address
+would not satisfy the grant contract.
 
-**Implemented provisionally:** The current semantic-module format stores the
-requirement bit and symbolic length/read operations. References propagate the
-requirement; linking checks it; `NativeJit.ExecuteWithSourceGrant` validates
-and copies one eligible source snapshot before hosted verification/emission.
-The native emitter, graph and module-set paths reject unbound or unsupported
-source requirements. This profile defines neither a general buffer dependency
-nor the separate native companion ABI.
+## Reconsideration and acceptance
 
-The same capability also runs the bounded Terrum-authored `Utf16Scalar`,
-`CharacterLiteral` and `StringLiteral` leaf decoders and the provisional `StringRow` name and
-namespace encoders for ASCII, UTF-8, UTF-16LE and UTF-32LE as persisted
-semantic-module providers. This reuses the existing requirement and grant
-validation; it does not make `StringRow` a TRRM section writer or make the
-scanner or scalar frontend source-independent, independently
-verified, or executable outside the hosted verifier/emitter path.
+Require a concrete consumer and a resource policy appropriate for its whole
+input, rather than adopting 16,384 because it fits existing fixtures. Before
+promotion:
 
-The provisional contract for this slice is:
+1. Invoke identical producer/consumer artifacts with empty, changed-length,
+   maximum, malformed-surrogate and mixed-line-break snapshots under both
+   runtime policies. Confirm no seed contents or concrete length survives.
+2. Reject each invalid binding and unsupported execution surface before
+   entry; revalidate requirements through dependency replacement.
+3. Preserve source/line and decoder observable behavior, including EOF,
+   vacant outputs, cleanup and successive invocation isolation.
+4. Prove no grant-backed value survives backing retirement and that copied
+   scalar results remain independent. Distinguish artifact reuse from
+   generated-code reuse.
+5. Keep source-neutral modules and source-free library exports unchanged.
+   Do not use a scanner fallback or embedded sample to report success.
 
-- A module may require only the reserved identity `Host.Source`, with readonly
-  `char16` elements and invocation lifetime. The requirement is module-level,
-  exposed through references and propagated through retained producer
-  dependencies. Replacement must preserve the recorded requirement.
-- One synchronous entry invocation, including nested calls and defined
-  unwinding/cleanup, observes one immutable snapshot. Different invocations
-  bind independently; there is no process-global current source, capture,
-  suspension, or rebinding during execution.
-- The caller explicitly supplies exact UTF-16 code units, copied into
-  invocation-owned backing. Empty source is valid and distinct from a missing
-  grant. This first profile accepts at most 16,384 code units, preserving
-  malformed surrogates, NUL and line endings. Missing, duplicate, writable,
-  wrong-element-type, invalid-code-unit or oversized grants reject before
-  entry execution.
-- Artifacts retain only the requirement and symbolic source operations, never
-  invocation contents, concrete length or address. Source-dependent operations
-  cannot use a compile-time sample length for constant evaluation or persisted
-  bounds/effect proofs. Checked indexing and conditional-output publication
-  retain their existing behavior.
-- The capability cannot become a source value, field, pointer, returned view
-  or retained handle. Copied code units, scalar coordinates and `SourceRange`
-  values may escape; they carry no source backing or implicit snapshot
-  identity.
-- This profile covers single-producer semantic-module JIT execution only.
-  Native packages, graphs and persisted AOT images with this dependency
-  reject explicitly. The native source-grant companion is a separate
-  provisional implementation, not execution of this module profile.
-  A reusable AOT contract requires a
-  separate invocation adapter; embedding a snapshot in an executable does not
-  satisfy this profile.
-
-## Regression evidence
-
-[Module tests](../../tests/Terrum.CodeAnalysis.Tests/ModuleTests.cs) reuse
-identical producer/consumer artifacts across fresh empty, differently sized,
-malformed-surrogate and mixed-line-break snapshots. They compare the facade
-with hosted `SourceText`, check output vacancy and invocation-relative
-end-index reads, reject invalid grants and preserve host-neutral behavior.
-
-The [self-host inventory](../implementation/self-host.md) records decoder, line,
-numeric and string-row support with their component boundaries. The associated
-module regressions compare observable results with independent host oracles
-under both runtime policies. That coverage does not accept the proposal,
-make a compiler bootstrap, or move verification/emission out of the host.
-Use [module history](https://github.com/tannergooding/terrum/commits/main/sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs)
-for implementation provenance rather than treating past test totals as
-current qualification evidence.
-
-## Alternative
-
-Keep persisted modules host-neutral and defer source-aware exports until the
-compiler can supply source-bound code per compilation. This avoids a new
-module capability but leaves `SourceLines` and other source readers outside
-the persisted bootstrap library.
-
-General host-buffer dependencies and explicit span parameters are not proposed
-as substitutes: they would widen the module or reference ABI beyond this
-source-specific requirement.
-
-## Reconsideration boundary
-
-If reconsidered, acceptance should require a concrete persisted
-source-processing consumer and demonstrate that it can be invoked with
-different source snapshots without rebuilding or retaining either snapshot.
-Missing or incompatible source grants must fail validation before execution;
-modules without this dependency remain host-neutral, and arbitrary host
-buffers remain unsupported. AOT/JIT results should preserve the existing
-`SourceText` parity fixtures.
+Evidence entry points are
+[`NativeJit.ExecuteWithSourceGrant`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs)
+and [module regressions](../../tests/Terrum.CodeAnalysis.Tests/ModuleTests.cs).
+They document implementation evidence, not acceptance or an independently
+verified/self-hosted compiler.

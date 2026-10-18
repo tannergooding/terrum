@@ -59,51 +59,60 @@ prerequisite has already been met.
    General source catches/filters require incremental post-inner-cleanup
    selection, not reuse of the bounded Windows first-pass discriminator as an
    authored predicate.
-3. **Full runtime/structured contracts — conditions and constants.** Specify
-   published/static conditions and required literal/constant domains, including
-   proof/effect limits, before claiming general proof execution.
+3. **Full runtime/structured contracts — conditions and constants.** Implement
+   the selected published/static conditions, literal/constant domains and
+   portable proof/evaluation floor. Complete their physical effect/program/
+   value records and independent-consumer support before claiming general
+   execution; additional domains and beyond-floor rules remain separate work.
 4. **Resources/graphs.** Extend beyond bounded owners, views and managed graphs
    only after representation, lifetime, cleanup, failure and publication
-   rules are defined. General stored views, partial field moves, arbitrary
-   owning graphs, allocators and relocation remain pending.
-5. **General separate compilation — layouts.** Implement the accepted bounded
-   public Windows x64 `Blittable` plus `Sequential` direction after settling
-   attribute schemas, source-version selection, metadata encoding, access
-   lowering and compatibility checks. Packing and over-alignment remain
-   broader layout work. The
-   [first-profile proposal](proposals/public-fixed-layout-profile.md) records
-   accepted semantics separately from implementation support.
-6. **General separate compilation — binding contracts.** Complete overload
-   and witness selection plus adapter, family and explicit-interface
-   contracts. Keep unresolved declaration, lookup and compatibility choices
-   pending rather than adopting convenient host behavior. The staged,
-   Windows x64-only FFI direction using the DX11 sketch as a target is accepted
-   across this area and runtime safety; see the
-   [Windows native FFI proposal](proposals/windows-native-ffi.md). This accepts
-   only the bounded sequence, not wholesale interop or current sample support.
-   The proposed gates start with checked scalar imports, then sample-specific
-   storage/pointers, a static callback, closed COM/resources, and application
-   integration. Their import/catalog, ABI, layout, lifetime, callback, COM and
-   runtime contracts remain unapproved and are not implementation claims.
-7. **Rich libraries — builders and handlers.** Specify registered builders and
-   handlers with checked eager capture before draining, ownership, refusal,
-   cleanup, failure and publication behavior.
+   rules are defined. Implement the accepted partial-field move/repair and
+   retirement contracts through their complete state/cleanup representation.
+   General stored-view profiles, arbitrary owning graphs, allocators and
+   relocation retain their remaining design and implementation gates.
+5. **General separate compilation — layouts.** Complete standard persistence
+   and native ABI integration for the accepted public Windows x64 Blittable
+   contracts. Natural Sequential and bounded Transparent source support
+   already exist; Packing/Alignment controls, Union and broader ABI cases
+   remain implementation work. The
+   [integration proposal](proposals/public-fixed-layout-profile.md) separates
+   the accepted target rules, pending physical carriers and current support.
+6. **General separate compilation — binding contracts.** Implement the
+   selected source call/inference algorithm, witness/default resolution and
+   qualified interface forms; complete their physical identity, dispatch and
+   replacement records. Adapter, family and additional declaration/lookup
+   choices remain pending rather than adopting convenient host behavior. The staged,
+   Windows x64 FFI direction crosses this area and runtime safety: raw
+   caller-unsafe imports, general stable storage/pointers, explicit native
+   entries/function pointers, generic vtable calls and authored applications.
+   The settled [authored-library boundary](proposals/unsafe-ffi-vtable-cleanup.md)
+   supersedes compiler catalogs, COM ownership inference and sample-specific
+   admission. Review the [standard metadata](proposals/trrm-native-interop-metadata.md)
+   as a coherent route through declarations, dependencies, mandatory
+   verification and lowering. Completed sample generalization does not
+   approve its experimental source or wire schemas.
+7. **Rich libraries — builders and handlers.** Implement the selected
+   registered builders and handlers, including eager capture before draining,
+   ownership, refusal, cleanup, failure and publication. Complete their
+   independent physical contracts; additional profiles/APIs require review.
 8. **Rich libraries — callables.** Progress in order from fixed-signature
    callables and tuples, to generic scalar/SIMD functors, to contextual generic
    lambdas. Each stage depends on its declared type, effect, access, loan,
    ownership and ABI contracts; it does not imply type packs or polymorphic
    callable erasure.
-9. **Full runtime/structured contracts — conversions.** Implement accepted
-   numeric-conversion policies, including floating support, only with their
-   target contracts and boundary behavior. This is not current floating-point
-   compiler support.
-10. **Full runtime/structured contracts — asynchronous producers.** Specify
-    completion, producer, capture and suspension contracts after their loan,
-    effect, ownership and cleanup prerequisites. This targeted work is not an
-    async-runtime support claim.
-11. **General separate compilation — evolution.** Add evolvable-case
-    contracts, exact-contract forwarders and compatibility analysis without
-    silently widening existing contracts.
+9. **Full runtime/structured contracts — conversions.** Complete accepted
+   numeric-conversion policies with their target contracts and boundary
+   behavior. Existing bounded floating implementation does not establish
+   support for every accepted format, source form or interchange operation.
+10. **Full runtime/structured contracts — asynchronous producers.** Integrate
+    accepted completion, producer, capture and suspension contracts after
+    their loan, effect, ownership and cleanup prerequisites. Complete physical
+    frame/phase records and runtime support; broader awaiter, supervision and
+    scheduling APIs remain design work.
+11. **General separate compilation — evolution.** Integrate selected
+    closed-case/exhaustiveness rules and their physical identities. Complete
+    exact-contract forwarder schemas and compatibility analysis without
+    silently widening retained contracts.
 12. **Rich libraries/self-hosting — bootstrap components.** Grow the current
     bounded components toward a compiler bootstrap only as their language and
     library prerequisites are met and through the shared
@@ -180,8 +189,10 @@ generation without source recompilation. It is not merely private-IR
 serialization or a verifier certificate. The approved source grammar and
 current `(1, 0)` metadata and coded-instruction designs specify target
 contracts, not a complete executable profile, current compiler support or a
-released schema. The complete Body/verifier contract, feature negotiation and
-resource budgets remain work. Source compilation checks authored bodies;
+released schema. Complete implementation of the selected Body/verifier and
+feature-admission rules remains work; higher structured physical profiles
+and numerical portable representation-reader minima retain their explicit design gates.
+Source compilation checks authored bodies;
 binary consumers validate structure, references, binding, compatibility and
 caller use, then may rely on declared contracts for external dependencies
 without re-proving their bodies. Malformed data is never trusted.
@@ -240,17 +251,18 @@ preserving existing single-threaded behavior.
 
 | Order | Increment and prerequisite | Required evidence |
 |---|---|---|
-| 1 | Preserve observable evaluation, checked arithmetic, cleanup, ordinary access widths and current unsafe-recovery behavior. | Source/IR/AOT/JIT regressions show optimization adds no invalid access or observable fault/effect. Unsafe discovery must not invent repair or trap behavior; caller-unsafe declarations and explicit scopes express call-site obligations, not memory-safety proofs or persisted metadata. |
+| 1 | Preserve observable evaluation, checked arithmetic, cleanup, ordinary access widths and current unsafe-recovery behavior. | Source/IR/AOT/JIT regressions show optimization adds no invalid access or observable fault/effect. Unsafe discovery must not invent repair or trap behavior; caller-unsafe declarations and explicit scopes express call-site obligations, not memory-safety proofs or complete reference/capability metadata. |
 | 2 | Implement caller obligations for `unsafe` callable declarations, explicit unsafe-block requirements, and producer-owned transfer/share capabilities with reference/loan/parameter metadata and separate compilation. Ordinary safe declarations may contain checked internal unsafe blocks; no trusted-implementation marker is required. | Wrappers/imports cannot erase obligations; unsafe operations remain scoped; generic bodies use published constraints; private layout/JIT facts do not change source binding; incompatible capability/safety changes reject without freezing opaque layouts. |
 | 3 | Add bounded `MemoryPrimitives` value access and scalar atomics after typed access paths, representation eligibility and compile-time order binding; begin with supported Windows x64 profiles. | Check atomicity, ordering and progress separately; define bitwise CAS comparison; checked overflow leaves storage unchanged; unaligned access is not a snapshot; prove target capability and AOT/JIT/module parity; no hidden lock fallback. |
 | 4 | Build checked handoff, immutable publication and scoped synchronization on those primitives within resources/graphs and rich libraries; allow an explicitly selected coordinated fallback where feasible. | Test publication and mixed-order litmus cases; enforce guards, lifetimes and aliases; justify lock-free and wait-free claims separately; share fallback protocols across modules; preserve effects while allowing valid read elision. |
 | 5 | Extend reference atomics only after collector-aware roots, barriers, safepoints and reclamation are defined. Add explicit SIMD, non-temporal and cache operations only with layout, feature and memory-domain contracts. | Establish concurrent root safety before reference APIs; preserve ranges and per-location guarantees through SIMD; complete non-temporal stores before publication; do not confuse cache maintenance with DMA coherence or persistence. |
 
-Before concurrent operations, specify mixed-order/fence rules and executable
-litmus cases. Preserve the accepted explicit acquire-release relay rule, not
-implicit relaxed-RMW release sequences. Exact declaration spellings,
-conditional-capability metadata, CAS order-pair validation and target tables
-remain specification work. This sequence does not authorize new backends,
+Before claiming concurrent support, qualify the accepted mixed-order/fence
+rules and concurrent-execution cases. Preserve the explicit acquire-release
+relay rule, not implicit relaxed-RMW release sequences, and implement the
+selected CAS success/failure order matrix. Exact primitive API spellings,
+physical conditional-capability/operation records and target instruction
+recipes remain separate work. This sequence does not authorize new backends,
 public managed-handle ABI, or wholesale adoption of design-only libraries.
 
 Represent access, ordering and lifetime effects in checked IR before lowering.

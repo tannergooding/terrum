@@ -22,3 +22,5 @@ runtime, metadata, and native contracts. See the
 self-host component boundaries, the [roadmap](roadmap.md) for pending work,
 and the [proposal index](proposals/README.md) for unapproved alternatives.
 Accepted contracts are not claims that every feature is implemented.
+They are also a [mutable pre-v1 baseline](specs/overview/conformance.md),
+not a frozen destination for proposal design.

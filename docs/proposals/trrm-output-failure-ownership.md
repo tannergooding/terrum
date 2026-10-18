@@ -52,6 +52,21 @@ all these relationships. The
 [reference-call proposal](reference-call-metadata.md#1-which-dependency-relations-belong-in-the-first-callable-profile)
 remains the owner of its genuinely pending dependency encoding choices.
 
+## Specification integration
+
+Recommend a shared place/outcome/ownership model rather than independently
+standardizing the scalar-output and root-free-catch experiments. Their small
+profiles are useful implementation gates, but cannot compose by merely
+enabling both Feature numbers. Define exact operation-site state and
+publication/cleanup carriers once, then admit bounded projections.
+
+After review, amend the instruction chapter's executable-subset, place,
+region, failure and exit contracts, metadata clause applicability, the
+logical-record inventory, registry and corresponding conformance cases
+together. This may replace draft shapes or assignments; no compatibility
+alias or historical-reader retention follows. Physical handler/event/owner
+codecs and their complete joint admission remain design blockers.
+
 ## Phase and publication obligations
 
 | Phase/outcome | Required boundary |
@@ -85,7 +100,11 @@ missing codecs, incompatible contracts or unsupported required capabilities.
 Before affected use, reject missing/unknown prerequisites, invalid
 references, inconsistent operation/output versions, incomplete handler
 state, unsupported roots/loans or incompatible replacement. Apply admission
-to uncalled bodies and inactive paths as well as reached operations.
+to uncalled bodies and inactive paths within a whole-artifact validation
+claim. A trusted selective consumer applies the
+[reader-trust rules](../specs/representation/reader-trust.md) to its actual
+access and retained requirements; this is not a requirement to pre-scan
+every unrelated Body.
 Do not infer authorization from persisted bits, infer conformance from
 matching members, or reinterpret native faults as Terrum checked failures.
 
@@ -133,7 +152,7 @@ decision to leave needed metadata permanently out of scope.
 
 | Subject | Recommended carrier and meaning |
 |---|---|
-| Raw pointer cell or pointee region | Proposed NativeOutput, candidate Contract kind `0x0012`: exact formal/depth, integer-result predicate and validity on each normal status. This does not create a checked init destination or an owner. |
+| Raw pointer cell or pointee region | Proposed NativeOutput, candidate Contract kind `0x0008`: exact formal/depth, integer-result predicate and validity on each normal status. This does not create a checked init destination or an owner. |
 | Checked Terrum initialization destination | Existing OutputState kind `0x0002` where its Boolean applicability is exact, plus the complete admitted output/place/publication codec. No raw-pointer alias or reserved flag replaces that codec. |
 | Responsible owning result/output | Complete ordinary ownership/transfer/cleanup and dependency records under the joint gate above. NativeOutput alone cannot transfer responsibility, synthesize an owner or choose its release operation. |
 
@@ -228,7 +247,7 @@ Dropped pointer backing at indirect calls, incomplete nested unsafe traversal
 and premature output publication are implementation defects wherever those
 facts already exist. Missing physical output/owner/phase carriers remain
 metadata gaps. The
-[native review partition](trrm-native-interop-metadata.md#review-feedback-defects-versus-contract-gaps)
+[native review partition](trrm-native-interop-metadata.md#implementation-gaps-versus-design-work)
 records that distinction without claiming old findings are current or fixed.
 An uninspected later diff is not acceptance evidence.
 

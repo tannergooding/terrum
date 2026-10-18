@@ -4,6 +4,9 @@ These documents define accepted target contracts. They are normative design
 references, not inventories of compiler support; see the
 [implementation summary](../implementation.md) for implemented boundaries.
 Unapproved alternatives belong in [proposals](../proposals/README.md).
+Acceptance is not pre-v1 immutability: proposals may recommend replacing these
+contracts, structures, and draft assignments under the
+[scope and authority rules](overview/conformance.md#scope).
 
 ## Scope and conformance
 

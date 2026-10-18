@@ -121,7 +121,9 @@ follow [dependencies and views](dependencies-and-views.md).
 Backing-only removes an own-storage alternative, not a source guard or the
 required close responsibility.
 Acquisition failure uses ordinary call/result/partial-initialization cleanup;
-no complete cursor exists on which to invoke Close.
+the caller does not invoke Close on a vacant acquisition result. Any complete
+cursor formed privately before failure retains its actual close and cleanup
+obligations with its responsible holder; failed publication does not erase them.
 
 For a direct cursor, stage the supplied value using ordinary copy/transfer
 rules and adopt that exact value into the header. A fresh owning result

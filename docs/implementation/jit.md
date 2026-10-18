@@ -30,7 +30,7 @@ result as the PE writer. It is a second artifact consumer, not a second
 instruction encoder, source interpreter or CIL/LLVM backend.
 Standalone `NativeJit.Execute` accepts direct source imports when every
 external declaration has a retained direct-import contract; it resolves those
-DLL names by absolute System32 path. Catalogued imports are not JIT bindings.
+DLL names by absolute System32 path.
 The graph-JIT root uses the same System32 path for direct imports while
 selected package imports resolve to staged provider DLLs. Neither path stages
 arbitrary raw-import DLLs.
@@ -63,8 +63,9 @@ rather than mandatory language limits.
 entry, function ranges/stack allocations, import displacements, and optional
 initialized data with explicit read-only/writable partitions. Artifact
 consumers patch RIP-relative references according to their own layout.
-`BoundProgram` is verified before encoding; raw addresses are not part of the
-source type system.
+`BoundProgram` is verified before encoding. Source raw data/function pointers
+retain their caller-unsafe, backing and code-lifetime obligations; a native
+address is not a checked reference or a lifetime extension.
 
 The JIT allocates private RW memory, writes text, import cells and unwind
 records, applies fixups, and changes text/metadata pages to RX. Immutable source

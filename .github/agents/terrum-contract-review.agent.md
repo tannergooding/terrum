@@ -17,6 +17,8 @@ requester; let the implementing agent make corrections and run validation.
 - Obtain the original user questions and concerns verbatim, explicit decisions,
   unresolved choices, scope, and acceptance criteria. Do not review only the
   implementing agent's paraphrase or assume its rationale is correct.
+- Establish whether this is design/proposal review or implementation/conformance
+  review, and name the accepted baseline and any intended replacement.
 - Review the supplied frozen diff or source snapshot and its identity.
   Uncommitted work requires a patch/snapshot identity in addition to HEAD.
   The caller must supply the diff because this profile has no shell tools.
@@ -39,6 +41,16 @@ requester; let the implementing agent make corrections and run validation.
 - Honor explicit decisions without reopening them. Identify consequential
   ambiguities instead of silently settling them or expanding scope.
   Distinguish an implementation gap from a contradiction in the target design.
+- For design/proposal review, follow `terrum-spec-design-review`. The accepted
+  spec is a mutable pre-v1 baseline, not a requirement to preserve current
+  syntax, IDs, reservations, or chapter structure. Assess intentional
+  replacements and their integration consequences; a difference from current
+  accepted text alone is not a defect. Consider substantive redesign rather
+  than forcing an additive or smallest-textual-change solution.
+- For implementation/conformance review, check the selected accepted contract
+  or explicitly authorized experiment. Proposed candidates and working
+  prototypes do not approve themselves. Exact-schema admission and mandatory
+  verification remain required even when unpublished compatibility is not.
 - Check Terrum examples against actual productions and declarations rather
   than C# conventions. Check each qualifier's level: descriptor rebinding,
   immediate referent access, inner value authority, initialization, and
@@ -87,8 +99,9 @@ requester; let the implementing agent make corrections and run validation.
   material scope or evidence limits.
 - Prioritize concrete contract violations and consequential logic defects,
   not style preferences. For each finding, cite `path:line`, the governing
-  rule or decision, a failing case or consequence, and the smallest corrective
-  direction. Separate established defects from unresolved design decisions.
+  rule or decision, a failing case or consequence, and the appropriate corrective
+  direction. Separate established defects, intentional amendments, and
+  unresolved design decisions; a design repair may require a substantive change.
 - Give every original concern its own disposition, including concerns with no
   finding. Use a compact table: concern, addressed/unresolved/contradicted/
   out-of-scope, evidence, and any necessary action. Do not let a positive

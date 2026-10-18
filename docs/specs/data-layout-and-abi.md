@@ -240,7 +240,7 @@ eligibility independently of a bounded compiler slice. The
 [registered source schemas](targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
 are specified; physical metadata encoding remains unassigned and no
 implementation support is implied. The
-[initial implementation direction](../implementation/layout-profiles.md#initial-public-fixed-layout-direction)
+[implemented source profile](../implementation/layout-profiles.md#implemented-public-fixed-layout-source-profile)
 does not add a standard target/Feature identity or narrow those target rules.
 
 Blittability/frozen representation does not initialize padding bytes, validate

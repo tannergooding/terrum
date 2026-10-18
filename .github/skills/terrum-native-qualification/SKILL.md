@@ -9,6 +9,11 @@ Follow `.github\copilot-instructions.md` and `docs\building.md`. Use standard
 developer builds, the existing NUnit runner, and applicable native probes.
 This skill does not add a build system or authorize interactive/hardware runs.
 Paths below are repository-relative.
+Qualification checks a deliberately selected contract and input, not the
+immutability of today's draft. Design-only amendments use
+`terrum-spec-design-review`; they do not require native execution merely to
+propose new schemas or assignments. Never report a static review as runtime
+evidence.
 
 ## Select the evidence required
 

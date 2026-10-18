@@ -4,6 +4,13 @@ These chapters give required outcomes for the cited contracts. They are not
 implementation support inventories or a claim that a compiler has passed them.
 Each case applies only with its stated declarations and admitted profile.
 
+Cases apply the cited accepted rules and, for encoded cases, the exact
+selected schema.
+[Proposed amendments](../../proposals/README.md) do not silently change that
+baseline. The [pre-v1 status](../overview/conformance.md#scope) permits reviewed
+replacement of unpublished rules and assignments; this corpus does not
+require their preservation in a later draft.
+
 | Chapter | Coverage |
 |---|---|
 | [Source input](source-input.md) | Strict UTF-8 boundary vectors, invalid-byte extents, signatures/preservation, UTF-16 coordinates, and already-decoded API distinctions |

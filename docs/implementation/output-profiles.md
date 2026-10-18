@@ -151,3 +151,47 @@ does not admit public generic exports or witnesses, output-free templates,
 fixed floating by-value parameters, formal-valued results, floating protocol
 results, symbolic floating operations, source-free TRRM, or scalar-frontend
 verification or emission.
+
+## Provisional TRRM output Bodies
+
+The current `ScalarInitOutput` writer/reader is a bounded experiment, not
+implementation of the accepted general output/place contract. It uses
+unregistered Feature `1` and a historical minimum-rule-revision interpretation;
+the writer requires revision `8`, while the reader also accepts revisions
+`1..7` with their narrower implementation rules. These are current reader
+behaviors, not compatibility promises or candidate standard allocations.
+Old Param mode `0x02` and retired operation numbers are not the current
+[registry](../specs/representation/registry.md); see the
+[encoding inventory](trrm-encoding-history.md).
+
+| Surface | Current bounded behavior |
+|---|---|
+| Types | `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, `float32`, `float64` values and scalar places; `void` or supported scalar results |
+| Output calls | Module-local initialization outputs; Boolean results conditionally publish, non-Boolean/void results require normal-return initialization |
+| General Bodies | One straight-line block or one direct Boolean-call split with two terminal arms; independently audited place state |
+| Places | Output formals then local places, exact types, vacant activation and initialization; entry/inherited state counts as use ordinal zero |
+| Operations | Existing admitted scalar values, comparisons, checked arithmetic/conversions, loads, initialization and local calls; no general place escape |
+| Failure | Existing Fail reason 1; no checked handling, ownership cleanup, exceptional output publication or general output forwarding |
+| Native scalar addresses | Revision 7 readonly `NoEscape` inputs; revision 8 writable result-correlated outputs and the bounded three-block unsafe scope |
+| Unsafe scope | Experimental opcode `0x2E` marks the one-block suffix or conditional entry and its terminal successors; not the accepted indexed region `0x06` |
+| Native correlation | Exact producing call, result and destination versions; direct zero comparisons or verified one-parameter predicates for `NonZero`/signed `NonNegative` |
+| Invalidation | Status/destination overwrite, another output call, or an unmodeled pointer write invalidates the bounded proof |
+
+The native path requires candidate NativeBoundaryContracts and
+RootlessNativeValues requirements. It admits initialized scalar backing and
+matching typed pointer formals, including direct-import and role-4 vtable
+calls. It does not admit fixed arrays, aggregate addresses, pointer memory
+operations, general pointer locals, arbitrary CFGs or a general reference ABI.
+
+Earlier supported revisions restrict referents to `int32` (1), add the other
+scalar referents (2), non-Boolean results (3), Boolean publication (4),
+output-call terminal splitting (5), no-output Boolean-call splitting (6),
+and readonly native scalar addresses (7). Existing support for these drafts
+does not require retaining them when the reviewed contract is implemented.
+
+`TrRmScalarInitOutputBodyReaderTests` and related executable reader/compiler
+cases exercise this experiment. Their presence is not a claim that they ran
+for this documentation change or use current normative bytes.
+The pending [output/place proposal](../proposals/trrm-output-parameters.md)
+and [joint composition](../proposals/trrm-output-failure-ownership.md) own
+the design work; the [gap inventory](conformance-gaps.md) owns compiler gates.

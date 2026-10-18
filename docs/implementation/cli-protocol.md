@@ -10,8 +10,8 @@ follows from that selection.
 
 The experimental check, tokens, tree, analyze, build and build-native-import
 commands distinguish inspection/build diagnostics from execution.
-Build-native-import compiles against the development Windows x64 import
-catalog; ordinary build does not enable those imports.
+Build-native-import opts into source-authored Windows x64 native imports;
+ordinary build does not enable those imports.
 These nonexecution commands return 0 on success, 1 for source/compilation
 diagnostics and 2 for usage/input/output failures. Execution workers instead
 return raw program status. Run-native currently supervises its native child

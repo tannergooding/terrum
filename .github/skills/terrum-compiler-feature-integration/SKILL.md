@@ -8,6 +8,10 @@ description: Implement or generalize Terrum compiler features end to end. Use wh
 Follow `.github\copilot-instructions.md`. This skill guides implementation
 within the authorized feature scope; it does not approve new language or
 metadata contracts. Paths below are repository-relative.
+Use `terrum-spec-design-review` when the task is to choose or revise that
+contract rather than implement a selected one. Current accepted syntax and
+assignments are not immutable; an implementation task must still identify
+the accepted baseline or explicitly authorized experiment it implements.
 
 ## Establish the contract and integration boundary
 
@@ -25,7 +29,9 @@ metadata contracts. Paths below are repository-relative.
 4. Keep a compact contract-to-test matrix in the conversation or session state.
    For each relevant layer, identify the carrier, producer, consumer,
    invariant, required changes, and regression evidence. Record deliberate
-   exclusions as support gaps; do not create a repository tracking document.
+   exclusions as support gaps. Keep temporary tracking in session state;
+   update a maintained repository conformance inventory when explicitly
+   requested, rather than treating this default as a prohibition.
 
 ## Map every affected surface
 

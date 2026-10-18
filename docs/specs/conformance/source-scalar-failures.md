@@ -114,7 +114,7 @@ allocation/OOM, async, native or physical-codec implementation.
 | SFAD-12 | Missing required constant opt-in/program/value support | No runtime fallback, published constant or implicit constructor authorization |
 | SFAD-13 | Missing actual event/runtime/helper dependency versus removed compiler-only use | Check the complete retained closure, not all historical imports |
 | SFAD-14 | NoThrow/Pure expectation justified only by the zero-data payload shape | Decline or require the actual complete proof/guarantee |
-| SFAD-15 | Registry, prior corpora and physical allocations | No new physical IDs/codecs or weakening of prior evidence |
+| SFAD-15 | Logical scalar-failure catalog is offered as physical registration | No physical IDs or codecs follow; complete selected encoding and support remain independently required |
 | SFAD-16 | Actual independent declaration/value/operation-site/handler/cause/phase codecs | Document-only: supplied logical layers are not source-free conformance |
 
 ## Evidence boundary

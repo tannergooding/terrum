@@ -14,7 +14,9 @@ The [unified registry](representation/registry.md) owns numeric allocations,
 operand shapes and admission status; the tables here project that registry.
 The [requirement and admission contract](representation/requirements-and-admission.md)
 owns artifact-schema versus Module-semantic scope and complete retained
-requirements. Its logical selection assigns no physical manifest or feature ID.
+requirements. The [Module manifest](representation/semantic-manifests.md)
+supplies the physical edition/Feature protocol; no extra capability IDs
+are registered.
 The [binding and replacement contract](representation/binding-and-replacement.md)
 owns selected-definition resolution and checked directional satisfaction of
 complete retained expectations; it does not enable missing physical features.
@@ -51,8 +53,9 @@ container.
 Field tables use `u8`, `u16`, `u32` and `u64` for fixed-width unsigned
 little-endian integers. Byte offsets are artifact-relative; lengths are byte
 counts unless stated otherwise. Numeric assignments below describe this
-approved current design. Numerical resource ceilings and future format-revision
-policy remain unspecified.
+approved current design. Numerical portable resource minima remain unassigned;
+the selected [format-version policy](representation/format-versioning.md)
+governs draft changes and released schema identities.
 
 ## Scope and conformance boundary
 
@@ -304,8 +307,9 @@ Other kinds reject, including `0xFF`, reserved for a future required
 indirection encoding, not defined or accepted here.
 
 The [candidate inline built-in type-word extension](../proposals/il-extensions.md#inline-built-in-type-reference)
-is not part of `(1, 0)`; its reserved kind rejects until a format revision
-adopts it. The fixed `u32` reference layouts do not imply it.
+is not part of the current schema; its reserved kind rejects until a reviewed
+schema amendment adopts it. A pre-release amendment need not change `(1, 0)`;
+the fixed `u32` reference layouts do not imply it.
 
 A contiguous range is `u32 firstRow, u32 count`; its empty encoding is
 `(0, 0)`, otherwise `firstRow` is nonzero, has a zero high byte, and the
@@ -1162,7 +1166,7 @@ or distinct unused type-map entries are accepted under
 [encoding canonicality](representation/encoding-canonicality.md).
 This does not waive invalid shapes, references, values or required support.
 
-Candidate unknown-data rules are:
+Unknown-data rules are:
 
 - Reject an unsupported format revision before interpreting sections.
 - Reject unknown required kinds and unknown kinds outside the nonsemantic
@@ -1184,8 +1188,9 @@ Candidate unknown-data rules are:
   A feature declaration cannot authorize behavior the reader does not
   implement.
 
-Kind-specific schemas for future optional extensions, reserved values, and
-feature declaration remain open. Optional extensions are limited to their
+Kind-specific schemas for future optional extensions, new reserved-value
+meanings and complete additional capability definitions remain open.
+Optional extensions are limited to their
 namespace's generic rewrite policy and, if reference-slotted, the permitted
 target selectors above; a consumer that interprets an extension must also
 validate its kind-specific payload.
@@ -1222,7 +1227,7 @@ following byte-level contracts:
 
 | Surface | Not yet specified |
 |---|---|
-| Encoding and revisions | Physical schema/rule manifests, required-feature identities and registered compatibility mappings. [Logical admission](representation/requirements-and-admission.md) fixes artifact-schema and Module-semantic scope; the current `(1, 0)` design still accepts only its exact agreed schema and is not released. |
+| Encoding and revisions | Released schema assignments, additional capability identities/definitions and explicit compatibility mappings remain unassigned. The format pair/exact draft agreement and physical Module governing-edition/Feature codec are selected; no additional schema selector or manifest is implied. |
 | Allocation | The current unified registry and family capacity are assigned. Extended operation/terminator envelopes, new feature IDs, wider constants and additional Body forms remain unassigned. |
 | Declarations | Encoding the accepted explicit `Blittable` commitment, resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
 | Constant generics | Exact nominal/carrier values, derived Transparent eligibility, formal/default relationships, validity/value-codec obligations and compatibility. Logical rules do not activate an existing scalar/Attr encoding. |
@@ -1230,4 +1235,4 @@ following byte-level contracts:
 | Patterns and handlers | Runtime captured-type evidence/constraints/code availability, qualified reference matching, live candidate/filter scopes, pending failure/causal replacement and post-inner-cleanup handler selection. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | [Resource accounting](representation/resource-accounting.md) assigns scopes, capacity/work/state recipes and explicit exhaustion; portable numerical minima remain unassigned. External resource/expanded codec recipes need separate adoption. Canonical widths/maps and ordinary noncanonical admission follow [encoding canonicality](representation/encoding-canonicality.md). |
-| Unknown data | Kind-specific extension schemas, reserved values and required-feature encoding; generic skip, remap and discard policies are assigned above. |
+| Unknown data | Kind-specific extension schemas and new reserved-value meanings; generic skip/remap/discard policies and the exact Feature row codec are already assigned. |

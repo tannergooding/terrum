@@ -17,5 +17,8 @@ project summaries from normative target contracts and unapproved proposals.
 | [Proposals](proposals/README.md) | Unapproved alternatives and decisions requiring review |
 
 Specifications define target behavior; implementation support is tracked
-separately. A proposal does not amend an accepted contract unless it is
-explicitly approved and incorporated into the relevant specification.
+separately. [Current acceptance is not stabilization](specs/overview/conformance.md):
+proposals may recommend replacing accepted rules, reorganizing contracts or
+reassigning draft IDs without preserving unpublished compatibility. A proposal
+does not amend an accepted contract unless it is explicitly approved and
+incorporated into the relevant specification.

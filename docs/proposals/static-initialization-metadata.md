@@ -74,8 +74,10 @@ the remaining decision is how the proposed records expose them to consumers.
 
 **Recommendation, still unapproved:** assign the following closed logical
 records and Body-operation forms to the first slice, without assigning wire
-IDs, opcode numbers or native handles. Use a new required schema/profile
-instead of overloading the current metadata flags or `(1, 0)` Body profile.
+IDs, opcode numbers or native handles. Extend the selected draft with required
+records and exact capability requirements rather than hiding semantics in
+current flags. This may retain `(1, 0)` under the draft versioning rules;
+it does not require a new on-wire selector or old-reader support.
 The accepted static-field identity is in the
 [metadata specification](../specs/il-metadata.md); `StaticField` below is only
 a candidate physical representation.
@@ -156,5 +158,21 @@ exact semantic-clause and verifier rules, and a runtime
 protocol implementing load-scoped identity, nonconcurrent admission,
 publication, failure, cleanup and unload. Cross-module initialization remains
 excluded until field identity and dependency obligations are defined. These
-blockers do not justify changing the accepted contract or borrowing host
-static-constructor behavior.
+blockers do not justify borrowing host static-constructor behavior or silently
+weakening the accepted contract. A deliberate redesign remains possible
+through an explicit amendment; current assignments are not immutable.
+
+## Integration and review boundary
+
+Prefer the distinct typed static-field/group model above over an instance
+FieldDef flag: group ownership, initialization-phase authority and load
+identity affect binding and execution, not just storage placement. Review the
+complete record/clause/operation allocation alongside native and generic
+metadata rather than reserving unrelated numbers independently.
+
+Amend the metadata static-field/access sections, logical-record inventory,
+registry, instruction operations and conformance cases together after approval.
+The source trigger rules need no amendment unless that review explicitly
+recommends one. Exact attribute identities, physical records, clause codecs
+and runtime lifecycle ABI remain blockers; see the
+[compiler conformance inventory](../implementation/conformance-gaps.md).

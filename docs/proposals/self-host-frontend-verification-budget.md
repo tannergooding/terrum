@@ -1,69 +1,70 @@
-# Self-host frontend verification-budget proposal
+# Self-host frontend verification budget
 
-**Status: deferred by decision; unapproved architecture option.**
-The scalar frontend composes the current single-function and complete-program
-projections under the unchanged shared 100,000-visit verification limit. This
-proposal does not change language semantics, the accepted source grammar,
-native ABI, or verification budget.
+**Status: split/phase handoff deferred by decision.** Prefer profiling and
+behavior-preserving reductions of repeated proof work. Reconsider a component
+boundary only if representative growth still reaches `TRM3016` after that
+work. This proposal does not raise a limit or waive mandatory verification.
 
-**Decision recorded:** keep a frontend split or phase handoff deferred.
-Prefer further caching and hot-spot analysis on real workloads; reconsider a
-verification boundary only if representative growth again reaches `TRM3016`
-after behavior-preserving repeated-work reductions.
+## Current mechanism and constraints
 
-## Current mechanism and evidence
+The [hosted verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs)
+has a 100,000-visit analysis limit. It is an implementation ceiling, not an
+accepted portable source/program minimum.
 
-The [shared verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs)
-caches state-independent feasibility, optional-presence and flow-effect facts
-by expression identity within a function. Flow-state clones share those facts;
-state-dependent results are not cached across different initialization states.
-Cache hits and recursive analysis remain charged to the existing visit budget.
+Per-function expression-identity caches share state-independent feasibility,
+optional-presence and flow-effect facts across flow-state clones. Cache hits
+and recursive work remain charged. Do not cache initialization-dependent
+results across states, functions, source revisions or rewritten trees.
 
-Outcome computation skips provably infeasible paths and avoids constructing
-states with no publication/cleanup consumer. Unknown expressions and unknown
-presence retain conservative analysis. Initialization-sensitive short-circuit
-and conditional expressions apply each preceding expression's outcome
-transfer before testing later operands; pruning cannot erase a possible
-publication, cleanup or vacancy effect.
+Prune only proved infeasible paths. Initialization-sensitive short-circuit
+and conditional analysis must apply preceding outcome transfers before
+testing later operands. Unknown feasibility/presence stays conservative;
+skipping work cannot erase a possible publication, vacancy, cleanup or
+exception effect. Avoid constructing unused states only when no consumer
+needs their facts.
 
-[Initialization regressions](../../tests/Terrum.CodeAnalysis.Tests/InitReferenceTests.cs)
-cover selected output publication and infeasible nested/conditional outputs
-under both runtime policies. [Value regressions](../../tests/Terrum.CodeAnalysis.Tests/ValueTests.cs)
-cover bounded deep Boolean analysis and explicit `TRM3016` exhaustion.
-These are correctness and resource-bound checks, not throughput benchmarks
-or a guarantee that every syntactically valid program fits the budget.
+The [initialization regressions](../../tests/Terrum.CodeAnalysis.Tests/InitReferenceTests.cs)
+and [value regressions](../../tests/Terrum.CodeAnalysis.Tests/ValueTests.cs)
+exercise correctness and explicit exhaustion. They are not throughput
+benchmarks or a guarantee that every syntactically valid program fits.
+The [composition inventory](../implementation/bootstrap-frontend-composition.md)
+owns current frontend support; historical suite totals and temporary limit
+experiments are not continuing qualification evidence.
 
-Use the [verifier history](https://github.com/tannergooding/terrum/commits/main/sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs)
-for implementation provenance. No persistent visit-count telemetry or aligned
-before/after timing benchmark is retained, so this proposal makes no measured
-speedup claim.
+## Alternatives
 
-For a future budget failure, profile the same representative source and record
-whether each run completes. Compare repeated-proof work and hot methods before
-changing the limit or considering a component boundary. An early budget
-failure is not a like-for-like throughput baseline.
+1. **Recommended now:** profile the same representative source and policy,
+   reduce redundant state-independent proof work, and preserve conservative
+   state-dependent transfer. This keeps one verification boundary.
+2. **Deferred:** partition independently meaningful, independently verified
+   components with an explicit handoff. Moving methods between files alone
+   does not split a verification unit, and splitting solely to reset a budget
+   is not an architecture justification.
+3. **Not selected:** raise the limit. A larger ceiling needs workload/resource
+   evidence; passing a larger fixture does not itself justify it.
 
-The bootstrap return-component selection later reproduced `TRM3016` in nine
-`CheckedExceptions` cases under both Debug and Release, even with the
-implementation ceiling temporarily at 100,500 visits. The published ceiling is
-100,000; the temporary implementation setting was out of sync and did not
-change the contract. The short-circuit verifier now computes left-side
-feasibility once before RHS analysis and reuses that result for the failure-edge
-gate and outcome merge; the implementation guard is again 100,000. The focused
-frontend PE integration passes all 18 cases under both policies in Debug and
-Release at that ceiling. The full return-component selection now passes all
-1,445 cases in both configurations at 100,000 visits, with no failures or skips.
+## Reconsideration and integration
 
-## Deferred option
+Before changing architecture, record representative inputs, configuration,
+runtime policy, final revision, completion/failure and repeated-work hot spots.
+An early budget failure is not a like-for-like throughput baseline. No aligned
+before/after timing evidence is claimed here.
 
-Do not split the frontend or add an internal phase handoff merely to bypass
-the verification budget. If representative frontend growth reaches `TRM3016` after
-hot-path identification and behavior-preserving repeated-work reductions,
-consider partitioning independently verified bounded components while
-retaining the existing limit per verification. Moving methods between files
-alone would not split a compilation/verification unit.
+A future split must preserve source association and diagnostics, projection
+facts, initialization/effects, AOT/JIT behavior and runtime policy. Reconstruct
+and verify handoff inputs rather than accepting producer facts as trusted.
+Retain code/backing/owner obligations across the boundary.
 
-Any future partition must preserve existing source diagnostics, projection
-facts, AOT/JIT output and runtime-policy behavior. Its handoff would remain an
-implementation detail of the hosted-verified components, not a language-level
-separate-compilation or module-ABI contract.
+Keep a private handoff separate from a language-level module ABI or standard
+TRRM schema. If it becomes a standardized artifact, apply the
+[persistence](../specs/representation/persistence.md) and
+[resource-accounting](../specs/representation/resource-accounting.md)
+contracts, including aggregate work; partitioning must not manufacture
+unaccounted root budgets.
+
+Reconsider only with a failing representative workload after repeated-work
+reductions, a diagnosed bottleneck, a useful component boundary and evidence
+covering final inputs. Acceptance would require equivalent observable
+diagnostics/results and negative initialization/cleanup cases under both
+policies, explicit resource exhaustion and measured work/latency where a
+performance claim is made. None of those requirements accepts a split now.

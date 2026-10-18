@@ -80,6 +80,6 @@ No fixture proves an arbitrary native image or private serializer correct.
 | IPOW-03 | Unpublished private alpha revision changes | No old-format reader or migration is required |
 | IPOW-04 | Private format receives a new extension or current version number | Not an adoption of independent serialized interchange |
 | IPOW-05 | Proposed promotion supplies only framing or known records | Still incomplete until required semantics/admission/rewrites and vectors are complete |
-| IPOW-06 | All four moved development guides retain their original substantive text | Verify exact relocation apart from status prefaces and relative-link rebasing |
+| IPOW-06 | Implementation references precisely document private framing and supported operations | Retain their implementation-specific status and canonical contract links; precision does not standardize the private format |
 | IPOW-07 | Independent normative `.trrm` producers/readers implement every claimed feature | Requires their complete codecs and independent production/consumption; document-only here |
 | IPOW-08 | Future public adoption of native package/set/graph bytes | Requires explicit complete schema and behavioral conformance; document-only here |

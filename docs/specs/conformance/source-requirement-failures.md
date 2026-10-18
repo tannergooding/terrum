@@ -152,5 +152,5 @@ They do not claim Terrum implementation or physical-codec conformance.
 | RFAD-10 | Local rule is treated as a wire/opcode/Feature allocation | Exact registry stays unchanged; no allocation follows |
 | RFAD-11 | Trusted consumer uses retained requirements selectively | No preliminary all-Body scan; complete required before-use gates remain |
 | RFAD-12 | Unrelated new default/type/constructor is added | Ordinary retained compatibility; neither universally breaking nor universally valid |
-| RFAD-13 | Accepted local-failure/source/native contracts are parent inputs | Preserve original exact records/tools/projections, not rewrite their hash gates |
+| RFAD-13 | Requirement defaults coexist with selected local-failure/source/native contracts | Retain each contract's identity, phase, ownership and boundary obligations; default selection supplies no shared unwind ABI or physical schema |
 | RFAD-14 | Complete independent serialized constructor/default/handler execution | Requires actual producers/readers/runtime; logical unit assigns no codec |

@@ -336,7 +336,9 @@ Private proof, specialization or producer trust cannot change source binding.
 
 Logical approval assigns no capability bit, guard token layout, reservation
 table, proof certificate, feature number, opcode or native helper ABI.
-Physical records, complete concurrent observations, collector-aware crossings,
-primitive/library catalogs and target profiles remain independently admitted.
+The [concurrent-execution rules](concurrent-executions.md) are selected;
+compiler/runtime and target conformance still require evidence. Physical
+records, collector-aware crossings, concrete primitive/library catalogs and
+target profiles remain independently admitted.
 [Conformance cases](../conformance/source-sharing-and-handoff.md) distinguish
 finite supplied-fact protocol evidence from source/runtime implementation proof.

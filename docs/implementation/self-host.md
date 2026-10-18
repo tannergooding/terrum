@@ -3,11 +3,12 @@
 These files are parallel design candidates, not a bootstrapped compiler.
 The approved [source grammar](../specs/grammar-spec.md) defines the language
 target, not the execution status of these candidates or approval of their
-sketched library APIs. The unlinked `TokenCursor` candidate uses `init ref<Token>`
+sketched library APIs. The compilation-local `TokenCursor` uses `init ref<Token>`
 for both sequential and indexed reads because exhaustion and out-of-range
-results leave their destinations vacant; this narrow migration does not settle
-the general `out`-to-`init ref<T>` migration.
-They are not linked into the C# implementation. The native profile executes
+results leave their destinations vacant. Its
+[accepted bounded view contract](../proposals/span-backed-token-cursor.md#accepted-bounded-exception)
+does not establish general view representation or persisted captures.
+These components do not replace the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token
 scanner; a separate non-persisted component runner exercises `TokenCursor`.
 The hosted `frontend-component` also composes `WideIntegerFacts` and
@@ -32,14 +33,17 @@ these helper exports are test-only. The build also emits a separate
 provisional `terrum-compiler-primitives-source-grant.dll` from
 `CharacterFacts`, `SourceCodeUnit`, `SourceLineCount`, `SourceLineEnd`,
 `CharacterLiteralPacked`, `CharacterLiteralScalar`, `HexDigitValue`,
-`BasedIntegerFloatLiteral`, `HexFloatLiteral`, `SourceRangeValidation`,
+`BasedIntegerFloatLiteral`, `HexFloatLiteral`, `DecimalFloatLiteral`,
+`SourceRangeValidation`,
 `SourceTextLength`, `SourceOffset`, `SourcePosition`, `StringEscapePacked`,
 `StringLiteralEncodedLength`, `StringNameRowByteLength`, `StringLiteralScalarAt`,
 `StringLiteralScalarCount`,
 `WideIntegerFacts`, `SourceIntegerParsing`,
 `Utf16CodeUnits` and `Utf16Scalar`,
 with a hash-bound export manifest; it does not change the source-free
-compiler-primitives DLL or establish a stable ABI.
+compiler-primitives DLL or establish a stable ABI. Its
+[native source-grant boundary](../proposals/native-source-grant-library.md)
+remains deferred, including promotion of its input/result and failure contracts.
 This maintained native
 compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
 `Terrum.CodeAnalysis.IsAsciiDigit`,
@@ -161,9 +165,10 @@ DLL checks cover the exact-rounding corpus and a maximum-length source grant.
 The tracked native ABI probe verifies source-context forwarding, successful
 owner cleanup in both runtime policies, and checked unwinding and allocation
 failure without a live owner. Allocation failure remains a native checked or
-fail-fast failure, distinct from malformed input. The scalar frontend still
-compiles the helper into its semantic-module component, and this does not move
-verification or emission out of the hosted implementation. The host test
+fail-fast failure, distinct from malformed input. This prototype evidence does
+not approve unwinding across an ordinary foreign boundary. The scalar frontend
+still compiles the helper into its semantic-module component, and this does not
+move verification or emission out of the hosted implementation. The host test
 runner still orchestrates compilation and assertions in C#.
 `ComponentTestRunner.terrum` is a bounded Terrum entry harness composing the
 `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `IntegerFacts`, `Token`,
@@ -175,190 +180,194 @@ bounded `ManagedTokenChain`, `WideIntegerFacts`, `IntegerFormatting`,
 `FloatingFormatConversion`, `FloatingNegation`, `FloatingIntegerConversion`,
 and `BitOperations` module tests; it does not provide general test discovery or
 replace the host runner.
+
+## Scalar frontend and interchange
+
 The hosted [TRRM scalar pipeline](../implementation.md#executable-trrm-scalar-interchange)
-emits approved metadata and compact-linear/indexed Bodies and loads them for
-shared native execution without producer source. It supports bounded branches,
-switches, loops, integer operations and module-local scalar calls; non-nearest transfers
-use scalar routing codes and designated single-exit indexed regions. This
-source-free path remains fail-fast-only. The separate native scalar frontend
-currently supports scalar/void functions, initialized scalar locals, structured
-branches and loops, named loop transfers, bounded `switch` statements over
-`int32`, `uint32`, `int64`, `uint64`, `bool` or `char16` with distinct constant
-arms and a final `_` arm, standalone
-requirements/discards, and selected function-effect contracts. Switch arm
-bodies contain only already-supported statements; guards, patterns,
-fallthrough forms, and missing or misplaced defaults reject. The v85
-projection carries named by-value and scalar `out`/`init ref<T>` arguments
-through bounded scalar self/global calls while preserving source evaluation
-order; overload selection remains unsupported. V85 is the only produced and
-accepted tag for both projection families, every complete-program frame and
-diagnostic records. Exact layouts
-and audits are in the
-[native profile](../implementation/native.md) and
-[implementation reference](../implementation.md). General attributes,
-binding and broader call forms remain outside the frontend's subset.
-Complete-program projections also resolve up to eleven top-level internal,
-non-generic aliases to scalar types in function return, parameter and local
-type positions, including forward chains. The source reader independently
-resolves aliases from the original text. Duplicate, unresolved, cyclic,
-public, attributed and generic aliases reject. The hosted separate
-type/function name spaces are retained, and alias names are not explicit
-conversion-call targets. Rejected aliases report their offending token span.
-This preserves the hosted verifier/emitter boundary and does not add aliases
-to source-free TRRM.
-Complete-program v85 also carries switch statement kinds 38/39 and hidden
-selector local flag 8 in previously invalid record values; frame layouts and
-existing record meanings do not change. The reader accepts switch records only
-after independently matching them to source and lowers them to ordered hosted
-conditionals that evaluate the selector once. Older readers reject these
-unknown records. Switch remains complete-program-only; verification and
-emission remain hosted, and bootstrap support is not claimed. CLI integration
-tests compare matching and default-arm selection for all six selector types
-with hosted conditional equivalents at signed extrema, unsigned maxima, both
-Boolean values, and surrogate/U+FFFF code-unit boundaries under both runtime
-policies, and confirm duplicate constant-label rejection for all six types.
-The bounded Terrum-authored scalar frontend now projects same-format
-`float32`/`float64` unary signs, target-typed decimal and hexadecimal floating
-literals, based integer literals directly targeting either format, `+`, `-`,
-`*`, `/` and IEEE comparisons. Its Terrum-authored conversion helpers populate
-positive literal-leaf bits; the hosted reader validates token spans and those
-bits independently against the hosted parser, then consumes the validated
-payloads. It also projects conversions between the floating formats and from
-`int32`, `uint32`, `int64` and `uint64` to either format. Explicit
-`char16`-to-floating conversion is accepted as unsigned code-unit conversion
-and is provisionally projected through v85 outside the validated frontend
-subset; verification and emission remain hosted. Float-to-integer conversions are
-provisionally projected through v85 for the eight accepted checked pairs;
-verification and emission remain hosted. The unreleased `(1, 0)` TRRM draft
-accepts same-format floating comparisons with opcode `0x19` and exact-bit
-`ConstBits`; this does not promise post-release compatibility. Explicit
-conversion between `float32` and `float64` is accepted in the unreleased draft
-under `FloatConvert` opcode `0x1A`, without a post-release compatibility
-promise. The draft also accepts `IntToFloat` opcode `0x1B` for the eight
-`int32`/`uint32`/`int64`/`uint64` to `float32`/`float64` conversions, with
-nearest/ties-to-even target-format rounding and no post-release compatibility
-promise.
-The standalone `FloatingFormatConversion` helper also converts raw bits
-between `float32` and `float64` with hosted nearest/ties-to-even parity for
-finite values. NaN payload bits are not promised; the helper remains internal
-and does not promise released-format compatibility.
-The draft also accepts `FloatNegate` opcode `0x1C` for same-format
-`float32`/`float64` values, toggling only the sign bit and preserving all other
-bits, including NaN payloads; this makes no post-release compatibility promise.
-The standalone `FloatingNegation` helper remains internal and does not define
-a public negation API or promise released-format compatibility.
-The draft also accepts `FloatBinary` opcode `0x1D` for same-format
-`float32`/`float64` addition, subtraction, multiplication and division. NaN
-results retain only their NaN classification; sign and payload are
-unspecified, and input-NaN propagation is preferred when practical. This
-draft decision makes no post-release compatibility promise.
-The unreleased `(1, 0)` TRRM draft accepts `FloatToInteger` opcode `0x1F` for
-the eight checked pairs, with fail-fast overflow behavior; this does not
-promise post-release compatibility.
-Remainder and mixed-format arithmetic remain unsupported there.
-The standalone `FloatingIntegerConversion` helper implements raw-bit
-float-to-integer conversion internally and is checked against hosted conversion
-behavior; it is an internal helper, not a public conversion API.
-The unreleased `(1, 0)` TRRM draft accepts `Char16ToFloat` opcode `0x1E` for
-the two explicit pairs, with unsigned code-unit semantics and no
-post-release compatibility promise.
-The bounded scalar frontend candidate also provisionally projects this
-conversion. The hosted binder and emitter treat a code unit as an unsigned
-numeric value.
-Both current v85 projections carry
-scalar non-Boolean/void `init ref<T>` declarations, including `float32` and
-`float64`; definite-publication
-verification and emission remain hosted. V85 includes
-source-audited caller-unsafe callable declarations and explicit unsafe-block
-call authorization and source-audited `unsafe(expr)` call-site scopes;
-v85 maps named by-value and scalar output call arguments to formal parameters
-without changing source-order evaluation. Their verifier and emitter also
-remain hosted. Library integration tests compare both caller-unsafe scope
-forms byte-for-byte with hosted builds and execute the exported safe wrapper
-under both runtime policies; unscoped calls retain the hosted `TRM3028`
-diagnostic and reject without replacing an existing library artifact.
-The single-function buffer also audits self-call authorization against enclosing
-unsafe scopes. Both current projections
-source-audit `is init` tests for named scalar locals and parameters. Verification
-and emission remain hosted; this projection does not make the frontend a
-standalone compiler.
+uses compact-linear/indexed development encodings and the shared native
+verifier/emitter without producer source. Its supported branches, switches,
+loops, scalar operations and module-local calls remain a separate fail-fast
+execution profile. Non-nearest transfers use scalar routing codes and
+designated single-exit indexed regions. Indexed `do`/`for` preserves post-test
+ordering, one-time initialization and the required iterator/condition on
+continue; acyclic loops without a reachable backedge remain outside that
+emitter. Audited equal-width reinterpretations preserve source `int32`
+checked-count semantics in its `uint32` bridge.
 
-Persisted TRRM admits caller-unsafe calls only inside structurally validated
-lexical unsafe regions in compact-indexed fail-fast Bodies under the accepted
-bounded contract; these regions grant no cleanup, unwind or lifetime
-authority, and `unsafe(expr)`, compact-linear calls and unsafe members remain
-unsupported.
+The [development encoding inventory](trrm-encoding-history.md) distinguishes
+current standard assignments from the executable prototype's overlapping
+floating bytes. The [output inventory](output-profiles.md#provisional-trrm-output-bodies)
+records the separate scoped-unsafe `0x2E` experiment, not an accepted standard
+instruction or persistence contract. Floating helper parity is not proof of
+unified-registry conformance. Those byte assignments must not be inferred from
+the component table below.
 
-Initialized six-primitive locals in lexical blocks, branches and loops preserve
-scope visibility, outer mutations and per-iteration initialization through
-existing indexed values, without adding executable lexical regions or places.
-Indexed `do`/`for` emission preserves post-test ordering and one-time header
-initialization. Normal completion or `continue` targeting a `for` reaches its
-iterator once; `continue` targeting a `do` reaches its condition. Acyclic loops
-without a reachable
-backedge remain outside this emitter; no synthetic edge or wire revision is added.
-Its `uint32` checked-count instructions use audited equal-width bit
-reinterpretations to preserve the source's `int32` count semantics.
-It is implemented in C#,
-supports fail-fast only, and does not make these broader Terrum compiler
-candidates self-hosting or change their provisional frontend projections.
-Current scanner behavior and record shapes are specified in the
-[scanner contract](../scanner.md); hosted parser and native projection
-boundaries are in the [implementation reference](../implementation.md).
-Scanner-10/schema-10 appends `DotDot`, `DotDotCaret`, and `QuestionDot` token
-kinds 104–106 after Scanner-9/schema-9 added `CharacterLiteral` kind 103.
-Scanner-8/schema-8 diagnostic identities 11/12 for invalid and unsupported
-maximal runs remain unchanged. These punctuation tokens do not imply parser
-consumption or binding in the native scalar frontend. The hosted parser and
-binder consume constant and dynamic `^offset` bounds for compiler-supplied
-host-buffer indexing and dynamic absolute or end-relative `..`/`..^` ranges for
-readonly `OwnedInt32Buffer` lexical views;
-`?.` remains token-only. Hosted
-generic closers and optional suffixes require parser consumption; native
-scalar spacing permits only the `init ref<T>` parameter delimiters, not
-general generic type contexts. Raw buffers have no schema marker and current
-adapters interpret their records only with current identities and shapes; no
-historical-schema reader is retained. Scanner,
-projection and ABI formats are distinct. Projection tags are alpha
-implementation/validation details, not roadmap or product versions. Both scalar
-frontend readers reject every v1–v84 tag; no obsolete reader support is retained.
-V85 covers the existing compact expression and tree/statement layouts without
-changing either buffer layout. Current producers use both layouts, so neither
-is a historical comparison format. Every rebuild uses v85, independent of source
-features; readers have no historical selectors or per-feature version gates.
-Progress does not require a version bump per
-increment; a preview version, if any, is decided explicitly when shipping.
-V85 uses a separate 4,284-word
-multi-function buffer alongside the 392-word single-function buffer. It admits
-void-target calls as direct expression-statement roots.
+The separate Terrum-authored scalar frontend projects scalar/void functions,
+initialized scalar locals, structured branches/loops, named loop transfers,
+requirements/discards and selected function effects. Complete-program switch
+supports `int32`, `uint32`, `int64`, `uint64`, `bool` and `char16` selectors,
+distinct constant arms and a final `_` arm; guards, patterns, fallthrough and
+missing/misplaced defaults reject. Source-audited switch records evaluate the
+selector once; cleanup-contained transfers additionally need the
+[finite dispatcher/counting proof](../proposals/scalar-frontend-cleanup-switch-transfer.md).
+Verification and emission remain hosted.
 
-The native scalar frontend remains a bounded projection, not a standalone
-compiler: it shares the hosted verifier/emitter and is limited to 16K source
-units and 64 tokens per snapshot, with 8 total named/hidden local identities,
-12 statement records, 32 expression nodes and 3 parameters per function.
-A maximum-length program with trailing trivia is compared byte-for-byte with
-the hosted build under both runtime policies, and the next source unit is
-rejected by the CLI before artifact publication and by the single- and
-complete-program projection readers; this remains projection parity, not an
-independent-verification or bootstrap claim.
-V85 inventories top-level global declarations before parsing bodies, resolves
-direct scalar-returning calls in declaration order regardless of source order,
-and rejects duplicate normalized names, local/parameter shadowing at call sites,
-and mismatched argument counts/types. Its ten-function capacity follows from
-the existing token bound: even an empty void function needs six tokens, and
-one token is reserved for EOF. Functions may have zero through three scalar
-parameters, including the existing scalar `out` and `init ref<T>` modes with
-matching explicit or declared destinations. Void callers may invoke scalar
-callees. Calls to void functions are admitted only as direct expression-statement roots,
-including supported `for` clauses;
-void calls remain invalid in value contexts. V85 admits the existing void-only
-`[DoesNotReturn]` contract and accounts for its continuation effect at direct
-call-statement roots. Older tags are rejected even when their payloads would
-otherwise describe an accepted source shape; tests use current-tag fixtures
-and explicit obsolete-tag rejection.
-The bounded generic, ownership, initialization
-and constant-evaluation contracts are detailed in the
-[implementation reference](../implementation.md);
+Complete programs inventory declarations in the supported global or namespace
+scopes before bodies, resolving direct forward/self/mutual calls independently
+of declaration order. Duplicate normalized names, call-site local/parameter
+shadowing and mismatched argument counts/types reject. Supported namespace
+forms are one file-scoped namespace, one block, repeated flat blocks of the
+same qualified identity, or a single nested-block chain of at most eight
+levels with declarations only in its terminal leaf. Up to twelve internal
+nongeneric scalar aliases resolve return/parameter/local types, including
+forward chains; the original source is independently audited. Duplicate,
+unresolved, cyclic, public, attributed and generic aliases reject. Alias names
+are not explicit conversion-call targets. Same-leaf alias support is narrower
+than accepted enclosing-namespace lookup, not a new lookup rule. Imports,
+overloads, arbitrary namespace mixtures and broader call forms remain outside
+this frontend.
+
+Named by-value and scalar `out`/`init ref<T>` arguments preserve source
+evaluation order and explicit/declared destinations. Both floating output
+types and normal-return publication for non-Boolean or void results are
+supported; definite publication remains a hosted proof. Void callers can invoke
+scalar callees; void calls are direct statement roots, including supported
+`for` clauses, never values.
+The void-only `[DoesNotReturn]` effect is checked at direct call-statement
+roots. Both current projection families source-audit caller-unsafe declarations,
+unsafe blocks/expressions, named argument mappings and scalar `is init`.
+Unscoped calls retain `TRM3028`; single-function self calls are also checked.
+These facts do not make either projection an independent compiler.
+
+The frontend projects same-format `float32`/`float64` signs, target-typed
+decimal/hexadecimal literals, based integers targeting either format, `+`,
+`-`, `*`, `/` and IEEE comparisons. Authored conversion helpers supply positive
+literal bits; the host audits their original token spans and bits against its
+parser. It projects both floating-format conversions and the eight
+32-/64-bit integer-to-floating conversions. The eight checked floating-to-integer
+pairs remain provisional; explicit unsigned-code-unit `char16`-to-floating
+projection also remains provisional outside the validated frontend subset.
+Raw-bit helper tests below do not widen those source/profile boundaries.
+General attributes, references, callable values, typed catches, filters and
+unproved static proofs remain unsupported.
+
+## Projection identities and resources
+
+The current scanner is `scanner-10`/schema 10, with `CharacterLiteral` kind 103
+and `DotDot`, `DotDotCaret`, `QuestionDot` kinds 104–106. Diagnostics 11/12
+describe invalid/unsupported maximal punctuation runs. Token recognition is
+not parser/binder support: hosted bounded indexing/ranges consume `^`,
+`..`/`..^`, while `?.` remains token-only. Native scalar spacing admits only
+the supported `init ref<T>` delimiters, not general generic contexts.
+Raw scanner buffers carry no historical-schema marker or reader selection.
+
+Projection tags are private validation details, separate from scanner schema,
+semantic-module revisions and native ABI identity:
+
+| Surface | Current writer and reader |
+|---|---|
+| Standalone `Frontend` result/diagnostic | v87; compact-expression and tree/statement layouts are both currently produced |
+| Complete `FrontendProgram` | v88 outer header and every function body; ordinary host reading requires zero `Frontend` scratch |
+| Decoded complete summary in `Frontend` | v88; the Terrum reader requires a completed v88 program and overwrites the zero scratch, not the program |
+
+Other projection tags reject. An all-zero program buffer permits ordinary
+host reading of a standalone result/diagnostic; the persisted summary adapter
+requires complete v88 success and cannot use that fallback. No unpublished
+assignment or historical reader is a compatibility obligation.
+
+| Resource | Current implementation bound |
+|---|---|
+| Source | 16,384 UTF-16 code units; not a language/full-file limit |
+| Functions/aliases | 32 complete-program frames; 12 scalar aliases in the admitted scope |
+| Parameters | Up to three standalone, four complete-program scalar parameters, including supported output modes |
+| Per function | 8 named/hidden locals, 12 statements, 64 expression nodes, 16 expression-recursion levels, 6 structural levels |
+| `Frontend` | 2,274 words: standalone output or complete-program scratch/summary |
+| Complete frame | 4 header + 712 body + 64 per-node call-target words = 780 words |
+| `FrontendProgram` | 4 + 32 * 780 + 61 temporary alias words = 25,025 words; unused frames/tail zero at publication |
+| Summary | Tag/status words, 32 seven-word descriptors, then 2,048 per-node call-target words starting at 226; every unused word checked |
+
+Nodes 0–31 use the inline bank and 32–63 the overflow bank. Inventory and
+per-function parsing borrow an indexed `Span<Token>` synchronously and retain
+scalar positions; function windows add a synthetic EOF, whereas standalone
+fallback uses the scanner's real EOF. There is no separate 64-token
+snapshot/function gate in this path. Snapshot backing stays live through
+inventory, parser retries and fallback, without a managed-chain copy/rescan.
+
+The separately fingerprinted, unapproved
+[summary invocation profiles](../proposals/scalar-frontend-invocation-profile.md)
+both have twelve buffers, but select 64 or at most 16,385 total tokens including
+real EOF. Their decoder token-end limits are 63 and source-derived,
+respectively. Function/node limits are independent; ten short functions
+fitting profile 1 do not establish coverage of all 32 frames.
+The [composition inventory](bootstrap-frontend-composition.md) records exact
+publication/resource combinations, direct-source bootstrap support and the
+known fourth-call-child audit mismatch. The
+[consolidated proposal](../proposals/bootstrap-frontend-profiles.md) owns pending
+support decisions, not this inventory.
+
+Capacity definitions are in
+[`ScalarFrontendHost`](../../sources/Terrum.CodeAnalysis/Lexing/ScalarFrontendHost.cs),
+[complete-program layout](../../sources/Terrum.CodeAnalysis/Lexing/ScalarFrontendHost.Program.cs)
+and [invocation identity/audit](../../sources/Terrum.CodeAnalysis/Lexing/ScalarFrontendHost.Invocation.cs);
+the [complete-program fixtures](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
+assert 2,274/712/780/61/25,025 and exercise the distinct token profiles.
+
+## Private semantic-module revisions
+
+These are private structured-IR revisions, **not** TRRM `(major, minor)` or
+v87/v88 projection tags. The writer selects from retained features; it does not
+always emit the highest revision understood by the reader.
+
+| Retained facts, without an overriding native feature | Writer selection |
+|---|---|
+| Scalar, source-only requirement or `scanner-10` profile without private span/fixed-storage facts | 76 |
+| Explicit fixed-storage commitments without private span/frontend-profile facts | 78 |
+| Private span IR or scalar-frontend summary-profile requirement without fixed-storage facts | 77 |
+| That private span/profile schema combined with explicit fixed-storage commitments | 81 |
+
+Source dependence or scanner binding alone does not select revision 77.
+For example, `[Blittable]` SourceRange/Token metadata can select fixed-layout
+revision 78; the full private-span/frontend fixtures combine those commitments
+with span/profile facts and write **81**. The
+[private-span replacement fixture](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.PrivateSpans.cs)
+asserts provider 81 and a separate `scanner-10` scalar consumer **76**; the
+[complete frontend fixtures](../../tests/Terrum.CodeAnalysis.Tests/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
+assert producer 81 for both invocation identities. A provider's revision does
+not automatically become its scalar consumer's revision.
+
+Native facts have separate writer selections: direct imports 79, parameter
+contracts 80, function-pointer signatures 82, typed pointers 83, vtable
+metadata 86 (87 with nonempty outputs). This vtable selection applies to any
+local or imported vtable method, regardless of vptr offset or expected-binding
+use. Native-callable entry names subsequently select 88. Revisions 84/85 remain
+admitted historical reader schemas, not current writer selections. Thus a
+combined native schema may carry span/fixed-layout facts under its selected
+revision instead of 81; these cases are not added to the frontend invocation
+profile by reader capability alone.
+
+`ReadModuleHeader` explicitly admits revisions **76–88**, with **88** the
+current maximum, then checks each exact schema and feature combination.
+The private-span gate admits 77, 79, 80 and 81–88; 76/78 remain span-free.
+Header acceptance is not arbitrary payload acceptance or a decoder fallback.
+Private roles/layouts, invocation requirements, backing, staged arguments,
+initialization, owner liveness and cleanup are revalidated after read/link.
+Public/imported/exported span signatures, returned spans and persisted cursor
+captures remain outside the
+[unapproved private-span slice](../proposals/token-span-semantic-module.md).
+
+The exact selections and gates are in
+[`ModuleCompiler.Write`/`ReadModuleHeader`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
+[`SelectFixedLayoutRevision`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.FixedLayout.cs)
+and [private-span validation](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.TokenSpans.cs).
+Only [TRRM](../specs/representation/persistence.md) is normative serialized
+semantic interchange. Neither accepting these private revisions nor executing
+their bounded components approves the source-grant, scanner or frontend
+proposals.
+
+## Hosted integration and commands
+
+The bounded generic, ownership, initialization and constant-evaluation
+contracts are detailed in the [implementation reference](../implementation.md);
 candidate library declarations do not become executable APIs by appearing here.
 
 Host fixtures retain syntax round trips and add native execution of
@@ -438,12 +447,12 @@ JIT-executes the same bounded entry without writing an image. Like hosted
 supervise this in-process native command with a deadline.
 The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
-Two hundred and thirty-seven shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
+Shared scalar/conditional/Boolean/integer-literal fixtures compare DLL output from
 the hosted and Terrum-authored frontend paths under both runtime policies;
 both paths still use the hosted native emitter.
 The bounded parameter/literal operands accept grouping inside or outside
 unary `+`/`-`; decimal signed minima still require the sign directly
-on the contextual literal. The compact expression layout retained by v85
+on the contextual literal. The current standalone compact expression layout
 supports grouped signed-minus literals, grouped Boolean negation of
 parameter/literal binaries and numeric comparisons with literal operands.
 Grouped integer binaries support unary `~`, unary `+` and checked `-`.
@@ -453,9 +462,12 @@ double negation and complement over complemented integer binaries.
 A third named parameter uses a disjoint operation offset for its
 parameter/literal expressions. These compact encodings do not represent
 arbitrary nested expressions; bounded tree records cover the broader subset.
-Thirty-one bounded `int32 Main()` fixtures likewise emit byte-identical Windows
-executables and run under both policies; this does not establish an independent
-native emitter or compiler self-build.
+Bounded `int32 Main()` fixtures likewise compare Windows executable output
+and execute under both policies. These unchanged-corpus comparisons do not
+freeze unpublished bytes/readers or establish an independent native emitter
+or compiler self-build.
+
+## Component inventory
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
@@ -464,13 +476,13 @@ native emitter or compiler self-build.
 | [IntegerMath](../../sources/self-host/IntegerMath.terrum) | Internal helpers cover accepted `Abs`/`Min`/`Max`/`Clamp` selection behavior plus candidate `TryAbs`, `Sign`, exact widened `int32` multiplication and signed-input GCD returning unsigned magnitudes | AOT/JIT and independent-module boundaries include signed minima, failed `TryAbs` vacancy/reuse, reversed clamp rejection and full-magnitude GCD; persisted semantic-module JIT compares candidate operations against integer oracles across 858 boundary cases under both policies, including signed-minimum magnitude and failed-output checks; the internal Windows x64 fail-fast DLL directly invokes all fifteen functions for valid contracts, checks `TryAbs` failure preservation/canaries, and compares GCD with BigInteger; the Terrum `ComponentTestRunner` also exercises representative `int32`/`int64` boundaries; tuple-returning `DivRem`, public declarations and conversion witnesses remain out of scope |
 | [Float32MathSelection](../../sources/self-host/Float32MathSelection.terrum) | Internal implementation of the accepted `float32` absolute-value, numeric min/max, and clamp selection behavior; direct primitive members and generic-interface access are not implemented | AOT/JIT and independent-module tests check NaN results, infinities, zero-sign selection and clamp validation order; Windows x64 internal DLL bit-carrier calls check finite values, subnormals, adjacent representations, infinities, signed zeros, and NaN classification; payload/signaling/status effects remain open, and this is not a primitive API or standard C floating ABI |
 | [Float64MathSelection](../../sources/self-host/Float64MathSelection.terrum) | Internal implementation of the accepted `float64` absolute-value, numeric min/max, and clamp selection behavior; direct primitive members and generic-interface access are not implemented | AOT/JIT and independent-module tests check NaN results, infinities, zero-sign selection and clamp validation order; Windows x64 internal DLL bit-carrier calls check finite values, subnormals, adjacent representations, infinities, signed zeros, and NaN classification; payload/signaling/status effects remain open, and this is not a primitive API or standard C floating ABI |
-| [IntegerFloatConversion](../../sources/self-host/IntegerFloatConversion.terrum) | Internal exact raw-bit conversion from signed/unsigned 32-/64-bit integers to `float32` and `float64` | Semantic-module JIT compares all eight conversions with hosted target-format results under both policies, covering signed extrema, both precision-tie directions, sticky bits and deterministic values; the independent `ComponentTestRunner` also executes boundary cases under AOT/JIT and both policies; the Windows x64 internal DLL directly invokes all eight helpers with integer carriers against hosted conversions; draft-only TRRM opcode `0x1B` is accepted, but this helper does not define a public conversion API or promise released-format compatibility |
-| [Char16FloatConversion](../../sources/self-host/Char16FloatConversion.terrum) | Internal raw-bit conversion of `char16` as an unsigned UTF-16 code-unit value, composed from the existing `uint32` conversions | Semantic-module JIT exhausts all 65,536 code units for both formats under both policies against independently constructed exact encodings; the independent `ComponentTestRunner` repeats the exhaustive check under AOT/JIT and both policies; hosted native-emitter tests and the Windows x64 internal DLL exhaust the same domain; language eligibility and draft-only TRRM opcode `0x1E` are accepted, but this helper remains internal and does not promise released-format compatibility |
-| [FloatingComparison](../../sources/self-host/FloatingComparison.terrum) | Internal raw-bit `float32`/`float64` ordering with IEEE equality, inequality and relational predicates; NaNs are unordered and signed zeros compare equal | Semantic-module JIT compares boundary cross-products and deterministic raw-bit pairs against hosted operators under both policies; the independent `ComponentTestRunner` checks signed zero, infinities and NaNs under AOT/JIT and both policies; the Windows x64 internal DLL directly exercises all twelve predicates with integer carriers against hosted operators; draft-only opcode `0x19` and exact-bit constants are accepted, but this helper remains internal and makes no released-format compatibility promise |
-| [FloatingArithmetic](../../sources/self-host/FloatingArithmetic.terrum) | Internal raw-bit `float32`/`float64` addition, subtraction, multiplication and division with nearest/ties-to-even rounding, gradual underflow and unspecified arithmetic-NaN sign/payload | Semantic-module JIT compares finite boundary pairs and deterministic raw-bit inputs against the controlled hosted emitter under both policies; the independent `ComponentTestRunner` covers precision ties, subnormal transitions, infinities, NaN classification and practical input-payload propagation under AOT/JIT and both policies; the Windows x64 internal DLL checks finite outputs exactly and NaN results by classification; draft-only TRRM opcode `0x1D` is accepted, but this helper is internal and makes no released-format compatibility promise |
-| [FloatingFormatConversion](../../sources/self-host/FloatingFormatConversion.terrum) | Internal raw-bit widening and narrowing between `float32` and `float64`; finite narrowing rounds once to nearest/ties-even with gradual underflow and overflow to infinity | Semantic-module JIT compares finite results with hosted conversions under both policies, including all float32 subnormal leading-bit positions, midpoint neighbors, underflow, overflow and NaN classification; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL compares finite conversions exactly and NaNs by classification only; exact NaN payload preservation is not promised, and draft-only TRRM opcode `0x1A` is accepted without a released-format compatibility promise |
-| [FloatingNegation](../../sources/self-host/FloatingNegation.terrum) | Internal raw-bit `float32`/`float64` negation by toggling only the sign bit | Semantic-module JIT compares exact bit results with the sign-bit oracle under both policies, including signed zeros, infinities, noncanonical NaNs and deterministic values; the independent `ComponentTestRunner` also executes representative cases under AOT/JIT and both policies; the Windows x64 internal DLL checks exact sign-bit toggling and involution through integer carriers; draft-only TRRM opcode `0x1C` is accepted, but this helper does not define a public negation API or promise released-format compatibility |
-| [FloatingIntegerConversion](../../sources/self-host/FloatingIntegerConversion.terrum) | Internal checked conversion from raw `float32`/`float64` bits to signed/unsigned 32-/64-bit integers, truncating toward zero before range checks | Semantic-module JIT compares all eight conversions with hosted behavior under both policies, including boundaries, non-finite values and negative fractions; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL directly checks all eight status-plus-output exports against checked casts, preserving failed outputs and adjacent canaries; the eight-pair language eligibility and draft-only TRRM opcode `0x1F` are accepted, but this helper does not define a public conversion API or promise released-format compatibility |
+| [IntegerFloatConversion](../../sources/self-host/IntegerFloatConversion.terrum) | Internal exact raw-bit conversion from signed/unsigned 32-/64-bit integers to `float32` and `float64` | Semantic-module JIT compares all eight conversions with hosted target-format results under both policies, covering signed extrema, both precision-tie directions, sticky bits and deterministic values; the independent `ComponentTestRunner` also executes boundary cases under AOT/JIT and both policies; the Windows x64 internal DLL directly invokes all eight helpers with integer carriers against hosted conversions; TRRM encoding support is separate, and this helper does not define a public conversion API |
+| [Char16FloatConversion](../../sources/self-host/Char16FloatConversion.terrum) | Internal raw-bit conversion of `char16` as an unsigned UTF-16 code-unit value, composed from the existing `uint32` conversions | Semantic-module JIT exhausts all 65,536 code units for both formats under both policies against independently constructed exact encodings; the independent `ComponentTestRunner` repeats the exhaustive check under AOT/JIT and both policies; hosted native-emitter tests and the Windows x64 internal DLL exhaust the same domain; source eligibility is accepted, while TRRM encoding support is separate and the helper remains internal |
+| [FloatingComparison](../../sources/self-host/FloatingComparison.terrum) | Internal raw-bit `float32`/`float64` ordering with IEEE equality, inequality and relational predicates; NaNs are unordered and signed zeros compare equal | Semantic-module JIT compares boundary cross-products and deterministic raw-bit pairs against hosted operators under both policies; the independent `ComponentTestRunner` checks signed zero, infinities and NaNs under AOT/JIT and both policies; the Windows x64 internal DLL directly exercises all twelve predicates with integer carriers against hosted operators; this is helper evidence, not qualification of a TRRM byte assignment |
+| [FloatingArithmetic](../../sources/self-host/FloatingArithmetic.terrum) | Internal raw-bit `float32`/`float64` addition, subtraction, multiplication and division with nearest/ties-to-even rounding, gradual underflow and unspecified arithmetic-NaN sign/payload | Semantic-module JIT compares finite boundary pairs and deterministic raw-bit inputs against the controlled hosted emitter under both policies; the independent `ComponentTestRunner` covers precision ties, subnormal transitions, infinities, NaN classification and practical input-payload propagation under AOT/JIT and both policies; the Windows x64 internal DLL checks finite outputs exactly and NaN results by classification; this is internal helper evidence, not qualification of the separate TRRM encoding |
+| [FloatingFormatConversion](../../sources/self-host/FloatingFormatConversion.terrum) | Internal raw-bit widening and narrowing between `float32` and `float64`; finite narrowing rounds once to nearest/ties-even with gradual underflow and overflow to infinity | Semantic-module JIT compares finite results with hosted conversions under both policies, including all float32 subnormal leading-bit positions, midpoint neighbors, underflow, overflow and NaN classification; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL compares finite conversions exactly and NaNs by classification only; exact NaN payload preservation is not promised, and TRRM encoding qualification is separate |
+| [FloatingNegation](../../sources/self-host/FloatingNegation.terrum) | Internal raw-bit `float32`/`float64` negation by toggling only the sign bit | Semantic-module JIT compares exact bit results with the sign-bit oracle under both policies, including signed zeros, infinities, noncanonical NaNs and deterministic values; the independent `ComponentTestRunner` also executes representative cases under AOT/JIT and both policies; the Windows x64 internal DLL checks exact sign-bit toggling and involution through integer carriers; this does not define a public negation API or qualify the separate TRRM encoding |
+| [FloatingIntegerConversion](../../sources/self-host/FloatingIntegerConversion.terrum) | Internal checked conversion from raw `float32`/`float64` bits to signed/unsigned 32-/64-bit integers, truncating toward zero before range checks | Semantic-module JIT compares all eight conversions with hosted behavior under both policies, including boundaries, non-finite values and negative fractions; the independent `ComponentTestRunner` exercises representative boundaries under AOT/JIT and both policies; the Windows x64 internal DLL directly checks all eight status-plus-output exports against checked casts, preserving failed outputs and adjacent canaries; the eight-pair source eligibility is accepted, but this helper does not define a public conversion API or qualify the separate TRRM encoding |
 | [CopyAlgorithms](../../sources/self-host/CopyAlgorithms.terrum) | NoThrow selection and conditional `init ref<T>` publication of complete Copy values, with an explicit forwarding `out` adapter and no operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; existing `out` calls remain valid; persisted semantic-module JIT also executes the private generic specializations through an exported verifier under both policies; the Windows x64 fail-fast compiler-primitives DLL exercises all three operations through test-only wrappers over concrete Token specializations and also checks `SelectCopy` with the eight-byte SourceRange ABI, including selected fields, success/failure publication and adjacent output canaries; the Terrum `ComponentTestRunner` selects scalar and Token values through producer-local tests; sentinel-filled output storage is only for native write observation and does not relax source vacancy rules; this does not add a public generic ABI; no primitive operator conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](../../sources/self-host/IntegerFacts.terrum) | Internal `[ConstEval]` eligibility predicates for checked `int32`, `uint32`, `int64` and `uint64` arithmetic, including signed negation and absolute value | Boundary predicates are proven in required static expressions and executed under both native policies; native executables compare all 24 predicates with independent `BigInteger` range, divisor and signed-minimum expectations under both policies; persisted semantic-module JIT also compares 362 signed/unsigned boundary pairs with independent `BigInteger` expectations under both policies; the Windows x64 fail-fast compiler-primitives DLL exercises all 24 predicates through test-only exports against `BigInteger` boundary oracles; 32-bit signed checks widen safely, 64-bit checks rearrange bounds without overflowing, zero divisors reject, and signed-minimum remainder by `-1` remains valid; no public arithmetic API or compiler bootstrap |
 | [WideIntegerFacts](../../sources/self-host/WideIntegerFacts.terrum) | Checked signed and unsigned 64-bit addition, subtraction, multiplication, division and remainder, signed negation and absolute value with conditional `init ref` publication, total unsigned signed-magnitude extraction, plus bounded decimal/radix-2..36 accumulation through the full unsigned range | Executed as separately compiled modules with vacancy-only `init ref` outputs and accumulation under both policies; persisted semantic-module JIT checks all ten binary helpers, both signed unary helpers and `MagnitudeInt64` against `BigInteger` across 935 boundary cases under both policies, and also checks decimal/all-radix accumulators against an independent arithmetic oracle across the unsigned range limits under both policies; Windows x64 fail-fast compiler-primitives DLL directly invokes all twelve checked arithmetic helpers, `MagnitudeInt64` and both accumulator functions against BigInteger boundary expectations; division by zero, signed-minimum quotient overflow, negation and absolute value do not publish; invalid accumulation leaves outputs unpublished; magnitude includes the signed minimum |
@@ -564,12 +576,12 @@ native emitter or compiler self-build.
 | [TokenTests](../../tests/self-host/TokenTests.terrum) | Nested value copies and reconstruction with a vacancy-only initialized replacement range | Executed through the Windows indirect aggregate ABI; token and range fields stay read-only; no retained backing views |
 | [ManagedTokenChain](../../sources/self-host/ManagedTokenChain.terrum) | Bounded linked storage for complete Copy tokens and vacancy-only validated source ranges, with a sequential managed cursor, non-consuming indexed lookahead and conditional kind consumption | Matching-kind reads check version and consume one node in a single read; AOT/JIT fixtures under both policies cover 64-link capacity, count/version changes, vacancy-only `init ref` indexed lookup/lookahead/sequential reads, public `out` and internal `init ref` cursor creation, mismatch does not advance, mutation invalidation and collection after clear; persisted semantic-module JIT reloads producer and consumer artifacts and checks records, cursor behavior and collection under both policies; producer-local component-runner coverage exports only its boolean result, not the owner graph |
 | [TokenSnapshot](../../sources/self-host/TokenSnapshot.terrum) | Owned, indexed copy of a completed compiled scanner stream using three words per token, without the managed chain's 64-link limit | Scalar operator-spacing checks retain a rolling adjacent-token window; AOT/JIT vacancy-only `init ref` indexed reads beyond 64 tokens, exact EOF and checked invalid indices; a maximum-length source verifies every identifier record and EOF through JIT and AOT under both policies; buffer capacity and allocation still bound the snapshot, trivia requires the separate snapshot, and diagnostics, general parser integration and general CST parsing remain outside this bounded scalar use |
-| [TokenTriviaSnapshot](../../sources/self-host/TokenTriviaSnapshot.terrum) | Separately owned scanner-6 leading-trivia records with kind, range and owning token index, atomically published with `TokenSnapshot` by `TryScanLossless` | The lossless composite builds both owned buffers together and publishes only after token records pass the shared snapshot-validation gate; AOT/JIT host-lexer parity, contiguous source coverage, vacancy-only `init ref` reads, invalid record/owner rejection and input mutation independence under both policies; a maximum-length source verifies every trivia record and owning token; no diagnostic recovery or general CST parser |
-| [TokenIntegerSnapshot](../../sources/self-host/TokenIntegerSnapshot.terrum) | Separately owned scanner-6 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | Compiler-input construction reuses the one-pass lossless token/trivia builder, then requires one ordered record per integer token and reparses each source slice to check the full `uint64` magnitude or overflow status; AOT/JIT full-width, radix and overflow fixtures, vacancy-only `init ref` indexed lookup/find, missing-record/mismatched-magnitude/status/tag/owner rejection and atomic failure; a maximum-length source checks all densest integer, token and trivia records together; general binding remains hosted |
+| [TokenTriviaSnapshot](../../sources/self-host/TokenTriviaSnapshot.terrum) | Separately owned current-scanner leading-trivia records with kind, range and owning token index, atomically published with `TokenSnapshot` by `TryScanLossless` | The lossless composite builds both owned buffers together and publishes only after token records pass the shared snapshot-validation gate; AOT/JIT host-lexer parity, contiguous source coverage, vacancy-only `init ref` reads, invalid record/owner rejection and input mutation independence under both policies; a maximum-length source verifies every trivia record and owning token; no diagnostic recovery or general CST parser |
+| [TokenIntegerSnapshot](../../sources/self-host/TokenIntegerSnapshot.terrum) | Separately owned current-scanner numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | Compiler-input construction reuses the one-pass lossless token/trivia builder, then requires one ordered record per integer token and reparses each source slice to check the full `uint64` magnitude or overflow status; AOT/JIT full-width, radix and overflow fixtures, vacancy-only `init ref` indexed lookup/find, missing-record/mismatched-magnitude/status/tag/owner rejection and atomic failure; a maximum-length source checks all densest integer, token and trivia records together; general binding remains hosted |
 | [TokenDiagnosticSnapshot](../../sources/self-host/TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and positive source-bounded ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, vacancy-only `init ref` reads, invalid buffer/range rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure; a maximum-length malformed-UTF-16 source retains and validates every diagnostic after token publication rejects |
 | [ScalarParserTypes](../../sources/self-host/ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Vacancy-only `init ref` helper outputs; scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
-| [ScalarFrontend](../../sources/self-host/ScalarFrontend.terrum), [ScalarFrontendProgram](../../sources/self-host/ScalarFrontendProgram.terrum) | Bounded v85 frontend over a successful scanner snapshot: source-bound scalar/void functions, up to three scalar parameters, supported expressions including single-scalar character literals only in representable `char16` contexts, and structured control flow, visible-local lifetime ending, explicit/inferred vacant locals, scalar constants, nested cleanup/recovery and foldable-true static proofs. Complete snapshots inventory global declarations and direct forward/self/mutual calls. They also resolve up to eleven top-level internal, non-generic scalar aliases, including forward chains, in return/parameter/local type positions; duplicate, unresolved, cyclic, public, attributed and generic aliases reject, and alias names are not explicit conversion-call targets. Scalar out/init-ref modes support matching explicit/declared destinations and normal-return publication for non-Boolean/void results. Caller-unsafe declarations and explicit unsafe blocks/wrappers are source-audited. Named by-value and scalar output calls preserve source-order evaluation. Result/error objects and internal handled/header-end values use conditional `init ref` outputs; handled parse diagnostics return a result, while false returns leave outputs vacant. Non-scalar non-Boolean outputs, namespaces/imports, overload search, callable values, general references, typed catches, filters and unproven proofs remain unsupported. See the [native profile](../implementation/native.md). | Produces independently audited source-bound projections for the shared hosted verifier/emitter; aliases are reconstructed from original source, scanner integer records supply integer constants, and `CharacterLiteral` decodes character-token spans from `Host.Source`. The Terrum decimal, hexadecimal-float and based-integer helpers populate positive raw-bit floating literal leaves; the host reader independently checks floating payloads against the hosted parser. Inventory and parsing use a borrowed indexed `Span<Token>` with bounded per-function windows; inventory/function windows add one synthetic EOF, while the synchronous single-function fallback retains the scanner's real EOF. The snapshot owner stays live through inventory, parser retries and fallback; no managed token-chain copy or rescan is used. The persisted primitives DLL and `build-component` do not consume its typed result. |
-| [ScalarFrontendProjection](../../sources/self-host/ScalarFrontendProjection.terrum) | Host-owned buffers with completion status written last: 392-word single-function and 4,284-word complete-program buffers. Only v85 is produced and accepted, including diagnostics and every function frame; all v1–v84 tags reject. Existing compact-expression and tree/statement layouts remain fixed. Unused extensions are zero; absent call targets are `-1`. | `ScalarFrontendHost` independently checks source anchors, types, literals, node order/ownership, precedence, roots, modes, local binding/initialization/liveness, scopes, control flow, returns, mutability, conversions and exact declaration effects. Complete-program audits also check declaration sets, duplicate names, frame coverage, callees and argument ownership. Void-call statement roots, DoesNotReturn continuation, scalar out/init-ref destinations, unsafe call scopes and named argument mappings retain their exact validations. Shared verification checks effects, definite liveness/publication and reachable completion under the selected policy. Limits remain 64 tokens per snapshot; per function 8 total named/hidden locals, 12 statements, 32 nodes, 16 expression-recursion levels and 6 structural levels. See the [implementation reference](../implementation.md). This is not a standalone compiler or machine-code encoder. |
+| [ScalarFrontend](../../sources/self-host/ScalarFrontend.terrum), [ScalarFrontendProgram](../../sources/self-host/ScalarFrontendProgram.terrum) | Bounded v87 standalone/v88 complete frontend over a successful scanner snapshot; see the [source/control-flow envelope](#scalar-frontend-and-interchange) and [resources](#projection-identities-and-resources). Character literals require representable `char16` contexts. Visible-local lifetime ending, explicit/inferred vacant locals, scalar constants, nested cleanup/recovery and foldable-true static proofs are supported. Result/error objects and internal handled/header-end values use conditional `init ref` outputs: handled diagnostics return a result, while false leaves outputs vacant. | Produces source-bound projections for independent hosted audit/verification/emission. Aliases are reconstructed from source, scanner integer records supply constants and `CharacterLiteral` decodes `Host.Source`. Authored literal helpers supply independently audited floating bits. Inventory/parsing borrow an indexed `Span<Token>`; function windows add synthetic EOF, standalone fallback retains real EOF, and the owner stays live through retries without a managed-chain copy or rescan. The persisted primitives DLL and `build-component` do not consume its typed result. |
+| [ScalarFrontendProjection](../../sources/self-host/ScalarFrontendProjection.terrum) | Host-owned 2,274-word `Frontend` and 25,025-word `FrontendProgram`; completion is written last. Standalone output/diagnostics use v87; complete headers, function bodies and decoded summaries use v88. Compact-expression and tree/statement layouts are both current. Unused extensions are zero; absent call targets are `-1`. | `ScalarFrontendHost` checks source anchors, types, literals, node order/ownership, precedence, roots, modes, local binding/initialization/liveness, scopes, control flow, returns, mutability, conversions and declaration effects. Complete audits also check declaration sets, duplicate names, frame coverage, callees and argument ownership. Shared verification checks effects, definite publication and reachable completion under the selected policy. See [current bounds](#projection-identities-and-resources), including the [fourth-child audit mismatch](bootstrap-frontend-composition.md#exact-private-identities-and-resources); this is not a standalone compiler or machine-code encoder. |
 | [ScalarFunctionParser](../../sources/self-host/ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Success-only parse helpers and every scalar evaluator output use vacancy-only `init ref`. Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](../../sources/self-host/ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | Vacancy-only `init ref` outputs; AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](../../sources/self-host/ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | Vacancy-only `init ref` parse/evaluator outputs; AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -845,7 +857,9 @@ The candidates reuse `Span<Token>`/`TextSpan` rather than imitating C# strings,
 `IEnumerator`, `ImmutableArray`, reflection, GC handles or compiler-generated
 state machines. A read cursor may forward backing dependencies; retaining its
 descriptor alone cannot extend an external allocation lease. `[Captures]` is
-working contract notation, not an unchecked annotation accepted by the MVP.
+an [accepted dependency contract](../specs/language/dependencies-and-views.md),
+not an unchecked promise or evidence of general stored-view/export/persistence
+support.
 
 The scanner shares the host's generated Unicode ranges; classification,
 token boundaries (including valid hexadecimal floating `p`-exponent forms),
@@ -857,7 +871,7 @@ type. Empty hexadecimal and binary prefixes
 report `TRM0007` and `TRM0008`, respectively. Hexadecimal and binary literals
 construct bits in their destination type; nonzero bits beyond its width are
 diagnosed, and decimal signed-range and negative-minimum rules are unchanged.
-Attached width suffixes are lexical errors (`TRM0006`); scanner-6 retains
+Attached width suffixes are lexical errors (`TRM0006`); the current scanner retains
 recognized suffix-tag metadata only in the existing record for those rejected
 tokens, while valid integer records are untagged. Larger integer magnitudes
 are reported as beyond the decoder's range, not lexical errors. The compiled
@@ -872,7 +886,7 @@ literals and based integer literals directly targeting those formats. The
 Terrum-authored conversion helpers populate positive raw-bit literal leaves;
 the hosted reader validates their token spans and bits independently against
 the hosted parser. Conversion projection covers the two floating formats and the four
-fixed-width integer types. The floating-to-integer v85 projection remains
+fixed-width integer types. The floating-to-integer projection remains
 provisional, and those authored components still rely on the hosted
 verifier/emitter. Although its source eligibility is accepted,
 `char16`-to-floating projection remains provisional and outside this validated

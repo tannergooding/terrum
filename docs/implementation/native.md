@@ -22,7 +22,7 @@ The profile is deliberately narrower than the syntax grammar and proposed
 libraries. It does not imply general ownership/lifetime checking, general
 semantic IL, general managed graphs, or standard-library execution.
 
-The additive [approved-TRRM scalar path](../implementation.md#executable-trrm-scalar-interchange)
+The bounded [development TRRM scalar path](../implementation.md#executable-trrm-scalar-interchange)
 loads audited compact-linear/indexed Bodies into this same backend for JIT,
 EXE and DLL output. Indexed merges and nested loops lower to direct native
 branches; edge arguments are snapshotted before block-parameter writes.
@@ -261,7 +261,9 @@ The [implementation-era encoding record](trrm-encoding-history.md)
 identifies the retired draft numbers used by the hosted development inventory.
 That inventory is not evidence that a compiler already emits or accepts the
 unified registry. Projection layouts, native ABI and hosted verification/
-emission remain separate from semantic opcode allocation.
+emission remain separate from semantic opcode allocation. Experimental native
+section/clause/Feature numbers likewise describe the implementation, not the
+coordinated next-draft allocations in the native metadata proposal.
 
 Only v85 is produced or accepted for single-function and complete-program
 scalar frontend projections, every function frame and diagnostic records.

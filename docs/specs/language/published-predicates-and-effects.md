@@ -110,7 +110,7 @@ successfully executed language call, and still prevents required publication.
 `[Pure]` alone may authorize JIT/AOT folding when the backend can establish the
 result and materialize it safely. It does not opt that callable into Terrum's
 required constant interpreter or promise a persistent constant-value codec.
-`[Pure, ConstEval]` is permitted but redundant in its pure-form capability;
+`[Pure] [ConstEval]` is permitted but redundant in its pure-form capability;
 the two distinct attributes each obey their own placement/multiplicity rules.
 
 The ordinary, pure and constant forms preserve the declared value, outcome,
@@ -177,7 +177,7 @@ temporary's address.
 
 ```terrum
 [Pure]
-int32 Observe(implicit ref<int32> value, bool trace)
+public int32 Observe(implicit ref<int32> value, bool trace)
 {
     if (!RuntimeHelpers.IsPureEval && trace)
     {
@@ -328,7 +328,7 @@ not substitute for a parameter target.
 ```terrum
 // Signature-only instance-member illustration.
 [Pure]
-int32 Inspect([NoAlias] write ref<T> other);
+public int32 Inspect([NoAlias] write ref<T> other);
 ```
 
 At this invocation, mutable regions accessed through the staged `other` input
@@ -561,8 +561,9 @@ recipe; no interpreter address or process-specific bit pattern is persisted.
 Documented constant-result behavior is a compatibility promise. Changing it
 incompatibly is a breaking change even if the new algorithm is still pure;
 semantic equivalence is not generally detected automatically. Changes within
-declared latitude, such as unspecified arithmetic NaN payload, are not newly
-frozen. Record actual evaluated code/value/target dependencies; preserving
+a contract's remaining declared latitude are not newly frozen. Runtime
+arithmetic NaN latitude does not extend to the selected deterministic constant
+NaN recipe. Record actual evaluated code/value/target dependencies; preserving
 a purity flag alone does not make an old computed answer the new answer.
 
 An independent consumer validates identities, record shape, substitution,

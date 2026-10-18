@@ -20,11 +20,11 @@ This proposal supersedes prior recommendations to validate or synthesize COM
 owner/acquisition behavior and withdraws those clauses from the
 [TRRM native interop proposal](trrm-native-interop-metadata.md). It does not
 alter normative specifications or approve existing provisional experiments.
-Its current recommendations also supersede compiler-selected API catalogs,
-sample-specific carrier admission and COM owner/acquisition recipes in the
-historical [Windows FFI stages](windows-native-ffi.md) and
-[native architecture proposal](general-native-compiler-architecture.md).
-Preserving those documents does not restore their withdrawn policy.
+Its recommendations consolidate the earlier Windows FFI stages and native
+architecture work. Compiler-selected API catalogs, sample-specific carrier
+admission and COM owner/acquisition recipes are withdrawn, not alternative
+integration paths. The [support boundary](../implementation/dx11-generalization-check-in.md)
+separates their retirement from remaining generic interchange work.
 
 ## Settled direction
 
@@ -101,6 +101,23 @@ open. An interface opt-in must not imply COM ownership, automatic cleanup,
 provider verification, or a fixed IID unless a separate reviewed contract
 requires that fact.
 
+### Source overview amendment
+
+The accepted [source overview](../specs/language.md#interfaces-access-and-generic-properties)
+still lists NativeComInterface among compiler-verified properties and mentions
+IID/inherited-slot checks. It supplies no complete source/property schema.
+Recommend removing that intrinsic-property example rather than designing a
+COM-specific compiler checker to preserve it. Retain generic native signature,
+receiver, offset/slot, representation and checked dependency facts; author IID
+selection, inherited SDK declarations, acquisition and ownership in libraries.
+
+This is an explicit amendment to the current overview, not a claim that its
+wording has already been replaced or that native candidate records are accepted.
+The substantive integration is preferable to a smaller edit that leaves the
+compiler-COM property as an additional admission requirement. It applies the
+settled authored-library direction without selecting a replacement COM marker,
+automatic witness, fixed IID or ownership schema.
+
 ## Cleanup direction
 
 1. Retire compiler-owned `NativeComOwner` and `NativeComAcquisition`
@@ -132,11 +149,11 @@ requires that fact.
 | Generic vtable calls | Use explicit pointer receiver, vptr byte offset, slot and native signature. Recommend this minimal binding before an interface-to-vtable convenience form; no distinct COM/interface ownership commitment is needed. |
 | Native annotations | Retain optional authored access, retention, extent and result-correlated validity facts where useful. They do not prove foreign behavior, authorize raw calls by themselves or confer owners. Absence is not no-retention or initialized-output evidence. |
 | Known pointer/owner facts | Preserve them through every producer/consumer and nested operation. Generic ABI adaptation does not change their authority, backing, publication or cleanup. |
-| Metadata evolution | Extend the early draft additively with required records and exact capabilities; consolidate the concrete candidates in the TRRM proposal before canonical registration. Existing provisional codes provide no approval. |
+| Metadata evolution | Integrate required records and exact capabilities in one selected draft; compare additive records with shared-codec redesign and reassignment before registration. Existing provisional codes provide neither approval nor a reservation. |
 
 The remaining design choices are exact source ergonomics, product loading
 defaults and shared-versus-scoped physical callable/value/dependency carriers.
-The [TRRM recommendation](trrm-native-interop-metadata.md#consolidation-decisions-and-experimental-history)
+The [TRRM recommendation](trrm-native-interop-metadata.md#consolidation-decisions)
 chooses reasonable defaults and concrete candidate IDs for review; none is a
 reason to leave the needed route unspecified. Suppressible analyzer
 diagnostics remain tooling choices, separate from mandatory validation.
@@ -147,7 +164,7 @@ Aggregate scratch overlap, wrong-origin imported addresses, lost pointer
 backing, missing layout validation, incomplete nested traversal and
 address-only import accounting are implementation/verification issues, not
 reasons to restore compiler-owned provider policy. The
-[review disposition](trrm-native-interop-metadata.md#review-feedback-defects-versus-contract-gaps)
+[gap inventory](../implementation/conformance-gaps.md)
 separates them from missing standard carriers. Old findings are not current
 patch verdicts, and an uninspected follow-up is not clearance.
 

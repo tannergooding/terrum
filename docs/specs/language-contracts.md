@@ -281,7 +281,9 @@ expressions. A nested lambda does not rebind it, and captures obey ordinary
 lifetime and ownership rules. For an ordinary async callable it denotes the
 completed payload, not its task handle. Instance constructors use receiver
 initialization facts instead; static constructors use their owning group's
-initialization facts. Producer phase mapping remains open.
+initialization facts. Generated producers instead use their selected
+[creation, advance and close phases](language/generated-producers.md);
+their declaration's contextual `return` denotes the created cursor.
 
 The [selected async cursor contract](language/async-iteration.md) separately
 attaches its init destination to the returned advancement operation's
@@ -567,13 +569,14 @@ an actual retained capability; do not implicitly extend user scopes.
 contract model, with no promise to add one later.** Initial postconditions
 describe observable method-boundary facts: initialization, nullability, ranges,
 and relationships to unchanged value inputs. These are genuine behavioral
-guarantees callers may rely on, not merely optimizer hints. For example, the
-following expresses contract intent, not settled source syntax:
+guarantees callers may rely on, not merely optimizer hints. The following
+selected clause fragments assume an initialization-reference `output` and
+an unchanged value input `capacity`:
 
 ```text
-ensure *output is init; // output is an initialization-reference parameter.
-ensure *output > 0;
-ensure written <= capacity; // capacity is an unchanged value input
+ensure *output is init
+ensure *output > 0
+ensure written <= capacity
 ```
 
 Historical relations such as “the count increased by one” require state-history
@@ -603,7 +606,8 @@ and historical mutable-state contracts are not part of the initial model.
 | Cleanup replaces a pending return with an escaping exception | No |
 | Failure while checking a precondition | No |
 | Failure while checking a postcondition | Ordinary failure/unwinding begins at the failed check; completed body cleanup and `finally` blocks are not rerun |
-| Fail-fast, process termination, or a non-returning operation | No normal-return guarantee and no cleanup promise |
+| A DoesNotReturn invocation has no normal completion | No; a checked escaping failure still performs applicable ordinary unwind cleanup |
+| Fail-fast or process termination | No normal-return guarantee and no cleanup promise |
 
 Searching the stack for a handler is not execution of a method's normal
 epilogue. Neither handler search nor unwind itself runs `ensure`. A check after

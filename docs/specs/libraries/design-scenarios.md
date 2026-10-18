@@ -290,7 +290,7 @@ evidence of this selected contract or normative artifact admission.
 | Topic | Terrum contract and reason | Relevant FDG comparison |
 |---|---|---|
 | Type/object roots | No universal Object/Exception base, implicit boxing or concrete inheritance is needed for selected value/category roles | Layering, type design and explicit interfaces |
-| Try outputs | Boolean init outputs are live on true and vacant on false/failure; defaults cannot fabricate values | 7.5.2 and 5.8.3 |
+| Try outputs | Boolean init defaults are live on true and vacant on false; failure preserves actual ordinary state and any distinct protocol cleanup/publication obligations, not fabricated defaults or rollback | 7.5.2 and 5.8.3 |
 | Try writes and retry | Exact writer progress/effects govern false; typed content and streams cannot generally be replayed by grow-and-retry | 9.12.3-4 |
 | Preconditions | require is a safe once-only check with source-owned failure construction; unsafe recovery and ensure's fixed category remain distinct | Argument validation and standard failures |
 | Equality and keys | Ordinary numeric equality/ordering, representation ties and candidate key/hash domains stay separate | 5.7 and collection key design |

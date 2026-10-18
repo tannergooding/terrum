@@ -1,141 +1,107 @@
-# Persisted scanner invocation profile proposal
+# Persisted scanner invocation profile
 
-**Status: Deferred until an integrated compiler path needs persisted scanner
-execution and its full-file size/resource policy is defined. Semantic-module
-revision 76 carries provisional `scanner-10` implementation support only; its
-16,384-code-unit source ceiling is not an accepted limit.**
+**Status: deferred until an integrated compiler consumer and whole-input
+resource policy justify persisted scanner execution.** Provisional
+`scanner-10` support does not accept its source ceiling or binding model.
 
-## Summary
+## Scope and alternatives
 
-The Terrum-authored scanner consumes more than source text. `ScannerHost`
-currently supplies immutable source and scanner tables, plus mutable token,
-diagnostic, trivia and integer-value buffers. Persisted semantic-module JIT
-currently has no binding model for these auxiliary buffers, and its
-source-grant entry point returns only an integer rather than copied scanner
-records.
+This candidate is a named private semantic-module JIT profile for the
+Terrum-authored scanner, not a general multi-buffer registry. It extends the
+binding/publication surface beyond the
+[source-only grant](invocation-scoped-source-grant.md), while leaving the
+[scanner contract](../scanner.md), [source input](../specs/language/source-input.md)
+and [private-persistence distinction](../specs/representation/persistence.md)
+unchanged.
 
-This proposal considers a named, bounded invocation profile for the existing
-`scanner-10` component. It is not a general multi-buffer capability, a new
-scanner contract, or support for the scalar frontend, compiler-primitives DLL,
-graphs, module sets or persisted AOT.
+Keep ordinary compilation-local scanner use unless persisted execution serves
+a real integrated path. A general host-buffer capability or explicit view ABI
+is a substantive alternative with wider ownership and compatibility work;
+do not introduce either implicitly through this fixed component profile.
+The [self-host inventory](../implementation/self-host.md) owns current
+provisional support.
 
-## Decision question
+## Candidate identity and binding
 
-Should persisted semantic-module JIT support a named scanner invocation
-profile, in addition to the existing source-only profile?
+Bind exactly the canonical `ScannerHost` descriptors in ordinal order:
 
-## Deferred decision
-
-Do not accept the scanner-specific profile until a real compiler path needs
-persisted scanner execution and the full-file size/resource policy is defined.
-Keep any future profile tied to `ScannerHost.SchemaVersion` and
-`ScannerHost.ComponentName`, rather than generalizing source grants to
-arbitrary caller-defined buffers. The current implementation and tests are
-evidence only; they do not establish that this execution path is required or
-that the 16,384-code-unit source ceiling is appropriate.
-
-## Existing boundary and profile shape
-
-`NativeJit.ExecuteWithSourceGrant` accepts exactly one readonly invocation-
-scoped `char16` source grant, rejects contents longer than 16,384 code units,
-copies the source into invocation storage, and returns an integer result.
-`NativeJit.ExecuteWithScannerProfile` separately accepts a linked program
-retaining the fixed scanner profile, binds fresh storage and returns validated
-owned results. The persisted scanner profile uses the existing
-`ScannerHost` buffer set:
-
-| Buffer | Access | Existing shape or capacity |
+| Ordinal | Buffer | Access and meaning |
 |---|---|---|
-| `Source` | Readonly `char16` | At most 16,384 UTF-16 code units |
-| `XidStart`, `XidContinue` | Readonly `int32` | Inclusive Unicode identifier range pairs |
-| `Keywords`, `EscapeKeywords`, `Operators` | Readonly `int32` | Packed kind/length/code-unit catalogs |
-| `Tokens` | Writable `int32` | Three words per token, with space for EOF |
-| `Diagnostics` | Writable `int32` | Count plus three words per diagnostic |
-| `Trivia` | Writable `int32` | Count plus four words per trivia record |
-| `IntegerValues` | Writable `int32` | Count plus five words per integer record |
+| 0 | `Source` | Readonly `char16`, immutable UTF-16 snapshot |
+| 1 | `XidStart` | Readonly `int32`, inclusive Unicode range pairs |
+| 2 | `XidContinue` | Readonly `int32`, inclusive Unicode range pairs |
+| 3 | `Tokens` | Writable `int32`, three words per token including real EOF |
+| 4 | `Diagnostics` | Writable `int32`, count plus three words per record |
+| 5 | `Trivia` | Writable `int32`, count plus four words per record |
+| 6 | `Keywords` | Readonly `int32`, packed catalog |
+| 7 | `Operators` | Readonly `int32`, packed catalog |
+| 8 | `IntegerValues` | Writable `int32`, count plus five words per record |
+| 9 | `EscapeKeywords` | Readonly `int32`, packed catalog |
 
-`IntegerValues` is an output buffer, not a readonly table. The current
-capacities are derived by `ScannerHost.CreateBuffers`; they are not a new
-caller-selected sizing policy.
+`IntegerValues` is an output, not a readonly catalog. The current
+16,384-code-unit source bound and source-derived capacities belong to the
+candidate envelope, not the language or an accepted full-file policy.
 
-## Contracts to settle
+Fingerprint the component/schema, source/resource envelope, descriptor order,
+names/types/access and capacity formulas, readonly table contents, token and
+record meanings. Names alone cannot establish compatibility. Preserve exact
+identity through producer references, reconstruction, linking and replacement.
+Persist the requirement and symbolic buffer operations, not seed values,
+concrete source capacities, addresses or trusted analysis.
 
-1. **Profile identity and compatibility.** Tie the requirement to the
-   `scanner-10` component identity and define how the Unicode identifier
-   tables, keyword/escape/operator catalogs, token kinds and output record
-   layouts are pinned together. A replacement must not silently change those
-   meanings. Do not infer identity from buffer names alone.
-2. **Persisted requirements and validation.** Persist only the named profile
-   requirement and symbolic buffer operations, never sample contents,
-   addresses or sample-derived bounds/effect proofs. Define how a scanner
-   profile is propagated and checked during producer/reference/link
-   replacement, and how it composes with the existing source-only requirement.
-3. **Binding, storage and resource limits.** Require the canonical readonly
-   tables and fresh, correctly typed, disjoint output storage with the
-   established capacities. Reject missing, duplicate, incompatible or
-   unsupported bindings before entry. Define checked capacity arithmetic,
-   aggregate limits, invocation lifetime and how mutable aliases are
-   excluded.
-4. **Result publication and failure.** Copy token, diagnostic, trivia and
-   integer-value records to host-owned results before native invocation
-   storage is released. Distinguish a completed scan containing lexical
-   diagnostics from a runtime failure; never report partial runtime-failed
-   buffers as a successful scan.
-5. **Acceptance evidence.** Reuse `ScannerHost` readers and existing scanner
-   differential oracles. Reuse identical persisted artifacts across empty,
-   maximum-length and differently sized sources; cover malformed UTF-16,
-   lexical diagnostics and all four result buffers. Reject invalid profiles
-   and demonstrate fresh-storage isolation. Any parser/binder integration
-   must continue through hosted verification and emission and must not fall
-   back to the host lexer.
+For each invocation, validate before entry and bind fresh correctly typed,
+capacity-checked backing. Outputs must be mutually disjoint and cannot alias
+readonly inputs; the canonical tables cannot be replaced by caller-selected
+contents. Use checked capacity/aggregate arithmetic. Hold all backing through
+synchronous calls and cleanup; publish no escaped native view.
 
-## Explicit exclusions and stop condition
+## Publication and failure
 
-This profile would establish only persisted semantic-module JIT execution of
-the existing scanner component. It would not make the scanner a
-compiler-primitives dependency, move the scalar frontend beyond hosted
-verification/emission, define new lexical behavior, or establish support for
-module graphs/sets, native DLLs or persisted AOT.
+After normal completion, copy and validate tokens, diagnostics, trivia and
+integer values with the existing host readers before releasing native storage.
+Return owned immutable results that cannot change during another invocation.
+Lexical diagnostics are a **completed scan result**, not a runtime failure.
+A runtime failure or malformed publication yields no successful partial
+record set.
 
-Defer the proposal if satisfying it requires arbitrary buffer capture,
-escaped views, general host-buffer registration, broader linking/AOT support
-or new scanner semantics. Successful scanner-module execution alone does not pass the self-hosting gate.
+This profile must execute the persisted scanner: a hosted lexer fallback,
+captured publication or source-only integer result is not scanner-profile
+success. Scanner completion does not establish parsing, binding, emission,
+frontend invocation or compiler bootstrap.
 
-## Provisional implementation record (not approval)
+## Integration and exclusions
 
-Current development modules persist `ScannerHost.InvocationProfileIdentity` and
-the ten canonical buffer descriptors in ordinal order. The identity
-fingerprints the component/schema and source bound, descriptor names, types,
-mutability and capacity formulas, readonly table contents, and token/trivia/
-integer record enums. Persisted descriptors contain no values or concrete
-capacities. The source grant is part of this named profile; arbitrary profile
-composition, graphs, module sets, native DLLs and persisted AOT are rejected
-or remain unsupported.
+The private implementation currently retains structured buffer assignments
+as private IR. Neither those tags nor a development revision number are TRRM
+assignments. Promotion needs an exact requirement/IR schema and mandatory
+reader/link verification, not a rule that every additive experiment preserves
+every earlier private decoder.
 
-Structured `BoundBufferAssignment` operations are retained as semantic-module
-statement tag 27. The scanner JIT adapter binds a fresh `ScannerHost` buffer
-set for each source, copies native data after normal completion and validates
-tokens, diagnostics, trivia and integer records before returning. Lexical
-diagnostics remain successful scan results; a runtime failure does not return
-partial scanner buffers. Regression coverage reuses identical persisted
-producer/consumer artifacts for empty, varied, malformed-UTF-16 and
-maximum-length sources under both runtime policies, compares lexical results
-with the hosted scanner, and checks integer magnitudes.
+The [frontend profile](scalar-frontend-invocation-profile.md) owns its distinct
+twelve-buffer identity and complete program audit; it cannot silently reuse
+`scanner-10`. Keep arbitrary profile composition, captured/returned views,
+native DLLs/packages, graphs/module sets, persisted AOT and source-free TRRM
+outside this candidate. If the consumer requires those, reopen the capability
+design rather than treating them as incidental scanner support.
 
-This is implementation evidence for review, not approval of the proposed
-support boundary or the related source-grant proposal. The scanner and scalar
-frontend still depend on hosted verification/emission, and no self-hosting
-gate is claimed.
+## Acceptance gates
 
-## Evidence
+1. Identify the integrated consumer and settle whole-input size, capacity and
+   failure policy. Preserve strict file-byte decoding versus decoded snapshot
+   behavior; do not normalize malformed UTF-16 grants.
+2. Reuse identical artifacts with empty, varied, maximum and one-too-large
+   sources under both runtime policies. Cover all four output families,
+   malformed UTF-16, diagnostics, EOF, trivia, integer magnitudes and exact
+   capacities against independent scanner oracles.
+3. Reject missing/extra/reordered/wrong-access descriptors, altered tables,
+   fingerprints, record tags, counts, spans, capacities and replacement
+   requirements before unsafe execution or successful publication.
+4. Exercise fresh-storage, retained-result and successive-invocation
+   isolation, failure cleanup and absence of embedded seed contents.
+5. Demonstrate the consumer continues through the appropriate hosted audits,
+   verifier and emitter without a hosted-lexer fallback.
 
-- [`ScannerHost.CreateBuffers`](../../sources/Terrum.CodeAnalysis/Lexing/ScannerHost.cs)
-  defines the current ten-buffer component boundary and its source-derived
-  capacities.
-- [`Scanner.terrum`](../../sources/self-host/Scanner.terrum) writes token, diagnostic,
-  trivia and integer-value records and uses the immutable scanner tables.
-- [`NativeJit.ExecuteWithSourceGrant`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs)
-  retains the source-only API; the separate scanner adapter binds the named
-  profile and publishes validated owned results.
-- The [invocation-scoped source-grant proposal](invocation-scoped-source-grant.md)
-  remains unapproved and continues to describe only the source-only profile.
+The [`ScannerHost`](../../sources/Terrum.CodeAnalysis/Lexing/ScannerHost.cs),
+[`Scanner`](../../sources/self-host/Scanner.terrum) and
+[`NativeJit`](../../sources/Terrum.CodeAnalysis/Native/NativeJit.cs) implementations
+are evidence entry points. Their existence does not discharge these gates.

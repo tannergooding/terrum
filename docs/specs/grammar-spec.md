@@ -398,11 +398,12 @@ ordinary identifier **tokens**, not lexical keywords. Their exact type
 bindings are reserved for compiler/runtime-owned primitives: an ordinary
 package cannot declare a type with a reserved primitive name, including in
 another namespace. This does not reserve all lowercase type names or prevent
-ordinary code from using primitive types. The proposed width-explicit integer,
-floating, character, vector and decimal families are listed in the
-[language design](language.md#primitives-strict-arithmetic-and-text);
-the set of reserved bindings follows the primitives actually selected by the
-language, not every candidate in this grammar. A reserved or contextual
+ordinary code from using primitive types. The 26 identities in the
+[mandatory scalar catalog](overview/conformance.md#mandatory-scalar-catalog)
+are selected, including the width-explicit integer, floating, character and
+decimal types. Vector families and additional APIs have their separately
+selected admission contracts; a candidate does not acquire a reserved binding
+merely by appearing in an example. A reserved or contextual
 keyword can be used as an identifier through the narrow `@` escape, as in
 `alias @await = Task<int32>;`. The escape changes token interpretation, not
 name identity or binding authority. Backtick-delimited and arbitrary-string
@@ -427,11 +428,12 @@ an ordinary nested struct. Outside the designated Core build, the same
 declaration is an error, regardless of spelling or namespace. The Core
 artifact identity, full permitted member forms and enforcement across
 separate compilation are outside this source grammar.
-Each selected language profile must publish a closed reserved-primitive
-binding catalog independently of optional Core APIs. Privileged source
-members must satisfy ordinary checking and cannot redefine primitive
-representation or built-in operations. Candidate width families are not
-automatically added to that catalog.
+The mandatory scalar binding catalog is independent of optional Core APIs
+and of whether a target implements an operation in hardware or software.
+Separately admitted primitive families must publish their closed binding
+catalogs. Privileged source members must satisfy ordinary checking and cannot
+redefine primitive representation or built-in operations. Additional candidate
+families are not automatically added to those catalogs.
 
 ### Source vocabulary
 
@@ -526,10 +528,12 @@ and admitted schemas, not lexer spelling, supply their semantics.
 token/escape recognition, query evidence and all three selector roles.
 
 Future additions must consider both ordinary name use and ambiguities in
-real source. A new reservation or contextual recognition that changes the
-meaning of previously valid source requires a source-language version
-boundary, not silent reclassification within that source version. Exact
-source-version selection is a separate tooling contract.
+real source. Under the [pre-v1 acceptance policy](overview/conformance.md#scope),
+reviewed draft changes may replace reservations and recognition without an
+automatic new version or old-source compatibility requirement. A selected
+stable source-version promise would instead require an explicit boundary for
+breaking recognition changes, not silent reclassification within that
+promised version. Exact source-version selection is a separate tooling contract.
 
 `_` is a distinct nonbinding token, not an identifier. Vacant initialization
 uses `init ref<T>`; arithmetic selection uses policy cases rather than a
@@ -1239,8 +1243,9 @@ Properties/indexers and their accessors are synchronous and reject `async`.
 A getter may return an awaitable as an ordinary value; asynchronously
 executing operations use named methods. Extern properties/accessors have
 no source form without a separate concrete interop design; authored accessors
-may call permitted external bindings. Static init-accessor applicability
-remains outside the specified initialization-phase contracts.
+may call permitted external bindings. A static init accessor is available only
+during its owning group's unpublished initialization phase, as specified in
+§5.10; ordinary later assignment requires an applicable setter.
 
 A partial property/indexer primary owns its value/index types, accessor
 set, accessor visibility, receiver/safety contracts and conditions.
@@ -1872,8 +1877,10 @@ readonly/mut receiver requirements. The completion reservation initializes
 ref<T>/write ref<T> output; its published element loan remains cursor-bound
 unless an available checked backing/invalidation refinement applies.
 All surviving copies/reborrows constrain advance/close and suspension.
-General annotation syntax, associated lifetime items and generated lending
-frame representation are separate from these selected logical relationships.
+The selected DependsOn/Captures/ForwardsBacking schemas express the admitted
+whole-source relationships and refinements. Additional lifetime annotations,
+associated lifetime items and physical generated lending frames remain
+separate work.
 The [generated-producer chapter](language/generated-producers.md) separately
 registers named affine producers for the selected direct roles.
 An iteration loop closes its successfully acquired or adopted iterator
@@ -2523,7 +2530,7 @@ ordinary authored checks, not inferred public contracts.
 
 `async` marks a function implementation or lambda, including expression-bodied
 forms; it is not part of the callable's result type. Declaration modifiers
-retain their ordinary legal permutation rules. Lambda `static` and `async`
+retain the fixed role-specific ordering in §3.1. Lambda `static` and `async`
 may occur in either order, at most once each. An async implementation must
 have a declared or contextual task-like completion result, or the eligible
 async-producer result contract described in §5.12 when marked `[Iterator]`.
@@ -2772,15 +2779,21 @@ These semantic constraints accompany the source forms above.
   representations](data-layout-and-abi.md#fixed-directly-interoperable-representations),
   [packing/alignment](data-layout-and-abi.md#packing-and-aggregate-alignment),
   and [overlap safety](memory-model.md#overlap-representation-access-and-unions).
-  Exact syntax and profile limits remain open.
+  The selected Layout/Blittable source schemas and
+  [Windows x64 limits](targets/windows-x64-data-layout.md) apply. Additional
+  target profiles and physical representation records remain separate work.
 - **Text and numeric forms:** [conversion policies](conversions.md#conversion-policies)
   define numeric behavior and [character intent](conversions.md#character-intent)
   defines character forms. There are no width suffixes or default numeric type;
   `T(expression)` is a checked conversion, literals are context-typed, and
-  numeric operators are checked by default. Floating APIs are target-specific;
-  character literals have the scalar/target rules in §2, while custom literal
-  registration and floating token-boundary details are outside this grammar. `utf8z("...")` is an
-  ordinary call rather than a lexer prefix.
+  numeric operators follow the [selected primitive contracts](language/primitive-operators.md).
+  Mandatory floating behavior is not optional target-specific API policy.
+  Character literals have the scalar/target rules in §2, and
+  [literal construction](language/literal-construction.md) owns selected
+  registration and parser contracts. Additional APIs, physical registration
+  records and hexadecimal-float recovery details remain separate work.
+  `utf8z("...")` is an ordinary call rather than a lexer prefix; its name does
+  not establish a registered target.
 
 <a id="5-open-grammar-and-semantic-choices"></a>
 
@@ -3002,7 +3015,9 @@ mechanical checks compose admitted protocols, while arbitrary/native algorithms
 retain their explicit unsafe implementation responsibility and producer/audit
 trust. Capability opt-in is not implementation proof.
 
-The contract metadata representation remains open.
+The current [Effects clause](representation/contract-clauses.md) carries
+caller-unsafety. That selected carrier does not complete additional native
+annotations, callable ABI records or their physical integration.
 
 <a id="54-aliases-and-associated-types-candidate-declarations-open-binding"></a>
 
@@ -3273,8 +3288,9 @@ not a named identifier or a consequence of the discard rule. In a match over `T?
 when those are the only possibilities. The wildcard still means "any
 remaining value", not `none`: it also matches other unhandled cases if the
 matched type has them. `null` remains the optional absence value. The
-bounded switch/pattern productions and coverage rules are in §3.3; complete
-nominal-case and destructuring patterns remain to specify.
+bounded switch/pattern productions, qualified union cases, structural tuples
+and coverage rules are in §3.3. Arbitrary object extractors and their
+registration remain separate work.
 
 ```terrum
 // Standalone discard statements.
@@ -3456,9 +3472,10 @@ validity and admitted typed constant encoding, not today's private layout.
 opt-in; `Pure` alone is not that opt-in. Neither promises termination,
 ordinary-form `NoThrow` or every-input constant success.
 An unused known runtime-only operation is distinct from an invalid source
-or unknown body schema. Constant arithmetic chooses deterministic NaNs only
-where source representation is unspecified; copies/bit-preserving operations
-retain bits and runtime NaN contracts remain unchanged.
+or unknown body schema. Admitted constant NaN-processing arithmetic,
+nonidentity numeric conversion and numeric selection use the selected positive
+quiet zero-payload recipe. Copies and sign-only negation/Abs retain their
+representation contracts; runtime arithmetic NaN sign/payload remain unspecified.
 The canonical resource envelope and dependency requirements are logical
 contracts, not a proof certificate, wire format, registration or target ABI.
 
@@ -3467,7 +3484,8 @@ ordinary expression/`require` instead of requiring static evaluation. This is
 not a compiler fallback, and ordinary `require` remains enforced unless
 soundly redundant. A runtime alternative is unavailable for compile-time-only
 layout/type/metadata requirements and does not weaken structural lifetime or
-initialization safety. No example fixes the exact source spelling.
+initialization safety. The productions above select the stated proof/const
+source forms; examples do not add further forms or evaluator capabilities.
 
 ### 5.10 Properties and accessor-local effects
 
@@ -3567,8 +3585,8 @@ public struct Point
 ```
 
 Other properties may defer initialization only through the declared
-construction obligations below. Accessor applicability and metadata
-representation are outside this source grammar.
+construction obligations below. Additional accessor binding profiles and
+physical metadata representation remain separate work.
 `mut get` and `mut set` follow ordinary method receiver contracts; writing
 through an independently writable referent does not by itself mutate `this`.
 `init` provides mutability within its initialization scope without a redundant
@@ -3691,8 +3709,10 @@ runtime vtable. Conflicting inherited defaults need an explicit resolution;
 no inheritance-order tie-break or implicit linearization selects one.
 Adding a default to an existing interface remains subject to compatible
 binding/dispatch for older implementations, not an assumption that an older
-binary has a newly appended slot. Exact witness-mapping syntax and metadata
-representation remain open. Ordered prefixes and the type-kind/callable
+binary has a newly appended slot. The
+[witness chapter](language/interface-witnesses.md) selects source mapping and
+inherited/default resolution; physical witness records and dispatch ABI
+remain open. Ordered prefixes and the type-kind/callable
 matrix are defined in §3.1; duplicates, conflicting visibility, misordering
 and illegal modifier/declaration pairs reject. Named callable contract
 clauses follow the parameter list and generic constraints as specified in
@@ -4038,15 +4058,15 @@ The paired `true`/`false` declarations do not derive short-circuiting through
 `&`/`|`, nor can an ordinary binary witness license eager evaluation of both
 operands. Built-in Boolean short-circuit ordering is unchanged.
 
-This grammar does not define complete nominal/destructuring
-patterns and union representation/metadata contracts, full associated-identity
-checking and family/adapter declarations,
-conditional/default conformance and text-target fragment contracts,
-general `const` declarations/expressions,
-physical partial-owner/stored-reference representations,
-complete constructor applicability, broader task APIs/general awaiter and scheduling
-protocols, nonstandard producer/capture registration, exception transport, and registered collection-fragment
-construction. Source type packs and tuple arity extensions have no production here.
+The selected union-case/tuple patterns, associated-identity checks,
+proof/const forms, constructor call algorithm and standard text/collection
+builder contracts do not complete arbitrary object extractors, physical
+union/witness/partial-owner/stored-reference representations, family/adapter
+declarations, generalized conditional conformance, broader task APIs/general
+awaiter and scheduling protocols, nonstandard producer/capture registration,
+or physical exception transport. Additional literal/builder profiles and
+constant positions/domains require their own contracts.
+Source type packs and tuple arity extensions have no production here.
 Specifying a source form does not complete its open lifetime,
 effect, representation or separate-compilation contracts. Hexadecimal float
 spelling and target rounding are above; exact lexical recovery/boundaries
@@ -4117,7 +4137,7 @@ appears in §2.
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
 | Visibility and declaration prefixes | §3.1 defines fixed role-specific primary prefixes, strict source-unit file access, member-scoped same-module friend grants and restricted interface conformance authority. Static constructors have a policy-identified primary without visibility. | Complete access/provenance/grant and initialization-policy metadata encoding. |
-| Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases. | Nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
+| Nominal types | §3.1 gives ordered class/struct kind forms, static-class containers, interfaces, integral-base enums and explicit struct/class unions with qualified cases and independent closedness. Enum constants have checked successor overflow and deliberate aliases; the mandatory scalar catalog is selected separately. | Nested declarations, additional primitive-family bindings, flags schemas and contextual attributes. |
 | Generic declarations | §§3.1–3.2 and the constant-generic chapter give bounded domains, derived checked Transparent primitive-wrapper eligibility, canonical nominal/carrier value identity, earlier-only defaults, `_` inference, explicit `default` selection and actual-type `where T : write` requirements; the call chapter defines finite source inference. | Physical generic/value/validity and witness records; broader constant-formal domains. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |
 | Associated types and witnesses | §§3.1 and 5.4 give declaration forms; the witness chapter defines inherited/default identity, associated checking, and qualified-self adaptation. | Physical witness/projection metadata and dispatch ABI. |
@@ -4128,10 +4148,10 @@ appears in §2.
 | Properties | §§3.1, 5.10 and 5.12 give instance/static named properties, instance-only indexers, accessor-local contracts and static init authority limited to unpublished group initialization. | Physical ref-result records and ABI; external accessor binding needs a separate interop design. |
 | Operators | §§3.1, 5.7 and 5.13 give static explicit operands, eligible implicit-reference inputs, ordinary visibility, synchronous caller-safety, partial primary ownership and distinct void compound operations. | Complete applicability and witness/metadata encoding; external binding needs a separate interop design. |
 | Conversions | §§3.1 and 5.13 give static by-value/implicit-reference logical inputs, synchronous caller-safety, partial primary ownership, destination-first `T(value)` and `.via<Owner>` selection, distinct from `new T(...)`. | Complete eligible conversion catalogs and binding/metadata diagnostics; external binding needs a separate interop design. |
-| Interface members | §§3.1, 5.4 and 5.12 give explicit qualified implementations, shared implicit implementations and restricted current-receiver default-body bypass. | Complete inherited-default resolution and representation; constructors have no production here. |
+| Interface members | §§3.1, 5.4 and 5.12 and the witness chapter give explicit qualified implementations, shared implicit implementations, inherited/default resolution and restricted current-receiver default-body bypass. | Physical witness representation and dispatch ABI; constructors have no production here. |
 | Types | §3.2 gives recursive types, tuple types and normalized optionals. | Remaining owning forms, unsupported reference/view representations and public tuple ABI. |
 | Ownership | §§3.2 and 5.12 sketch owner forms and explicit transfer. | Complete ownership-form grammar. |
-| Reference access | §§3.2 and 5.12 sketch loans and reference qualifications. | Complete legality of `pin`, `write` and other qualifier combinations. |
+| Reference access | §§3.2 and 5.12 and the reference/type chapters define the admitted loans, qualifications and complete-type normalization. | Additional owning/view storage profiles, physical stored-reference representation and public ABI. |
 | Parameters | §§3.2, 5.1–5.2 and the reference/type chapters give modes, qualifier legality, final `params`, eligible Copy defaults and direct/named attribute targets. | Physical output/loan metadata and unsupported representation contracts. |
 | Arguments | §§3.2 and 5.1 and the call chapter give labels, source-order evaluation, position-preserving named/positional mixtures, normal/expanded forms and finite inference/ranking. | Concrete extension eligibility schemas and physical recorded-binding contracts. |
 | Statements | §3.3 and [ordinary execution](language/expressions-and-statements.md) give expression/place categories, inhabited unit values, explicit non-unit result discard, scope/loop transfers, vacant locals, result checking and fallthrough. [Generated producers](language/generated-producers.md) gives named shells, yield/body completion and owned close. | Nonstandard producer and associated lifetime contracts; physical frame/phase records. |
