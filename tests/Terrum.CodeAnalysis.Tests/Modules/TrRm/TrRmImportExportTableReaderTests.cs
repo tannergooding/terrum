@@ -215,8 +215,9 @@ public sealed class TrRmImportExportTableReaderTests
             }
 
             // This fixture checks Body framing and ownership, not executable instructions.
-            byte[] body = [0, 0, 0, 0, 1, 0, 0, 0, 0];
-            sections.Add((0x0020, body, 1));
+            var body = TrRmRegisterBodyTestData.MinimalReturnBody();
+            sections.Add((0x0020,
+                TrRmVariableTableWriter.EncodeBodies([body]), 1));
             TrRmStructuralMetadataValidator.Validate(Artifact(sections));
         }
 

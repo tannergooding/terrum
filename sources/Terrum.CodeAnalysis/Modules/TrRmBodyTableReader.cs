@@ -19,4 +19,10 @@ public readonly ref struct TrRmBodyTableReader
 
     public ReadOnlySpan<byte> GetRow(int row)
         => _rows.GetRow(row);
+
+    internal TrRmRegisterBodyReader GetRegisterBody(int row, int contractCount = 0)
+        => new(_rows.GetRow(row), contractCount);
+
+    internal void ValidateSelectedImplementation(int row, int contractCount)
+        => TrRmBodyImplementationReader.Validate(_rows.GetRow(row), contractCount);
 }

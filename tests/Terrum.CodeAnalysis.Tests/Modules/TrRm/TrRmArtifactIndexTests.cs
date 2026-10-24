@@ -244,10 +244,11 @@ public sealed class TrRmArtifactIndexTests
             TrRmStructuralMetadataValidator.Validate(invalidBlob));
 
         var invalidBody = ArtifactWithCallableMetadata(includeBody: true);
-        invalidBody[^5] = 0;
+        invalidBody[^1] = 0xCC;
         _ = new TrRmArtifactIndex(invalidBody);
+        TrRmStructuralMetadataValidator.Validate(invalidBody);
         Assert.Throws<InvalidDataException>(() =>
-            TrRmStructuralMetadataValidator.Validate(invalidBody));
+            ReadSelectedRegisterBody(invalidBody));
 
         var invalidMap = ArtifactWithCallableMetadata(includeSourceMap: true);
         invalidMap[^12] = 1;
@@ -427,6 +428,18 @@ public sealed class TrRmArtifactIndexTests
     {
         var index = new TrRmArtifactIndex(artifact);
         index.GetSection(entry, out _, out _, out _, out _);
+    }
+
+    private static void ReadSelectedRegisterBody(byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        if (!index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount))
+        {
+            throw new InvalidDataException("Body section is absent.");
+        }
+
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
+        _ = bodies.GetRegisterBody(1);
     }
 
     [Test]
@@ -787,7 +800,8 @@ public sealed class TrRmArtifactIndexTests
 
         if (includeBody || includeSourceMap)
         {
-            sections = [.. sections, TrRmVariableTableWriter.EncodeBodies([new byte[] { 0 }])];
+            sections = [.. sections, TrRmVariableTableWriter.EncodeBodies(
+                [TrRmRegisterBodyTestData.MinimalReturnBody()])];
             kinds = [.. kinds, 0x0020];
         }
 

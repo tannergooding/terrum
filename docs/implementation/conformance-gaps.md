@@ -115,6 +115,15 @@ current-schema conformance. See
 and the [module inventory](modules.md). Existing test success would not establish
 current-registry decoding.
 
+Selected Body access now decodes register kind-01 framing, optional-map
+extents, fixed Blocks, assigned typed-record payload shapes, instruction
+boundaries and block terminators; compact descriptor shapes are also checked.
+This remains selective access rather than artifact-wide Body-content
+preflight. The C# structural validator indexes Body table ranges, and callers
+must use `TrRmBodyTableReader` to validate a selected implementation. Map
+token binding, full record and instruction semantics, descriptor eligibility,
+canonical writing, remapping, re-emission and execution remain unfinished.
+
 **Routes/gate:** migrate the complete producer/reader/rewriter and executable
 consumer set to the accepted register Body: implementation kinds `01..05`,
 the `17 + 4*popcount(mapMask)` prefix and five optional maps,

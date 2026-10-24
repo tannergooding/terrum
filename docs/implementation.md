@@ -130,6 +130,14 @@ Formal arity/kind and ConstantSource binding, remaining registered
 TypeSpecRef-bearing records, dependency/remapping, Body codecs and broader
 execution are still incomplete, so this does not establish current-schema
 conformance.
+Selected Body access now has a register-stream reader for kind-01 framing,
+all optional-map extents, fixed Blocks, typed-record offsets/payload shapes,
+instruction boundaries and block terminators, plus shape decoding for compact
+descriptor kinds. The standard metadata validator still indexes the Body
+table without pre-scanning unrelated Body rows; consumers validate a selected
+Body through `TrRmBodyTableReader`. Map-token binding, full instruction
+operands/control verification, descriptor eligibility, canonical writing,
+re-emission and execution remain incomplete.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar
