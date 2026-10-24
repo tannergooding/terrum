@@ -34,13 +34,6 @@ numbers do not save bytes.
 |---|---|
 | [Semantic IL and metadata extensions](il-extensions.md) | Remaining Body/runtime carriers, exception regions, roots/effects, sharing and inlining questions; TypeSpecRef and the register instruction/Body schema are integrated. |
 
-The approved [register instruction-encoding design](trrm-register-instruction-encoding.md)
-is retained as the decision record and integrated by the
-[instruction chapter](../specs/il-instruction-set.md),
-[metadata chapter](../specs/il-metadata.md), [registry](../specs/representation/registry.md)
-and [conformance gates](../specs/conformance/il-registry.md). It is not an
-implementation-support claim.
-
 ## Review and implementation handoff
 
 Review shared state and representation before dependent native, witness,
