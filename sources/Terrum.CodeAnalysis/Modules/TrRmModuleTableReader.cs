@@ -65,8 +65,8 @@ public readonly ref struct TrRmModuleTableReader
         for (var row = 0; row < recordCount; row++)
         {
             if (Read(row, 4) == 0 || Read(row, 8) > 1 || Read(row, 12) > 1
-                || !ValidFeatureRange(Read(row, 20), Read(row, 24), featureCount)
-                || Read(row, 28) != 0
+                || Read(row, 20) != 0
+                || !ValidFeatureRange(Read(row, 24), Read(row, 28), featureCount)
                 || !_identities.TryAdd(ReadIdentity(row), row + 1))
             {
                 throw InvalidModule();
@@ -209,7 +209,7 @@ public readonly ref struct TrRmModuleTableReader
             throw InvalidModule();
         }
 
-        return ((int)Read(row - 1, 20), (int)Read(row - 1, 24));
+        return ((int)Read(row - 1, 24), (int)Read(row - 1, 28));
     }
 
     public bool TryFindModule(string identity, out int row)

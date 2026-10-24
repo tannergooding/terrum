@@ -1726,14 +1726,14 @@ public sealed class NativeFunctionPointerTests
                 bytes.CopyTo(modules, bytes.Length);
                 var firstModule = modules.AsSpan(0, 48);
                 var secondModule = modules.AsSpan(48, 48);
-                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[20..], 1);
-                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[24..],
+                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[24..], 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[28..],
                     includeRootlessFeature ? (uint)featureCount : 1);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule, methodNameRow);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule[4..], 1);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule[16..], 0);
-                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[20..], 1);
-                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[24..],
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[24..], 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[28..],
                     includeRootlessFeature ? (uint)featureCount : 1);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule[40..], 2);
                 bytes = modules;

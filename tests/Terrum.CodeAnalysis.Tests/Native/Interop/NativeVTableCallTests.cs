@@ -132,7 +132,7 @@ public sealed class NativeVTableCallTests
 
         var missingVTableFeatures = (byte[])callArtifact.Clone();
         var moduleOffset = FindSectionOffset(callArtifact, 0x0001);
-        BinaryPrimitives.WriteUInt32LittleEndian(missingVTableFeatures.AsSpan(moduleOffset + 24), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(missingVTableFeatures.AsSpan(moduleOffset + 28), 2);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingVTableFeatures));
 
         var privateArtifact = ModuleCompiler.CreateProducer(offsetLoaded, ["Invoke"]);

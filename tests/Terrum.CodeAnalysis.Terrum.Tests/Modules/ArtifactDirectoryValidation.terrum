@@ -284,8 +284,8 @@ bool TryValidateArtifactFeatures()
     for (mut int32 row = 0; row < int32(moduleCount); row = row + 1)
     {
         int32 rowStart = moduleStart + row * 48;
-        if (!TryReadArtifactWord(rowStart + 20, init var featureFirst)
-            || !TryReadArtifactWord(rowStart + 24, init var moduleFeatureCount))
+        if (!TryReadArtifactWord(rowStart + 24, init var featureFirst)
+            || !TryReadArtifactWord(rowStart + 28, init var moduleFeatureCount))
         {
             return false;
         }

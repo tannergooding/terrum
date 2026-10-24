@@ -283,8 +283,8 @@ public sealed class ModuleTableValidationComponentTests
             WriteWord(modules, offset, checked((uint)identities[row]));
             WriteWord(modules, offset + 4, 1);
             WriteWord(modules, offset + 16, row == 0 ? checked((uint)entryMethod) : 0);
-            WriteWord(modules, offset + 20, row == 0 ? checked((uint)firstFeature) : 0);
-            WriteWord(modules, offset + 24, row == 0 ? checked((uint)firstFeatureCount) : 0);
+            WriteWord(modules, offset + 24, row == 0 ? checked((uint)firstFeature) : 0);
+            WriteWord(modules, offset + 28, row == 0 ? checked((uint)firstFeatureCount) : 0);
             WriteWord(modules, offset + 32,
                 row == 0 ? 1u : checked((uint)secondModuleRefStart));
             WriteWord(modules, offset + 36, row == 0 || typeDefCount == 0 ? 1u : 2u);

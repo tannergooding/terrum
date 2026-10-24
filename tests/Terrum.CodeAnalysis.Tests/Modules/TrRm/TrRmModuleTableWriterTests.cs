@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
@@ -44,6 +45,9 @@ public sealed class TrRmModuleTableWriterTests
         var featureModules = new TrRmModuleTableReader(featureBytes, 1,
             new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1);
         Assert.That(featureModules.GetFeatureRange(1), Is.EqualTo((1, 1)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(featureBytes.AsSpan(20)), Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(featureBytes.AsSpan(24)), Is.EqualTo(1u));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(featureBytes.AsSpan(28)), Is.EqualTo(1u));
         Assert.Throws<InvalidDataException>(() => TrRmModuleTableWriter.Encode(
             [featureRow with { FeatureFirst = 2 }],
             new TrRmStringTableReader(minimalNames, 1), 0, 0, 0, 0, 1));

@@ -80,8 +80,8 @@ public sealed class TrRmModuleTableReaderTests
     public void ReadsFeatureRangesAndRejectsMalformedOrOutOfRangeRanges()
     {
         var moduleBytes = TwoModules();
-        Write(moduleBytes, 20, 1);
         Write(moduleBytes, 24, 1);
+        Write(moduleBytes, 28, 1);
         var strings = new TrRmStringTableReader(TwoNames(), 2);
         var modules = new TrRmModuleTableReader(moduleBytes, 2, strings,
             0, 0, 2, 0, 1);
@@ -89,10 +89,13 @@ public sealed class TrRmModuleTableReaderTests
         Assert.That(modules.GetFeatureRange(2), Is.EqualTo((0, 0)));
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 0));
 
-        Write(moduleBytes, 24, 0);
+        Write(moduleBytes, 28, 0);
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 1));
-        Write(moduleBytes, 20, 2);
-        Write(moduleBytes, 24, 1);
+        Write(moduleBytes, 24, 2);
+        Write(moduleBytes, 28, 1);
+        Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 1));
+
+        Write(moduleBytes, 20, 1);
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 1));
     }
 

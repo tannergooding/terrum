@@ -117,8 +117,8 @@ public readonly ref struct TrRmArtifactIndex
         for (var module = 0; module < moduleCount; module++)
         {
             var offset = module * 48;
-            var featureFirst = ReadU32(moduleBytes, offset + 20);
-            var moduleFeatureCount = ReadU32(moduleBytes, offset + 24);
+            var featureFirst = ReadU32(moduleBytes, offset + 24);
+            var moduleFeatureCount = ReadU32(moduleBytes, offset + 28);
             if (!ValidFeatureRange(featureFirst, moduleFeatureCount, featureCount))
             {
                 throw InvalidArtifact();

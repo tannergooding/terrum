@@ -55,8 +55,8 @@ public static class TrRmModuleTableWriter
             Write(result, offset + 8, row.TargetRequirement);
             Write(result, offset + 12, row.RuntimePolicy);
             Write(result, offset + 16, row.EntryMethodDefRow);
-            Write(result, offset + 20, row.FeatureFirst);
-            Write(result, offset + 24, row.FeatureCount);
+            Write(result, offset + 24, row.FeatureFirst);
+            Write(result, offset + 28, row.FeatureCount);
             Write(result, offset + 32, row.ModuleRefStart);
             Write(result, offset + 36, row.TypeDefStart);
             Write(result, offset + 40, row.MethodDefStart);

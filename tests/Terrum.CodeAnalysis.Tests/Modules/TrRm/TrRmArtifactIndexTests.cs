@@ -593,8 +593,8 @@ public sealed class TrRmArtifactIndexTests
     {
         var source = MinimalArtifact();
         var module = source.AsSpan(64, 48).ToArray();
-        Write(module, 20, featureFirst);
-        Write(module, 24, moduleFeatureCount);
+        Write(module, 24, featureFirst);
+        Write(module, 28, moduleFeatureCount);
         var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
         var sectionCount = featureBytes is null ? 2 : 3;
         var moduleOffset = 32 + sectionCount * 16;

@@ -107,9 +107,11 @@ public sealed class ArtifactDirectoryValidationComponentTests
                     TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])),
                 new TrRmFeatureRow(1, 1)), 0x0004),
             NewCase(ChangeSectionWord(minimal, 0x0001, 16, 1), 0x0001),
-            Invalid(ChangeSectionWord(minimal, 0x0001, 20, 1)),
+            NewCase(ChangeSectionWord(minimal, 0x0001, 20, 1), 0x0001),
+            Invalid(ChangeSectionWord(minimal, 0x0001, 24, 1)),
             NewCase(ChangeSectionWord(featureArtifact, 0x0001, 16, 0), 0x0001),
-            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 20, 0x0100_0000)),
+            NewCase(ChangeSectionWord(featureArtifact, 0x0001, 20, 0x0100_0000), 0x0001),
+            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 24, 0x0100_0000)),
             NewCase(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x0100_0000), 0x0001),
             NewCase(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x00FF_FFFF), 0x0001),
             InvalidWithHostedAccepted(outOfOrder, 0x8001),
@@ -284,8 +286,8 @@ public sealed class ArtifactDirectoryValidationComponentTests
         byte[] featureBytes)
     {
         var module = new byte[48];
-        WriteWord(module, 20, featureFirst);
-        WriteWord(module, 24, moduleFeatureCount);
+        WriteWord(module, 24, featureFirst);
+        WriteWord(module, 28, moduleFeatureCount);
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 1,

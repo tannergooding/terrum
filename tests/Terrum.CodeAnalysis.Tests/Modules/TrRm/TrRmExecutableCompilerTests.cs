@@ -859,7 +859,8 @@ public sealed class TrRmExecutableCompilerTests
             var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(
                 artifact.AsSpan(32 + section * 16 + 8));
             BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 16), 0);
-            BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 20), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 24), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(offset + 28), 0);
             Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
             return;
         }
