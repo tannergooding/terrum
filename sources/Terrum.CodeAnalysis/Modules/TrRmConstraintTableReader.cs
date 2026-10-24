@@ -42,11 +42,15 @@ public readonly ref struct TrRmConstraintTableReader
             var payload = Read(data, 8);
             if (owner != formals.GetConstraintOwner(row)
                 || flags != 0 || payload == 0
-                || (kind == 1 && payload > (uint)types.Count)
                 || (kind == 2 && payload > 3)
                 || (kind is not (1 or 2 or 3)))
             {
                 throw InvalidConstraint();
+            }
+
+            if (kind == 1)
+            {
+                _ = types.GetTypeSpecRef(payload);
             }
         }
     }

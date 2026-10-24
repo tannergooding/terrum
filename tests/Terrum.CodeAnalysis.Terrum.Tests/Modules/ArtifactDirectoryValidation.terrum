@@ -218,7 +218,7 @@ int32 GetArtifactSectionStride(int32 kind)
     if (kind == 0x0002 || kind == 0x0003 || kind == 0x0011
         || kind == 0x001B || kind == 0x0020 || kind == 0x7F00) { return 0; }
     if (kind == 0x0004) { return 8; }
-    if (kind == 0x0010 || kind == 0x0012 || kind == 0x001C) { return 12; }
+    if (kind == 0x0010 || kind == 0x001C) { return 12; }
     if (kind == 0x0013) { return 40; }
     if (kind == 0x0014) { return 20; }
     if (kind == 0x0015 || kind == 0x0017) { return 24; }

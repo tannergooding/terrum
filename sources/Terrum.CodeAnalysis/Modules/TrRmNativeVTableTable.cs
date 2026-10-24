@@ -280,7 +280,7 @@ internal readonly ref struct TrRmNativeVTableTableReader
     }
 
     private static bool IsSupportedNativeParameter(TrRmTypeSpecTableReader types,
-        int typeSpec, TrRmNativeParameterContract parameter)
+        uint typeSpec, TrRmNativeParameterContract parameter)
         => parameter.Access is >= 1 and <= 3
             && parameter.Retention == 1
             && parameter.ExtentKind is 0 or 1
@@ -291,9 +291,9 @@ internal readonly ref struct TrRmNativeVTableTableReader
                 types, typeSpec, out _);
 
     private static bool IsNativeValueType(TrRmTypeSpecTableReader types,
-        int typeSpec, bool allowVoid)
+        uint typeSpec, bool allowVoid)
     {
-        var row = types.GetRow(typeSpec);
+        var row = types.GetTypeSpecBytes(typeSpec);
         if (row.Length == 3 && row[0] == 1 && row[1] == 0)
         {
             return row[2] is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x14 or 0x15
@@ -304,9 +304,9 @@ internal readonly ref struct TrRmNativeVTableTableReader
             || (row.Length == 6 && row[0] == 0x0D && row[1] == 0);
     }
 
-    private static bool IsNativePointerType(TrRmTypeSpecTableReader types, int typeSpec)
+    private static bool IsNativePointerType(TrRmTypeSpecTableReader types, uint typeSpec)
     {
-        var row = types.GetRow(typeSpec);
+        var row = types.GetTypeSpecBytes(typeSpec);
         return (row.Length == 4 && row[0] == 1 && row[2] == 0x8C)
             || (row.Length == 7 && row[0] == 0x0C && row[2] == 0x8C);
     }

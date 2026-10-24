@@ -7,7 +7,7 @@ using System.Collections.Generic;
 namespace Terrum.CodeAnalysis.Modules;
 
 public readonly record struct TrRmParamRow(
-    int OwnerMethodSigRow, int Ordinal, int TypeSpecRow, byte Mode);
+    int OwnerMethodSigRow, int Ordinal, uint TypeSpecRef, byte Mode);
 
 /// <summary>Emits Param rows with checked MethodSig ownership, mode and ordinal.</summary>
 public static class TrRmParamTableWriter
@@ -28,7 +28,7 @@ public static class TrRmParamTableWriter
             var offset = index * 16;
             Write(result, offset, row.OwnerMethodSigRow);
             Write(result, offset + 4, row.Ordinal);
-            Write(result, offset + 8, row.TypeSpecRow);
+            Write(result, offset + 8, row.TypeSpecRef);
             result[offset + 12] = row.Mode;
         }
 
@@ -38,4 +38,7 @@ public static class TrRmParamTableWriter
 
     private static void Write(byte[] bytes, int offset, int value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), unchecked((uint)value));
+
+    private static void Write(byte[] bytes, int offset, uint value)
+        => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 }

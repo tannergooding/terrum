@@ -2,7 +2,7 @@ namespace Terrum.CodeAnalysis;
 
 public static bool TryValidateMethodSigParamTables(int32 recordCount,
     int32 paramCount, int32 genericParamCount, int32 typeSpecCount,
-    int32 typeDefCount, int32 importCount, int32 typeArgCount)
+    int32 typeDefCount, int32 importCount)
 {
     if (recordCount <= 0 || recordCount > 0xFF_FFFF
         || !IsValidMethodTableCount(paramCount)
@@ -10,7 +10,7 @@ public static bool TryValidateMethodSigParamTables(int32 recordCount,
         || recordCount * 24 != Host.Signatures.Length
         || paramCount * 16 != Host.Params.Length
         || !TryValidateTypeSpecTable(typeSpecCount, typeDefCount,
-            importCount, genericParamCount, typeArgCount))
+            importCount, genericParamCount))
     {
         return false;
     }

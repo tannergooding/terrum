@@ -111,7 +111,8 @@ public readonly ref struct TrRmContractTableReader
                     }
 
                     var signature = methods.GetSignature((int)(owner & 0xFF_FFFF));
-                    var result = typeSpecs.GetRow(signatures.GetResultTypeSpec(signature));
+                    var result = typeSpecs.GetTypeSpecBytes(
+                        signatures.GetResultTypeSpec(signature));
                     var (paramFirst, paramCount) = signatures.GetParamRange(signature);
                     var ordinal = Read(data, 8);
                     if (result.Length != 3 || result[0] != 1 || result[1] != 0
@@ -319,9 +320,9 @@ public readonly ref struct TrRmContractTableReader
         => methodDefRow > 0 && methodDefRow < _nativeParameters.Length
             ? _nativeParameters[methodDefRow] : [];
 
-    private static bool IsPointerTypeSpec(TrRmTypeSpecTableReader typeSpecs, int typeSpecRow)
+    private static bool IsPointerTypeSpec(TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
     {
-        var type = typeSpecs.GetRow(typeSpecRow);
+        var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
         return (type.Length == 4 && type[0] == 1 && type[2] == 0x8C)
             || (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C);
     }

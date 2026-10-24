@@ -287,7 +287,7 @@ public static partial class TrRmExecutableCompiler
                         var extent = ValueLayout.Size(type, structures);
                         var pointerTypeRow = body.Types[valueInfo.TypeId - 1].TypeSpecRow;
                         var isOutputPointer = TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
-                            typeReader, pointerTypeRow, out var outputPointee)
+                            typeReader, checked((uint)pointerTypeRow), out var outputPointee)
                             && outputPointee == type;
                         if (!IsOutputScalarType(type) || extent <= 0)
                         {
@@ -734,7 +734,7 @@ public static partial class TrRmExecutableCompiler
 
         var typeSpecRow = body.Types[typeId - 1].TypeSpecRow;
         if (TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
-            types, typeSpecRow, out var pointeeType)
+            types, checked((uint)typeSpecRow), out var pointeeType)
             && IsOutputScalarType(pointeeType))
         {
             return PrimitiveType.NativeRawPointer;

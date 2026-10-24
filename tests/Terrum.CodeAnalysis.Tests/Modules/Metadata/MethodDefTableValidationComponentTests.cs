@@ -23,7 +23,7 @@ public sealed class MethodDefTableValidationComponentTests
         int32 Main() {
             bool valid = TryValidateMethodSigParamTables(
                 Host.Expected[12], 0, Host.Expected[9], 1,
-                Host.Expected[4], Host.Expected[3], 0)
+                Host.Expected[4], Host.Expected[3])
                 && TryValidateMethodDefTable(
                     Host.Expected[0], Host.Expected[1], Host.Expected[2],
                     Host.Expected[3], Host.Expected[4], Host.Expected[5],

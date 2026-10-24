@@ -354,7 +354,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 }
 
                 var targetResult = signatures.GetResultTypeSpec(targetSignature);
-                var resultRow = types.GetRow(targetResult);
+                var resultRow = types.GetTypeSpecBytes(targetResult);
                 var voidResult = resultRow.Length == 3 && resultRow[0] == 1
                     && resultRow[1] == 0 && resultRow[2] == 0;
                 if (voidResult ? result != 0 : result == 0)
@@ -541,7 +541,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
         if (terminator == 0x83)
         {
             var result = ReadLocal(body, ref position, terminatorWidth);
-            var resultSpec = types.GetRow(signatures.GetResultTypeSpec(signature));
+            var resultSpec = types.GetTypeSpecBytes(
+                signatures.GetResultTypeSpec(signature));
             if (result == 0)
             {
                 if (resultSpec.Length != 3 || resultSpec[0] != 1
@@ -606,9 +607,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
             : throw InvalidBody();
 
     private static ushort MatchType(TrRmTypeSpecTableReader types,
-        ReadOnlySpan<ulong> mappedTypeKeys, int row)
+        ReadOnlySpan<ulong> mappedTypeKeys, uint typeSpecRef)
     {
-        var type = ResolveType(types, row);
+        var type = ResolveType(types, typeSpecRef);
         if (!IsMappedType(mappedTypeKeys, type))
         {
             throw InvalidBody();
@@ -644,6 +645,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
     internal static ushort ResolveType(TrRmTypeSpecTableReader types, int row)
         => types.GetCompactValueTypeKey(row);
+
+    internal static ushort ResolveType(TrRmTypeSpecTableReader types, uint typeSpecRef)
+        => types.GetCompactValueTypeKey(typeSpecRef);
 
     private ushort Use(ReadOnlySpan<byte> body, ref int position, int width, int result, int ordinal)
     {

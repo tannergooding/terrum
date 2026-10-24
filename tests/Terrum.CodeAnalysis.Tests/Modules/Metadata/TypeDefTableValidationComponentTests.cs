@@ -244,7 +244,7 @@ public sealed class TypeDefTableValidationComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 bool typeSpecValid = TryValidateTypeSpecTable(
-                    Host.Expected[12], Host.Expected[4], 0, Host.Expected[9], 0);
+                    Host.Expected[12], Host.Expected[4], 0, Host.Expected[9]);
                 bool typeDefValid = TryValidateTypeDefTable(
                     Host.Expected[0], Host.Expected[1], Host.Expected[2],
                     Host.Expected[3], Host.Expected[4], Host.Expected[5],

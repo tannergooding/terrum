@@ -10,10 +10,10 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <summary>A FieldDef's owner, name, complete type reference and flags.</summary>
 /// <param name="OwnerTypeDefRow">The one-based owning TypeDef row.</param>
 /// <param name="NameStringRow">The one-based name String row.</param>
-/// <param name="TypeSpecRow">The four-byte TypeSpecRef word.</param>
+/// <param name="TypeSpecRef">The four-byte complete type reference.</param>
 /// <param name="Flags">The assigned visibility, mutability and static flags.</param>
 public readonly record struct TrRmFieldDefRow(
-    int OwnerTypeDefRow, int NameStringRow, int TypeSpecRow, uint Flags);
+    int OwnerTypeDefRow, int NameStringRow, uint TypeSpecRef, uint Flags);
 
 /// <summary>Emits FieldDef rows with checked TypeDef ownership and TypeSpec references.</summary>
 public static class TrRmFieldDefTableWriter
@@ -41,7 +41,7 @@ public static class TrRmFieldDefTableWriter
             var offset = index * 16;
             Write(result, offset, row.OwnerTypeDefRow);
             Write(result, offset + 4, row.NameStringRow);
-            Write(result, offset + 8, row.TypeSpecRow);
+            Write(result, offset + 8, row.TypeSpecRef);
             Write(result, offset + 12, row.Flags);
         }
 

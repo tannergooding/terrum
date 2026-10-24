@@ -61,9 +61,19 @@ public sealed class TrRmPropertyDefTableWriterTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { OwnerTypeDefRow = 0 }]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { NameStringRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRow = 2 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRef = 2 }]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { GetterMethodDefRow = 0 }]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 3 }]));
+    }
+
+    [Test]
+    public void MatchesInlineTypeRefsAgainstEquivalentGetterResultTypes()
+    {
+        var property = new TrRmPropertyDefRow(1, 5, 0xF2000008, 1, 0);
+        Assert.That(Encode([property]), Has.Length.EqualTo(20));
+        Assert.Throws<InvalidDataException>(() => Encode([
+            property with { TypeSpecRef = 0xF2000001 },
+        ]));
     }
 
     private static byte[] Encode(TrRmPropertyDefRow[] rows)

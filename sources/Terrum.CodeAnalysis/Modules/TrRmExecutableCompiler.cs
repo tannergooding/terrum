@@ -319,7 +319,7 @@ public static partial class TrRmExecutableCompiler
                     : fieldDefinition.IsInternal ? 1u : 2u;
                 var fieldFlags = visibility | (fieldDefinition.IsMutable ? 4u : 0u);
                 fieldRows.Add(new TrRmFieldDefRow(index + 1, structureFieldNameRows[index][field],
-                    fieldTypeRow, fieldFlags));
+                    checked((uint)fieldTypeRow), fieldFlags));
             }
 
             structureLayoutFirst[index] = layoutRows.Count + 1;
@@ -477,7 +477,7 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported($"Function '{function.Name}' has a non-value scalar parameter.");
                 }
 
-                parameters.Add(new TrRmParamRow(index + 1, parameter, parameterType,
+                parameters.Add(new TrRmParamRow(index + 1, parameter, checked((uint)parameterType),
                     variable.IsInit && function.DirectNativeImport is null ? (byte)2 : (byte)0));
             }
 
@@ -487,7 +487,7 @@ public static partial class TrRmExecutableCompiler
                 : NativeValueTypeRow(function.ReturnType, nativeRawPointerTypeRow,
                     nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
                     program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows);
-            signatures.Add(new TrRmMethodSigRow(resultTypeRow, 0,
+            signatures.Add(new TrRmMethodSigRow(checked((uint)resultTypeRow), 0,
                 first, function.ParameterCount, 0, 0));
             var bodyRow = 0;
             if (!function.IsExternal && !hasNativeVTable)
@@ -580,15 +580,15 @@ public static partial class TrRmExecutableCompiler
             foreach (var parameterType in signature.ParameterTypes)
             {
                 parameters.Add(new TrRmParamRow(methodRow, parameters.Count - first + 1,
-                    NativeValueTypeRow(parameterType, nativeRawPointerTypeRow,
+                    checked((uint)NativeValueTypeRow(parameterType, nativeRawPointerTypeRow,
                         nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
-                        program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows), 0));
+                        program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows)), 0));
             }
 
             signatures.Add(new TrRmMethodSigRow(
-                NativeValueTypeRow(signature.ReturnType, nativeRawPointerTypeRow,
+                checked((uint)NativeValueTypeRow(signature.ReturnType, nativeRawPointerTypeRow,
                     nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
-                    program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows),
+                    program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows)),
                 0, first, signature.ParameterTypes.Length, 0, 0));
             var contractFirst = contracts.Count + 1;
             contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 1,
@@ -679,10 +679,10 @@ public static partial class TrRmExecutableCompiler
         var moduleRefs = moduleRefRows.Count == 0 ? default
             : new TrRmModuleRefTableReader(moduleRefBytes, moduleRefRows.Count, strings, modules);
         var typeRows = typeRowsList.ToArray();
-        var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, typeDefCount, 0, 0, 0,
+        var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, typeDefCount, 0, 0,
             nativeFunctionPointerSignatureRows.Count);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length,
-            typeDefCount, 0, 0, 0, nativeFunctionPointerSignatureRows.Count);
+            typeDefCount, 0, 0, nativeFunctionPointerSignatureRows.Count);
         var sigBytes = TrRmMethodSigTableWriter.Encode(signatures, types, parameters.Count, 0);
         var sigs = new TrRmMethodSigTableReader(sigBytes, signatures.Count, types, parameters.Count, 0);
         var paramBytes = parameters.Count == 0 ? [] : TrRmParamTableWriter.Encode(parameters, sigs, types);
@@ -2346,7 +2346,7 @@ public static partial class TrRmExecutableCompiler
             {
                 var fieldRow = layoutFields.GetFieldDef(firstField + ordinal);
                 var fieldType = FromNativeValueRow(typeSpecs,
-                    fields.GetTypeSpecRow(fieldRow), nativePointerTypes, structureTypeByTypeDef);
+                    fields.GetTypeSpecRef(fieldRow), nativePointerTypes, structureTypeByTypeDef);
                 var fieldFlags = fields.GetFlags(fieldRow);
                 structureFields.Add(new BoundStructField(fields.GetName(fieldRow),
                     fieldType, 0, 0)
@@ -2377,10 +2377,10 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types,
-        int row, List<NativePointerTypeDefinition> nativePointerTypes,
+        uint typeSpecRef, List<NativePointerTypeDefinition> nativePointerTypes,
         int[] structureTypeByTypeDef)
     {
-        var type = types.GetRow(row);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 4 && type[0] == 0x01 && type[2] == 0x8C)
         {
             var pointeeIndex = Array.IndexOf(s_codes, type[3]);
@@ -2388,17 +2388,20 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid("Unsupported native pointer pointee TypeSpec.");
             }
-
-            return GetNativePointerType(nativePointerTypes, s_types[pointeeIndex],
-                type[1] != 0);
+            return s_types[pointeeIndex] == PrimitiveType.Void && type[1] == 0
+                ? PrimitiveType.NativeRawPointer
+                : GetNativePointerType(nativePointerTypes, s_types[pointeeIndex],
+                    type[1] != 0);
         }
 
         if (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C)
         {
-            var pointeeRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(type[3..]));
-            var pointeeType = FromNativeValueRow(types, pointeeRow,
+            var pointeeRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            var pointeeType = FromNativeValueRow(types, pointeeRef,
                 nativePointerTypes, structureTypeByTypeDef);
-            return GetNativePointerType(nativePointerTypes, pointeeType, type[1] != 0);
+            return pointeeType == PrimitiveType.Void && type[1] == 0
+                ? PrimitiveType.NativeRawPointer
+                : GetNativePointerType(nativePointerTypes, pointeeType, type[1] != 0);
         }
 
         if (type.Length == 6 && type[0] == 0x02 && type[1] == 0)
@@ -2424,8 +2427,14 @@ public static partial class TrRmExecutableCompiler
             return NativeFunctionPointerTypes.Type(checked((int)signatureRow - 1));
         }
 
-        return FromRow(types, row);
+        return FromRow(types, typeSpecRef);
     }
+
+    private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types,
+        int row, List<NativePointerTypeDefinition> nativePointerTypes,
+        int[] structureTypeByTypeDef)
+        => FromNativeValueRow(types, checked((uint)row), nativePointerTypes,
+            structureTypeByTypeDef);
 
     private static PrimitiveType GetNativePointerType(
         List<NativePointerTypeDefinition> nativePointerTypes,
@@ -2456,16 +2465,16 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static PrimitiveType NativeParameterPointee(TrRmTypeSpecTableReader typeSpecs,
-        int typeSpecRow, TrRmLayoutTableReader layouts, int[] structureTypeByTypeDef)
+        uint typeSpecRef, TrRmLayoutTableReader layouts, int[] structureTypeByTypeDef)
     {
         if (TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-            typeSpecs, typeSpecRow, out var pointeeType))
+            typeSpecs, typeSpecRef, out var pointeeType))
         {
             return pointeeType;
         }
 
         if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
-            typeSpecs, typeSpecRow, layouts, out var typeDefRow)
+            typeSpecs, typeSpecRef, layouts, out var typeDefRow)
             && typeDefRow < structureTypeByTypeDef.Length
             && structureTypeByTypeDef[typeDefRow] >= 0)
         {
@@ -2516,9 +2525,9 @@ public static partial class TrRmExecutableCompiler
             structureTypeByTypeDef);
     }
 
-    private static PrimitiveType FromRow(TrRmTypeSpecTableReader types, int row)
+    private static PrimitiveType FromRow(TrRmTypeSpecTableReader types, uint typeSpecRef)
     {
-        var bytes = types.GetRow(row);
+        var bytes = types.GetTypeSpecBytes(typeSpecRef);
         if (bytes.Length != 3 || bytes[0] != 1 || bytes[1] != 0)
         {
             throw Invalid("Unsupported qualified or constructed TypeSpec.");
@@ -2527,9 +2536,13 @@ public static partial class TrRmExecutableCompiler
         return index >= 0 ? s_types[index] : throw Invalid("Unsupported scalar TypeSpec.");
     }
 
-    private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types, int row)
+    private static PrimitiveType FromRow(TrRmTypeSpecTableReader types, int row)
+        => FromRow(types, checked((uint)row));
+
+    private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types,
+        uint typeSpecRef)
     {
-        var bytes = types.GetRow(row);
+        var bytes = types.GetTypeSpecBytes(typeSpecRef);
         if (bytes.Length == 4 && bytes[0] == 1 && bytes[1] == 0
             && bytes[2] == 0x8C && bytes[3] <= 0x19)
         {
@@ -2545,8 +2558,11 @@ public static partial class TrRmExecutableCompiler
             return NativeFunctionPointerTypes.Type(checked((int)signatureRow - 1));
         }
 
-        return FromRow(types, row);
+        return FromRow(types, typeSpecRef);
     }
+
+    private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types, int row)
+        => FromNativeValueRow(types, checked((uint)row));
     private static NotSupportedException Unsupported(string reason) => new(reason);
     private static InvalidDataException Invalid(string reason) => new($"Invalid or unsupported executable TRRM: {reason}");
 }

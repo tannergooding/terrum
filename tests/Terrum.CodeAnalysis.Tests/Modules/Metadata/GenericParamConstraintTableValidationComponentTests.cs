@@ -24,7 +24,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
         int32 Main() {
             bool valid = TryValidateMethodSigParamTables(
                 Host.Expected[12], 0, Host.Expected[9], Host.Expected[13],
-                Host.Expected[4], 0, 0)
+                Host.Expected[4], 0)
                 && TryValidateConstraintTable(
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
@@ -298,7 +298,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
                 testCase.MethodDefCount, strings, modules, types, signatures, 0, 0);
             var formals = new TrRmGenericParamTableReader(ToBytes(testCase.GenericParams),
                 testCase.GenericParamCount, strings, types, methods, signatures,
-                testCase.ConstraintCount);
+                typeSpecs, testCase.ConstraintCount);
             _ = new TrRmConstraintTableReader(ToBytes(testCase.Constraints),
                 testCase.ConstraintCount, formals, typeSpecs);
             return true;

@@ -25,7 +25,7 @@ public sealed class FieldDefTableValidationComponentTests
         int32 Main() {
             bool valid = TryValidateTypeSpecTable(
                 Host.Expected[12], Host.Expected[4], Host.Expected[3],
-                Host.Expected[9], 0)
+                Host.Expected[9])
                 && TryValidateFieldDefTable(
                     Host.Expected[0], Host.Expected[1], Host.Expected[2],
                     Host.Expected[3], Host.Expected[4], Host.Expected[5],

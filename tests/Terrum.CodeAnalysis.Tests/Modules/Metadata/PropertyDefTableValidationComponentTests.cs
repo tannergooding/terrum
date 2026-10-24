@@ -25,7 +25,7 @@ public sealed class PropertyDefTableValidationComponentTests
         int32 Main() {
             bool valid = TryValidateMethodSigParamTables(
                 Host.Expected[5], 0, 0, Host.Expected[3],
-                Host.Expected[2], 0, 0)
+                Host.Expected[2], 0)
                 && TryValidatePropertyDefTable(
                     Host.Expected[0], Host.Expected[1], Host.Expected[2],
                     Host.Expected[3], Host.Expected[4], Host.Expected[5]);
@@ -155,7 +155,7 @@ public sealed class PropertyDefTableValidationComponentTests
         ]);
         byte[] typeSpecs = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
-            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.Builtin(9),
         ], 1, 0, 0, 0);
         var testCase = new TableCase(
             [.. strings.Select(static value => (int)value)],

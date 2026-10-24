@@ -165,11 +165,11 @@ internal static class TrRmScalarInitOutputBodyReader
         return signature;
     }
 
-    private static ushort ResultType(TrRmTypeSpecTableReader types, int row)
+    private static ushort ResultType(TrRmTypeSpecTableReader types, uint typeSpecRef)
     {
-        var bytes = types.GetRow(row);
+        var bytes = types.GetTypeSpecBytes(typeSpecRef);
         return bytes.Length == 3 && bytes[0] == 1 && bytes[1] == 0 && bytes[2] == 0
-            ? (ushort)0 : TrRmCompactLinearBodyReader.ResolveType(types, row);
+            ? (ushort)0 : TrRmCompactLinearBodyReader.ResolveType(types, typeSpecRef);
     }
 
     private ref struct Parser
@@ -1195,14 +1195,14 @@ internal static class TrRmScalarInitOutputBodyReader
 
                 var pointerTypeRow = _map[typeId - 1].TypeSpecRow;
                 var isOutputPointer = TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
-                    _types, pointerTypeRow, out var pointeeType);
+                    _types, checked((uint)pointerTypeRow), out var pointeeType);
                 if (isOutputPointer && _ruleRevision < 8)
                 {
                     throw InvalidBody();
                 }
                 if (!isOutputPointer
                     && !TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-                        _types, pointerTypeRow, out pointeeType))
+                        _types, checked((uint)pointerTypeRow), out pointeeType))
                 {
                     throw InvalidBody();
                 }
@@ -1325,7 +1325,7 @@ internal static class TrRmScalarInitOutputBodyReader
                                     && addressParameter.Retention == 1
                                     && addressParameter.Extent <= 1;
                                 if ((!matchesOutput && !matchesInput)
-                                    || !TypeSpecsEqual(TypeSpecRow(_valueTypes[valueId - 1]),
+                                    || !TypeSpecsEqual(checked((uint)TypeSpecRow(_valueTypes[valueId - 1])),
                                         _parameters.GetTypeSpec(first + argument)))
                                 {
                                     throw InvalidBody();
@@ -1334,7 +1334,7 @@ internal static class TrRmScalarInitOutputBodyReader
                             }
                             else if (UseValue(valueId) != type
                                 || (_types.IsNativePointerTypeKey(type)
-                                    && !TypeSpecsEqual(TypeSpecRow(_valueTypes[valueId - 1]),
+                                    && !TypeSpecsEqual(checked((uint)TypeSpecRow(_valueTypes[valueId - 1])),
                                         _parameters.GetTypeSpec(first + argument))))
                             {
                                 throw InvalidBody();
@@ -1601,8 +1601,8 @@ internal static class TrRmScalarInitOutputBodyReader
             return _map[typeId - 1].TypeSpecRow;
         }
 
-        private readonly bool TypeSpecsEqual(int first, int second)
-            => _types.GetRow(first).SequenceEqual(_types.GetRow(second));
+        private readonly bool TypeSpecsEqual(uint first, uint second)
+            => _types.AreEquivalentTypeSpecRefs(first, second);
 
         private readonly bool PointerPointeeMatches(int pointerTypeRow, int pointeeTypeRow,
             bool writable)
@@ -1679,7 +1679,7 @@ internal static class TrRmScalarInitOutputBodyReader
         {
             if (_allowNativeAddresses && _ruleRevision >= 8
                 && TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
-                    _types, typeSpecRow, out var pointeeType))
+                    _types, checked((uint)typeSpecRow), out var pointeeType))
             {
                 var pointeeTypeKey = NativeTypeKey(pointeeType);
                 if (Scalar(pointeeTypeKey))

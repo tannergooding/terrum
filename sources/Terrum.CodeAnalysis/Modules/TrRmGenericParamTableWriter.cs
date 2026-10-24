@@ -36,7 +36,7 @@ public static class TrRmGenericParamTableWriter
     public static byte[] Encode(IReadOnlyList<TrRmGenericParamRow> rows,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
-        int constraintCount)
+        TrRmTypeSpecTableReader typeSpecs, int constraintCount)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -62,7 +62,7 @@ public static class TrRmGenericParamTableWriter
         }
 
         _ = new TrRmGenericParamTableReader(result, rows.Count,
-            strings, types, methods, signatures, constraintCount);
+            strings, types, methods, signatures, typeSpecs, constraintCount);
         return result;
     }
 

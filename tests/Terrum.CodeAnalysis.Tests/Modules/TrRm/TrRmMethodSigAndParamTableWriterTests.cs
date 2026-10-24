@@ -28,7 +28,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         Assert.That(paramBytes.Length, Is.EqualTo(32));
         Assert.That(parameters.GetMode(2), Is.EqualTo((byte)4));
 
-        rows[0] = rows[0] with { ResultTypeSpecRow = 0 };
+        rows[0] = rows[0] with { ResultTypeSpecRef = 0 };
         paramRows[1] = paramRows[1] with { Mode = 9 };
         Assert.That(sigs.GetResultTypeSpec(1), Is.EqualTo(1));
         Assert.That(parameters.GetMode(2), Is.EqualTo((byte)4));
@@ -76,12 +76,33 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
     }
 
     [Test]
+    public void PreservesInlineCompleteTypeReferencesInSignaturesAndParameters()
+    {
+        var signatureBytes = EncodeSignature([
+            new TrRmMethodSigRow(0xF2000008, 0xF3008B08, 1, 2, 0, 0),
+        ]);
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
+            signatureBytes), Is.EqualTo(0xF2000008u));
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
+            signatureBytes.AsSpan(4)), Is.EqualTo(0xF3008B08u));
+
+        var parameterBytes = EncodeParams([
+            new TrRmParamRow(1, 0, 0xF2000008, 0),
+            new TrRmParamRow(1, 1, 0xF3008B08, 0),
+        ]);
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
+            parameterBytes.AsSpan(8)), Is.EqualTo(0xF2000008u));
+        Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
+            parameterBytes.AsSpan(24)), Is.EqualTo(0xF3008B08u));
+    }
+
+    [Test]
     public void RejectsBadSignatureReferencesRangesAndMissingParams()
     {
         var row = new TrRmMethodSigRow(1, 0, 1, 2, 0, 0);
         Assert.Throws<ArgumentOutOfRangeException>(() => EncodeSignature([]));
-        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ResultTypeSpecRow = 2 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ReceiverTypeSpecRow = 2 }]));
+        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ResultTypeSpecRef = 2 }]));
+        Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ReceiverTypeSpecRef = 2 }]));
         Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ParamFirst = 0 }]));
         Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { ParamCount = 1 }]));
         Assert.Throws<InvalidDataException>(() => EncodeSignature([row with { GenericFirst = 1 }]));
@@ -95,7 +116,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         Assert.Throws<ArgumentOutOfRangeException>(() => EncodeParams([]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first with { OwnerMethodSigRow = 2 }, second]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { Ordinal = 0 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { TypeSpecRow = 0 }]));
+        Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { TypeSpecRef = 0 }]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { Mode = 5 }]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first]));
     }

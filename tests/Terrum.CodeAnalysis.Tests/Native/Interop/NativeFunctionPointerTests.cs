@@ -765,7 +765,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(artifactIndex.TryGetSection(0x0011, out var typeSpecBytes,
             out var typeSpecCount), Is.True);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecCount,
-            0, 0, 0, 0, signatureCount);
+            0, 0, 0, signatureCount);
         var hasFunctionPointerTypeSpec = false;
         for (var row = 1; row <= typeSpecCount; row++)
         {

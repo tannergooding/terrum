@@ -120,6 +120,16 @@ catalog-derived per-Module prerequisite closure. The executable compiler
 continues to emit and consume its separate development Feature assignments;
 this metadata progress does not qualify its Body or native capabilities as
 current-schema support.
+A further metadata slice now decodes the assigned TypeSpecRef row/F2/F3 union,
+validates nested TypeSpec operands and existential/ref-init forms, and uses
+complete type references in the currently integrated FieldDef, MethodSig,
+Param, PropertyDef, GenericParam type fields and Constraint kind-1 payload.
+Constructed TypeSpec rows now carry their argument words inline; the separate
+TypeArg table and section `0x0012` are no longer parsed as standard metadata.
+Formal arity/kind and ConstantSource binding, remaining registered
+TypeSpecRef-bearing records, dependency/remapping, Body codecs and broader
+execution are still incomplete, so this does not establish current-schema
+conformance.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar

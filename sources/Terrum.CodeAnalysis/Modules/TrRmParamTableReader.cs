@@ -34,13 +34,13 @@ public readonly ref struct TrRmParamTableReader
             ordinal = expectedOwner == previousOwner ? ordinal + 1 : 0;
             var type = Read(data, 8);
             if (owner != expectedOwner || Read(data, 4) != ordinal
-                || type == 0 || type > types.Count
                 || data[12] > 4 || data[13] != 0
                 || data[14] != 0 || data[15] != 0)
             {
                 throw InvalidParam();
             }
 
+            _ = types.GetTypeSpecRef(type);
             previousOwner = expectedOwner;
         }
     }
@@ -55,14 +55,14 @@ public readonly ref struct TrRmParamTableReader
         return _rows[(row - 1) * RowSize + 12];
     }
 
-    public int GetTypeSpec(int row)
+    public uint GetTypeSpec(int row)
     {
         if (row <= 0 || (long)row * RowSize > _rows.Length)
         {
             throw InvalidParam();
         }
 
-        return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
+        return Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

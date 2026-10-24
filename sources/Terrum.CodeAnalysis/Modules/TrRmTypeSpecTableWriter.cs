@@ -29,15 +29,24 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
-    public static byte[] Constructed(uint genericTypeSpec, uint typeArgFirst,
-        uint typeArgCount, byte qualifiers = 0)
+    public static byte[] Constructed(uint genericTypeSpec,
+        ReadOnlySpan<uint> argumentReferences, byte qualifiers = 0)
     {
-        var bytes = new byte[14];
+        if (argumentReferences.IsEmpty)
+        {
+            throw new ArgumentException("A constructed TypeSpec requires arguments.",
+                nameof(argumentReferences));
+        }
+
+        var bytes = new byte[checked(6 + argumentReferences.Length * sizeof(uint))];
         bytes[0] = 0x05;
         bytes[1] = qualifiers;
         Write(bytes, 2, genericTypeSpec);
-        Write(bytes, 6, typeArgFirst);
-        Write(bytes, 10, typeArgCount);
+        for (var index = 0; index < argumentReferences.Length; index++)
+        {
+            Write(bytes, 6 + index * sizeof(uint), argumentReferences[index]);
+        }
+
         return bytes;
     }
 
@@ -68,13 +77,13 @@ public static class TrRmTypeSpecTableWriter
 
     /// <summary>Encodes TypeSpec rows and validates their referenced table counts.</summary>
     public static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows,
-        int typeDefCount, int importCount, int genericParamCount, int typeArgCount,
+        int typeDefCount, int importCount, int genericParamCount,
         int nativeFunctionPointerSignatureCount = 0)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var result = TrRmVariableTableWriter.EncodeBlobs(rows);
         _ = new TrRmTypeSpecTableReader(result, rows.Count,
-            typeDefCount, importCount, genericParamCount, typeArgCount,
+            typeDefCount, importCount, genericParamCount,
             nativeFunctionPointerSignatureCount);
         return result;
     }

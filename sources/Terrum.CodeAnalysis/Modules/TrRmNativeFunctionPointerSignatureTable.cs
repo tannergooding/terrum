@@ -191,9 +191,9 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
         return true;
     }
 
-    private string TypeIdentity(int typeSpecRow, bool allowVoid, bool allowStruct)
+    private string TypeIdentity(uint typeSpecRef, bool allowVoid, bool allowStruct)
     {
-        var type = _types.GetRow(typeSpecRow);
+        var type = _types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 3 && type[0] == 0x01 && type[1] == 0
             && (type[2] is 0x01 or 0x03 or 0x08 or 0x09 or 0x0D or 0x0E or 0x14 or 0x15
                 || (allowVoid && type[2] == 0)))
@@ -220,7 +220,7 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
         throw InvalidNativeFunctionPointerSignature();
     }
 
-    private string CanonicalTypeIdentity(int typeSpecRow, bool allowVoid, int depth,
+    private string CanonicalTypeIdentity(uint typeSpecRef, bool allowVoid, int depth,
         bool allowStruct = false)
     {
         if (depth > SemanticVerifier.MaximumDepth)
@@ -228,7 +228,7 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
             throw InvalidNativeFunctionPointerSignature();
         }
 
-        var type = _types.GetRow(typeSpecRow);
+        var type = _types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 6 && type[0] == 0x0D && type[1] == 0)
         {
             var signatureRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(type[2..]));
@@ -240,7 +240,7 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
             return $"ptr:{type[1]}:{NativePointerPointeeIdentity(type, depth + 1)}";
         }
 
-        return TypeIdentity(typeSpecRow, allowVoid, allowStruct);
+        return TypeIdentity(typeSpecRef, allowVoid, allowStruct);
     }
 
     private string NativePointerPointeeIdentity(ReadOnlySpan<byte> type, int depth)
@@ -257,8 +257,8 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
             throw InvalidNativeFunctionPointerSignature();
         }
 
-        var pointeeRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(type[3..]));
-        return CanonicalTypeIdentity(pointeeRow, allowVoid: true, depth, allowStruct: true);
+        var pointeeRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+        return CanonicalTypeIdentity(pointeeRef, allowVoid: true, depth, allowStruct: true);
     }
 
     private static bool IsNativePointerType(ReadOnlySpan<byte> type)

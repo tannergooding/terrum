@@ -111,7 +111,6 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0004, out var featureBytes, out var featureCount);
         _ = index.TryGetSection(0x0010, out var moduleRefBytes, out var moduleRefCount);
         _ = index.TryGetSection(0x0011, out var typeSpecBytes, out var typeSpecCount);
-        _ = index.TryGetSection(0x0012, out var typeArgBytes, out var typeArgCount);
         _ = index.TryGetSection(0x0013, out var typeDefBytes, out var typeDefCount);
         _ = index.TryGetSection(0x0014, out var fieldDefBytes, out var fieldDefCount);
         _ = index.TryGetSection(0x0015, out var layoutBytes, out var layoutCount);
@@ -164,10 +163,8 @@ public static class TrRmStructuralMetadataValidator
             strings, modules);
         var typeSpecs = typeSpecCount == 0 && nativeFunctionPointerSignatureCount == 0 ? default
             : new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecCount,
-                typeDefCount, importCount, genericParamCount, typeArgCount,
+                typeDefCount, importCount, genericParamCount,
                 nativeFunctionPointerSignatureCount);
-        var typeArgs = typeArgCount == 0 ? default
-            : new TrRmTypeArgTableReader(typeArgBytes, typeArgCount, typeSpecs);
         var types = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
             strings, modules, fieldDefCount, genericParamCount, layoutCount, contractCount);
         var targetProfiles = new TrRmTargetProfileTableReader(
@@ -190,7 +187,7 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmPropertyDefTableReader(propertyBytes, propertyCount,
                 strings, types, typeSpecs, methods, signatures);
         var generics = new TrRmGenericParamTableReader(genericParamBytes, genericParamCount,
-            strings, types, methods, signatures, constraintCount);
+            strings, types, methods, signatures, typeSpecs, constraintCount);
         var constraints = constraintCount == 0 ? default
             : new TrRmConstraintTableReader(constraintBytes, constraintCount,
                 generics, typeSpecs);
@@ -301,7 +298,6 @@ public static class TrRmStructuralMetadataValidator
             }
         }
 
-        _ = typeArgs;
         _ = fields;
         _ = layouts;
         _ = parameters;
@@ -427,7 +423,7 @@ public static class TrRmStructuralMetadataValidator
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs)
     {
         var signature = methods.GetSignature(method);
-        if (typeSpecs.GetRow(signatures.GetResultTypeSpec(signature))[0] == 0x0D)
+        if (typeSpecs.GetTypeSpecBytes(signatures.GetResultTypeSpec(signature))[0] == 0x0D)
         {
             return true;
         }
@@ -435,7 +431,7 @@ public static class TrRmStructuralMetadataValidator
         var (first, count) = signatures.GetParamRange(signature);
         for (var parameter = 0; parameter < count; parameter++)
         {
-            if (typeSpecs.GetRow(parameters.GetTypeSpec(first + parameter))[0] == 0x0D)
+            if (typeSpecs.GetTypeSpecBytes(parameters.GetTypeSpec(first + parameter))[0] == 0x0D)
             {
                 return true;
             }
@@ -448,7 +444,8 @@ public static class TrRmStructuralMetadataValidator
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs)
     {
         var signature = methods.GetSignature(method);
-        if (IsNativePointerType(typeSpecs.GetRow(signatures.GetResultTypeSpec(signature))))
+        if (IsNativePointerType(typeSpecs.GetTypeSpecBytes(
+            signatures.GetResultTypeSpec(signature))))
         {
             return true;
         }
@@ -456,7 +453,8 @@ public static class TrRmStructuralMetadataValidator
         var (first, count) = signatures.GetParamRange(signature);
         for (var parameter = 0; parameter < count; parameter++)
         {
-            if (IsNativePointerType(typeSpecs.GetRow(parameters.GetTypeSpec(first + parameter))))
+            if (IsNativePointerType(typeSpecs.GetTypeSpecBytes(
+                parameters.GetTypeSpec(first + parameter))))
             {
                 return true;
             }

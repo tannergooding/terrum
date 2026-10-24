@@ -7,7 +7,7 @@ using System.Collections.Generic;
 namespace Terrum.CodeAnalysis.Modules;
 
 public readonly record struct TrRmMethodSigRow(
-    int ResultTypeSpecRow, int ReceiverTypeSpecRow,
+    uint ResultTypeSpecRef, uint ReceiverTypeSpecRef,
     int ParamFirst, int ParamCount, int GenericFirst, int GenericCount);
 
 /// <summary>Emits MethodSig rows with checked type references and disjoint Param ranges.</summary>
@@ -27,8 +27,8 @@ public static class TrRmMethodSigTableWriter
         {
             var row = rows[index];
             var offset = index * 24;
-            Write(result, offset, row.ResultTypeSpecRow);
-            Write(result, offset + 4, row.ReceiverTypeSpecRow);
+            Write(result, offset, row.ResultTypeSpecRef);
+            Write(result, offset + 4, row.ReceiverTypeSpecRef);
             Write(result, offset + 8, row.ParamFirst);
             Write(result, offset + 12, row.ParamCount);
             Write(result, offset + 16, row.GenericFirst);
@@ -41,4 +41,7 @@ public static class TrRmMethodSigTableWriter
 
     private static void Write(byte[] bytes, int offset, int value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), unchecked((uint)value));
+
+    private static void Write(byte[] bytes, int offset, uint value)
+        => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 }

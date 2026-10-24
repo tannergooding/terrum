@@ -22,8 +22,8 @@ public sealed class MethodSigParamTableValidationComponentTests
         int32 Main() {
             bool valid = TryValidateMethodSigParamTables(
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
-                Host.Expected[3], Host.Expected[4], Host.Expected[5], Host.Expected[6]);
-            return valid == (Host.Expected[7] != 0) ? 0 : 1;
+                Host.Expected[3], Host.Expected[4], Host.Expected[5]);
+            return valid == (Host.Expected[6] != 0) ? 0 : 1;
         }
         """;
     [TestCase(BoundRuntimePolicy.FailFast)]
@@ -166,7 +166,6 @@ public sealed class MethodSigParamTableValidationComponentTests
                     testCase.TypeSpecCount,
                     testCase.TypeDefCount,
                     testCase.ImportCount,
-                    testCase.TypeArgCount,
                     testCase.ExpectedValid ? 1 : 0,
                 ], false),
             ], policy);
@@ -182,14 +181,14 @@ public sealed class MethodSigParamTableValidationComponentTests
         byte[] types = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
             TrRmTypeSpecTableWriter.Builtin(0),
-        ], 0, 0, 2, 0);
+        ], 0, 0, 2);
         byte[] signatures = EncodeWords(1, 0, 1, 2, 1, 1,
             2, 1, 3, 1, 2, 1);
         byte[] parameters = EncodeParameters((1, 0, 1, 0),
             (1, 1, 2, 1), (2, 0, 1, 4));
         var testCase = new TableCase([.. types.Select(static value => (int)value)],
             [.. signatures.Select(static value => (int)value)],
-            [.. parameters.Select(static value => (int)value)], 2, 3, 2, 2, 0, 0, 0, true, true);
+            [.. parameters.Select(static value => (int)value)], 2, 3, 2, 2, 0, 0, true, true);
         Assert.That(ValidateHosted(testCase), Is.True);
         return testCase;
     }
@@ -200,7 +199,7 @@ public sealed class MethodSigParamTableValidationComponentTests
         byte[] types = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(8),
             TrRmTypeSpecTableWriter.Builtin(0),
-        ], 0, 0, 0, 0);
+        ], 0, 0, 0);
         byte[] signatures = EncodeWords(1, 0, 1, paramCount, 0, 0);
         var parameters = new byte[paramCount * 16];
         for (var index = 0; index < paramCount; index++)
@@ -214,7 +213,7 @@ public sealed class MethodSigParamTableValidationComponentTests
         var testCase = new TableCase([.. types.Select(static value => (int)value)],
             [.. signatures.Select(static value => (int)value)],
             [.. parameters.Select(static value => (int)value)],
-            1, paramCount, 0, 2, 0, 0, 0, true, true);
+            1, paramCount, 0, 2, 0, 0, true, true);
         Assert.That(ValidateHosted(testCase), Is.True);
         return testCase;
     }
@@ -262,7 +261,7 @@ public sealed class MethodSigParamTableValidationComponentTests
             var parameters = testCase.Parameters.Select(static value => checked((byte)value)).ToArray();
             var typeSpecs = new TrRmTypeSpecTableReader(types, testCase.TypeSpecCount,
                 testCase.TypeDefCount, testCase.ImportCount,
-                testCase.GenericParamCount, testCase.TypeArgCount);
+                testCase.GenericParamCount);
             var signatureReader = new TrRmMethodSigTableReader(signatures, testCase.SignatureCount,
                 typeSpecs, testCase.ParamCount, testCase.GenericParamCount);
             if (testCase.ParamCount > 0)
@@ -345,5 +344,5 @@ public sealed class MethodSigParamTableValidationComponentTests
 
     private sealed record TableCase(int[] Types, int[] Signatures, int[] Parameters,
         int SignatureCount, int ParamCount, int GenericParamCount, int TypeSpecCount,
-        int TypeDefCount, int ImportCount, int TypeArgCount, bool ExpectedValid, bool HasHostedOracle = true);
+        int TypeDefCount, int ImportCount, bool ExpectedValid, bool HasHostedOracle = true);
 }

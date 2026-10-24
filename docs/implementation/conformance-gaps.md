@@ -100,8 +100,15 @@ validator. The bounded Blittable path emits complete default and Windows x64
 Layout variants with ordered instance-field lists, then reconstructs supported
 Sequential/Transparent layouts without serializing physical size or offsets.
 GenericParam domains and assigned Constraint kinds are structurally checked;
-the associated-relation payload and all complete-field TypeSpecRef conversions
-remain unfinished. See
+the current TypeSpecRef slice validates row/F2/F3 forms, nested operands,
+existential and ref-init rows, and variable form-0x05 payload framing. It
+applies complete references to FieldDef, MethodSig, Param, PropertyDef,
+GenericParam defaults/constant types and Constraint kind 1, and retires the
+TypeArg table and section `0x0012` from standard parsing. Generic-aware
+argument arity/kind/ConstantSource bounds, remaining registered fields,
+dependency/remapping and Body routes, and the provisional associated-relation
+payload remain unfinished. The selected TypeSpecRef behavior does not establish
+current-schema conformance. See
 [ModuleCompiler](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
 [Feature admission](../../sources/Terrum.CodeAnalysis/Modules/TrRmFeatureTableReader.cs),
 [Body fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)

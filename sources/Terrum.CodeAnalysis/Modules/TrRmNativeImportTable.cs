@@ -11,21 +11,21 @@ namespace Terrum.CodeAnalysis.Modules;
 internal static class TrRmNativeImportTypeContract
 {
     internal static bool TryGetDirectNativeImportResultType(TrRmTypeSpecTableReader types,
-        int typeSpecRow, out PrimitiveType resultType)
+        uint typeSpecRef, out PrimitiveType resultType)
     {
-        var type = types.GetRow(typeSpecRow);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 3 && type[0] == 1 && type[1] == 0 && type[2] == 0)
         {
             resultType = PrimitiveType.Void;
             return true;
         }
 
-        if (TryGetScalarType(types, typeSpecRow, out resultType))
+        if (TryGetScalarType(types, typeSpecRef, out resultType))
         {
             return DirectNativeImportContract.IsScalar(resultType);
         }
 
-        if (IsNativeAbiPointerOrFunctionPointerType(types, typeSpecRow))
+        if (IsNativeAbiPointerOrFunctionPointerType(types, typeSpecRef))
         {
             resultType = PrimitiveType.NativeRawPointer;
             return true;
@@ -35,19 +35,19 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
-    internal static bool TryGetScalarType(TrRmTypeSpecTableReader types, int typeSpecRow,
+    internal static bool TryGetScalarType(TrRmTypeSpecTableReader types, uint typeSpecRef,
         out PrimitiveType scalarType)
     {
-        var type = types.GetRow(typeSpecRow);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         scalarType = type.Length == 3 && type[0] == 1 && type[1] == 0
             ? FromAtomicCode(type[2]) : PrimitiveType.Void;
         return scalarType != PrimitiveType.Void;
     }
 
     internal static bool TryGetWritableOutputPointee(TrRmTypeSpecTableReader types,
-        int typeSpecRow, out PrimitiveType pointeeType)
+        uint typeSpecRef, out PrimitiveType pointeeType)
     {
-        var type = types.GetRow(typeSpecRow);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         pointeeType = type.Length == 4 && type[0] == 1 && type[1] == 1 && type[2] == 0x8C
             ? FromAtomicCode(type[3]) : PrimitiveType.Void;
         if (pointeeType != PrimitiveType.Void)
@@ -57,8 +57,8 @@ internal static class TrRmNativeImportTypeContract
 
         if (type.Length == 7 && type[0] == 0x0C && type[1] == 1 && type[2] == 0x8C)
         {
-            var innerRow = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
-            var inner = types.GetRow(checked((int)innerRow));
+            var innerRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            var inner = types.GetTypeSpecBytes(innerRef);
             if (inner.Length == 4 && inner[0] == 1 && inner[1] == 0
                 && inner[2] == 0x8C && inner[3] == 0)
             {
@@ -72,9 +72,9 @@ internal static class TrRmNativeImportTypeContract
     }
 
     internal static bool TryGetNativeParameterPointee(TrRmTypeSpecTableReader types,
-        int typeSpecRow, out PrimitiveType pointeeType)
+        uint typeSpecRef, out PrimitiveType pointeeType)
     {
-        var type = types.GetRow(typeSpecRow);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 4 && type[0] == 1 && type[1] == 0 && type[2] == 0x8C)
         {
             if (type[3] == 0)
@@ -89,8 +89,8 @@ internal static class TrRmNativeImportTypeContract
 
         if (type.Length == 7 && type[0] == 0x0C && type[1] == 0 && type[2] == 0x8C)
         {
-            var innerRow = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
-            var inner = types.GetRow(checked((int)innerRow));
+            var innerRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            var inner = types.GetTypeSpecBytes(innerRef);
             if (inner.Length == 4 && inner[0] == 1 && inner[1] == 0
                 && inner[2] == 0x8C && inner[3] == 0)
             {
@@ -103,15 +103,15 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
-    internal static bool IsNativeAbiValueType(TrRmTypeSpecTableReader types, int typeSpecRow)
-        => (TryGetScalarType(types, typeSpecRow, out var scalarType)
+    internal static bool IsNativeAbiValueType(TrRmTypeSpecTableReader types, uint typeSpecRef)
+        => (TryGetScalarType(types, typeSpecRef, out var scalarType)
                 && DirectNativeImportContract.IsScalar(scalarType))
-            || IsNativeAbiPointerOrFunctionPointerType(types, typeSpecRow);
+            || IsNativeAbiPointerOrFunctionPointerType(types, typeSpecRef);
 
     private static bool IsNativeAbiPointerOrFunctionPointerType(
-        TrRmTypeSpecTableReader types, int typeSpecRow)
+        TrRmTypeSpecTableReader types, uint typeSpecRef)
     {
-        var type = types.GetRow(typeSpecRow);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         if ((type.Length == 4 && type[0] == 0x01 && type[2] == 0x8C)
             || (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C))
         {
@@ -128,15 +128,15 @@ internal static class TrRmNativeImportTypeContract
     }
 
     internal static bool TryGetBlittableAggregateParameterTypeDef(
-        TrRmTypeSpecTableReader types, int typeSpecRow,
+        TrRmTypeSpecTableReader types, uint typeSpecRef,
         TrRmLayoutTableReader layouts, out int typeDefRow)
     {
-        var type = types.GetRow(typeSpecRow);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 7 && type[0] == 0x0C && type[1] == 0
             && type[2] == 0x8C)
         {
-            var innerRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(type[3..]));
-            var inner = types.GetRow(innerRow);
+            var innerRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            var inner = types.GetTypeSpecBytes(innerRef);
             if (inner.Length == 6 && inner[0] == 0x02 && inner[1] == 0)
             {
                 typeDefRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner[2..]));

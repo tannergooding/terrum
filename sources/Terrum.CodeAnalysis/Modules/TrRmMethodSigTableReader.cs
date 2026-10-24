@@ -40,12 +40,14 @@ public readonly ref struct TrRmMethodSigTableReader
             var count = Read(data, 12);
             var genericFirst = Read(data, 16);
             var genericCount = Read(data, 20);
-            if (result == 0 || result > types.Count || receiver > types.Count
-                || !ValidRange(first, count, paramCount)
+            if (!ValidRange(first, count, paramCount)
                 || !ValidRange(genericFirst, genericCount, genericParamCount))
             {
                 throw InvalidSignature();
             }
+
+            _ = types.GetTypeSpecRef(result);
+            _ = types.GetTypeSpecRef(receiver, allowNull: true);
 
             for (var param = first; param < first + count; param++)
             {
@@ -77,24 +79,24 @@ public readonly ref struct TrRmMethodSigTableReader
         return _paramOwners[row];
     }
 
-    public int GetReceiverTypeSpec(int row)
+    public uint GetReceiverTypeSpec(int row)
     {
         if (row <= 0 || row > Count)
         {
             throw InvalidSignature();
         }
 
-        return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 4);
+        return Read(_rows.Slice((row - 1) * RowSize, RowSize), 4);
     }
 
-    public int GetResultTypeSpec(int row)
+    public uint GetResultTypeSpec(int row)
     {
         if (row <= 0 || row > Count)
         {
             throw InvalidSignature();
         }
 
-        return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 0);
+        return Read(_rows.Slice((row - 1) * RowSize, RowSize), 0);
     }
 
     public (int Start, int Count) GetParamRange(int row)

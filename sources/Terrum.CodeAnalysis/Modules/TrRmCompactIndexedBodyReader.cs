@@ -286,7 +286,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         }
 
         var resultTypeSpec = signatures.GetResultTypeSpec(signature);
-        var resultRow = types.GetRow(resultTypeSpec);
+        var resultRow = types.GetTypeSpecBytes(resultTypeSpec);
         var voidResult = resultRow.Length == 3 && resultRow[0] == 1
             && resultRow[1] == 0 && resultRow[2] == 0;
         var resultType = voidResult ? (ushort)0
@@ -686,7 +686,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     }
 
                     var targetResult = signatures.GetResultTypeSpec(targetSignature);
-                    var targetRow = types.GetRow(targetResult);
+                    var targetRow = types.GetTypeSpecBytes(targetResult);
                     var targetVoid = targetRow.Length == 3 && targetRow[0] == 1
                         && targetRow[1] == 0 && targetRow[2] == 0;
                     if (targetVoid ? result != 0
@@ -807,7 +807,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     }
 
                     var returnTypeSpec = signatures.GetResultTypeSpec(anchorSignature);
-                    var returnTypeRow = types.GetRow(returnTypeSpec);
+                    var returnTypeRow = types.GetTypeSpecBytes(returnTypeSpec);
                     var voidReturn = returnTypeRow.Length == 3 && returnTypeRow[0] == 1
                         && returnTypeRow[1] == 0 && returnTypeRow[2] == 0;
                     if (voidReturn ? result != 0

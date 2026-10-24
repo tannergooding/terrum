@@ -190,9 +190,10 @@ internal readonly ref struct TrRmNativeCallableTableReader
         }
     }
 
-    private static bool IsCallableType(TrRmTypeSpecTableReader types, int row, bool allowVoid)
+    private static bool IsCallableType(TrRmTypeSpecTableReader types,
+        uint typeSpecRef, bool allowVoid)
     {
-        var type = types.GetRow(row);
+        var type = types.GetTypeSpecBytes(typeSpecRef);
         return (type.Length == 3 && type[0] == 1 && type[1] == 0
                 && (type[2] is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x14 or 0x15
                     || (allowVoid && type[2] == 0)))

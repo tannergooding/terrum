@@ -105,7 +105,7 @@ public sealed class TrRmGenericParamTableReaderTests
         var methods = new TrRmMethodDefTableReader(Method(), 1,
             names, modules, types, signatures, 0, 0);
         var formals = new TrRmGenericParamTableReader(Formals(), 2,
-            names, types, methods, signatures, 1);
+            names, types, methods, signatures, typeSpecs, 1);
         var constraints = new TrRmConstraintTableReader(row, 1, formals, typeSpecs);
         Assert.That(constraints.GetOwnerGenericParam(1), Is.EqualTo(1));
         Assert.That(constraints.GetKind(1), Is.EqualTo((ushort)2));
@@ -145,7 +145,7 @@ public sealed class TrRmGenericParamTableReaderTests
         var methods = new TrRmMethodDefTableReader(Method(), 1,
             names, modules, types, signatures, 0, 0);
         var formals = new TrRmGenericParamTableReader(Formals(), 2,
-            names, types, methods, signatures, 1);
+            names, types, methods, signatures, typeSpecs, 1);
         _ = new TrRmConstraintTableReader(bytes, recordCount, formals, typeSpecs);
     }
 
@@ -163,7 +163,7 @@ public sealed class TrRmGenericParamTableReaderTests
         var methods = new TrRmMethodDefTableReader(Method(), 1,
             names, modules, types, signatures, 0, 0);
         var formals = new TrRmGenericParamTableReader(formalRows, 2,
-            names, types, methods, signatures, 1);
+            names, types, methods, signatures, typeSpecs, 1);
         return formals.GetConstraintOwner(row);
     }
 

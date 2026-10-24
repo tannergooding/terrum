@@ -39,14 +39,16 @@ public readonly ref struct TrRmPropertyDefTableReader
             var flags = Read(data, 16);
             if (owner == 0 || owner > types.Count
                 || name is 0 or > 0xFF_FFFF
-                || type == 0 || type > typeSpecs.Count || flags > 2
+                || flags > 2
                 || getter == 0 || getter > methods.Count
                 || methods.GetOwnerType((int)getter) != owner
-                || signatures.GetResultTypeSpec(methods.GetSignature((int)getter)) != type)
+                || !typeSpecs.AreEquivalentTypeSpecRefs(type,
+                    signatures.GetResultTypeSpec(methods.GetSignature((int)getter))))
             {
                 throw InvalidProperty();
             }
 
+            _ = typeSpecs.GetTypeSpecRef(type);
             _ = _strings.DecodeName((int)name);
         }
     }

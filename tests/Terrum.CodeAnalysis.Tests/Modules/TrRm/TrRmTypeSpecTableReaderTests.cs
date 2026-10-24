@@ -26,15 +26,56 @@ public sealed class TrRmTypeSpecTableReaderTests
         var section = Rows(
             [0x01, 0, 0x08],
             [0x01, 0, 0x81, 0x08],
-            [0x01, 0, 0x89, 0x08],
+            [0x01, 0, 0x8F, 0x08],
             [0x02, 0, 1, 0, 0, 0],
             [0x07, 0, 4, 0, 0, 0],
             [0x0C, 0, 0x8A, 4, 0, 0, 0],
             [0x06, 0, 1, 0, 0, 0],
-            [0x05, 0, 4, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-        var reader = new TrRmTypeSpecTableReader(section, 8, 1, 0, 0, 1);
+            [0x05, 0, 4, 0, 0, 0, 8, 0, 0, 0xF2]);
+        var reader = new TrRmTypeSpecTableReader(section, 8, 1, 0, 0);
         Assert.That(reader.GetRow(6)[0], Is.EqualTo((byte)0x0C));
         Assert.That(reader.GetRow(8)[0], Is.EqualTo((byte)0x05));
+    }
+
+    [Test]
+    public void ValidatesExistentialAndNestedTypeSpecRefForms()
+    {
+        var section = Rows(
+            [0x0F, 0],
+            [0x06, 0, 0x08, 0, 0, 0xF2],
+            [0x0C, 0, 0x8A, 0x08, 0x8B, 0x04, 0xF3],
+            [0x0E, 0, 0x08, 0, 0, 0xF2],
+            [0x01, 0x04, 0x8B, 0x08],
+            [0x0C, 0, 0x8A, 0x05, 0, 0, 0],
+            [0x06, 0, 0x08, 0, 0, 0xF2]);
+        var reader = new TrRmTypeSpecTableReader(section, 7, 0, 0, 0, 0);
+        Assert.That(reader.GetRow(1).ToArray(), Is.EqualTo(new byte[] { 0x0F, 0 }));
+        Assert.That(reader.GetRow(2)[0], Is.EqualTo((byte)0x06));
+        Assert.That(reader.GetRow(3)[0], Is.EqualTo((byte)0x0C));
+        Assert.That(reader.GetRow(4)[0], Is.EqualTo((byte)0x0E));
+        Assert.That(reader.AreEquivalentTypeSpecRefs(2, 7), Is.True);
+        Assert.That(reader.AreEquivalentTypeSpecRefs(3, 6), Is.True);
+        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 7, 5));
+        Assert.Throws<InvalidDataException>(() =>
+            GetTypeSpecRef(section, 7, 0xF3048B08));
+    }
+
+    [Test]
+    public void ValidatesTypeSpecRefNamespacesAndEquivalentInlineTypes()
+    {
+        var section = Rows([0x01, 0, 0x08], [0x01, 0, 0x8B, 0x08]);
+        var reader = new TrRmTypeSpecTableReader(section, 2, 0, 0, 0, 0);
+
+        Assert.That(reader.AreEquivalentTypeSpecRefs(1, 0xF2000008), Is.True);
+        Assert.That(reader.AreEquivalentTypeSpecRefs(2, 0xF3008B08), Is.True);
+        Assert.That(reader.GetTypeSpecRef(0xF200001A).Form, Is.EqualTo((byte)0x0F));
+        Assert.That(reader.GetTypeSpecRef(0xF3008B08).TypeCode, Is.EqualTo((byte)0x8B));
+        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 3));
+        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF2010008));
+        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF200001B));
+        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3008508));
+        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3008B1A));
+        Assert.Throws<InvalidDataException>(() => GetTypeSpecRef(section, 2, 0xF3028C08));
     }
 
     [Test]
@@ -71,8 +112,8 @@ public sealed class TrRmTypeSpecTableReaderTests
         rows[firstPointerRow] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D);
         rows[firstPointerRow + 1] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 8);
 
-        var section = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0, signatureCount);
-        var reader = new TrRmTypeSpecTableReader(section, rows.Length, 0, 0, 0, 0,
+        var section = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, signatureCount);
+        var reader = new TrRmTypeSpecTableReader(section, rows.Length, 0, 0, 0,
             signatureCount);
 
         Assert.That(reader.GetCompactValueTypeKey(firstPointerRow), Is.EqualTo(ushort.MaxValue));
@@ -87,6 +128,7 @@ public sealed class TrRmTypeSpecTableReaderTests
     [TestCase(new byte[] { 0x01, 0, 0xFF })]
     [TestCase(new byte[] { 0x01, 0, 0x80 })]
     [TestCase(new byte[] { 0x01, 0, 0x80, 0x80 })]
+    [TestCase(new byte[] { 0x01, 0, 0x89, 0x08 })]
     [TestCase(new byte[] { 0x01, 0, 8, 0 })]
     [TestCase(new byte[] { 0x02, 0, 0, 0, 0, 0 })]
     [TestCase(new byte[] { 0x02, 0, 2, 0, 0, 0 })]
@@ -107,20 +149,21 @@ public sealed class TrRmTypeSpecTableReaderTests
         Assert.Throws<InvalidDataException>(() =>
             Create(Rows([1, 0, 8], [0x0C, 0, 0x8A, 1, 0, 0, 0]), count: 2));
     }
-    [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 })]
-    [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0 })]
-    public void RejectsInvalidConstructedArgumentRanges(byte[] constructed)
+    [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2 })]
+    [TestCase(new byte[] { 5, 0, 1, 0, 0, 0 })]
+    [TestCase(new byte[] { 5, 0, 1, 0, 0, 0, 0, 0, 0, 0 })]
+    public void RejectsMalformedConstructedArgumentPayloads(byte[] constructed)
     {
         Assert.Throws<InvalidDataException>(() =>
-            Create(Rows([2, 0, 1, 0, 0, 0], constructed), count: 2, typeArgCount: 1));
+            Create(Rows([2, 0, 1, 0, 0, 0], constructed), count: 2));
     }
 
     [Test]
     public void ConstructedFormRequiresNominalGenericBase()
     {
         Assert.Throws<InvalidDataException>(() =>
-            Create(Rows([1, 0, 8], [5, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]),
-                count: 2, typeArgCount: 1));
+            Create(Rows([1, 0, 8], [5, 0, 1, 0, 0, 0, 1, 0, 0, 0]),
+                count: 2));
     }
 
     [Test]
@@ -131,23 +174,29 @@ public sealed class TrRmTypeSpecTableReaderTests
             Create(Rows([2, 0, 1, 0, 0, 0]), typeDefCount: 0));
     }
 
-    private static void Create(byte[] bytes, int count = 1, int typeDefCount = 1, int typeArgCount = 0)
+    private static void Create(byte[] bytes, int count = 1, int typeDefCount = 1)
     {
-        _ = new TrRmTypeSpecTableReader(bytes, count, typeDefCount, 0, 0, typeArgCount);
+        _ = new TrRmTypeSpecTableReader(bytes, count, typeDefCount, 0, 0);
     }
 
     private static byte[] ReadRow(byte[] bytes, int row)
     {
-        var reader = new TrRmTypeSpecTableReader(bytes, 1, 0, 0, 0, 0);
+        var reader = new TrRmTypeSpecTableReader(bytes, 1, 0, 0, 0);
         return reader.GetRow(row).ToArray();
     }
 
     private static ushort GetCompactValueTypeKey(byte[] bytes, int count,
         int nativeFunctionPointerSignatureCount, int row)
     {
-        var reader = new TrRmTypeSpecTableReader(bytes, count, 0, 0, 0, 0,
+        var reader = new TrRmTypeSpecTableReader(bytes, count, 0, 0, 0,
             nativeFunctionPointerSignatureCount);
         return reader.GetCompactValueTypeKey(row);
+    }
+
+    private static TrRmTypeSpecRefInfo GetTypeSpecRef(byte[] bytes, int count, uint value)
+    {
+        var reader = new TrRmTypeSpecTableReader(bytes, count, 0, 0, 0);
+        return reader.GetTypeSpecRef(value);
     }
 
     private static byte[] Rows(params byte[][] rows)

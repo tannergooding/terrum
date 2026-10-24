@@ -32,7 +32,8 @@ public readonly ref struct TrRmGenericParamTableReader
     public TrRmGenericParamTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
-        int constraintCount, int constantSourceCount = 0)
+        TrRmTypeSpecTableReader typeSpecs, int constraintCount,
+        int constantSourceCount = 0)
     {
         if (recordCount is < 0 or > 0xFF_FFFF || constraintCount is < 0 or > 0xFF_FFFF
             || constantSourceCount is < 0 or > 0xFF_FFFF
@@ -89,11 +90,9 @@ public readonly ref struct TrRmGenericParamTableReader
             {
                 1 => ownershipDomain is < 1 or > 3
                     || nullabilityDomain is < 1 or > 2
-                    || constantTypeSpec != 0
-                    || (defaultArgument != 0 && defaultArgument > (uint)types.Count),
+                    || constantTypeSpec != 0,
                 2 => ownershipDomain != 0 || nullabilityDomain != 0
                     || constantTypeSpec == 0
-                    || constantTypeSpec > (uint)types.Count
                     || count != 0 || (defaultArgument != 0
                         && defaultArgument > (uint)constantSourceCount),
                 _ => true,
@@ -104,6 +103,15 @@ public readonly ref struct TrRmGenericParamTableReader
                 || invalidFormalShape)
             {
                 throw InvalidFormal();
+            }
+
+            if (formalKind == 1 && defaultArgument != 0)
+            {
+                _ = typeSpecs.GetTypeSpecRef(defaultArgument);
+            }
+            else if (formalKind == 2)
+            {
+                _ = typeSpecs.GetTypeSpecRef(constantTypeSpec);
             }
 
             if (count == 0 ? first != 0

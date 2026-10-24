@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
@@ -62,10 +63,18 @@ public sealed class TrRmFieldDefTableWriterTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { OwnerTypeDefRow = 1 }]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { NameStringRow = 0 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRow = 2 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([row with { TypeSpecRef = 2 }]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 3 }]));
         Assert.Throws<InvalidDataException>(() => Encode([row with { Flags = 16 }]));
         Assert.Throws<InvalidDataException>(() => Encode([row, row]));
+    }
+
+    [TestCase(0xF2000008u)]
+    [TestCase(0xF3008C08u)]
+    public void PreservesInlineCompleteTypeReferences(uint typeSpecRef)
+    {
+        var bytes = Encode([new TrRmFieldDefRow(2, 6, typeSpecRef, 0)]);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8)), Is.EqualTo(typeSpecRef));
     }
 
     private static byte[] Encode(TrRmFieldDefRow[] rows)

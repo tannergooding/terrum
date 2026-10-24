@@ -14,6 +14,7 @@ public readonly ref struct TrRmFieldDefTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly TrRmTypeDefTableReader _types;
+    private readonly TrRmTypeSpecTableReader _typeSpecs;
     private readonly int _recordCount;
 
     /// <summary>Gets the number of validated FieldDef rows.</summary>
@@ -38,6 +39,7 @@ public readonly ref struct TrRmFieldDefTableReader
         _rows = section;
         _strings = strings;
         _types = types;
+        _typeSpecs = typeSpecs;
         _recordCount = recordCount;
         for (var row = 1; row <= recordCount; row++)
         {
@@ -47,12 +49,12 @@ public readonly ref struct TrRmFieldDefTableReader
             var flags = Read(row - 1, 12);
             if (owner == 0 || owner > types.Count || owner != types.GetFieldOwner(row)
                 || name is 0 or > 0xFF_FFFF
-                || spec == 0 || spec > typeSpecs.Count
                 || (flags & ~15u) != 0 || (flags & 3) == 3)
             {
                 throw InvalidField();
             }
 
+            _ = typeSpecs.GetTypeSpecRef(spec);
             _ = _strings.DecodeName((int)name);
         }
     }
@@ -81,11 +83,23 @@ public readonly ref struct TrRmFieldDefTableReader
         return _strings.DecodeName((int)name);
     }
 
-    /// <summary>Gets the referenced TypeSpec row for a validated FieldDef row.</summary>
-    public int GetTypeSpecRow(int row)
+    /// <summary>Gets the complete type reference for a validated FieldDef row.</summary>
+    public uint GetTypeSpecRef(int row)
     {
         CheckRow(row);
-        return checked((int)Read(row - 1, 8));
+        return Read(row - 1, 8);
+    }
+
+    /// <summary>Gets the referenced TypeSpec row when the FieldDef uses a row reference.</summary>
+    public int GetTypeSpecRow(int row)
+    {
+        var reference = _typeSpecs.GetTypeSpecRef(GetTypeSpecRef(row));
+        if (!reference.IsRow)
+        {
+            throw InvalidField();
+        }
+
+        return reference.Row;
     }
 
     /// <summary>Gets the flags for a validated FieldDef row.</summary>

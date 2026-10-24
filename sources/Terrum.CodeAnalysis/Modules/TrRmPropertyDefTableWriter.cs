@@ -7,7 +7,7 @@ using System.Collections.Generic;
 namespace Terrum.CodeAnalysis.Modules;
 
 public readonly record struct TrRmPropertyDefRow(
-    int OwnerTypeDefRow, int NameStringRow, int TypeSpecRow, int GetterMethodDefRow, uint Flags);
+    int OwnerTypeDefRow, int NameStringRow, uint TypeSpecRef, int GetterMethodDefRow, uint Flags);
 
 /// <summary>Emits PropertyDef rows with checked getter owner and result type.</summary>
 public static class TrRmPropertyDefTableWriter
@@ -30,7 +30,7 @@ public static class TrRmPropertyDefTableWriter
             var offset = index * 20;
             Write(result, offset, row.OwnerTypeDefRow);
             Write(result, offset + 4, row.NameStringRow);
-            Write(result, offset + 8, row.TypeSpecRow);
+            Write(result, offset + 8, row.TypeSpecRef);
             Write(result, offset + 12, row.GetterMethodDefRow);
             BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(offset + 16), row.Flags);
         }
@@ -42,4 +42,7 @@ public static class TrRmPropertyDefTableWriter
 
     private static void Write(byte[] bytes, int offset, int value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), unchecked((uint)value));
+
+    private static void Write(byte[] bytes, int offset, uint value)
+        => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 }

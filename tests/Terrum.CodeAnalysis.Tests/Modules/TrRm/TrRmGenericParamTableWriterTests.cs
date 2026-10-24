@@ -34,16 +34,21 @@ public sealed class TrRmGenericParamTableWriterTests
             types, signatures, 0, 0);
         var formalRows = new[] { TypeFormal, MethodFormal };
         var formalBytes = TrRmGenericParamTableWriter.Encode(
-            formalRows, strings, types, methods, signatures, 1);
+            formalRows, strings, types, methods, signatures, specs, 1);
         var formals = new TrRmGenericParamTableReader(formalBytes, 2,
-            strings, types, methods, signatures, 1);
+            strings, types, methods, signatures, specs, 1);
         var constraintRows = new[] { Constraint };
         var constraintBytes = TrRmConstraintTableWriter.Encode(constraintRows, formals, specs);
+        var inlineTypeConstraint = TrRmConstraintTableWriter.Encode([
+            Constraint with { Kind = 1, Payload = 0xF2000008 },
+        ], formals, specs);
         Assert.That(formalBytes.Length, Is.EqualTo(64));
         Assert.That(constraintBytes.Length, Is.EqualTo(12));
         Assert.That(formals.GetConstraintOwner(1), Is.EqualTo(1));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(constraintBytes.AsSpan(4)), Is.EqualTo(2));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(8)), Is.EqualTo(Constraint.Payload));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(inlineTypeConstraint.AsSpan(8)),
+            Is.EqualTo(0xF2000008u));
 
         formalRows[0] = TypeFormal with { NameStringRow = 0 };
         constraintRows[0] = Constraint with { Payload = 0 };
@@ -95,6 +100,28 @@ public sealed class TrRmGenericParamTableWriterTests
         Assert.Throws<InvalidDataException>(() => EncodeConstraints([
             Constraint with { Payload = 0 },
         ]));
+        Assert.Throws<InvalidDataException>(() => EncodeConstraints([
+            Constraint with { Kind = 1, Payload = 0xF4000008 },
+        ]));
+    }
+
+    [Test]
+    public void AcceptsInlineTypeRefsForConstantTypesAndTypeDefaults()
+    {
+        var constantFormal = TypeFormal with {
+            ConstraintFirst = 0,
+            ConstraintCount = 0,
+            FormalKind = 2,
+            OwnershipDomain = 0,
+            NullabilityDomain = 0,
+            ConstantTypeSpecRef = 0xF2000008,
+        };
+        var defaultTypeFormal = MethodFormal with {
+            ConstraintFirst = 1,
+            ConstraintCount = 1,
+            DefaultArgumentRef = 0xF3008B08,
+        };
+        Assert.That(EncodeFormals([constantFormal, defaultTypeFormal]), Has.Length.EqualTo(64));
     }
 
     private static byte[] EncodeFormals(TrRmGenericParamRow[] rows)
@@ -106,7 +133,8 @@ public sealed class TrRmGenericParamTableWriterTests
         var signatures = new TrRmMethodSigTableReader(Signature(), 1, specs, 0, 2);
         var methods = new TrRmMethodDefTableReader(Method(), 1, strings, modules,
             types, signatures, 0, 0);
-        return TrRmGenericParamTableWriter.Encode(rows, strings, types, methods, signatures, 1);
+        return TrRmGenericParamTableWriter.Encode(
+            rows, strings, types, methods, signatures, specs, 1);
     }
 
     private static byte[] EncodeConstraints(TrRmConstraintRow[] rows)
@@ -120,7 +148,7 @@ public sealed class TrRmGenericParamTableWriterTests
             types, signatures, 0, 0);
         var formals = new TrRmGenericParamTableReader(
             EncodeFormals([TypeFormal, MethodFormal]), 2,
-            strings, types, methods, signatures, 1);
+            strings, types, methods, signatures, specs, 1);
         return TrRmConstraintTableWriter.Encode(rows, formals, specs);
     }
 
