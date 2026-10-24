@@ -305,13 +305,13 @@ public sealed class GenericParamConstraintTableValidationComponentTests
 
     private static byte[] Module()
     {
-        var row = new byte[44];
+        var row = new byte[48];
         WriteWord(row, 0, 2);
         WriteWord(row, 4, 1);
-        WriteWord(row, 28, 1);
         WriteWord(row, 32, 1);
         WriteWord(row, 36, 1);
         WriteWord(row, 40, 1);
+        WriteWord(row, 44, 1);
         return row;
     }
 

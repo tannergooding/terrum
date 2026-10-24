@@ -231,19 +231,19 @@ public sealed class TrRmImportExportTableReaderTests
 
     private static byte[] Modules(bool producerOwnsRef)
     {
-        var rows = new byte[88];
+        var rows = new byte[96];
         Write(rows, 0, 2);
         Write(rows, 4, 1);
-        Write(rows, 28, 1);
         Write(rows, 32, 1);
         Write(rows, 36, 1);
         Write(rows, 40, 1);
-        Write(rows, 44, 3);
-        Write(rows, 48, 1);
-        Write(rows, 72, producerOwnsRef ? 2u : 1u);
-        Write(rows, 76, 2);
-        Write(rows, 80, 2);
-        Write(rows, 84, 1);
+        Write(rows, 44, 1);
+        Write(rows, 48, 3);
+        Write(rows, 52, 1);
+        Write(rows, 80, producerOwnsRef ? 2u : 1u);
+        Write(rows, 84, 2);
+        Write(rows, 88, 2);
+        Write(rows, 92, 1);
         return rows;
     }
 

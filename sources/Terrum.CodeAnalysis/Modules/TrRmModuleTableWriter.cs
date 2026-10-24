@@ -17,10 +17,11 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <param name="SourceFileStart">The one-based first SourceFile row owned by the module.</param>
 /// <param name="FeatureFirst">The one-based first Feature row required by the module, or zero when absent.</param>
 /// <param name="FeatureCount">The number of required Feature rows.</param>
+/// <param name="GoverningRuleEdition">The exact nonzero governing semantic edition.</param>
 public readonly record struct TrRmModuleRow(
     int IdentityStringRow, uint TargetRequirement, uint RuntimePolicy, int EntryMethodDefRow,
     int ModuleRefStart, int TypeDefStart, int MethodDefStart, int SourceFileStart,
-    int FeatureFirst = 0, int FeatureCount = 0);
+    int FeatureFirst = 0, int FeatureCount = 0, uint GoverningRuleEdition = 1);
 
 /// <summary>Emits Module rows with validated identities and artifact-wide ownership partitions.</summary>
 public static class TrRmModuleTableWriter
@@ -44,21 +45,22 @@ public static class TrRmModuleTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
-        var result = new byte[rows.Count * 44];
+        var result = new byte[rows.Count * 48];
         for (var index = 0; index < rows.Count; index++)
         {
             var row = rows[index];
-            var offset = index * 44;
+            var offset = index * 48;
             Write(result, offset, row.IdentityStringRow);
-            Write(result, offset + 4, row.TargetRequirement);
-            Write(result, offset + 8, row.RuntimePolicy);
-            Write(result, offset + 12, row.EntryMethodDefRow);
-            Write(result, offset + 16, row.FeatureFirst);
-            Write(result, offset + 20, row.FeatureCount);
-            Write(result, offset + 28, row.ModuleRefStart);
-            Write(result, offset + 32, row.TypeDefStart);
-            Write(result, offset + 36, row.MethodDefStart);
-            Write(result, offset + 40, row.SourceFileStart);
+            Write(result, offset + 4, row.GoverningRuleEdition);
+            Write(result, offset + 8, row.TargetRequirement);
+            Write(result, offset + 12, row.RuntimePolicy);
+            Write(result, offset + 16, row.EntryMethodDefRow);
+            Write(result, offset + 20, row.FeatureFirst);
+            Write(result, offset + 24, row.FeatureCount);
+            Write(result, offset + 32, row.ModuleRefStart);
+            Write(result, offset + 36, row.TypeDefStart);
+            Write(result, offset + 40, row.MethodDefStart);
+            Write(result, offset + 44, row.SourceFileStart);
         }
 
         _ = new TrRmModuleTableReader(result, rows.Count, strings,

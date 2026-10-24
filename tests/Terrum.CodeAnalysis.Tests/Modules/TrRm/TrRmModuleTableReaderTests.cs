@@ -41,17 +41,18 @@ public sealed class TrRmModuleTableReaderTests
         Assert.That(row, Is.EqualTo(2));
     }
     [TestCase(0,(byte)(0))]
-    [TestCase(4,(byte)(2))]
+    [TestCase(4,(byte)(0))]
     [TestCase(8,(byte)(2))]
     [TestCase(12,(byte)(2))]
-    [TestCase(16,(byte)(1))]
+    [TestCase(16,(byte)(2))]
     [TestCase(20,(byte)(1))]
     [TestCase(24,(byte)(1))]
-    [TestCase(28,(byte)(0))]
-    [TestCase(32,(byte)(2))]
-    [TestCase(36,(byte)(0))]
-    [TestCase(40,(byte)(2))]
-    [TestCase(44 + 36,(byte)(1))]
+    [TestCase(28,(byte)(1))]
+    [TestCase(32,(byte)(0))]
+    [TestCase(36,(byte)(2))]
+    [TestCase(40,(byte)(0))]
+    [TestCase(44,(byte)(2))]
+    [TestCase(48 + 40,(byte)(1))]
     public void RejectsInvalidFieldsAndModulePartitioning(int byteIndex, byte replacement)
     {
         var moduleBytes = TwoModules();
@@ -79,8 +80,8 @@ public sealed class TrRmModuleTableReaderTests
     public void ReadsFeatureRangesAndRejectsMalformedOrOutOfRangeRanges()
     {
         var moduleBytes = TwoModules();
-        Write(moduleBytes, 16, 1);
         Write(moduleBytes, 20, 1);
+        Write(moduleBytes, 24, 1);
         var strings = new TrRmStringTableReader(TwoNames(), 2);
         var modules = new TrRmModuleTableReader(moduleBytes, 2, strings,
             0, 0, 2, 0, 1);
@@ -88,10 +89,10 @@ public sealed class TrRmModuleTableReaderTests
         Assert.That(modules.GetFeatureRange(2), Is.EqualTo((0, 0)));
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 0));
 
-        Write(moduleBytes, 20, 0);
+        Write(moduleBytes, 24, 0);
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 1));
-        Write(moduleBytes, 16, 2);
-        Write(moduleBytes, 20, 1);
+        Write(moduleBytes, 20, 2);
+        Write(moduleBytes, 24, 1);
         Assert.Throws<InvalidDataException>(() => Create(moduleBytes, featureCount: 1));
     }
 
@@ -126,20 +127,22 @@ public sealed class TrRmModuleTableReaderTests
 
     private static byte[] TwoModules()
     {
-        var bytes = new byte[88];
+        var bytes = new byte[96];
         Write(bytes, 0, 1);
         Write(bytes, 4, 1);
-        Write(bytes, 12, 1);
-        Write(bytes, 28, 1);
+        Write(bytes, 8, 1);
+        Write(bytes, 16, 1);
         Write(bytes, 32, 1);
         Write(bytes, 36, 1);
         Write(bytes, 40, 1);
-        Write(bytes, 44, 2);
-        Write(bytes, 44 + 4, 1);
-        Write(bytes, 44 + 28, 1);
-        Write(bytes, 44 + 32, 1);
-        Write(bytes, 44 + 36, 2);
-        Write(bytes, 44 + 40, 1);
+        Write(bytes, 44, 1);
+        Write(bytes, 48, 2);
+        Write(bytes, 52, 1);
+        Write(bytes, 56, 1);
+        Write(bytes, 80, 1);
+        Write(bytes, 84, 1);
+        Write(bytes, 88, 2);
+        Write(bytes, 92, 1);
         return bytes;
     }
 

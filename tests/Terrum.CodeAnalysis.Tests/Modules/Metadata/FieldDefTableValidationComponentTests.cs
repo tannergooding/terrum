@@ -267,12 +267,13 @@ public sealed class FieldDefTableValidationComponentTests
 
     private static byte[] EncodeModules()
     {
-        var module = new byte[44];
+        var module = new byte[48];
         WriteWord(module, 0, 2);
-        WriteWord(module, 28, 1);
+        WriteWord(module, 4, 1);
         WriteWord(module, 32, 1);
         WriteWord(module, 36, 1);
         WriteWord(module, 40, 1);
+        WriteWord(module, 44, 1);
         return module;
     }
 

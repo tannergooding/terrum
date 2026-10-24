@@ -30,7 +30,7 @@ public sealed class TrRmArtifactIndexTests
     public void FindsSectionsAtDirectoryBoundariesAndRejectsMissingKinds()
     {
         var artifact = TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x0002, 0, 1, TrRmStringTableWriter.EncodeNames([("A", 0)])),
             new TrRmSection(0x8000, 1, 1, new byte[] { 1 }),
             new TrRmSection(0xFFFF, 3, 1, new byte[] { 2 }),
@@ -38,7 +38,7 @@ public sealed class TrRmArtifactIndexTests
         var index = new TrRmArtifactIndex(artifact);
 
         Assert.That(index.TryGetSection(0x0001, out var first, out var firstCount), Is.True);
-        Assert.That(first.Length, Is.EqualTo(44));
+        Assert.That(first.Length, Is.EqualTo(48));
         Assert.That(firstCount, Is.EqualTo(1));
         Assert.That(index.TryGetSection(0xFFFF, out var last, out var lastCount), Is.True);
         Assert.That(last[0], Is.EqualTo((byte)2));
@@ -130,7 +130,7 @@ public sealed class TrRmArtifactIndexTests
         Assert.That(ReadCallableName(artifact), Is.EqualTo("Run"));
 
         var namesLength = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
-        var methodOffset = 32 + 5 * 16 + 44 + namesLength + 11;
+        var methodOffset = 32 + 5 * 16 + 48 + namesLength + 11;
         artifact[methodOffset + 12] = 3;
         _ = new TrRmArtifactIndex(artifact);
         Assert.Throws<InvalidDataException>(() => ReadCallableName(artifact));
@@ -159,7 +159,7 @@ public sealed class TrRmArtifactIndexTests
             TrRmStructuralMetadataValidator.Validate(invalidOutput));
 
         var invalidBlob = ArtifactWithCallableMetadata(includeEmptyBlob: true);
-        var blobOffset = 32 + 6 * 16 + 44
+        var blobOffset = 32 + 6 * 16 + 48
             + TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
         invalidBlob[blobOffset + 4] = 1;
         _ = new TrRmArtifactIndex(invalidBlob);
@@ -180,7 +180,7 @@ public sealed class TrRmArtifactIndexTests
 
         var invalid = ArtifactWithCallableMetadata();
         var stringsLength = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
-        invalid[32 + 5 * 16 + 44 + stringsLength + 11 + 12] = 3;
+        invalid[32 + 5 * 16 + 48 + stringsLength + 11 + 12] = 3;
         _ = new TrRmArtifactIndex(invalid);
         Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(invalid));
     }
@@ -195,7 +195,7 @@ public sealed class TrRmArtifactIndexTests
         var secondRow = 12 + (int)BinaryPrimitives.ReadUInt32LittleEndian(strings.AsSpan(4));
         strings[secondRow + rowOffset] = replacement;
         var artifact = TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, MinimalArtifact().AsSpan(64, 44).ToArray()),
+            new TrRmSection(0x0001, 0, 1, MinimalArtifact().AsSpan(64, 48).ToArray()),
             new TrRmSection(0x0002, 0, 2, strings),
         ]);
         var index = new TrRmArtifactIndex(artifact);
@@ -211,7 +211,7 @@ public sealed class TrRmArtifactIndexTests
         var secondRow = 12 + (int)BinaryPrimitives.ReadUInt32LittleEndian(strings.AsSpan(4));
         strings[secondRow + 4] = 0;
         var artifact = TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, MinimalArtifact().AsSpan(64, 44).ToArray()),
+            new TrRmSection(0x0001, 0, 1, MinimalArtifact().AsSpan(64, 48).ToArray()),
             new TrRmSection(0x0002, 0, 2, strings),
         ]);
         TrRmStructuralMetadataValidator.Validate(artifact);
@@ -249,17 +249,17 @@ public sealed class TrRmArtifactIndexTests
         Write(overlap, 48 + 8, 104);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(overlap));
 
-        var trailing = new byte[125];
+        var trailing = new byte[129];
         MinimalArtifact().CopyTo(trailing, 0);
         Write(trailing, 16, (uint)trailing.Length);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(trailing));
 
-        var gap = new byte[128];
-        MinimalArtifact().AsSpan(0, 108).CopyTo(gap);
-        MinimalArtifact().AsSpan(108).CopyTo(gap.AsSpan(112));
+        var gap = new byte[132];
+        MinimalArtifact().AsSpan(0, 112).CopyTo(gap);
+        MinimalArtifact().AsSpan(112).CopyTo(gap.AsSpan(116));
         Write(gap, 16, (uint)gap.Length);
-        Write(gap, 48 + 8, 112);
-        gap[109] = 1;
+        Write(gap, 48 + 8, 116);
+        gap[113] = 1;
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(gap));
     }
 
@@ -267,11 +267,11 @@ public sealed class TrRmArtifactIndexTests
     public void PermitsZeroFilledAlignmentGaps()
     {
         var original = MinimalArtifact();
-        var gap = new byte[128];
-        original.AsSpan(0, 108).CopyTo(gap);
-        original.AsSpan(108).CopyTo(gap.AsSpan(112));
+        var gap = new byte[132];
+        original.AsSpan(0, 112).CopyTo(gap);
+        original.AsSpan(112).CopyTo(gap.AsSpan(116));
         Write(gap, 16, (uint)gap.Length);
-        Write(gap, 48 + 8, 112);
+        Write(gap, 48 + 8, 116);
         var index = new TrRmArtifactIndex(gap);
         Assert.That(index.TryGetSection(0x0002, out var strings, out var count), Is.True);
         Assert.That(new TrRmStringTableReader(strings, count).DecodeName(1), Is.EqualTo("A"));
@@ -281,7 +281,7 @@ public sealed class TrRmArtifactIndexTests
     public void AcceptsOutOfOrderSectionPayloads()
     {
         var artifact = TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x8001, 1, 1, new byte[] { 0x11 }),
             new TrRmSection(0x8002, 1, 1, new byte[] { 0x22 }),
         ]);
@@ -307,17 +307,17 @@ public sealed class TrRmArtifactIndexTests
         Assert.That(section.Length, Is.EqualTo(21));
 
         var missingTarget = WithReferenceSlottedExtension();
-        Write(missingTarget, 144 + 4, 2);
+        Write(missingTarget, 148 + 4, 2);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(missingTarget));
 
         var absentTarget = WithReferenceSlottedExtension();
-        WriteU16(absentTarget, 144, 0x0010);
+        WriteU16(absentTarget, 148, 0x0010);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(absentTarget));
 
         var danglingBody = WithReferenceSlottedExtension();
-        WriteU16(danglingBody, 144, 0x0020);
-        WriteU16(danglingBody, 146, 1);
-        Write(danglingBody, 152, 1);
+        WriteU16(danglingBody, 148, 0x0020);
+        WriteU16(danglingBody, 150, 1);
+        Write(danglingBody, 156, 1);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(danglingBody));
     }
     [TestCase((ushort)1)]
@@ -385,8 +385,8 @@ public sealed class TrRmArtifactIndexTests
 
         var atomic = TrRmOptionalSectionSlots.ReplaceInArtifact(original, 0x8000,
             [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]);
-        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(144)), Is.EqualTo((ushort)0x0002));
-        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(atomic.AsSpan(144)), Is.EqualTo((ushort)0x0001));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(148)), Is.EqualTo((ushort)0x0002));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(atomic.AsSpan(148)), Is.EqualTo((ushort)0x0001));
         Assert.Throws<InvalidDataException>(() =>
             TrRmOptionalSectionSlots.ReplaceInArtifact(original, 0x8000,
                 [new TrRmReferenceSlot(0x0001, 0, 2, 0, 0)]));
@@ -486,7 +486,7 @@ public sealed class TrRmArtifactIndexTests
     private static byte[] MinimalArtifact()
     {
         var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
-        var artifact = new byte[32 + 2 * 16 + 44 + strings.Length];
+        var artifact = new byte[32 + 2 * 16 + 48 + strings.Length];
         "TRRM"u8.CopyTo(artifact);
         WriteU16(artifact, 4, 1);
         Write(artifact, 8, 32);
@@ -496,18 +496,18 @@ public sealed class TrRmArtifactIndexTests
         WriteU16(artifact, 32, 0x0001);
         Write(artifact, 32 + 4, 1);
         Write(artifact, 32 + 8, 64);
-        Write(artifact, 32 + 12, 44);
+        Write(artifact, 32 + 12, 48);
         WriteU16(artifact, 48, 0x0002);
         Write(artifact, 48 + 4, 1);
-        Write(artifact, 48 + 8, 108);
+        Write(artifact, 48 + 8, 112);
         Write(artifact, 48 + 12, (uint)strings.Length);
         Write(artifact, 64, 1);
         Write(artifact, 64 + 4, 1);
-        Write(artifact, 64 + 28, 1);
         Write(artifact, 64 + 32, 1);
         Write(artifact, 64 + 36, 1);
         Write(artifact, 64 + 40, 1);
-        strings.CopyTo(artifact.AsSpan(108));
+        Write(artifact, 64 + 44, 1);
+        strings.CopyTo(artifact.AsSpan(112));
         return artifact;
     }
 
@@ -515,9 +515,9 @@ public sealed class TrRmArtifactIndexTests
         byte[]? featureBytes)
     {
         var source = MinimalArtifact();
-        var module = source.AsSpan(64, 44).ToArray();
-        Write(module, 16, featureFirst);
-        Write(module, 20, moduleFeatureCount);
+        var module = source.AsSpan(64, 48).ToArray();
+        Write(module, 20, featureFirst);
+        Write(module, 24, moduleFeatureCount);
         var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
         var sectionCount = featureBytes is null ? 2 : 3;
         var moduleOffset = 32 + sectionCount * 16;
@@ -556,22 +556,22 @@ public sealed class TrRmArtifactIndexTests
     private static byte[] WithReferenceSlottedExtension()
     {
         var original = MinimalArtifact();
-        var artifact = new byte[161];
+        var artifact = new byte[165];
         original.AsSpan(0, 64).CopyTo(artifact);
-        original.AsSpan(64, 44).CopyTo(artifact.AsSpan(80));
-        original.AsSpan(108).CopyTo(artifact.AsSpan(124));
+        original.AsSpan(64, 48).CopyTo(artifact.AsSpan(80));
+        original.AsSpan(112).CopyTo(artifact.AsSpan(128));
         Write(artifact, 12, 3);
         Write(artifact, 16, (uint)artifact.Length);
         Write(artifact, 32 + 8, 80);
-        Write(artifact, 48 + 8, 124);
+        Write(artifact, 48 + 8, 128);
         WriteU16(artifact, 64, 0x8000);
         WriteU16(artifact, 66, 2);
         Write(artifact, 68, 1);
-        Write(artifact, 72, 140);
+        Write(artifact, 72, 144);
         Write(artifact, 76, 21);
-        Write(artifact, 140, 1);
-        WriteU16(artifact, 144, 0x0002);
-        Write(artifact, 148, 1);
+        Write(artifact, 144, 1);
+        WriteU16(artifact, 148, 0x0002);
+        Write(artifact, 152, 1);
         return artifact;
     }
 
@@ -579,7 +579,7 @@ public sealed class TrRmArtifactIndexTests
     {
         var names = TrRmStringTableWriter.EncodeNames(
             [("A", 0), ("B", 1), ("src/A.terrum", 0)]);
-        var artifact = new byte[32 + 4 * 16 + 44 + names.Length + 12 + 8];
+        var artifact = new byte[32 + 4 * 16 + 48 + names.Length + 12 + 8];
         "TRRM"u8.CopyTo(artifact);
         WriteU16(artifact, 4, 1);
         Write(artifact, 8, 32);
@@ -587,13 +587,13 @@ public sealed class TrRmArtifactIndexTests
         Write(artifact, 16, (uint)artifact.Length);
         Write(artifact, 20, 32);
         var moduleOffset = 96;
-        var stringOffset = moduleOffset + 44;
+        var stringOffset = moduleOffset + 48;
         var refOffset = stringOffset + names.Length;
         var sourceOffset = refOffset + 12;
         WriteU16(artifact, 32, 0x0001);
         Write(artifact, 32 + 4, 1);
         Write(artifact, 32 + 8, (uint)moduleOffset);
-        Write(artifact, 32 + 12, 44);
+        Write(artifact, 32 + 12, 48);
         WriteU16(artifact, 48, 0x0002);
         Write(artifact, 48 + 4, 3);
         Write(artifact, 48 + 8, (uint)stringOffset);
@@ -608,10 +608,10 @@ public sealed class TrRmArtifactIndexTests
         Write(artifact, 80 + 12, 8);
         Write(artifact, moduleOffset, 1);
         Write(artifact, moduleOffset + 4, 1);
-        Write(artifact, moduleOffset + 28, 1);
         Write(artifact, moduleOffset + 32, 1);
         Write(artifact, moduleOffset + 36, 1);
         Write(artifact, moduleOffset + 40, 1);
+        Write(artifact, moduleOffset + 44, 1);
         names.CopyTo(artifact.AsSpan(stringOffset));
         Write(artifact, refOffset, 2);
         Write(artifact, refOffset + 4, 1);
@@ -643,13 +643,13 @@ public sealed class TrRmArtifactIndexTests
         var strings = includeSourceMap
             ? TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0), ("src/file", 0)])
             : TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]);
-        var module = new byte[44];
+        var module = new byte[48];
         Write(module, 0, 1);
         Write(module, 4, 1);
-        Write(module, 28, 1);
         Write(module, 32, 1);
         Write(module, 36, 1);
         Write(module, 40, 1);
+        Write(module, 44, 1);
         byte[] typeSpec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         if (includeOutputState)
         {

@@ -400,15 +400,16 @@ public sealed class TypeDefTableValidationComponentTests
 
     private static byte[] EncodeModules(int moduleCount, int typeDefCount)
     {
-        var modules = new byte[moduleCount * 44];
+        var modules = new byte[moduleCount * 48];
         for (var row = 0; row < moduleCount; row++)
         {
-            var offset = row * 44;
+            var offset = row * 48;
             WriteWord(modules, offset, (uint)(row + 2));
-            WriteWord(modules, offset + 28, 1);
-            WriteWord(modules, offset + 32, (uint)Math.Min(row + 1, typeDefCount + 1));
-            WriteWord(modules, offset + 36, 1);
+            WriteWord(modules, offset + 4, 1);
+            WriteWord(modules, offset + 32, 1);
+            WriteWord(modules, offset + 36, (uint)Math.Min(row + 1, typeDefCount + 1));
             WriteWord(modules, offset + 40, 1);
+            WriteWord(modules, offset + 44, 1);
         }
         return modules;
     }

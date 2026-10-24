@@ -87,8 +87,10 @@ contract. Consumers require exact agreement on
 alternate schema.
 
 **Current/evidence:** `TrRmBodyExampleTests.ReadExample` explicitly embeds
-development-schema fixtures; private/native and output experiments retain
-other assignments. See
+development-schema fixtures. The C# Module row reader/writer and artifact
+framer now use the assigned 48-byte row and validate governing edition 1, but
+the Feature assignments, Body codecs and private/native/output experiments
+retain other assignments. See
 [ModuleCompiler](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
 [Feature admission](../../sources/Terrum.CodeAnalysis/Modules/TrRmFeatureTableReader.cs),
 [Body fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)

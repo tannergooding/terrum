@@ -257,16 +257,16 @@ public sealed class SourceMapTableValidationComponentTests
             .Append(("Run", 0))
             .Append(("src/A", 0))
             .ToArray());
-        var modules = new byte[moduleCount * 44];
+        var modules = new byte[moduleCount * 48];
         for (var row = 0; row < moduleCount; row++)
         {
-            var offset = row * 44;
+            var offset = row * 48;
             Write(modules, offset, (uint)row + 1);
             Write(modules, offset + 4, 1);
-            Write(modules, offset + 28, 1);
             Write(modules, offset + 32, 1);
             Write(modules, offset + 36, 1);
             Write(modules, offset + 40, 1);
+            Write(modules, offset + 44, 1);
         }
 
         var method = new byte[28];
@@ -359,16 +359,16 @@ public sealed class SourceMapTableValidationComponentTests
 
     private static byte[] EncodeModules(int moduleCount, int methodCount, int sourceFileCount)
     {
-        var modules = new byte[moduleCount * 44];
+        var modules = new byte[moduleCount * 48];
         for (var row = 0; row < moduleCount; row++)
         {
-            var offset = row * 44;
+            var offset = row * 48;
             Write(modules, offset, (uint)row + 1);
             Write(modules, offset + 4, 1);
-            Write(modules, offset + 28, 1);
             Write(modules, offset + 32, 1);
-            Write(modules, offset + 36, row == 0 ? 1u : (uint)methodCount);
-            Write(modules, offset + 40, row == 0 ? 1u : (uint)sourceFileCount);
+            Write(modules, offset + 36, 1);
+            Write(modules, offset + 40, row == 0 ? 1u : (uint)methodCount);
+            Write(modules, offset + 44, row == 0 ? 1u : (uint)sourceFileCount);
         }
         return modules;
     }

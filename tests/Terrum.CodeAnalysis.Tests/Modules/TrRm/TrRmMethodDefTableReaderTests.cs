@@ -69,19 +69,19 @@ public sealed class TrRmMethodDefTableReaderTests
     {
         var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
             [("One", 0), ("Two", 0), ("Run", 0)]), 3);
-        var moduleRows = new byte[88];
+        var moduleRows = new byte[96];
         Write(moduleRows, 0, 1);
         Write(moduleRows, 4, 1);
-        Write(moduleRows, 28, 1);
         Write(moduleRows, 32, 1);
         Write(moduleRows, 36, 1);
         Write(moduleRows, 40, 1);
-        Write(moduleRows, 44, 2);
-        Write(moduleRows, 48, 1);
-        Write(moduleRows, 72, 1);
-        Write(moduleRows, 76, 1);
+        Write(moduleRows, 44, 1);
+        Write(moduleRows, 48, 2);
+        Write(moduleRows, 52, 1);
         Write(moduleRows, 80, 1);
         Write(moduleRows, 84, 1);
+        Write(moduleRows, 88, 1);
+        Write(moduleRows, 92, 1);
         var modules = new TrRmModuleTableReader(moduleRows, 2, names, 0, 0, 1, 0);
         var types = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
         var signatures = new TrRmMethodSigTableReader(Signature(), 1, TypeSpecs(), 0, 0);
@@ -130,19 +130,19 @@ public sealed class TrRmMethodDefTableReaderTests
     {
         var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
             [("One", 0), ("Two", 0), ("", 0), ("Widget", 0), ("Run", 0)]), 5);
-        var moduleRows = new byte[88];
+        var moduleRows = new byte[96];
         Write(moduleRows, 0, 1);
         Write(moduleRows, 4, 1);
-        Write(moduleRows, 28, 1);
         Write(moduleRows, 32, 1);
         Write(moduleRows, 36, 1);
         Write(moduleRows, 40, 1);
-        Write(moduleRows, 44, 2);
-        Write(moduleRows, 48, 1);
-        Write(moduleRows, 72, 1);
-        Write(moduleRows, 76, 2);
-        Write(moduleRows, 80, 2);
-        Write(moduleRows, 84, 1);
+        Write(moduleRows, 44, 1);
+        Write(moduleRows, 48, 2);
+        Write(moduleRows, 52, 1);
+        Write(moduleRows, 80, 1);
+        Write(moduleRows, 84, 2);
+        Write(moduleRows, 88, 2);
+        Write(moduleRows, 92, 1);
         var modules = new TrRmModuleTableReader(moduleRows, 2, names, 0, 1, 2, 0);
         var typeRow = new byte[40];
         Write(typeRow, 0, 3);
@@ -195,13 +195,13 @@ public sealed class TrRmMethodDefTableReaderTests
 
     private static byte[] Module()
     {
-        var result = new byte[44];
+        var result = new byte[48];
         Write(result, 0, 1);
         Write(result, 4, 1);
-        Write(result, 28, 1);
         Write(result, 32, 1);
         Write(result, 36, 1);
         Write(result, 40, 1);
+        Write(result, 44, 1);
         return result;
     }
 

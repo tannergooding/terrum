@@ -20,8 +20,8 @@ public static bool TryValidateModuleRefTable(int32 recordCount, int32 moduleCoun
     int32 stringIndexByteLength = (stringCount + 1) * 4;
     for (mut int32 module = 1; module <= moduleCount; module = module + 1)
     {
-        int32 moduleStart = (module - 1) * 44;
-        if (!TryReadModuleTableWord(moduleStart, 28, init var firstModuleRef))
+        int32 moduleStart = (module - 1) * 48;
+        if (!TryReadModuleTableWord(moduleStart, 32, init var firstModuleRef))
         {
             return false;
         }
@@ -29,7 +29,7 @@ public static bool TryValidateModuleRefTable(int32 recordCount, int32 moduleCoun
         mut uint32 endModuleRef = uint32(recordCount + 1);
         if (module < moduleCount)
         {
-            if (!TryReadModuleTableWord(module * 44, 28, init var nextModuleRef))
+            if (!TryReadModuleTableWord(module * 48, 32, init var nextModuleRef))
             {
                 return false;
             }
@@ -48,9 +48,9 @@ public static bool TryValidateModuleRefTable(int32 recordCount, int32 moduleCoun
 
             if (selectedModule != 0)
             {
-                int32 selectedModuleStart = (selectedModule - 1) * 44;
-                if (!TryReadModuleTableWord(selectedModuleStart, 4, init var selectedTarget)
-                    || !TryReadModuleTableWord(selectedModuleStart, 8, init var selectedPolicy)
+                int32 selectedModuleStart = (selectedModule - 1) * 48;
+                if (!TryReadModuleTableWord(selectedModuleStart, 8, init var selectedTarget)
+                    || !TryReadModuleTableWord(selectedModuleStart, 12, init var selectedPolicy)
                     || target != selectedTarget || policy != selectedPolicy)
                 {
                     return false;

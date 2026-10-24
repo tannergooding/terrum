@@ -29,7 +29,10 @@ table; forward and recursive calls do not require source or name rebinding. Audi
 policy-3 integer reinterpretations preserve the source shift contract without
 changing checked numeric conversions. Loaded scalar graphs, including linear
 Bodies that need these representation operations or calls, are not serializable as
-development structured IR.
+development structured IR. Its Module section now emits and reads the assigned
+48-byte row, including governing edition 1. The Feature assignments and Body
+forms remain provisional; the Module-row update does not claim current-schema
+TRRM support.
 Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute

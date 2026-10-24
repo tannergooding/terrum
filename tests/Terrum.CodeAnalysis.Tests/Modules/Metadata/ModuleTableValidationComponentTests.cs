@@ -60,17 +60,18 @@ public sealed class ModuleTableValidationComponentTests
 
         AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 4, 2);
         AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 8, 2);
-        AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 24, 1);
+        AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 12, 2);
+        AddRejectedWithModuleWord(cases, Valid(names, [1, 2], 8), 28, 1);
         AddRejectedWithModuleWord(cases,
-            Valid(names, [1, 2], 8, moduleRefCount: 1), 44 + 28, 0);
+            Valid(names, [1, 2], 8, moduleRefCount: 1), 48 + 32, 0);
         AddRejectedWithModuleWord(cases,
-            Valid(names, [1, 2], 8, moduleRefCount: 1), 44 + 28, 3);
+            Valid(names, [1, 2], 8, moduleRefCount: 1), 48 + 32, 3);
         AddRejectedWithModuleWord(cases,
-            Valid(names, [1, 2], 8, typeDefCount: 1), 44 + 32, 3);
+            Valid(names, [1, 2], 8, typeDefCount: 1), 48 + 36, 3);
         AddRejectedWithModuleWord(cases,
-            Valid(names, [1, 2], 8, methodDefCount: 2), 44 + 36, 0);
+            Valid(names, [1, 2], 8, methodDefCount: 2), 48 + 40, 0);
         AddRejectedWithModuleWord(cases,
-            Valid(names, [1, 2], 8, sourceFileCount: 1), 44 + 40, 3);
+            Valid(names, [1, 2], 8, sourceFileCount: 1), 48 + 44, 3);
 
         AddRejected(cases, names, [0]);
         AddRejected(cases, names, [9]);
@@ -235,10 +236,17 @@ public sealed class ModuleTableValidationComponentTests
             var strings = new TrRmStringTableReader(
                 testCase.Strings.Select(static value => checked((byte)value)).ToArray(),
                 testCase.StringCount);
-            _ = new TrRmModuleTableReader(
+            var modules = new TrRmModuleTableReader(
                 testCase.Modules.Select(static value => checked((byte)value)).ToArray(),
                 testCase.RecordCount, strings, testCase.ModuleRefCount, testCase.TypeDefCount,
                 testCase.MethodDefCount, testCase.SourceFileCount, testCase.FeatureCount);
+            for (var module = 1; module <= modules.Count; module++)
+            {
+                if (modules.GetGoverningRuleEdition(module) != 1)
+                {
+                    return false;
+                }
+            }
             return true;
         }
         catch (InvalidDataException)
@@ -268,19 +276,20 @@ public sealed class ModuleTableValidationComponentTests
         int firstFeature = 0, int firstFeatureCount = 0,
         int entryMethod = 0, int secondModuleRefStart = 1)
     {
-        var modules = new byte[identities.Length * 44];
+        var modules = new byte[identities.Length * 48];
         for (var row = 0; row < identities.Length; row++)
         {
-            var offset = row * 44;
+            var offset = row * 48;
             WriteWord(modules, offset, checked((uint)identities[row]));
-            WriteWord(modules, offset + 12, row == 0 ? checked((uint)entryMethod) : 0);
-            WriteWord(modules, offset + 16, row == 0 ? checked((uint)firstFeature) : 0);
-            WriteWord(modules, offset + 20, row == 0 ? checked((uint)firstFeatureCount) : 0);
-            WriteWord(modules, offset + 28,
+            WriteWord(modules, offset + 4, 1);
+            WriteWord(modules, offset + 16, row == 0 ? checked((uint)entryMethod) : 0);
+            WriteWord(modules, offset + 20, row == 0 ? checked((uint)firstFeature) : 0);
+            WriteWord(modules, offset + 24, row == 0 ? checked((uint)firstFeatureCount) : 0);
+            WriteWord(modules, offset + 32,
                 row == 0 ? 1u : checked((uint)secondModuleRefStart));
-            WriteWord(modules, offset + 32, row == 0 || typeDefCount == 0 ? 1u : 2u);
-            WriteWord(modules, offset + 36, row == 0 || methodDefCount == 0 ? 1u : 2u);
-            WriteWord(modules, offset + 40, row == 0 || sourceFileCount == 0 ? 1u : 2u);
+            WriteWord(modules, offset + 36, row == 0 || typeDefCount == 0 ? 1u : 2u);
+            WriteWord(modules, offset + 40, row == 0 || methodDefCount == 0 ? 1u : 2u);
+            WriteWord(modules, offset + 44, row == 0 || sourceFileCount == 0 ? 1u : 2u);
         }
         return modules;
     }

@@ -628,9 +628,10 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var parameterCount = modes.Length + (targetModes?.Length ?? 0);
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeTextRows([("Module", 0), ("Run", 0)]), 2);
-        var moduleBytes = new byte[44];
+        var moduleBytes = new byte[48];
         Write(moduleBytes, 0, 1);
-        foreach (var offset in new[] { 28, 32, 36, 40 })
+        Write(moduleBytes, 4, 1);
+        foreach (var offset in new[] { 32, 36, 40, 44 })
         {
             Write(moduleBytes, offset, 1);
         }

@@ -100,10 +100,10 @@ bool TryGetMethodDefModuleRanges(int32 module, int32 moduleCount,
     init ref<int32> methodStart, init ref<int32> methodEnd,
     init ref<int32> typeStart, init ref<int32> typeEnd)
 {
-    int32 rowStart = (module - 1) * 44;
+    int32 rowStart = (module - 1) * 48;
     if (module <= 0 || module > moduleCount
-        || !TryReadModuleTableWord(rowStart, 32, init var firstType)
-        || !TryReadModuleTableWord(rowStart, 36, init var firstMethod))
+        || !TryReadModuleTableWord(rowStart, 36, init var firstType)
+        || !TryReadModuleTableWord(rowStart, 40, init var firstMethod))
     {
         return false;
     }
@@ -112,8 +112,8 @@ bool TryGetMethodDefModuleRanges(int32 module, int32 moduleCount,
     mut int32 endMethod = methodDefCount + 1;
     if (module < moduleCount)
     {
-        if (!TryReadModuleTableWord(module * 44, 32, init var nextType)
-            || !TryReadModuleTableWord(module * 44, 36, init var nextMethod))
+        if (!TryReadModuleTableWord(module * 48, 36, init var nextType)
+            || !TryReadModuleTableWord(module * 48, 40, init var nextMethod))
         {
             return false;
         }

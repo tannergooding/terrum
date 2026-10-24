@@ -1501,25 +1501,25 @@ public sealed class TrRmBodyExampleTests
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
-        var module = new byte[packedTarget ? 88 : 44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[packedTarget ? 96 : 48];
+        foreach (var offset in new[] { 0, 4, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
 
         if (packedTarget)
         {
-            foreach (var offset in new[] { 48, 72, 76, 84 })
+            foreach (var offset in new[] { 52, 80, 84, 92 })
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
             }
-            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(44), 2);
-            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(48), packedTargetRequirement);
-            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(52), packedTargetRuntimePolicy);
-            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(80), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(48), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(56), packedTargetRequirement);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(60), packedTargetRuntimePolicy);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(88), 2);
         }
-        BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(4), callerTargetRequirement);
-        BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(8), runtimePolicy);
+        BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(8), callerTargetRequirement);
+        BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(12), runtimePolicy);
         var modules = new TrRmModuleTableReader(module, packedTarget ? 2 : 1,
             names, expectedTarget ? 1 : 0,
             ownedTarget ? 1 : 0,

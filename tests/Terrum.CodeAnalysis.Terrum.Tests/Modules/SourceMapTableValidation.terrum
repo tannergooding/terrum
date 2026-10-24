@@ -281,8 +281,8 @@ bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
     while (low <= high)
     {
         int32 middle = low + (high - low) / 2;
-        int32 rowStart = (middle - 1) * 44;
-        if (!TryReadModuleTableWord(rowStart, 40, init var firstFile))
+        int32 rowStart = (middle - 1) * 48;
+        if (!TryReadModuleTableWord(rowStart, 44, init var firstFile))
         {
             return false;
         }
@@ -290,7 +290,7 @@ bool TryGetSourceMapFileModule(int32 fileRow, int32 moduleCount,
         mut uint32 fileEnd = uint32(sourceFileCount + 1);
         if (middle < moduleCount)
         {
-            if (!TryReadModuleTableWord(middle * 44, 40, init var nextFileStart))
+            if (!TryReadModuleTableWord(middle * 48, 44, init var nextFileStart))
             {
                 return false;
             }

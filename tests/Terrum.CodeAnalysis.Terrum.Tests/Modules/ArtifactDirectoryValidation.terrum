@@ -288,9 +288,9 @@ bool TryValidateArtifactFeatures()
     uint32 moduleCount = GetArtifactSectionCount(0x0001);
     for (mut int32 row = 0; row < int32(moduleCount); row = row + 1)
     {
-        int32 rowStart = moduleStart + row * 44;
-        if (!TryReadArtifactWord(rowStart + 16, init var featureFirst)
-            || !TryReadArtifactWord(rowStart + 20, init var moduleFeatureCount))
+        int32 rowStart = moduleStart + row * 48;
+        if (!TryReadArtifactWord(rowStart + 20, init var featureFirst)
+            || !TryReadArtifactWord(rowStart + 24, init var moduleFeatureCount))
         {
             return false;
         }

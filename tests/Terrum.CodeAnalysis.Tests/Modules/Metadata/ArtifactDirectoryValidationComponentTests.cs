@@ -233,14 +233,14 @@ public sealed class ArtifactDirectoryValidationComponentTests
 
     private static byte[] MinimalArtifact()
         => TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x0002, 0, 1,
                 TrRmStringTableWriter.EncodeNames([("A", 0)])),
         ]);
 
     private static byte[] ExtensionArtifact()
         => TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x0002, 0, 1,
                 TrRmStringTableWriter.EncodeNames([("A", 0)])),
             new TrRmSection(0x8001, 3, 1, new byte[] { 0xA5 }),
@@ -258,7 +258,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         var extension = TrRmOptionalSectionSlots.Create(0x8000, 1,
             [new TrRmReferenceSlot(0x0020, 1, 1, 1, 0)], new byte[] { 0xA5 });
         return TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x0002, 0, 1,
                 TrRmStringTableWriter.EncodeNames([("A", 0)])),
             new TrRmSection(0x0020, 0, 1, new byte[] { 0x01 }),
@@ -272,7 +272,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         WriteWord(sourceMap, 0, 1);
         WriteSlot(sourceMap, 4, slot);
         return TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x0002, 0, 1,
                 TrRmStringTableWriter.EncodeNames([("A", 0)])),
             new TrRmSection(0x001F, 0, 1, new byte[8]),
@@ -283,9 +283,9 @@ public sealed class ArtifactDirectoryValidationComponentTests
     private static byte[] FeatureArtifact(uint featureFirst, uint moduleFeatureCount,
         byte[] featureBytes)
     {
-        var module = new byte[44];
-        WriteWord(module, 16, featureFirst);
-        WriteWord(module, 20, moduleFeatureCount);
+        var module = new byte[48];
+        WriteWord(module, 20, featureFirst);
+        WriteWord(module, 24, moduleFeatureCount);
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 1,
@@ -333,7 +333,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
     private static byte[] OutOfOrderArtifact()
     {
         var artifact = TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x8001, 1, 1, new byte[] { 0x11 }),
             new TrRmSection(0x8002, 1, 1, new byte[] { 0x22 }),
         ]);

@@ -31,7 +31,7 @@ public sealed class ModuleRefTableValidationComponentTests
             if (valid) {
                 int32 stringIndexByteLength = (Host.Expected[2] + 1) * 4;
                 for (mut int32 row = 1; row <= Host.Expected[1]; row = row + 1) {
-                    if (!TryReadModuleTableWord((row - 1) * 44, 0, init var identity)
+                    if (!TryReadModuleTableWord((row - 1) * 48, 0, init var identity)
                         || !TryFindModuleTableRowByIdentity(Host.Expected[1],
                             Host.Expected[2], stringIndexByteLength, int32(identity),
                             init var selectedRow)
@@ -208,34 +208,37 @@ public sealed class ModuleRefTableValidationComponentTests
 
     private static byte[] EncodeModules(int moduleRefCount)
     {
-        var modules = new byte[2 * 44];
+        var modules = new byte[2 * 48];
         WriteWord(modules, 0, 1);
         WriteWord(modules, 4, 1);
-        WriteWord(modules, 28, 1);
+        WriteWord(modules, 8, 1);
         WriteWord(modules, 32, 1);
         WriteWord(modules, 36, 1);
         WriteWord(modules, 40, 1);
-        WriteWord(modules, 44, 2);
-        WriteWord(modules, 44 + 4, 0);
-        WriteWord(modules, 44 + 8, 1);
-        WriteWord(modules, 44 + 28, moduleRefCount == 0 ? 1u : 2u);
-        WriteWord(modules, 44 + 32, 1);
-        WriteWord(modules, 44 + 36, 1);
-        WriteWord(modules, 44 + 40, 1);
+        WriteWord(modules, 44, 1);
+        WriteWord(modules, 48, 2);
+        WriteWord(modules, 52, 1);
+        WriteWord(modules, 56, 0);
+        WriteWord(modules, 60, 1);
+        WriteWord(modules, 80, moduleRefCount == 0 ? 1u : 2u);
+        WriteWord(modules, 84, 1);
+        WriteWord(modules, 88, 1);
+        WriteWord(modules, 92, 1);
         return modules;
     }
 
     private static byte[] EncodeManyModules(int[] identities)
     {
-        var modules = new byte[identities.Length * 44];
+        var modules = new byte[identities.Length * 48];
         for (var row = 0; row < identities.Length; row++)
         {
-            var offset = row * 44;
+            var offset = row * 48;
             WriteWord(modules, offset, checked((uint)identities[row]));
-            WriteWord(modules, offset + 28, 1);
+            WriteWord(modules, offset + 4, 1);
             WriteWord(modules, offset + 32, 1);
             WriteWord(modules, offset + 36, 1);
             WriteWord(modules, offset + 40, 1);
+            WriteWord(modules, offset + 44, 1);
         }
         return modules;
     }
@@ -244,7 +247,7 @@ public sealed class ModuleRefTableValidationComponentTests
     {
         var result = modules.ToArray();
         WriteWord(result, 0, 2);
-        WriteWord(result, 44, 1);
+        WriteWord(result, 48, 1);
         return result;
     }
 

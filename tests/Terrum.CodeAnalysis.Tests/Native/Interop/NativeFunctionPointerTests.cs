@@ -1522,10 +1522,10 @@ public sealed class NativeFunctionPointerTests
                 for (var row = 0; row < recordCount; row++)
                 {
                     var entryPoint = BinaryPrimitives.ReadUInt32LittleEndian(
-                        bytes.AsSpan((row * 44) + 12));
+                        bytes.AsSpan((row * 48) + 16));
                     if (entryPoint != 0)
                     {
-                        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan((row * 44) + 12),
+                        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan((row * 48) + 16),
                             (uint)RemapMethodRow(entryPoint, methodRowMap));
                     }
                 }
@@ -1719,18 +1719,19 @@ public sealed class NativeFunctionPointerTests
             var bytes = sectionBytes.ToArray();
             if (kind == 0x0001)
             {
-                var modules = new byte[bytes.Length + 44];
+                var modules = new byte[bytes.Length + 48];
                 bytes.CopyTo(modules, 0);
                 bytes.CopyTo(modules, bytes.Length);
-                var firstModule = modules.AsSpan(0, 44);
-                var secondModule = modules.AsSpan(44, 44);
+                var firstModule = modules.AsSpan(0, 48);
+                var secondModule = modules.AsSpan(48, 48);
                 BinaryPrimitives.WriteUInt32LittleEndian(firstModule[20..],
                     includeRootlessFeature ? 4u : 1u);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule, methodNameRow);
-                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[12..], 0);
-                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[16..], 1);
-                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[20..], 2);
-                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[36..], 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[4..], 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[16..], 0);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[20..], 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[24..], 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[40..], 2);
                 bytes = modules;
                 recordCount++;
             }

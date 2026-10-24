@@ -397,13 +397,13 @@ public sealed class CompactBodyOperationIndexComponentTests
         byte[] strings = TrRmStringTableWriter.EncodeNames([
             ("Module", 0), ("Run", 0), ("src/A", 0),
         ]);
-        var modules = new byte[44];
+        var modules = new byte[48];
         WriteWord(modules, 0, 1);
         WriteWord(modules, 4, 1);
-        WriteWord(modules, 28, 1);
         WriteWord(modules, 32, 1);
         WriteWord(modules, 36, 1);
         WriteWord(modules, 40, 1);
+        WriteWord(modules, 44, 1);
         var methods = new byte[28];
         WriteWord(methods, 4, 2);
         WriteWord(methods, 8, 1);

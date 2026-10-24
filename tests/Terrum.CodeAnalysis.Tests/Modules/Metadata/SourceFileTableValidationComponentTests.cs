@@ -201,17 +201,18 @@ public sealed class SourceFileTableValidationComponentTests
 
     private static byte[] EncodeModules(int sourceFileCount)
     {
-        var modules = new byte[2 * 44];
+        var modules = new byte[2 * 48];
         WriteWord(modules, 0, 1);
-        WriteWord(modules, 28, 1);
+        WriteWord(modules, 4, 1);
         WriteWord(modules, 32, 1);
         WriteWord(modules, 36, 1);
         WriteWord(modules, 40, 1);
-        WriteWord(modules, 44, 2);
-        WriteWord(modules, 44 + 28, 1);
-        WriteWord(modules, 44 + 32, 1);
-        WriteWord(modules, 44 + 36, 1);
-        WriteWord(modules, 44 + 40, sourceFileCount == 0 ? 1u : 2u);
+        WriteWord(modules, 44, 1);
+        WriteWord(modules, 48, 2);
+        WriteWord(modules, 80, 1);
+        WriteWord(modules, 84, 1);
+        WriteWord(modules, 88, 1);
+        WriteWord(modules, 92, sourceFileCount == 0 ? 1u : 2u);
         return modules;
     }
 

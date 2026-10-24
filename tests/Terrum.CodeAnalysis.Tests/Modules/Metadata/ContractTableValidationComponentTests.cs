@@ -318,13 +318,13 @@ public sealed class ContractTableValidationComponentTests
             byte[] stringBytes = TrRmStringTableWriter.EncodeTextRows(
                 [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0)]);
             var strings = new TrRmStringTableReader(stringBytes, 4);
-            byte[] moduleBytes = new byte[44];
+            byte[] moduleBytes = new byte[48];
             WriteWord(moduleBytes, 0, 2);
             WriteWord(moduleBytes, 4, 1);
-            WriteWord(moduleBytes, 28, 1);
             WriteWord(moduleBytes, 32, 1);
             WriteWord(moduleBytes, 36, 1);
             WriteWord(moduleBytes, 40, 1);
+            WriteWord(moduleBytes, 44, 1);
             var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
                 0, tables.TypeDefCount, tables.MethodDefCount, 0);
             var types = new TrRmTypeDefTableReader(tables.TypeDefs, tables.TypeDefCount,

@@ -442,19 +442,19 @@ public sealed partial class ImportTableValidationComponentTests
 
     private static byte[] Modules(bool producerOwnsReference)
     {
-        var rows = new byte[88];
+        var rows = new byte[96];
         WriteWord(rows, 0, 2);
         WriteWord(rows, 4, 1);
-        WriteWord(rows, 28, 1);
         WriteWord(rows, 32, 1);
         WriteWord(rows, 36, 1);
         WriteWord(rows, 40, 1);
-        WriteWord(rows, 44, 3);
-        WriteWord(rows, 48, 1);
-        WriteWord(rows, 72, producerOwnsReference ? 2u : 1u);
-        WriteWord(rows, 76, 2);
-        WriteWord(rows, 80, 2);
-        WriteWord(rows, 84, 1);
+        WriteWord(rows, 44, 1);
+        WriteWord(rows, 48, 3);
+        WriteWord(rows, 52, 1);
+        WriteWord(rows, 80, producerOwnsReference ? 2u : 1u);
+        WriteWord(rows, 84, 2);
+        WriteWord(rows, 88, 2);
+        WriteWord(rows, 92, 1);
         return rows;
     }
 

@@ -116,13 +116,13 @@ public sealed class TrRmArtifactWriterTests
 
     private static byte[] Module()
     {
-        var row = new byte[44];
+        var row = new byte[48];
         Write(row, 0, 1);
         Write(row, 4, 1);
-        Write(row, 28, 1);
         Write(row, 32, 1);
         Write(row, 36, 1);
         Write(row, 40, 1);
+        Write(row, 44, 1);
         return row;
     }
 

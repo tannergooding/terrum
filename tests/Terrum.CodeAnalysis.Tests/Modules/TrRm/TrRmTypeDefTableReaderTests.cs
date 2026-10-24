@@ -140,13 +140,13 @@ public sealed class TrRmTypeDefTableReaderTests
 
     private static byte[] Module()
     {
-        var bytes = new byte[44];
+        var bytes = new byte[48];
         Write(bytes, 0, 2);
         Write(bytes, 4, 1);
-        Write(bytes, 28, 1);
         Write(bytes, 32, 1);
         Write(bytes, 36, 1);
         Write(bytes, 40, 1);
+        Write(bytes, 44, 1);
         return bytes;
     }
 

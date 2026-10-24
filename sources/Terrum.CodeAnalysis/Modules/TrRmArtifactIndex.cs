@@ -116,9 +116,9 @@ public readonly ref struct TrRmArtifactIndex
 
         for (var module = 0; module < moduleCount; module++)
         {
-            var offset = module * 44;
-            var featureFirst = ReadU32(moduleBytes, offset + 16);
-            var moduleFeatureCount = ReadU32(moduleBytes, offset + 20);
+            var offset = module * 48;
+            var featureFirst = ReadU32(moduleBytes, offset + 20);
+            var moduleFeatureCount = ReadU32(moduleBytes, offset + 24);
             if (!ValidFeatureRange(featureFirst, moduleFeatureCount, featureCount))
             {
                 throw InvalidArtifact();
@@ -282,7 +282,7 @@ public readonly ref struct TrRmArtifactIndex
 
     private static int FixedStride(int kind) => kind switch
     {
-        0x0001 => 44, 0x0002 or 0x0003 or 0x0011 or 0x001B or 0x0020 or 0x7F00 => 0,
+        0x0001 => 48, 0x0002 or 0x0003 or 0x0011 or 0x001B or 0x0020 or 0x7F00 => 0,
         0x0004 => 8, 0x0010 => 12, 0x0012 => 12, 0x0013 => 40,
         0x0014 => 20, 0x0015 => 24, 0x0016 => 28, 0x0017 => 24,
         0x0018 => 16, 0x0019 => 20, 0x001A => 16, 0x001C => 12,

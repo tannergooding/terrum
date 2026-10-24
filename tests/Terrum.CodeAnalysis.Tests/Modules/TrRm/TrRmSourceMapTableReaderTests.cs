@@ -166,21 +166,21 @@ public sealed class TrRmSourceMapTableReaderTests
 
     private static byte[] Modules(bool crossModule)
     {
-        var rows = new byte[crossModule ? 88 : 44];
+        var rows = new byte[crossModule ? 96 : 48];
         Write(rows, 0, 1);
         Write(rows, 4, 1);
-        Write(rows, 28, 1);
         Write(rows, 32, 1);
         Write(rows, 36, 1);
         Write(rows, 40, 1);
+        Write(rows, 44, 1);
         if (crossModule)
         {
-            Write(rows, 44, 4);
-            Write(rows, 48, 1);
-            Write(rows, 72, 1);
-            Write(rows, 76, 1);
-            Write(rows, 80, 2);
+            Write(rows, 48, 4);
+            Write(rows, 52, 1);
+            Write(rows, 80, 1);
             Write(rows, 84, 1);
+            Write(rows, 88, 2);
+            Write(rows, 92, 1);
         }
 
         return rows;

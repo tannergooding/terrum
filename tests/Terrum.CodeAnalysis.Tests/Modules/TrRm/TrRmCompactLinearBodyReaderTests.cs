@@ -559,25 +559,26 @@ public sealed class TrRmCompactLinearBodyReaderTests
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeTextRows([("Module", 0), ("Run", 0), ("", 0)]), 3);
-        var moduleBytes = new byte[packedTarget ? 88 : 44];
+        var moduleBytes = new byte[packedTarget ? 96 : 48];
         Write(moduleBytes, 0, 1);
-        Write(moduleBytes, 4, callerRequirement);
-        Write(moduleBytes, 8, runtimePolicy);
-        Write(moduleBytes, 28, 1);
+        Write(moduleBytes, 4, 1);
+        Write(moduleBytes, 8, callerRequirement);
+        Write(moduleBytes, 12, runtimePolicy);
         Write(moduleBytes, 32, 1);
         Write(moduleBytes, 36, 1);
         Write(moduleBytes, 40, 1);
+        Write(moduleBytes, 44, 1);
         if (packedTarget)
         {
-            foreach (var offset in new[] { 48, 72, 76, 84 })
+            foreach (var offset in new[] { 52, 80, 84, 92 })
             {
                 Write(moduleBytes, offset, 1);
             }
 
-            Write(moduleBytes, 44, 2);
-            Write(moduleBytes, 48, targetRequirement);
-            Write(moduleBytes, 52, targetPolicy);
-            Write(moduleBytes, 80, 2);
+            Write(moduleBytes, 48, 2);
+            Write(moduleBytes, 56, targetRequirement);
+            Write(moduleBytes, 60, targetPolicy);
+            Write(moduleBytes, 88, 2);
         }
 
         var modules = new TrRmModuleTableReader(moduleBytes, packedTarget ? 2 : 1,

@@ -12,7 +12,7 @@ public static bool TryValidateImportTable(int32 recordCount,
         || methodDefCount < 0 || methodDefCount > 0xFF_FFFF
         || recordCount * 12 != Host.Imports.Length
         || propertyDefCount < 0 || propertyDefCount > 0xFF_FFFF
-        || moduleCount * 44 != Host.Modules.Length
+        || moduleCount * 48 != Host.Modules.Length
         || moduleRefCount * 12 != Host.ModuleRefs.Length
         || typeDefCount * 40 != Host.TypeDefs.Length
         || methodDefCount * 28 != Host.Methods.Length
@@ -170,7 +170,7 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
     if (table == 0x13)
     {
         if (row > uint32(typeDefCount)
-            || !TryGetImportTableOwnerModule(int32(row), moduleCount, typeDefCount, 32,
+            || !TryGetImportTableOwnerModule(int32(row), moduleCount, typeDefCount, 36,
                 init ownerModule))
         {
             return false;
@@ -182,7 +182,7 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
     if (table == 0x16)
     {
         if (row > uint32(methodDefCount)
-            || !TryGetImportTableOwnerModule(int32(row), moduleCount, methodDefCount, 36,
+            || !TryGetImportTableOwnerModule(int32(row), moduleCount, methodDefCount, 40,
                 init ownerModule)
             || !TryReadMethodDefTableWord((int32(row) - 1) * 28, 24, init body))
         {
@@ -195,7 +195,7 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
     {
         if (row > uint32(propertyDefCount)
             || !TryReadPropertyTableWord((int32(row) - 1) * 20, 0, init var ownerType)
-            || !TryGetImportTableOwnerModule(int32(ownerType), moduleCount, typeDefCount, 32,
+            || !TryGetImportTableOwnerModule(int32(ownerType), moduleCount, typeDefCount, 36,
                 init ownerModule)
             || !TryReadPropertyTableWord((int32(row) - 1) * 20, 12, init var getter)
             || !TryReadMethodDefTableWord((int32(getter) - 1) * 28, 24, init body))
@@ -216,7 +216,7 @@ bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
     while (low <= high)
     {
         int32 middle = low + (high - low) / 2;
-        if (!TryReadModuleTableWord((middle - 1) * 44, cursorOffset,
+        if (!TryReadModuleTableWord((middle - 1) * 48, cursorOffset,
             init var start))
         {
             return false;
@@ -225,7 +225,7 @@ bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
         mut uint32 end = uint32(tableCount + 1);
         if (middle < moduleCount)
         {
-            if (!TryReadModuleTableWord(middle * 44, cursorOffset, init var nextStart))
+            if (!TryReadModuleTableWord(middle * 48, cursorOffset, init var nextStart))
             {
                 return false;
             }
@@ -252,7 +252,7 @@ bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
 
 bool TryGetImportModuleRefOwner(int32 row, int32 moduleCount,
     int32 moduleRefCount, init ref<int32> ownerModule)
-    => TryGetImportTableOwnerModule(row, moduleCount, moduleRefCount, 28,
+    => TryGetImportTableOwnerModule(row, moduleCount, moduleRefCount, 32,
         init ownerModule);
 
 bool TrySortAndCheckImportExpectations(int32 recordCount)

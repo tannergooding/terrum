@@ -1267,7 +1267,7 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Orphan MethodSig is not part of a defined function.");
         }
 
-        var entry = (int)BinaryPrimitives.ReadUInt32LittleEndian(moduleBytes.Slice(12, 4)) - 1;
+        var entry = (int)BinaryPrimitives.ReadUInt32LittleEndian(moduleBytes.Slice(16, 4)) - 1;
         if (entry >= 0 && (entry >= methodCount || functionIndexByMethodRow[entry + 1] < 0))
         {
             throw Invalid("Entry method must be a local int32 no-argument function.");

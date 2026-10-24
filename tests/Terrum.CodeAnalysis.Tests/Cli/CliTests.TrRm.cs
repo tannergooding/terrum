@@ -18,8 +18,8 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmStructureAcceptsMinimalArtifactAndRejectsCorruptionAsync()
     {
-        var module = new byte[44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[48];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
@@ -82,8 +82,8 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmCompactLinearChecksBodiesWithoutChangingStructuralValidationAsync()
     {
-        var module = new byte[44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[48];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
@@ -186,8 +186,8 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmCompactLinearChecksPersistedLocalCallAsync()
     {
-        var module = new byte[44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[48];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
@@ -279,15 +279,15 @@ public sealed partial class CliTests
                 "validate-trrm-compact-linear", path, "--json");
             Assert.That(invalid, Is.EqualTo(1));
 
-            var packedModule = new byte[88];
+            var packedModule = new byte[96];
             module.CopyTo(packedModule, 0);
-            foreach (var offset in new[] { 72, 76, 84 })
+            foreach (var offset in new[] { 52, 80, 84, 92 })
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(offset), 1);
             }
 
-            BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(44), 3);
-            BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(80), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(48), 3);
+            BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(88), 2);
             byte[] packedCaller =
             [
                 0x04, 1, 1, 0, 0, 0, 1,
@@ -365,8 +365,8 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmCompactIndexedChecksBodiesAndSourceLocationsAsync()
     {
-        var module = new byte[44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[48];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
@@ -530,8 +530,8 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmCompactIndexedChecksPersistedCallMethodRowsAsync()
     {
-        var module = new byte[44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[48];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
@@ -655,8 +655,8 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmCompactIndexedChecksPersistedChar16RangeConvertAsync()
     {
-        var module = new byte[44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[48];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
@@ -731,13 +731,13 @@ public sealed partial class CliTests
     [Test]
     public async Task ValidateTrRmCompactIndexedChecksPackedCallDefIdsAsync()
     {
-        var modules = new byte[88];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40, 48, 72, 76, 84 })
+        var modules = new byte[96];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44, 52, 56, 80, 84, 92 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(offset), 1);
         }
-        BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(44), 2);
-        BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(80), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(48), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(88), 2);
         var strings = TrRmStringTableWriter.EncodeTextRows(
             [("Module", 0), ("Producer", 0), ("", 0)]);
         byte[] typeSpec =
@@ -828,7 +828,7 @@ public sealed partial class CliTests
             Assert.That(privateCall, Is.EqualTo(1));
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 2);
 
-            BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(4), 0);
+            BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(8), 0);
             await File.WriteAllBytesAsync(path, Artifact());
             var (targetStructural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
@@ -836,7 +836,7 @@ public sealed partial class CliTests
             var (targetMismatch, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
             Assert.That(targetMismatch, Is.EqualTo(1));
-            BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(8), 1);
             await File.WriteAllBytesAsync(path, Artifact());
             var (compatibleTarget, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
@@ -882,8 +882,8 @@ public sealed partial class CliTests
     public async Task ValidateTrRmCompactIndexedChecksPersistedLoopRegionAsync(
         bool siblingLoop, bool nestedLoop)
     {
-        var module = new byte[44];
-        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        var module = new byte[48];
+        foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }

@@ -14,7 +14,7 @@ public static bool TryValidateExportTable(int32 recordCount,
         || propertyDefCount < 0 || propertyDefCount > 0xFF_FFFF
         || importRecordCount < 0 || importRecordCount > 0xFF_FFFF
         || recordCount * 8 != Host.Exports.Length
-        || moduleCount * 44 != Host.Modules.Length
+        || moduleCount * 48 != Host.Modules.Length
         || moduleRefCount * 12 != Host.ModuleRefs.Length
         || typeDefCount * 40 != Host.TypeDefs.Length
         || methodDefCount * 28 != Host.Methods.Length

@@ -79,19 +79,21 @@ public sealed class TrRmSourceFileTableReaderTests
 
     private static byte[] TwoModules()
     {
-        var bytes = new byte[88];
+        var bytes = new byte[96];
         Write(bytes, 0, 1);
         Write(bytes, 4, 1);
-        Write(bytes, 28, 1);
+        Write(bytes, 8, 1);
         Write(bytes, 32, 1);
         Write(bytes, 36, 1);
         Write(bytes, 40, 1);
-        Write(bytes, 44, 2);
-        Write(bytes, 44 + 4, 1);
-        Write(bytes, 44 + 28, 1);
-        Write(bytes, 44 + 32, 1);
-        Write(bytes, 44 + 36, 1);
-        Write(bytes, 44 + 40, 2);
+        Write(bytes, 44, 1);
+        Write(bytes, 48, 2);
+        Write(bytes, 52, 1);
+        Write(bytes, 56, 1);
+        Write(bytes, 80, 1);
+        Write(bytes, 84, 1);
+        Write(bytes, 88, 1);
+        Write(bytes, 92, 2);
         return bytes;
     }
 

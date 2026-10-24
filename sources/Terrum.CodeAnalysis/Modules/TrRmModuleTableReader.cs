@@ -13,7 +13,7 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>The borrowed Module and String sections must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmModuleTableReader
 {
-    private const int RowSize = 44;
+    private const int RowSize = 48;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly int _recordCount;
@@ -60,13 +60,13 @@ public readonly ref struct TrRmModuleTableReader
         _sourceFileCount = sourceFileCount;
         _identities = new Dictionary<string, int>(recordCount, StringComparer.Ordinal);
 
-        Span<int> cursorOffsets = [28, 32, 36, 40];
+        Span<int> cursorOffsets = [32, 36, 40, 44];
         Span<int> tableCounts = [moduleRefCount, typeDefCount, methodDefCount, sourceFileCount];
         for (var row = 0; row < recordCount; row++)
         {
-            if (Read(row, 4) > 1 || Read(row, 8) > 1
-                || !ValidFeatureRange(Read(row, 16), Read(row, 20), featureCount)
-                || Read(row, 24) != 0
+            if (Read(row, 4) == 0 || Read(row, 8) > 1 || Read(row, 12) > 1
+                || !ValidFeatureRange(Read(row, 20), Read(row, 24), featureCount)
+                || Read(row, 28) != 0
                 || !_identities.TryAdd(ReadIdentity(row), row + 1))
             {
                 throw InvalidModule();
@@ -83,10 +83,10 @@ public readonly ref struct TrRmModuleTableReader
                 }
             }
 
-            var entry = Read(row, 12);
-            var methodStart = Read(row, 36);
+            var entry = Read(row, 16);
+            var methodStart = Read(row, 40);
             var methodEnd = row + 1 < recordCount
-                ? Read(row + 1, 36) : (uint)methodDefCount + 1;
+                ? Read(row + 1, 40) : (uint)methodDefCount + 1;
             if (entry != 0 && (entry < methodStart || entry >= methodEnd))
             {
                 throw InvalidModule();
@@ -111,8 +111,8 @@ public readonly ref struct TrRmModuleTableReader
             throw InvalidModule();
         }
 
-        var start = (int)Read(row - 1, 28);
-        var end = row < _recordCount ? (int)Read(row, 28) : _moduleRefCount + 1;
+        var start = (int)Read(row - 1, 32);
+        var end = row < _recordCount ? (int)Read(row, 32) : _moduleRefCount + 1;
         if (start <= 0 || end < start || end > _moduleRefCount + 1)
         {
             throw InvalidModule();
@@ -128,8 +128,8 @@ public readonly ref struct TrRmModuleTableReader
             throw InvalidModule();
         }
 
-        var start = (int)Read(row - 1, 40);
-        var end = row < _recordCount ? (int)Read(row, 40) : _sourceFileCount + 1;
+        var start = (int)Read(row - 1, 44);
+        var end = row < _recordCount ? (int)Read(row, 44) : _sourceFileCount + 1;
         if (start <= 0 || end < start || end > _sourceFileCount + 1)
         {
             throw InvalidModule();
@@ -145,8 +145,8 @@ public readonly ref struct TrRmModuleTableReader
             throw InvalidModule();
         }
 
-        var start = (int)Read(row - 1, 32);
-        var end = row < _recordCount ? (int)Read(row, 32) : _typeDefCount + 1;
+        var start = (int)Read(row - 1, 36);
+        var end = row < _recordCount ? (int)Read(row, 36) : _typeDefCount + 1;
         if (start <= 0 || end < start || end > _typeDefCount + 1)
         {
             throw InvalidModule();
@@ -162,8 +162,8 @@ public readonly ref struct TrRmModuleTableReader
             throw InvalidModule();
         }
 
-        var start = (int)Read(row - 1, 36);
-        var end = row < _recordCount ? (int)Read(row, 36) : _methodDefCount + 1;
+        var start = (int)Read(row - 1, 40);
+        var end = row < _recordCount ? (int)Read(row, 40) : _methodDefCount + 1;
         if (start <= 0 || end < start || end > _methodDefCount + 1)
         {
             throw InvalidModule();
@@ -179,14 +179,25 @@ public readonly ref struct TrRmModuleTableReader
             throw InvalidModule();
         }
 
-        var target = Read(row - 1, 4);
-        var policy = Read(row - 1, 8);
+        var target = Read(row - 1, 8);
+        var policy = Read(row - 1, 12);
         if (target > 1 || policy > 1)
         {
             throw InvalidModule();
         }
 
         return (target, policy);
+    }
+
+    /// <summary>Gets the exact governing semantic edition selected by a module.</summary>
+    public uint GetGoverningRuleEdition(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidModule();
+        }
+
+        return Read(row - 1, 4);
     }
 
     /// <summary>Gets the one-based Feature row start and row count assigned to a module.</summary>
@@ -198,7 +209,7 @@ public readonly ref struct TrRmModuleTableReader
             throw InvalidModule();
         }
 
-        return ((int)Read(row - 1, 16), (int)Read(row - 1, 20));
+        return ((int)Read(row - 1, 20), (int)Read(row - 1, 24));
     }
 
     public bool TryFindModule(string identity, out int row)

@@ -138,6 +138,13 @@ public static class TrRmStructuralMetadataValidator
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
             moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount);
+        for (var module = 1; module <= modules.Count; module++)
+        {
+            if (modules.GetGoverningRuleEdition(module) != 1)
+            {
+                throw InvalidMetadata();
+            }
+        }
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, moduleRefCount,
             strings, modules);
         var typeSpecs = typeSpecCount == 0 && nativeFunctionPointerSignatureCount == 0 ? default

@@ -21,7 +21,7 @@ public sealed class TrRmModuleTableWriterTests
         var strings = new TrRmStringTableReader(names, 2);
         var bytes = TrRmModuleTableWriter.Encode(rows, strings, 2, 0, 1, 0);
         var modules = new TrRmModuleTableReader(bytes, 2, strings, 2, 0, 1, 0);
-        Assert.That(bytes.Length, Is.EqualTo(88));
+        Assert.That(bytes.Length, Is.EqualTo(96));
         Assert.That(modules.GetIdentity(1), Is.EqualTo("A"));
         Assert.That(modules.GetIdentity(2), Is.EqualTo("B"));
         Assert.That(modules.GetModuleRefRange(1), Is.EqualTo((1, 2)));
@@ -31,6 +31,7 @@ public sealed class TrRmModuleTableWriterTests
         Assert.That(modules.GetTypeDefRange(2), Is.EqualTo((1, 1)));
         Assert.That(modules.GetRequirements(1), Is.EqualTo((1u, 0u)));
         Assert.That(modules.GetRequirements(2), Is.EqualTo((0u, 1u)));
+        Assert.That(modules.GetGoverningRuleEdition(1), Is.EqualTo(1u));
 
         rows[0] = rows[0] with { IdentityStringRow = 2 };
         Assert.That(modules.GetIdentity(1), Is.EqualTo("A"));
@@ -55,6 +56,16 @@ public sealed class TrRmModuleTableWriterTests
             new TrRmSection(0x0002, 0, 1, minimalNames),
         ]);
         TrRmStructuralMetadataValidator.Validate(artifact);
+
+        var unsupportedEdition = TrRmModuleTableWriter.Encode(
+            [new TrRmModuleRow(1, 0, 0, 0, 1, 1, 1, 1, GoverningRuleEdition: 2)],
+            minimalStrings, 0, 0, 0, 0);
+        var unsupportedArtifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, unsupportedEdition),
+            new TrRmSection(0x0002, 0, 1, minimalNames),
+        ]);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(unsupportedArtifact));
     }
 
     [Test]
@@ -70,6 +81,8 @@ public sealed class TrRmModuleTableWriterTests
             Encode([first, second with { IdentityStringRow = 1 }]));
         Assert.Throws<InvalidDataException>(() =>
             Encode([first with { RuntimePolicy = 2 }, second]));
+        Assert.Throws<InvalidDataException>(() =>
+            Encode([first with { GoverningRuleEdition = 0 }, second]));
         Assert.Throws<InvalidDataException>(() =>
             Encode([first, second with { ModuleRefStart = 0 }]));
         Assert.Throws<InvalidDataException>(() =>

@@ -107,9 +107,11 @@ The development TRRM scalar path emits metadata and compact-linear or
 indexed Bodies for a bounded source-free, fail-fast scalar subset. It uses the
 shared hosted verifier and backend; general imported-call linking and checked
 exception Body support are not implemented.
-This inventory describes its development encoding, not verified support for
-the [unified registry](specs/representation/registry.md). Full current-schema
-producer/consumer migration and qualification remain tracked by
+Its Module framing now uses the assigned 48-byte row and governing edition 1;
+the Feature assignments and Body codecs remain provisional development
+representations. Module framing alone does not make the artifact conform to
+the [unified registry](specs/representation/registry.md). Full
+current-schema producer/consumer migration and qualification remain tracked by
 [CG-001](implementation/conformance-gaps.md#cg-001).
 
 Terrum-authored scanner and scalar-frontend components are implementation

@@ -10,7 +10,7 @@ public static bool TryValidateModuleTable(int32 recordCount, int32 stringCount,
         || !IsValidModuleTableCount(methodDefCount)
         || !IsValidModuleTableCount(sourceFileCount)
         || featureCount < -1 || featureCount > 0xFF_FFFF
-        || recordCount * 44 != Host.Modules.Length
+        || recordCount * 48 != Host.Modules.Length
         || Host.IdentitySlots.Length != recordCount + 1
         || !TryGetVariableTableRowExtent(stringCount, 8, 4, 1,
             init var firstStringStart, init var firstStringLength))
@@ -57,23 +57,25 @@ bool TryValidateModuleRow(int32 row, int32 recordCount, int32 stringCount,
     init ref<uint32> moduleRefStartResult, init ref<uint32> typeDefStartResult,
     init ref<uint32> methodDefStartResult, init ref<uint32> sourceFileStartResult)
 {
-    int32 rowStart = (row - 1) * 44;
+    int32 rowStart = (row - 1) * 48;
     if (!TryReadModuleTableWord(rowStart, 0, init var identity)
-        || !TryReadModuleTableWord(rowStart, 4, init var targetRequirement)
-        || !TryReadModuleTableWord(rowStart, 8, init var runtimePolicy)
-        || !TryReadModuleTableWord(rowStart, 12, init var entryMethod)
-        || !TryReadModuleTableWord(rowStart, 16, init var featureFirst)
-        || !TryReadModuleTableWord(rowStart, 20, init var featureRangeCount)
-        || !TryReadModuleTableWord(rowStart, 24, init var moduleFlags)
-        || !TryReadModuleTableWord(rowStart, 28, init var moduleRefStart)
-        || !TryReadModuleTableWord(rowStart, 32, init var typeDefStart)
-        || !TryReadModuleTableWord(rowStart, 36, init var methodDefStart)
-        || !TryReadModuleTableWord(rowStart, 40, init var sourceFileStart))
+        || !TryReadModuleTableWord(rowStart, 4, init var governingRuleEdition)
+        || !TryReadModuleTableWord(rowStart, 8, init var targetRequirement)
+        || !TryReadModuleTableWord(rowStart, 12, init var runtimePolicy)
+        || !TryReadModuleTableWord(rowStart, 16, init var entryMethod)
+        || !TryReadModuleTableWord(rowStart, 20, init var featureFirst)
+        || !TryReadModuleTableWord(rowStart, 24, init var featureRangeCount)
+        || !TryReadModuleTableWord(rowStart, 28, init var moduleFlags)
+        || !TryReadModuleTableWord(rowStart, 32, init var moduleRefStart)
+        || !TryReadModuleTableWord(rowStart, 36, init var typeDefStart)
+        || !TryReadModuleTableWord(rowStart, 40, init var methodDefStart)
+        || !TryReadModuleTableWord(rowStart, 44, init var sourceFileStart))
     {
         return false;
     }
 
     if (identity == 0 || identity > 0xFF_FFFF || identity > uint32(stringCount)
+        || governingRuleEdition != 1
         || targetRequirement > 1 || runtimePolicy > 1
         || !IsValidModuleFeatureRange(featureFirst, featureRangeCount, featureCount)
         || moduleFlags != 0
@@ -104,7 +106,7 @@ bool TryValidateModuleRow(int32 row, int32 recordCount, int32 stringCount,
     mut uint32 methodEnd = uint32(methodDefCount + 1);
     if (row < recordCount)
     {
-        if (!TryReadModuleTableWord(row * 44, 36, init var nextMethodStart))
+        if (!TryReadModuleTableWord(row * 48, 40, init var nextMethodStart))
         {
             return false;
         }
@@ -217,8 +219,8 @@ bool TryCompareModuleRowsByIdentity(int32 stringCount, int32 stringIndexByteLeng
         comparison = 0;
         return true;
     }
-    if (!TryReadModuleTableWord((firstModuleRow - 1) * 44, 0, init var firstIdentity)
-        || !TryReadModuleTableWord((secondModuleRow - 1) * 44, 0, init var secondIdentity))
+    if (!TryReadModuleTableWord((firstModuleRow - 1) * 48, 0, init var firstIdentity)
+        || !TryReadModuleTableWord((secondModuleRow - 1) * 48, 0, init var secondIdentity))
     {
         return false;
     }
@@ -297,7 +299,7 @@ bool TryFindModuleTableRowByIdentity(int32 moduleCount, int32 stringCount,
     {
         int32 middle = low + (high - low) / 2;
         int32 candidateModuleRow = Host.IdentitySlots[middle];
-        if (!TryReadModuleTableWord((candidateModuleRow - 1) * 44, 0,
+        if (!TryReadModuleTableWord((candidateModuleRow - 1) * 48, 0,
                 init var candidateIdentity)
             || !TryCompareModuleIdentityRows(stringCount, stringIndexByteLength,
                 int32(candidateIdentity), identityStringRow, init var comparison))
@@ -407,7 +409,7 @@ bool TryGetValidatedModuleIdentityExtent(int32 stringCount, int32 stringIndexByt
 
 bool TryReadModuleTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
 {
-    if (rowStart < 0 || rowStart > Host.Modules.Length - 44 || offset < 0 || offset > 40
+    if (rowStart < 0 || rowStart > Host.Modules.Length - 48 || offset < 0 || offset > 44
         || !TryReadModuleTableByte(rowStart + offset, init var first)
         || !TryReadModuleTableByte(rowStart + offset + 1, init var second)
         || !TryReadModuleTableByte(rowStart + offset + 2, init var third)

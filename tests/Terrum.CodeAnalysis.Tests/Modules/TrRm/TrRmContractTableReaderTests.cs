@@ -196,13 +196,13 @@ public sealed class TrRmContractTableReaderTests
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
             [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0), ("Owner", 0)]);
         var names = new TrRmStringTableReader(nameBytes, 5);
-        var module = new byte[44];
+        var module = new byte[48];
         Write(module, 0, 2);
         Write(module, 4, 1);
-        Write(module, 28, 1);
         Write(module, 32, 1);
         Write(module, 36, 1);
         Write(module, 40, 1);
+        Write(module, 44, 1);
         var modules = new TrRmModuleTableReader(module, 1, names, 0, typeRows, 1, 0);
         var type = new byte[typeRows * 40];
         for (var index = 0; index < typeRows; index++)
