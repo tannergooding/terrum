@@ -10,26 +10,27 @@ public static bool TryValidateConstraintTable(int32 recordCount,
     if (recordCount < 0 || recordCount > 0xFF_FFFF
         || recordCount != constraintCount
         || typeSpecCount < 0 || typeSpecCount > 0xFF_FFFF
-        || recordCount * 16 != Host.Constraints.Length
+        || recordCount * 12 != Host.Constraints.Length
         || !TryValidateGenericParamTable(genericParamCount, moduleCount, stringCount,
             moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
             featureCount, fieldCount, genericParamCount, layoutCount, contractCount,
-            methodSigCount, constraintCount, bodyCount))
+            methodSigCount, typeSpecCount, constraintCount, bodyCount))
     {
         return false;
     }
 
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
-        int32 rowStart = (row - 1) * 16;
+        int32 rowStart = (row - 1) * 12;
         if (!TryReadConstraintTableWord(rowStart, 0, init var owner)
             || !TryReadConstraintTableHalfWord(rowStart + 4, init var kind)
             || !TryReadConstraintTableHalfWord(rowStart + 6, init var flags)
-            || !TryReadConstraintTableWord(rowStart, 8, init var target)
-            || !TryReadConstraintTableWord(rowStart, 12, init var witness)
+            || !TryReadConstraintTableWord(rowStart, 8, init var payload)
             || owner != uint32(Host.ConstraintOwners[row])
-            || flags != 0
-            || target == 0 || target > uint32(typeSpecCount))
+            || flags != 0 || payload == 0
+            || (kind == 1 && payload > uint32(typeSpecCount))
+            || (kind == 2 && payload > 3)
+            || (kind != 1 && kind != 2 && kind != 3))
         {
             return false;
         }
@@ -40,8 +41,8 @@ public static bool TryValidateConstraintTable(int32 recordCount,
 
 bool TryReadConstraintTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
 {
-    if (rowStart < 0 || rowStart > Host.Constraints.Length - 16
-        || offset < 0 || offset > 12
+    if (rowStart < 0 || rowStart > Host.Constraints.Length - 12
+        || offset < 0 || offset > 8
         || !TryReadConstraintTableByte(rowStart + offset, init var first)
         || !TryReadConstraintTableByte(rowStart + offset + 1, init var second)
         || !TryReadConstraintTableByte(rowStart + offset + 2, init var third)

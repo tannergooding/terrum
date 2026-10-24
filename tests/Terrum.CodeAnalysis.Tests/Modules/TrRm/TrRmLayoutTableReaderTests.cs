@@ -11,77 +11,112 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 public sealed class TrRmLayoutTableReaderTests
 {
     [Test]
-    public void LinksPublishedLayoutToExactlyOneType()
+    public void LinksDefaultLayoutToItsTypeDef()
     {
-        Create(Layout());
+        var names = new TrRmStringTableReader(Names(), 2);
+        var modules = new TrRmModuleTableReader(Module(names, 1), 1, names,
+            0, 1, 0, 0);
+        var types = new TrRmTypeDefTableReader(Type(), 1, names, modules,
+            0, 0, 1, 0);
+        var profiles = new TrRmTargetProfileTableReader([], 0);
+        var layouts = new TrRmLayoutTableReader(Layout(), 1, types, profiles, 0);
+        Assert.That(layouts.Count, Is.EqualTo(1));
+        Assert.That(layouts.GetOwnerTypeDef(1), Is.EqualTo(1));
+        Assert.That(layouts.GetTargetProfileRef(1), Is.Zero);
+        Assert.That(layouts.GetLayoutKind(1), Is.Zero);
+        Assert.That(layouts.GetLayoutFieldRange(1), Is.EqualTo((0, 0)));
+        Assert.That(layouts.GetLayoutForProfile(1, 0), Is.EqualTo(1));
+        Assert.That(layouts.HasBlittableVariant(1), Is.False);
     }
-    [TestCase(0,(byte)(0))]
-    [TestCase(0,(byte)(2))]
-    [TestCase(4,(byte)(2))]
-    [TestCase(20,(byte)(1))]
-    public void RejectsMismatchedOwnerTargetAndReservedFlags(int offset, byte value)
+
+    [TestCase(0, 0)]
+    [TestCase(0, 2)]
+    [TestCase(4, 2)]
+    [TestCase(8, 5)]
+    [TestCase(9, 2)]
+    [TestCase(10, 1)]
+    [TestCase(12, 3)]
+    [TestCase(16, 3)]
+    [TestCase(20, 1)]
+    public void RejectsInvalidOwnerProfileKindFlagsAndRanges(int offset, byte value)
     {
         var bytes = Layout();
         bytes[offset] = value;
-        Assert.Throws<InvalidDataException>(() => Create(bytes));
+        Assert.Throws<InvalidDataException>(() =>
+            Create(bytes, 1, Type(), 1, [], 0));
     }
 
     [Test]
-    public void RejectsOrphanSharedAndTruncatedLayouts()
+    public void RejectsTruncatedOrUnownedVariantsAndMissingDefault()
     {
-        Assert.Throws<InvalidDataException>(() => Create(Layout()[..^1]));
-        var orphan = new byte[48];
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Layout()[..^1], 1, Type(), 1, [], 0));
+
+        var orphan = new byte[56];
         Layout().CopyTo(orphan, 0);
-        Layout().CopyTo(orphan, 24);
-        Assert.Throws<InvalidDataException>(() => Create(orphan, layoutCount: 2));
+        Layout().CopyTo(orphan, 28);
+        Assert.Throws<InvalidDataException>(() =>
+            Create(orphan, 2, Type(), 1, [], 0));
 
-        var duplicatedTypes = new byte[80];
-        Type().CopyTo(duplicatedTypes, 0);
-        Type().CopyTo(duplicatedTypes, 40);
-        Assert.Throws<InvalidDataException>(() => Create(Layout(), typeRows: duplicatedTypes,
-            typeCount: 2));
+        var targetOnlyType = Type();
+        Write(targetOnlyType, 32, 1);
+        var targetOnlyLayout = Layout();
+        Write(targetOnlyLayout, 4, 1);
+        Assert.Throws<InvalidDataException>(() =>
+            Create(targetOnlyLayout, 1, targetOnlyType, 1,
+                TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(1, 1)]), 0));
     }
 
-    private static void Create(byte[] layout, byte[]? typeRows = null, int typeCount = 1,
-        int layoutCount = 1)
+    [Test]
+    public void RejectsOverlappingTypeDefLayoutRanges()
     {
-        var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
-            [("", 0), ("Widget", 0)]), 2);
-        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, typeCount, 0, 0);
-        var types = new TrRmTypeDefTableReader(typeRows ?? Type(), typeCount, names,
-            modules, 0, 0, layoutCount, 0);
-        _ = new TrRmLayoutTableReader(layout, layoutCount, types);
+        var typeRows = new byte[88];
+        Type().CopyTo(typeRows, 0);
+        Type().CopyTo(typeRows, 44);
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Layout(), 1, typeRows, 2, [], 0));
     }
 
-    private static byte[] Module()
+    private static byte[] Names()
+        => TrRmStringTableWriter.EncodeTextRows([("", 0), ("Widget", 0)]);
+
+    private static byte[] Module(TrRmStringTableReader names, int typeDefCount)
+        => TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1),
+        ], names, 0, typeDefCount, 0, 0);
+
+    private static void Create(byte[] layoutBytes, int layoutCount,
+        byte[] typeDefBytes, int typeDefCount, byte[] profileBytes,
+        int layoutFieldCount)
     {
-        var row = new byte[48];
-        Write(row, 0, 2);
-        Write(row, 4, 1);
-        Write(row, 32, 1);
-        Write(row, 36, 1);
-        Write(row, 40, 1);
-        Write(row, 44, 1);
-        return row;
+        var names = new TrRmStringTableReader(Names(), 2);
+        var moduleBytes = Module(names, typeDefCount);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, names,
+            0, typeDefCount, 0, 0);
+        var types = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
+            names, modules, 0, 0, layoutCount, 0);
+        var profiles = new TrRmTargetProfileTableReader(profileBytes,
+            profileBytes.Length / sizeof(ulong));
+        _ = new TrRmLayoutTableReader(layoutBytes, layoutCount,
+            types, profiles, layoutFieldCount);
     }
 
     private static byte[] Type()
     {
-        var row = new byte[40];
+        var row = new byte[44];
         Write(row, 0, 1);
         Write(row, 4, 2);
-        Write(row, 8, 0x14);
+        Write(row, 8, 4);
         Write(row, 28, 1);
+        Write(row, 32, 1);
         return row;
     }
 
     private static byte[] Layout()
     {
-        var row = new byte[24];
+        var row = new byte[28];
         Write(row, 0, 1);
-        Write(row, 4, 1);
-        Write(row, 8, 4);
-        Write(row, 12, 4);
+        row[8] = 0;
         return row;
     }
 

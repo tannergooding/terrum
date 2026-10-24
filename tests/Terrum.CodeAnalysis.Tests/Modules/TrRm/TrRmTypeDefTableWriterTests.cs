@@ -18,12 +18,12 @@ public sealed class TrRmTypeDefTableWriterTests
         var modules = new TrRmModuleTableReader(moduleBytes, 2, strings, 0, 2, 0, 0);
         var rows = new[]
         {
-            new TrRmTypeDefRow(1, 4, 4, 0, 0, 0, 0, 0, 0, 0),
-            new TrRmTypeDefRow(1, 5, 4, 1, 1, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(1, 4, 4, 0, 0, 0, 0, 1, 1, 0, 0),
+            new TrRmTypeDefRow(1, 5, 4, 1, 1, 0, 0, 2, 1, 0, 0),
         };
-        var bytes = TrRmTypeDefTableWriter.Encode(rows, strings, modules, 1, 0, 0, 0);
-        var types = new TrRmTypeDefTableReader(bytes, 2, strings, modules, 1, 0, 0, 0);
-        Assert.That(bytes.Length, Is.EqualTo(80));
+        var bytes = TrRmTypeDefTableWriter.Encode(rows, strings, modules, 1, 0, 2, 0);
+        var types = new TrRmTypeDefTableReader(bytes, 2, strings, modules, 1, 0, 2, 0);
+        Assert.That(bytes.Length, Is.EqualTo(88));
         Assert.That(types.GetNamespace(1), Is.EqualTo(""));
         Assert.That(types.GetName(1), Is.EqualTo("Widget"));
         Assert.That(types.GetName(2), Is.EqualTo("Gadget"));
@@ -35,11 +35,19 @@ public sealed class TrRmTypeDefTableWriterTests
 
         rows[1] = rows[1] with { FieldFirst = 0, FieldCount = 0 };
         Assert.That(types.GetFieldRange(2), Is.EqualTo((1, 2)));
-        var noFields = TrRmTypeDefTableWriter.Encode(rows, strings, modules, 0, 0, 0, 0);
+        var noFields = TrRmTypeDefTableWriter.Encode(rows, strings, modules, 0, 0, 2, 0);
+        var noFieldTypes = new TrRmTypeDefTableReader(
+            noFields, 2, strings, modules, 0, 0, 2, 0);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 0, 0),
+        ], noFieldTypes, targetProfiles, 0);
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 2, moduleBytes),
             new TrRmSection(0x0002, 0, 5, stringBytes),
             new TrRmSection(0x0013, 0, 2, noFields),
+            new TrRmSection(0x0015, 0, 2, layoutBytes),
         ]);
         TrRmStructuralMetadataValidator.Validate(artifact);
     }
@@ -47,8 +55,8 @@ public sealed class TrRmTypeDefTableWriterTests
     [Test]
     public void RejectsInvalidNamesFlagsRangesAndMissingOwners()
     {
-        var first = new TrRmTypeDefRow(1, 4, 4, 0, 0, 0, 0, 0, 0, 0);
-        var second = new TrRmTypeDefRow(1, 5, 4, 1, 1, 0, 0, 0, 0, 0);
+        var first = new TrRmTypeDefRow(1, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0);
+        var second = new TrRmTypeDefRow(1, 5, 4, 1, 1, 0, 0, 0, 0, 0, 0);
         Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
         Assert.Throws<InvalidDataException>(() =>
             Encode([first with { NamespaceStringRow = 0 }, second]));

@@ -225,7 +225,7 @@ public sealed class PropertyDefTableValidationComponentTests
 
     private static byte[] Type()
     {
-        var row = new byte[40];
+        var row = new byte[44];
         WriteWord(row, 0, 1);
         WriteWord(row, 4, 3);
         WriteWord(row, 8, 4);

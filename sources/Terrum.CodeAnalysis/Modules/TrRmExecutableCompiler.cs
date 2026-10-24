@@ -257,15 +257,7 @@ public static partial class TrRmExecutableCompiler
             program.Functions.Length + program.NativeFunctionPointerSignatures.Length);
         var contracts = new List<TrRmContractRow>(
             effectCount + nativeImportCount + nativeCallableCount + nativeVTableCount
-                + blittableStructureIndexes.Length
             + (2 * program.NativeFunctionPointerSignatures.Length));
-        var structureContractFirst = new int[blittableStructureIndexes.Length];
-        for (var index = 0; index < blittableStructureIndexes.Length; index++)
-        {
-            structureContractFirst[index] = contracts.Count + 1;
-            contracts.Add(new TrRmContractRow(0x1300_0000u | (uint)(index + 1), 0x13,
-                NativeBlittableLayoutPayload(FixedLayoutStorage.WindowsX64TargetRequirement)));
-        }
         var exports = new List<TrRmExportRow>(exportCount);
         var typeRowsList = (hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows).ToList();
         var hasNativeRawPointerType = program.Functions.Any(static function =>
@@ -304,9 +296,12 @@ public static partial class TrRmExecutableCompiler
         var blittableParameterTypeRows = new Dictionary<PrimitiveType, int>();
         var typeDefTypeSpecRows = new Dictionary<int, int>();
         var structureFieldFirst = new int[blittableStructureIndexes.Length];
+        var structureLayoutFirst = new int[blittableStructureIndexes.Length];
+        var structureLayoutCount = new int[blittableStructureIndexes.Length];
         var fieldRows = new List<TrRmFieldDefRow>();
-        var layoutRows = new List<TrRmLayoutRow>(blittableStructureIndexes.Length);
-        var fixedLayoutAlignments = blittableStructureIndexes.IsEmpty
+        var layoutRows = new List<TrRmLayoutRow>(blittableStructureIndexes.Length * 2);
+        var layoutFieldRows = new List<TrRmLayoutFieldRow>();
+        _ = blittableStructureIndexes.IsEmpty
             ? [] : FixedLayoutStorage.Validate(program.Structures);
         for (var index = 0; index < blittableStructureIndexes.Length; index++)
         {
@@ -324,12 +319,26 @@ public static partial class TrRmExecutableCompiler
                     : fieldDefinition.IsInternal ? 1u : 2u;
                 var fieldFlags = visibility | (fieldDefinition.IsMutable ? 4u : 0u);
                 fieldRows.Add(new TrRmFieldDefRow(index + 1, structureFieldNameRows[index][field],
-                    fieldTypeRow, fieldFlags, (uint)fieldDefinition.Offset));
+                    fieldTypeRow, fieldFlags));
             }
 
-            layoutRows.Add(new TrRmLayoutRow(index + 1,
-                FixedLayoutStorage.WindowsX64TargetRequirement, (uint)structure.Size,
-                (uint)fixedLayoutAlignments[structureIndex], 0, 0));
+            structureLayoutFirst[index] = layoutRows.Count + 1;
+            structureLayoutCount[index] = 2;
+            var layoutKind = structure.IsSequential ? (byte)1 : (byte)3;
+            var pack = structure.IsSequential ? 16u : 0u;
+            for (var variant = 0; variant < 2; variant++)
+            {
+                var layoutRow = layoutRows.Count + 1;
+                var fieldFirst = structure.Fields.IsEmpty ? 0 : layoutFieldRows.Count + 1;
+                layoutRows.Add(new TrRmLayoutRow(index + 1,
+                    variant == 0 ? 0u : 1u, layoutKind, variant == 0 ? (byte)0 : (byte)1,
+                    0, pack, fieldFirst, structure.Fields.Length));
+                for (var field = 0; field < structure.Fields.Length; field++)
+                {
+                    layoutFieldRows.Add(new TrRmLayoutFieldRow(layoutRow, field,
+                        structureFieldFirst[index] + field));
+                }
+            }
         }
         foreach (var function in program.Functions)
         {
@@ -682,23 +691,33 @@ public static partial class TrRmExecutableCompiler
         {
             var structure = program.Structures[blittableStructureIndexes[type]];
             var visibility = structure.IsPrivate ? 0u : structure.IsInternal ? 1u : 2u;
-            var layoutKind = structure.IsSequential ? 1u : 3u;
             typeDefRows[type] = new TrRmTypeDefRow(structureNamespaceRows[type],
-                structureNameRows[type], visibility | 4u | (layoutKind << 4),
-                structureFieldFirst[type], structure.Fields.Length, 0, 0, type + 1,
-                structureContractFirst[type], 1);
+                structureNameRows[type], visibility | 4u,
+                structureFieldFirst[type], structure.Fields.Length, 0, 0,
+                structureLayoutFirst[type], structureLayoutCount[type], 0, 0);
         }
         var typeDefBytes = typeDefRows.Length == 0 ? []
             : TrRmTypeDefTableWriter.Encode(typeDefRows, strings, modules, fieldRows.Count,
                 0, layoutRows.Count, contracts.Count);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, typeDefRows.Length,
             strings, modules, fieldRows.Count, 0, layoutRows.Count, contracts.Count);
+        var targetProfileBytes = layoutRows.Count == 0 ? []
+            : TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(1, 1)]);
+        var targetProfiles = new TrRmTargetProfileTableReader(targetProfileBytes,
+            layoutRows.Count == 0 ? 0 : 1);
         var layoutBytes = layoutRows.Count == 0 ? []
-            : TrRmLayoutTableWriter.Encode(layoutRows, typeDefs);
-        var layouts = layoutRows.Count == 0 ? default
-            : new TrRmLayoutTableReader(layoutBytes, layoutRows.Count, typeDefs);
+            : TrRmLayoutTableWriter.Encode(layoutRows, typeDefs,
+                targetProfiles, layoutFieldRows.Count);
+        var layouts = new TrRmLayoutTableReader(layoutBytes, layoutRows.Count,
+            typeDefs, targetProfiles, layoutFieldRows.Count);
         var fieldBytes = fieldRows.Count == 0 ? []
-            : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs, types, layouts);
+            : TrRmFieldDefTableWriter.Encode(fieldRows, strings, typeDefs, types);
+        var fields = fieldRows.Count == 0 ? default
+            : new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count, strings, typeDefs, types);
+        var layoutFieldBytes = layoutFieldRows.Count == 0 ? []
+            : TrRmLayoutFieldTableWriter.Encode(layoutFieldRows, layouts, typeDefs, fields);
+        var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
+            layoutFieldRows.Count, layouts, typeDefs, fields);
         var methodBytes = TrRmMethodDefTableWriter.Encode(methods, strings, modules, typeDefs,
             sigs, contracts.Count, bodies.Count);
         var defs = new TrRmMethodDefTableReader(methodBytes, methods.Count, strings, modules,
@@ -706,9 +725,10 @@ public static partial class TrRmExecutableCompiler
         var paramReader = parameters.Count == 0 ? default
             : new TrRmParamTableReader(paramBytes, parameters.Count, sigs, types);
         var contractBytes = contracts.Count == 0 ? []
-            : TrRmContractTableWriter.Encode(contracts, typeDefs, defs, sigs, paramReader, types);
+            : TrRmContractTableWriter.Encode(contracts, typeDefs, defs, sigs,
+                paramReader, types, developmentProfile: true);
         var contractReader = new TrRmContractTableReader(contractBytes, contracts.Count,
-            typeDefs, defs, sigs, paramReader, types);
+            typeDefs, defs, sigs, paramReader, types, developmentProfile: true);
         var moduleImportRows = new List<TrRmImportRow>(moduleImportIdentities.Length);
         for (var index = 0; index < program.Functions.Length; index++)
         {
@@ -744,7 +764,7 @@ public static partial class TrRmExecutableCompiler
         }
         var nativeImportBytes = nativeImportRows.Count == 0 ? []
             : TrRmNativeImportTableWriter.Encode(nativeImportRows, strings, defs, sigs,
-                paramReader, types, contractReader);
+                paramReader, types, contractReader, layouts);
         var nativeFunctionPointerSignatureBytes = nativeFunctionPointerSignatureRows.Count == 0 ? []
             : TrRmNativeFunctionPointerSignatureTableWriter.Encode(
                 nativeFunctionPointerSignatureRows, defs, sigs, paramReader, types,
@@ -788,6 +808,8 @@ public static partial class TrRmExecutableCompiler
             + (bodies.Count != 0 ? 1 : 0) + (nativeImportRows.Count != 0 ? 1 : 0)
             + (nativeCallableRows.Count != 0 ? 1 : 0) + (nativeVTableRows.Count != 0 ? 1 : 0);
         sectionCount += nativeFunctionPointerSignatureRows.Count != 0 ? 1 : 0;
+        sectionCount += layoutFieldRows.Count != 0 ? 1 : 0;
+        sectionCount += targetProfiles.Count != 0 ? 1 : 0;
         var sections = new List<TrRmSection>(sectionCount)
         {
             new(1, 0, 1, moduleBytes),
@@ -836,6 +858,10 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new(0x20, 0, (uint)bodies.Count, TrRmVariableTableWriter.EncodeBodies(bodies)));
         }
+        if (layoutFieldRows.Count != 0)
+        {
+            sections.Add(new(0x23, 0, (uint)layoutFieldRows.Count, layoutFieldBytes));
+        }
         if (nativeImportRows.Count != 0)
         {
             sections.Add(new(0x30, 0, (uint)nativeImportRows.Count, nativeImportBytes));
@@ -852,6 +878,10 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new(0x33, 0, (uint)nativeFunctionPointerSignatureRows.Count,
                 nativeFunctionPointerSignatureBytes));
+        }
+        if (targetProfiles.Count != 0)
+        {
+            sections.Add(new(0x48, 0, (uint)targetProfiles.Count, targetProfileBytes));
         }
         var artifact = TrRmArtifactWriter.Encode(sections);
         _ = Load(artifact);
@@ -879,6 +909,8 @@ public static partial class TrRmExecutableCompiler
         var types = validatedTables.TypeSpecs;
         var fields = validatedTables.Fields;
         var layouts = validatedTables.Layouts;
+        var layoutFields = validatedTables.LayoutFields;
+        var targetProfiles = validatedTables.TargetProfiles;
         var sigs = validatedTables.Signatures;
         var defs = validatedTables.Methods;
         var parameters = validatedTables.Parameters;
@@ -896,7 +928,7 @@ public static partial class TrRmExecutableCompiler
             if (kind is not (1 or 2 or 4 or 0x10 or 0x11 or 0x13 or 0x14 or 0x15
                 or 0x16 or 0x17 or 0x18
                 or 0x1B or 0x1C or 0x1D or 0x20
-                or 0x30 or 0x31 or 0x32 or 0x33))
+                or 0x23 or 0x30 or 0x31 or 0x32 or 0x33 or 0x48))
             {
                 throw Invalid($"Section 0x{kind:X4} is not executable.");
             }
@@ -951,8 +983,8 @@ public static partial class TrRmExecutableCompiler
 
         var optionalStructures = hasOptionalScalarTypes ? TrRmOptionalScalar.Structures : [];
         var nativePointerTypeDefinitions = new List<NativePointerTypeDefinition>();
-        var structures = LoadBlittableStructures(typeDefs, fields, layouts, contractTable,
-            types, optionalStructures, nativePointerTypeDefinitions,
+        var structures = LoadBlittableStructures(typeDefs, fields, layouts, layoutFields,
+            targetProfiles, types, optionalStructures, nativePointerTypeDefinitions,
             out var structureTypeByTypeDef);
 
         var declaredExports = new HashSet<int>(exportCount);
@@ -1167,7 +1199,7 @@ public static partial class TrRmExecutableCompiler
                     {
                         var typeSpecRow = parameters.GetTypeSpec(first + parameter.ParameterOrdinal);
                         var pointeeType = NativeParameterPointee(types, typeSpecRow,
-                            contractTable, structureTypeByTypeDef);
+                            layouts, structureTypeByTypeDef);
                         if (parameter.Access is < 1 or > 3
                             || parameter.Retention != 1 || parameter.ExtentKind is not (0 or 1)
                             || parameter.PointerDepth != 1 || parameter.RequiredAlignment != 0
@@ -1204,7 +1236,7 @@ public static partial class TrRmExecutableCompiler
                     {
                         var typeSpecRow = parameters.GetTypeSpec(first + parameter.ParameterOrdinal);
                         var pointeeType = NativeParameterPointee(types, typeSpecRow,
-                            contractTable, structureTypeByTypeDef);
+                            layouts, structureTypeByTypeDef);
                         directParameters.Add(new DirectNativeParameter(parameter.ParameterOrdinal,
                             pointeeType, (NativeParameterAccess)(parameter.Access - 1),
                             NativeParameterRetention.NoEscape, checked((int)parameter.Extent)));
@@ -2188,14 +2220,6 @@ public static partial class TrRmExecutableCompiler
         return row;
     }
 
-    private static ReadOnlyMemory<byte> NativeBlittableLayoutPayload(int targetRequirement)
-    {
-        var payload = new byte[12];
-        BinaryPrimitives.WriteUInt32LittleEndian(payload, (uint)targetRequirement);
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8), 1);
-        return payload;
-    }
-
     private static ReadOnlyMemory<byte> NativeAbiPayload(byte role = 1)
     {
         var payload = new byte[8];
@@ -2247,17 +2271,31 @@ public static partial class TrRmExecutableCompiler
 
     private static ImmutableArray<BoundStruct> LoadBlittableStructures(
         TrRmTypeDefTableReader typeDefs, TrRmFieldDefTableReader fields,
-        TrRmLayoutTableReader layouts, TrRmContractTableReader contracts,
-        TrRmTypeSpecTableReader typeSpecs, ImmutableArray<BoundStruct> optionalStructures,
+        TrRmLayoutTableReader layouts, TrRmLayoutFieldTableReader layoutFields,
+        TrRmTargetProfileTableReader targetProfiles, TrRmTypeSpecTableReader typeSpecs,
+        ImmutableArray<BoundStruct> optionalStructures,
         List<NativePointerTypeDefinition> nativePointerTypes,
         out int[] structureTypeByTypeDef)
     {
+        if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
+        {
+            var hasBlittableVariant = false;
+            for (var type = 1; type <= typeDefs.Count; type++)
+            {
+                hasBlittableVariant |= layouts.HasBlittableVariant(type);
+            }
+            if (hasBlittableVariant)
+            {
+                throw Invalid("The artifact does not contain the assigned Windows x64 TargetProfile.");
+            }
+        }
+
         var structureRows = new List<int>();
         structureTypeByTypeDef = new int[typeDefs.Count + 1];
         Array.Fill(structureTypeByTypeDef, -1);
         for (var row = 1; row <= typeDefs.Count; row++)
         {
-            if (contracts.GetNativeBlittableTargetRequirement(row) == 0)
+            if (!layouts.HasBlittableLayout(row, 1, 1))
             {
                 continue;
             }
@@ -2270,22 +2308,24 @@ public static partial class TrRmExecutableCompiler
         foreach (var row in structureRows)
         {
             var flags = typeDefs.GetFlags(row);
-            var layoutRow = typeDefs.GetLayoutRow(row);
-            var size = layouts.GetSize(layoutRow);
-            if (size is 0 or > ValueLayout.MaximumStructureSize)
+            var layoutRow = layouts.GetLayoutForProfile(row, checked((uint)windowsX64ProfileRow));
+            var layoutKind = layouts.GetLayoutKind(layoutRow);
+            var pack = layoutKind == 1 ? 16u : 0u;
+            if (layouts.GetTargetProfileRef(layoutRow) != windowsX64ProfileRow
+                || layoutKind is not (1 or 3) || layouts.GetFlags(layoutRow) != 1
+                || layouts.GetAlignment(layoutRow) != 0 || layouts.GetPack(layoutRow) != pack)
             {
-                throw Invalid("A native Blittable TypeDef has an unsupported size.");
+                throw Invalid("A native Blittable Layout uses an unsupported Windows x64 variant.");
             }
 
             var typeNamespace = typeDefs.GetNamespace(row);
             var name = typeNamespace.Length == 0
                 ? typeDefs.GetName(row) : typeNamespace + "." + typeDefs.GetName(row);
-            var layoutKind = (flags >> 4) & 0x03;
-            structures.Add(new BoundStruct(name, [], (int)size)
+            structures.Add(new BoundStruct(name, [], 0)
             {
                 IsSequential = layoutKind == 1,
                 IsTransparent = layoutKind == 3,
-                BlittableTargetRequirement = (int)contracts.GetNativeBlittableTargetRequirement(row),
+                BlittableTargetRequirement = FixedLayoutStorage.WindowsX64TargetRequirement,
                 IsPrivate = (flags & 3) == 0,
                 IsInternal = (flags & 3) == 1,
             });
@@ -2294,30 +2334,22 @@ public static partial class TrRmExecutableCompiler
         foreach (var row in structureRows)
         {
             var structureIndex = structureTypeByTypeDef[row];
-            var (firstField, endField) = typeDefs.GetFieldRange(row);
-            if (firstField == 0 || endField <= firstField)
+            var layoutRow = layouts.GetLayoutForProfile(row, checked((uint)windowsX64ProfileRow));
+            var (firstField, fieldCount) = layouts.GetLayoutFieldRange(layoutRow);
+            if (fieldCount == 0)
             {
                 throw Invalid("A native Blittable TypeDef must have fields.");
             }
 
-            var structureFields = ImmutableArray.CreateBuilder<BoundStructField>(
-                endField - firstField);
-            for (var fieldRow = firstField; fieldRow < endField; fieldRow++)
+            var structureFields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
+            for (var ordinal = 0; ordinal < fieldCount; ordinal++)
             {
-                var fieldType = FromNativeValueRow(typeSpecs, fields.GetTypeSpecRow(fieldRow),
-                    nativePointerTypes, structureTypeByTypeDef);
-
+                var fieldRow = layoutFields.GetFieldDef(firstField + ordinal);
+                var fieldType = FromNativeValueRow(typeSpecs,
+                    fields.GetTypeSpecRow(fieldRow), nativePointerTypes, structureTypeByTypeDef);
                 var fieldFlags = fields.GetFlags(fieldRow);
-                var fieldOffset = fields.GetByteOffset(fieldRow);
-                var fieldSize = ValueLayout.Size(fieldType, structures);
-                if (fieldOffset == uint.MaxValue || fieldOffset > int.MaxValue
-                    || fieldSize <= 0)
-                {
-                    throw Invalid("A native Blittable field has an unsupported fixed layout.");
-                }
-
-                structureFields.Add(new BoundStructField(fields.GetName(fieldRow), fieldType,
-                    (int)fieldOffset, fieldSize)
+                structureFields.Add(new BoundStructField(fields.GetName(fieldRow),
+                    fieldType, 0, 0)
                 {
                     IsPrivate = (fieldFlags & 3) == 0,
                     IsInternal = (fieldFlags & 3) == 1,
@@ -2331,30 +2363,17 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
-        var result = structures.ToImmutableArray();
-        ImmutableArray<int> alignments;
         try
         {
-            alignments = FixedLayoutStorage.Validate(result);
+            var result = FixedLayoutStorage.Materialize([.. structures]);
+            _ = FixedLayoutStorage.Validate(result);
+            return result;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
             throw new InvalidDataException(
-                $"TRRM native Blittable-layout audit failed: {exception.Message}", exception);
+                $"TRRM native Blittable-layout validation failed: {exception.Message}", exception);
         }
-
-        foreach (var row in structureRows)
-        {
-            var structureIndex = structureTypeByTypeDef[row];
-            var layoutRow = typeDefs.GetLayoutRow(row);
-            if (layouts.GetSize(layoutRow) != result[structureIndex].Size
-                || layouts.GetAlignment(layoutRow) != (uint)alignments[structureIndex])
-            {
-                throw Invalid("A native Blittable Layout row differs from its recomputed structure.");
-            }
-        }
-
-        return result;
     }
 
     private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types,
@@ -2437,7 +2456,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static PrimitiveType NativeParameterPointee(TrRmTypeSpecTableReader typeSpecs,
-        int typeSpecRow, TrRmContractTableReader contracts, int[] structureTypeByTypeDef)
+        int typeSpecRow, TrRmLayoutTableReader layouts, int[] structureTypeByTypeDef)
     {
         if (TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
             typeSpecs, typeSpecRow, out var pointeeType))
@@ -2446,7 +2465,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
-            typeSpecs, typeSpecRow, contracts, out var typeDefRow)
+            typeSpecs, typeSpecRow, layouts, out var typeDefRow)
             && typeDefRow < structureTypeByTypeDef.Length
             && structureTypeByTypeDef[typeDefRow] >= 0)
         {

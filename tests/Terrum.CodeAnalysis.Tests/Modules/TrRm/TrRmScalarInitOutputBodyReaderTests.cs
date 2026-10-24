@@ -697,9 +697,9 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
             typeDefinitions, signatures, contractKind is null ? 0 : 1, methodCount);
         var contractTable = new TrRmContractTableReader(contractSection,
             contractKind is null ? 0 : 1, typeDefinitions, methods, signatures,
-            parameters, types);
+            parameters, types, developmentProfile: true);
         var nativeImports = new TrRmNativeImportTableReader([], 0, names, methods,
-            signatures, parameters, types, contractTable);
+            signatures, parameters, types, contractTable, default);
         var nativeVTables = new TrRmNativeVTableTableReader([], 0, methods, signatures,
             parameters, types, contractTable);
         byte[] target = targetModes is [2, 2]

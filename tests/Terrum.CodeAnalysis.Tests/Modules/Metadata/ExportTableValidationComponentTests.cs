@@ -103,7 +103,8 @@ public sealed partial class ImportTableValidationComponentTests
             var testCase = cases[caseIndex];
             if (testCase.HasHostedOracle)
             {
-                Assert.That(ValidateHosted(testCase), Is.EqualTo(testCase.ExpectedValid));
+                Assert.That(ValidateHosted(testCase), Is.EqualTo(testCase.ExpectedValid),
+                    $"Hosted differential case {caseIndex}");
             }
 
             int outputCapacity = testCase.ExportCount + 1;
@@ -194,7 +195,7 @@ public sealed partial class ImportTableValidationComponentTests
                 testCase.ExportCount, strings, types, methods, properties, imports);
             return true;
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException) when (!testCase.ExpectedValid)
         {
             return false;
         }

@@ -17,7 +17,11 @@ public sealed class TrRmPropertyDefTableWriterTests
         var moduleBytes = Modules(strings);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 1, 1, 0);
         var typeBytes = Types(strings, modules);
-        var types = new TrRmTypeDefTableReader(typeBytes, 1, strings, modules, 0, 0, 0, 0);
+        var types = new TrRmTypeDefTableReader(typeBytes, 1, strings, modules, 0, 0, 1, 0);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+        ], types, targetProfiles, 0);
         var specBytes = Specs();
         var specs = new TrRmTypeSpecTableReader(specBytes, 2, 1, 0, 0, 0);
         var sigBytes = Signatures(specs);
@@ -42,6 +46,7 @@ public sealed class TrRmPropertyDefTableWriterTests
             new TrRmSection(0x0002, 0, 5, stringBytes),
             new TrRmSection(0x0011, 0, 2, specBytes),
             new TrRmSection(0x0013, 0, 1, typeBytes),
+            new TrRmSection(0x0015, 0, 1, layoutBytes),
             new TrRmSection(0x0016, 0, 1, methodBytes),
             new TrRmSection(0x0017, 0, 1, sigBytes),
             new TrRmSection(0x001E, 0, 1, propertyBytes),
@@ -68,7 +73,7 @@ public sealed class TrRmPropertyDefTableWriterTests
         var moduleBytes = Modules(strings);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 1, 1, 0);
         var typeBytes = Types(strings, modules);
-        var types = new TrRmTypeDefTableReader(typeBytes, 1, strings, modules, 0, 0, 0, 0);
+        var types = new TrRmTypeDefTableReader(typeBytes, 1, strings, modules, 0, 0, 1, 0);
         var specBytes = Specs();
         var specs = new TrRmTypeSpecTableReader(specBytes, 2, 1, 0, 0, 0);
         var sigBytes = Signatures(specs);
@@ -91,8 +96,8 @@ public sealed class TrRmPropertyDefTableWriterTests
 
     private static byte[] Types(TrRmStringTableReader strings, TrRmModuleTableReader modules)
         => TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(1, 3, 4, 0, 0, 0, 0, 0, 0, 0),
-        ], strings, modules, 0, 0, 0, 0);
+            new TrRmTypeDefRow(1, 3, 4, 0, 0, 0, 0, 1, 1, 0, 0),
+        ], strings, modules, 0, 0, 1, 0);
 
     private static byte[] Specs()
         => TrRmTypeSpecTableWriter.Encode([

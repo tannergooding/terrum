@@ -93,7 +93,15 @@ standard Feature reader/writer now use exact assigned pairs, accept unordered
 ordinary lists with identical duplicates, canonicalize writer output, and
 derive prerequisite closure per Module. The executable compiler still routes
 through separate development Feature assignments; Body codecs and
-private/native/output experiments retain other assignments. See
+private/native/output experiments retain other assignments. Registry-owned
+TypeDef/FieldDef/Layout/LayoutField/TargetProfile/GenericParam/Constraint
+shapes are now used by the C# readers/writers, artifact index and structural
+validator. The bounded Blittable path emits complete default and Windows x64
+Layout variants with ordered instance-field lists, then reconstructs supported
+Sequential/Transparent layouts without serializing physical size or offsets.
+GenericParam domains and assigned Constraint kinds are structurally checked;
+the associated-relation payload and all complete-field TypeSpecRef conversions
+remain unfinished. See
 [ModuleCompiler](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
 [Feature admission](../../sources/Terrum.CodeAnalysis/Modules/TrRmFeatureTableReader.cs),
 [Body fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)
@@ -336,8 +344,17 @@ assignments by [metadata](../specs/il-metadata.md) and the
 compilation-local closed internal generic structs and bounded function
 witnesses. `Binder`/`Binder.ManagedClasses` and
 `GenericNominalTypeTests` deliberately reject broader public/class/
-conformance/constraint/generic-method forms. Constraint-row framing alone
-does not execute a generic contract.
+conformance/constraint/generic-method forms. The assigned 32-byte
+GenericParam and 12-byte Constraint rows now have C# readers/writers and
+Terrum-authored structural validators for ownership, formal domains, ranges,
+flags and currently assigned payload tags. This does not resolve complete
+TypeSpecRef/ConstantSource references, the associated-relation payload, or
+generic substitution, proof, witness and execution semantics; row framing
+alone does not execute a generic contract. The focused
+[associated-relation payload proposal](../proposals/constraint-associated-relation-payload.md)
+is unapproved, provisionally guides implementation only under explicit user
+authorization, and does not resolve the separate AssociatedTypeDef identity
+and Import/Export codec gap.
 
 **Routes/gate:** preserve complete declaring/implementing/selected instances,
 type and constant arguments, associated/generated identities, method formals,

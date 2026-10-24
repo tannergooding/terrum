@@ -27,71 +27,46 @@ public sealed class LayoutTableValidationComponentTests
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
                 Host.Expected[6], Host.Expected[7], Host.Expected[8],
-                Host.Expected[9], Host.Expected[10], Host.Expected[11]);
-            if (valid != (Host.Expected[12] != 0)) { return 1; }
+                Host.Expected[9], Host.Expected[10], Host.Expected[11],
+                Host.Expected[12]);
+            if (valid != (Host.Expected[13] != 0)) { return 1; }
             if (!valid) { return 0; }
-            if (Host.Expected[13] != Host.LayoutOwners.Length) { return 1; }
+            if (Host.LayoutOwners.Length != Host.Expected[14]
+                || Host.LayoutFieldOwners.Length != Host.Expected[15]) { return 1; }
             for (mut int32 row = 0; row < Host.LayoutOwners.Length; row = row + 1)
             {
-                if (Host.LayoutOwners[row] != Host.Expected[14 + row]) { return 1; }
+                if (Host.LayoutOwners[row] != Host.Expected[16 + row]) { return 1; }
+            }
+            int32 fieldExpectedStart = 16 + Host.Expected[14];
+            for (mut int32 row = 0; row < Host.LayoutFieldOwners.Length; row = row + 1)
+            {
+                if (Host.LayoutFieldOwners[row]
+                    != Host.Expected[fieldExpectedStart + row]) { return 1; }
             }
             return 0;
         }
         """;
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task LayoutValidationMatchesHostedReader(BoundRuntimePolicy policy)
     {
-        var strings = TrRmStringTableWriter.EncodeTextRows([
-            ("", 0), ("ModuleA", 0), ("Widget", 0), ("ModuleB", 0), ("Gadget", 0),
-        ]);
-        var modules = EncodeModules(1, 1);
-        var typeDefs = EncodeTypeDefs((1, 3, 0x14, 1));
-        var layouts = EncodeLayouts((1, 1, 0, 0, uint.MaxValue, 0));
-        var cases = new List<TableCase> {
-            Valid(strings, modules, typeDefs, layouts,
-                expectedLayoutOwners: [0, 1]),
-            Valid(strings, EncodeModules(2, 2),
-                EncodeTypeDefs((1, 3, 0x14, 1), (1, 5, 0x14, 2)),
-                EncodeLayouts((1, 1, 4, 4, 0, 0), (2, 0, 8, 8, 1, 0)),
-                recordCount: 2, moduleCount: 2, typeDefCount: 2, layoutCount: 2,
-                expectedLayoutOwners: [0, 1, 2]),
-            Rejected(strings, EncodeModules(1, 0), [], [], recordCount: 0,
-                moduleCount: 1, typeDefCount: 0, layoutCount: 0),
-            Rejected(strings, modules, typeDefs, layouts[..^1]),
-            Rejected(strings, modules, typeDefs, EncodeLayouts((2, 1, 4, 4, 0, 0))),
-            Rejected(strings, modules, EncodeTypeDefs((1, 3, 0x14, 0)),
-                EncodeLayouts((1, 1, 4, 4, 0, 0))),
-            Rejected(strings, modules, EncodeTypeDefs((1, 3, 0x14, 1)),
-                EncodeLayouts((1, 2, 4, 4, 0, 0))),
-            Rejected(strings, modules, EncodeTypeDefs((1, 3, 0x14, 1)),
-                EncodeLayouts((1, 1, 4, 4, 0, 1))),
-            Rejected(strings, modules, EncodeTypeDefs((1, 3, 0x14, 1)),
-                EncodeLayouts((1, 1, 4, 4, 0, 0), (1, 1, 4, 4, 0, 0)),
-                layoutCount: 2),
-            Rejected(strings, EncodeModules(2, 2),
-                EncodeTypeDefs((1, 3, 0x14, 1), (1, 5, 0x14, 1)),
-                EncodeLayouts((1, 1, 4, 4, 0, 0)),
-                moduleCount: 2, typeDefCount: 2),
+        var cases = new List<TableCase>
+        {
+            DefaultLayout(),
+            BlittableProfileVariant(),
+            EmptyTables(),
+            InvalidLayout(BlittableProfileVariant(), 0, 2),
+            InvalidLayout(BlittableProfileVariant(), 9, 2),
+            InvalidLayout(BlittableProfileVariant(), 10, 1),
+            InvalidLayout(BlittableProfileVariant(), 12, 3),
+            InvalidLayout(BlittableProfileVariant(), 16, 3),
+            InvalidLayout(MissingDefaultVariant(), -1, 0),
+            InvalidLayout(IncompleteFieldList(), -1, 0),
+            InvalidLayout(InvalidFieldOrdinal(), -1, 0),
+            InvalidLayout(InvalidFieldOwner(), -1, 0),
+            InvalidLayout(DuplicateProfileVariant(), -1, 0),
         };
-
-        var invalidByteWords = layouts.Select(static value => (int)value).ToArray();
-        invalidByteWords[0] = 256;
-        cases.Add(new TableCase(
-            [.. strings.Select(static value => (int)value)],
-            [.. modules.Select(static value => (int)value)],
-            [.. typeDefs.Select(static value => (int)value)],
-            invalidByteWords, 1, 1, 5, 0, 1, 0, 0, -1, 0, 0, 1, 0,
-            false, false, 2, 1, 2, []));
-        cases.Add(Valid(strings, modules, typeDefs, layouts) with {
-            LayoutOwnerCount = 1,
-            ExpectedValid = false,
-            HasHostedOracle = false,
-        });
-        cases.Add(Valid(strings, modules, typeDefs, layouts) with {
-            TypeDefs = [.. typeDefs[..^1].Select(static value => (int)value)],
-            ExpectedValid = false,
-        });
 
         var root = RepositoryRoot();
         var components = new List<SyntaxTree>();
@@ -115,94 +90,186 @@ public sealed class LayoutTableValidationComponentTests
         for (var caseIndex = 0; caseIndex < cases.Count; caseIndex++)
         {
             var testCase = cases[caseIndex];
-            if (testCase.HasHostedOracle)
-            {
-                Assert.That(testCase.ExpectedValid == ValidateHosted(testCase), Is.True, $"Hosted differential case {caseIndex} expected {testCase.ExpectedValid}.");
-            }
+            Assert.That(ValidateHosted(testCase), Is.EqualTo(testCase.ExpectedValid),
+                $"Hosted differential case {caseIndex}");
 
+            var expected = Expected(testCase);
             var compilation = Compilation.Create(components,
             [
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Strings], false),
                 new HostBuffer("Modules", PrimitiveType.Int32, [.. testCase.Modules], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
+                new HostBuffer("FieldDefs", PrimitiveType.Int32, [.. testCase.FieldDefs], false),
                 new HostBuffer("Layouts", PrimitiveType.Int32, [.. testCase.Layouts], false),
-                new HostBuffer("IdentitySlots", PrimitiveType.Int32,
-                    [.. Enumerable.Repeat(123, testCase.ModuleCount + 1)], true),
+                new HostBuffer("LayoutFields", PrimitiveType.Int32, [.. testCase.LayoutFields], false),
+                new HostBuffer("TargetProfiles", PrimitiveType.Int32, [.. testCase.TargetProfiles], false),
+                new HostBuffer("IdentitySlots", PrimitiveType.Int32, [123, 123], true),
                 new HostBuffer("FieldOwners", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.FieldCount + 1)], true),
                 new HostBuffer("LayoutOwners", PrimitiveType.Int32,
-                    [.. Enumerable.Repeat(123, testCase.LayoutOwnerCount)], true),
-                new HostBuffer("Expected", PrimitiveType.Int32,
-                [
-                    testCase.RecordCount,
-                    testCase.ModuleCount,
-                    testCase.StringCount,
-                    testCase.ModuleRefCount,
-                    testCase.TypeDefCount,
-                    testCase.MethodDefCount,
-                    testCase.SourceFileCount,
-                    testCase.FeatureCount,
-                    testCase.FieldCount,
-                    testCase.GenericParamCount,
-                    testCase.LayoutCount,
-                    testCase.ContractCount,
-                    testCase.ExpectedValid ? 1 : 0,
-                    testCase.ExpectedLayoutOwners.Length,
-                    .. testCase.ExpectedLayoutOwners,
-                ], false),
+                    [.. Enumerable.Repeat(123, testCase.LayoutCount + 1)], true),
+                new HostBuffer("LayoutFieldOwners", PrimitiveType.Int32,
+                    [.. Enumerable.Repeat(123, testCase.LayoutFieldCount + 1)], true),
+                new HostBuffer("Expected", PrimitiveType.Int32, [.. expected], false),
             ], policy);
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
-            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0, Is.True, $"JIT differential case {caseIndex} expected {testCase.ExpectedValid}.");
-            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy).ConfigureAwait(true) == 0, Is.True, $"AOT differential case {caseIndex} expected {testCase.ExpectedValid}.");
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.SourceDiagnostics.Select(
+                    static item => $"{item.SyntaxTree.Source.Path}: {item.Diagnostic}")));
+            var program = ((global::System.Func<BoundProgram>)(() => {
+                var __nunitActual0 = compilation.Program;
+                Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+                return (BoundProgram)__nunitActual0!;
+            }))();
+            Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy) == 0,
+                Is.True, $"JIT differential case {caseIndex}.");
+            Assert.That(await ExecuteAotAsync(program, (NativeRuntimePolicy)policy)
+                    .ConfigureAwait(true) == 0,
+                Is.True, $"AOT differential case {caseIndex}.");
         }
     }
 
-    private static TableCase Valid(byte[] strings, byte[] modules, byte[] typeDefs, byte[] layouts,
-        int recordCount = 1, int moduleCount = 1, int stringCount = 5,
-        int moduleRefCount = 0, int typeDefCount = 1, int methodDefCount = 0,
-        int sourceFileCount = 0, int featureCount = -1, int fieldCount = 0,
-        int genericParamCount = 0, int layoutCount = 1, int contractCount = 0,
-        int[]? expectedLayoutOwners = null)
-        => new([.. strings.Select(static value => (int)value)],
-            [.. modules.Select(static value => (int)value)],
-            [.. typeDefs.Select(static value => (int)value)],
-            [.. layouts.Select(static value => (int)value)],
-            recordCount, moduleCount, stringCount, moduleRefCount, typeDefCount,
-            methodDefCount, sourceFileCount, featureCount, fieldCount,
-            genericParamCount, layoutCount, contractCount,
-            true, true, moduleCount + 1, fieldCount + 1, layoutCount + 1,
-            expectedLayoutOwners ?? [.. Enumerable.Repeat(0, layoutCount + 1)]);
+    private static TableCase DefaultLayout()
+        => CreateCase(typeDefCount: 1, fieldCount: 0, Layouts(
+            new LayoutRow(1, 0, 0, 0, 0, 0, 0, 0)), [], [], true,
+            [0, 1], [0]);
 
-    private static TableCase Rejected(byte[] strings, byte[] modules, byte[] typeDefs, byte[] layouts,
-        int stringCount = 5, bool hasHostedOracle = true, int recordCount = 1,
-        int moduleCount = 1, int typeDefCount = 1, int layoutCount = 1)
-        => Valid(strings, modules, typeDefs, layouts, recordCount: recordCount,
-            moduleCount: moduleCount, stringCount: stringCount,
-            typeDefCount: typeDefCount, layoutCount: layoutCount) with {
-            ExpectedValid = false,
-            HasHostedOracle = hasHostedOracle,
-        };
+    private static TableCase BlittableProfileVariant()
+        => CreateCase(typeDefCount: 1, fieldCount: 1, Layouts(
+            new LayoutRow(1, 0, 1, 0, 0, 16, 1, 1),
+            new LayoutRow(1, 1, 1, 1, 0, 16, 2, 1)),
+            LayoutFields((1, 0, 1), (2, 0, 1)), TargetProfile(),
+            true, [0, 1, 1], [0, 1, 2]);
+
+    private static TableCase EmptyTables()
+        => CreateCase(typeDefCount: 0, fieldCount: 0, [], [], [], true, [0], [0]);
+
+    private static TableCase MissingDefaultVariant()
+        => CreateCase(typeDefCount: 1, fieldCount: 0, Layouts(
+            new LayoutRow(1, 1, 1, 1, 0, 16, 0, 0)), [], TargetProfile(),
+            false, [0], [0]);
+
+    private static TableCase IncompleteFieldList()
+        => CreateCase(typeDefCount: 1, fieldCount: 1, Layouts(
+            new LayoutRow(1, 0, 0, 0, 0, 0, 0, 0)), [], [], false, [0], [0]);
+
+    private static TableCase InvalidFieldOrdinal()
+        => CreateCase(typeDefCount: 1, fieldCount: 1, Layouts(
+            new LayoutRow(1, 0, 1, 0, 0, 16, 1, 1)),
+            LayoutFields((1, 1, 1)), [], false, [0], [0]);
+
+    private static TableCase InvalidFieldOwner()
+        => CreateCase(typeDefCount: 1, fieldCount: 1, Layouts(
+            new LayoutRow(1, 0, 1, 0, 0, 16, 1, 1)),
+            LayoutFields((1, 0, 2)), [], false, [0], [0]);
+
+    private static TableCase DuplicateProfileVariant()
+        => CreateCase(typeDefCount: 1, fieldCount: 0, Layouts(
+            new LayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+            new LayoutRow(1, 1, 1, 0, 0, 16, 0, 0),
+            new LayoutRow(1, 1, 1, 0, 0, 16, 0, 0)),
+            [], TargetProfile(), false, [0], [0]);
+
+    private static TableCase InvalidLayout(TableCase source, int offset, byte value)
+    {
+        var layouts = (int[])source.Layouts.Clone();
+        var index = offset < 0 ? layouts.Length - 1 : 28 + offset;
+        layouts[index] = value;
+        return source with { Layouts = layouts, ExpectedValid = false };
+    }
+
+    private static TableCase CreateCase(int typeDefCount, int fieldCount,
+        byte[] layoutBytes, byte[] layoutFieldBytes, byte[] targetProfileBytes,
+        bool expectedValid, int[] expectedLayoutOwners, int[] expectedLayoutFieldOwners)
+    {
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("Widget", 0), ("Value", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 4);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1),
+        ],
+            strings, 0, typeDefCount, 0, 0);
+        var typeDefs = typeDefCount == 0 ? []
+            : TrRmTypeDefTableWriter.Encode([
+                new TrRmTypeDefRow(1, 3, 4, fieldCount == 0 ? 0 : 1,
+                    fieldCount, 0, 0, 1, layoutBytes.Length / 28, 0, 0),
+            ], strings,
+                new TrRmModuleTableReader(moduleBytes, 1, strings,
+                    0, typeDefCount, 0, 0),
+                fieldCount, 0, layoutBytes.Length / 28, 0);
+        var fieldDefs = fieldCount == 0 ? []
+            : FieldDefs(fieldCount);
+        return new TableCase(
+            [.. stringsBytes.Select(static value => (int)value)],
+            [.. moduleBytes.Select(static value => (int)value)],
+            [.. typeDefs.Select(static value => (int)value)],
+            [.. fieldDefs.Select(static value => (int)value)],
+            [.. layoutBytes.Select(static value => (int)value)],
+            [.. layoutFieldBytes.Select(static value => (int)value)],
+            [.. targetProfileBytes.Select(static value => (int)value)],
+            typeDefCount, fieldCount, layoutBytes.Length / 28,
+            layoutFieldBytes.Length / 12, targetProfileBytes.Length / 8,
+            expectedValid, expectedLayoutOwners, expectedLayoutFieldOwners);
+    }
+
+    private static int[] Expected(TableCase testCase)
+    {
+        var expected = new int[16 + testCase.ExpectedLayoutOwners.Length
+            + testCase.ExpectedLayoutFieldOwners.Length];
+        expected[0] = 1;
+        expected[1] = 4;
+        expected[2] = 0;
+        expected[3] = testCase.TypeDefCount;
+        expected[4] = 0;
+        expected[5] = 0;
+        expected[6] = 0;
+        expected[7] = testCase.FieldCount;
+        expected[8] = 0;
+        expected[9] = testCase.LayoutCount;
+        expected[10] = 0;
+        expected[11] = testCase.TargetProfileCount;
+        expected[12] = testCase.LayoutFieldCount;
+        expected[13] = testCase.ExpectedValid ? 1 : 0;
+        expected[14] = testCase.ExpectedLayoutOwners.Length;
+        expected[15] = testCase.ExpectedLayoutFieldOwners.Length;
+        testCase.ExpectedLayoutOwners.CopyTo(expected, 16);
+        testCase.ExpectedLayoutFieldOwners.CopyTo(expected,
+            16 + testCase.ExpectedLayoutOwners.Length);
+        return expected;
+    }
 
     private static bool ValidateHosted(TableCase testCase)
     {
         try
         {
-            var strings = new TrRmStringTableReader(
-                testCase.Strings.Select(static value => checked((byte)value)).ToArray(),
-                testCase.StringCount);
-            var modules = new TrRmModuleTableReader(
-                testCase.Modules.Select(static value => checked((byte)value)).ToArray(),
-                testCase.ModuleCount, strings, testCase.ModuleRefCount,
-                testCase.TypeDefCount, testCase.MethodDefCount, testCase.SourceFileCount,
-                testCase.FeatureCount);
-            var types = new TrRmTypeDefTableReader(
-                testCase.TypeDefs.Select(static value => checked((byte)value)).ToArray(),
-                testCase.TypeDefCount, strings, modules, testCase.FieldCount,
-                testCase.GenericParamCount, testCase.LayoutCount, testCase.ContractCount);
-            _ = new TrRmLayoutTableReader(
-                testCase.Layouts.Select(static value => checked((byte)value)).ToArray(),
-                testCase.RecordCount, types);
+            var stringsBytes = testCase.Strings.Select(static value => checked((byte)value)).ToArray();
+            var strings = new TrRmStringTableReader(stringsBytes, 4);
+            var moduleBytes = testCase.Modules.Select(static value => checked((byte)value)).ToArray();
+            var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+                0, testCase.TypeDefCount, 0, 0);
+            var typeDefBytes = testCase.TypeDefs.Select(static value => checked((byte)value)).ToArray();
+            var types = new TrRmTypeDefTableReader(typeDefBytes, testCase.TypeDefCount,
+                strings, modules, testCase.FieldCount, 0, testCase.LayoutCount, 0);
+            var profileBytes = testCase.TargetProfiles
+                .Select(static value => checked((byte)value)).ToArray();
+            var profiles = new TrRmTargetProfileTableReader(profileBytes,
+                testCase.TargetProfileCount);
+            var typeSpecs = testCase.FieldCount == 0 ? default
+                : new TrRmTypeSpecTableReader(
+                    [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8],
+                    1, testCase.TypeDefCount, 0, 0, 0);
+            var fieldBytes = testCase.FieldDefs
+                .Select(static value => checked((byte)value)).ToArray();
+            var fields = testCase.FieldCount == 0 ? default
+                : new TrRmFieldDefTableReader(fieldBytes, testCase.FieldCount,
+                    strings, types, typeSpecs);
+            var layoutBytes = testCase.Layouts.Select(static value => checked((byte)value)).ToArray();
+            var layouts = new TrRmLayoutTableReader(layoutBytes, testCase.LayoutCount,
+                types, profiles, testCase.LayoutFieldCount);
+            var layoutFieldBytes = testCase.LayoutFields
+                .Select(static value => checked((byte)value)).ToArray();
+            _ = new TrRmLayoutFieldTableReader(layoutFieldBytes,
+                testCase.LayoutFieldCount, layouts, types, fields);
             return true;
         }
         catch (InvalidDataException)
@@ -211,52 +278,51 @@ public sealed class LayoutTableValidationComponentTests
         }
     }
 
-    private static byte[] EncodeModules(int moduleCount, int typeDefCount)
+    private static byte[] FieldDefs(int count)
     {
-        var modules = new byte[moduleCount * 48];
-        for (var row = 0; row < moduleCount; row++)
+        var bytes = new byte[count * 16];
+        for (var row = 0; row < count; row++)
         {
-            var offset = row * 48;
-            WriteWord(modules, offset, (uint)(row + 2));
-            WriteWord(modules, offset + 4, 1);
-            WriteWord(modules, offset + 32, 1);
-            WriteWord(modules, offset + 36, (uint)Math.Min(row + 1, typeDefCount + 1));
-            WriteWord(modules, offset + 40, 1);
-            WriteWord(modules, offset + 44, 1);
+            WriteWord(bytes, row * 16, 1);
+            WriteWord(bytes, row * 16 + 4, 4);
+            WriteWord(bytes, row * 16 + 8, 1);
         }
-        return modules;
+        return bytes;
     }
 
-    private static byte[] EncodeTypeDefs(params (uint Namespace, uint Name, uint Flags, uint Layout)[] rows)
+    private static byte[] Layouts(params LayoutRow[] rows)
     {
-        var section = new byte[rows.Length * 40];
+        var bytes = new byte[rows.Length * 28];
         for (var row = 0; row < rows.Length; row++)
         {
-            var offset = row * 40;
-            WriteWord(section, offset, rows[row].Namespace);
-            WriteWord(section, offset + 4, rows[row].Name);
-            WriteWord(section, offset + 8, rows[row].Flags);
-            WriteWord(section, offset + 28, rows[row].Layout);
+            var offset = row * 28;
+            WriteWord(bytes, offset, (uint)rows[row].Owner);
+            WriteWord(bytes, offset + 4, (uint)rows[row].TargetProfile);
+            bytes[offset + 8] = rows[row].Kind;
+            bytes[offset + 9] = rows[row].Flags;
+            WriteWord(bytes, offset + 12, (uint)rows[row].Alignment);
+            WriteWord(bytes, offset + 16, (uint)rows[row].Pack);
+            WriteWord(bytes, offset + 20, (uint)rows[row].FieldFirst);
+            WriteWord(bytes, offset + 24, (uint)rows[row].FieldCount);
         }
-        return section;
+        return bytes;
     }
 
-    private static byte[] EncodeLayouts(params (uint Owner, uint Target, uint Size, uint Alignment,
-        uint Pack, uint Flags)[] rows)
+    private static byte[] LayoutFields(params (int Owner, int Ordinal, int Field)[] rows)
     {
-        var section = new byte[rows.Length * 24];
+        var bytes = new byte[rows.Length * 12];
         for (var row = 0; row < rows.Length; row++)
         {
-            var offset = row * 24;
-            WriteWord(section, offset, rows[row].Owner);
-            WriteWord(section, offset + 4, rows[row].Target);
-            WriteWord(section, offset + 8, rows[row].Size);
-            WriteWord(section, offset + 12, rows[row].Alignment);
-            WriteWord(section, offset + 16, rows[row].Pack);
-            WriteWord(section, offset + 20, rows[row].Flags);
+            var offset = row * 12;
+            WriteWord(bytes, offset, (uint)rows[row].Owner);
+            WriteWord(bytes, offset + 4, (uint)rows[row].Ordinal);
+            WriteWord(bytes, offset + 8, (uint)rows[row].Field);
         }
-        return section;
+        return bytes;
     }
+
+    private static byte[] TargetProfile()
+        => TrRmTargetProfileTableWriter.Encode([new TrRmTargetProfileRow(1, 1)]);
 
     private static void WriteWord(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
@@ -286,10 +352,13 @@ public sealed class LayoutTableValidationComponentTests
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
 
-    private sealed record TableCase(int[] Strings, int[] Modules, int[] TypeDefs, int[] Layouts,
-        int RecordCount, int ModuleCount, int StringCount, int ModuleRefCount,
-        int TypeDefCount, int MethodDefCount, int SourceFileCount, int FeatureCount,
-        int FieldCount, int GenericParamCount, int LayoutCount, int ContractCount,
-        bool ExpectedValid, bool HasHostedOracle, int IdentitySlotCount, int FieldOwnerCount,
-        int LayoutOwnerCount, int[] ExpectedLayoutOwners);
+    private readonly record struct LayoutRow(
+        int Owner, int TargetProfile, byte Kind, byte Flags,
+        int Alignment, int Pack, int FieldFirst, int FieldCount);
+
+    private sealed record TableCase(int[] Strings, int[] Modules, int[] TypeDefs,
+        int[] FieldDefs, int[] Layouts, int[] LayoutFields, int[] TargetProfiles,
+        int TypeDefCount, int FieldCount, int LayoutCount, int LayoutFieldCount,
+        int TargetProfileCount, bool ExpectedValid, int[] ExpectedLayoutOwners,
+        int[] ExpectedLayoutFieldOwners);
 }

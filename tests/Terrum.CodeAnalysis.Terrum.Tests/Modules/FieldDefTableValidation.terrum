@@ -7,18 +7,11 @@ public static bool TryValidateFieldDefTable(int32 recordCount, int32 moduleCount
 {
     if (recordCount <= 0 || recordCount > 0xFF_FFFF
         || recordCount != fieldCount
-        || recordCount * 20 != Host.FieldDefs.Length
+        || recordCount * 16 != Host.FieldDefs.Length
         || typeSpecCount < 0 || typeSpecCount > 0xFF_FFFF
         || !TryValidateTypeDefTable(typeDefCount, moduleCount, stringCount,
             moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount,
-            fieldCount, genericParamCount, layoutCount, contractCount)
-        || (layoutCount == 0 && Host.Layouts.Length != 0))
-    {
-        return false;
-    }
-
-    if (layoutCount > 0
-        && !TryValidateLayoutRowsAfterTypeDefValidation(layoutCount, typeDefCount))
+            fieldCount, genericParamCount, layoutCount, contractCount))
     {
         return false;
     }
@@ -26,7 +19,7 @@ public static bool TryValidateFieldDefTable(int32 recordCount, int32 moduleCount
     int32 stringIndexByteLength = (stringCount + 1) * 4;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
-        if (!TryValidateFieldDefRow(row, typeDefCount, typeSpecCount, layoutCount,
+        if (!TryValidateFieldDefRow(row, typeDefCount, typeSpecCount,
             stringCount, stringIndexByteLength))
         {
             return false;
@@ -37,32 +30,20 @@ public static bool TryValidateFieldDefTable(int32 recordCount, int32 moduleCount
 }
 
 bool TryValidateFieldDefRow(int32 row, int32 typeDefCount, int32 typeSpecCount,
-    int32 layoutCount, int32 stringCount, int32 stringIndexByteLength)
+    int32 stringCount, int32 stringIndexByteLength)
 {
-    int32 rowStart = (row - 1) * 20;
+    int32 rowStart = (row - 1) * 16;
     if (!TryReadFieldDefTableWord(rowStart, 0, init var owner)
         || !TryReadFieldDefTableWord(rowStart, 4, init var name)
         || !TryReadFieldDefTableWord(rowStart, 8, init var typeSpec)
         || !TryReadFieldDefTableWord(rowStart, 12, init var flags)
-        || !TryReadFieldDefTableWord(rowStart, 16, init var byteOffset)
         || owner == 0 || owner > uint32(typeDefCount)
         || owner != uint32(Host.FieldOwners[row])
         || name == 0 || name > 0xFF_FFFF || name > uint32(stringCount)
         || typeSpec == 0 || typeSpec > uint32(typeSpecCount)
-        || flags > 7 || (flags & 3) == 3)
+        || flags > 15 || (flags & 3) == 3)
     {
         return false;
-    }
-
-    if (byteOffset != 0xFFFF_FFFF)
-    {
-        if (!TryReadTypeDefTableWord((int32(owner) - 1) * 40, 28, init var layoutRow)
-            || layoutRow == 0 || layoutRow > uint32(layoutCount)
-            || !TryReadLayoutTableWord((int32(layoutRow) - 1) * 24, 8, init var layoutSize)
-            || byteOffset >= layoutSize)
-        {
-            return false;
-        }
     }
 
     if (!TryGetValidatedModuleIdentityExtent(stringCount, stringIndexByteLength,
@@ -78,8 +59,8 @@ bool TryValidateFieldDefRow(int32 row, int32 typeDefCount, int32 typeSpecCount,
 
 bool TryReadFieldDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
 {
-    if (rowStart < 0 || rowStart > Host.FieldDefs.Length - 20
-        || offset < 0 || offset > 16
+    if (rowStart < 0 || rowStart > Host.FieldDefs.Length - 16
+        || offset < 0 || offset > 12
         || !TryReadFieldDefTableByte(rowStart + offset, init var first)
         || !TryReadFieldDefTableByte(rowStart + offset + 1, init var second)
         || !TryReadFieldDefTableByte(rowStart + offset + 2, init var third)

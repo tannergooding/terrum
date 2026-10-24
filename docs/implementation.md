@@ -417,9 +417,18 @@ Bodies for a bounded source-free, fail-fast scalar subset, separately from
 private semantic-module encoding. Its semantics overlap accepted contracts,
 but its retired allocations and manifests do not establish conformance to the
 selected [`trrm/1-draft-layout-queries-1` schema](specs/representation/trrm-1.registry.json).
-That accepted draft adds the masked five-map stream prefix, `DE` query/
-TypeIdentity operations, FieldMap/FieldPath and their binding/dependency
-contracts; the development path has not been migrated to those assignments.
+Common TRRM metadata readers, writers and structural validation now use the
+assigned 48-byte Module and exact Feature manifests, TypeDef/FieldDef rows of
+44/16 bytes, Layout/LayoutField rows of 28/12 bytes, 8-byte TargetProfile
+rows, and GenericParam/Constraint rows of 32/12 bytes. The bounded
+source-free loader reconstructs supported Windows x64 Blittable
+Sequential/Transparent layouts from their complete ordered field lists; size,
+offset and final alignment remain target-derived, not serialized. This
+metadata integration does not migrate compact-linear/indexed Bodies, complete
+type-valued fields to TypeSpecRef, or the assigned `DE` query/TypeIdentity,
+FieldMap/FieldPath and binding/dependency contracts. The executable path still
+uses separate development Feature assignments and does not claim current
+schema conformance.
 Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed
 inputs, and invoke the shared mandatory verifier and backend; there is no
 producer-trust bypass. General imported-call linking and standard

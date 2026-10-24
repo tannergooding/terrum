@@ -11,7 +11,7 @@ public static bool TryValidatePropertyDefTable(int32 recordCount,
         || methodDefCount < 0 || methodDefCount > 0xFF_FFFF
         || methodSigCount < 0 || methodSigCount > 0xFF_FFFF
         || recordCount * 20 != Host.Properties.Length
-        || typeDefCount * 40 != Host.TypeDefs.Length
+        || typeDefCount * 44 != Host.TypeDefs.Length
         || methodDefCount * 28 != Host.Methods.Length
         || methodSigCount * 24 != Host.Signatures.Length)
     {

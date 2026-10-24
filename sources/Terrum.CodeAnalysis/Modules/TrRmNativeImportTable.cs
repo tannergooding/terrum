@@ -129,7 +129,7 @@ internal static class TrRmNativeImportTypeContract
 
     internal static bool TryGetBlittableAggregateParameterTypeDef(
         TrRmTypeSpecTableReader types, int typeSpecRow,
-        TrRmContractTableReader contracts, out int typeDefRow)
+        TrRmLayoutTableReader layouts, out int typeDefRow)
     {
         var type = types.GetRow(typeSpecRow);
         if (type.Length == 7 && type[0] == 0x0C && type[1] == 0
@@ -140,7 +140,7 @@ internal static class TrRmNativeImportTypeContract
             if (inner.Length == 6 && inner[0] == 0x02 && inner[1] == 0)
             {
                 typeDefRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(inner[2..]));
-                return contracts.GetNativeBlittableTargetRequirement(typeDefRow) == 1;
+                return layouts.HasBlittableLayout(typeDefRow, 1, 1);
             }
         }
 
@@ -181,11 +181,13 @@ public static class TrRmNativeImportTableWriter
     /// <param name="parameters">The method parameter declarations associated with the imports.</param>
     /// <param name="types">The type specifications used by the signatures.</param>
     /// <param name="contracts">The method contracts used by the imports.</param>
+    /// <param name="layouts">The selected target layouts used by aggregate pointees.</param>
     /// <returns>The encoded native-import section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmNativeImportRow> rows,
         TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts)
+        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -205,7 +207,7 @@ public static class TrRmNativeImportTableWriter
         }
 
         _ = new TrRmNativeImportTableReader(result, rows.Count, strings, methods,
-            signatures, parameters, types, contracts);
+            signatures, parameters, types, contracts, layouts);
         return result;
     }
 
@@ -235,10 +237,12 @@ public readonly ref struct TrRmNativeImportTableReader
     /// <param name="parameters">The associated parameter table.</param>
     /// <param name="types">The associated type-specification table.</param>
     /// <param name="contracts">The associated contract table.</param>
+    /// <param name="layouts">The validated Layout table.</param>
     public TrRmNativeImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts)
+        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * 16 != section.Length
@@ -285,7 +289,7 @@ public readonly ref struct TrRmNativeImportTableReader
             _rowByMethod[method] = row;
             ValidateSignature((int)method, methods, signatures, parameters, types,
                 contracts.GetNativeOutputs((int)method), contracts.GetNativeParameters((int)method),
-                contracts);
+                layouts);
         }
 
         for (var method = 1; method <= methods.Count; method++)
@@ -351,7 +355,7 @@ public readonly ref struct TrRmNativeImportTableReader
         TrRmTypeSpecTableReader types,
         System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
         System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters,
-        TrRmContractTableReader contracts)
+        TrRmLayoutTableReader layouts)
     {
         var signature = methods.GetSignature(method);
         if (!TrRmNativeImportTypeContract.TryGetDirectNativeImportResultType(
@@ -409,7 +413,7 @@ public readonly ref struct TrRmNativeImportTableReader
                 seenNativeParameters[parameter] = true;
             }
             else if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
-                        types, typeRow, contracts, out _)
+                        types, typeRow, layouts, out _)
                     && hasNativeParameter)
             {
                     if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]

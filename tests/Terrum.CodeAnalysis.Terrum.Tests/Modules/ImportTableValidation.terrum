@@ -14,7 +14,7 @@ public static bool TryValidateImportTable(int32 recordCount,
         || propertyDefCount < 0 || propertyDefCount > 0xFF_FFFF
         || moduleCount * 48 != Host.Modules.Length
         || moduleRefCount * 12 != Host.ModuleRefs.Length
-        || typeDefCount * 40 != Host.TypeDefs.Length
+        || typeDefCount * 44 != Host.TypeDefs.Length
         || methodDefCount * 28 != Host.Methods.Length
         || Host.Properties.Length != propertyDefCount * 20
         || Host.ImportExpectedDefinitions.Length != recordCount + 1

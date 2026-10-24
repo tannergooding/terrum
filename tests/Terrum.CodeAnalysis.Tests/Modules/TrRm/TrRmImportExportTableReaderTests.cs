@@ -127,15 +127,22 @@ public sealed class TrRmImportExportTableReaderTests
         var names = new TrRmStringTableReader(nameBytes, 8);
         var moduleRows = Modules(producerOwnsRef);
         var modules = new TrRmModuleTableReader(moduleRows, 2, names, 1, 2, 2, 0);
-        var typeRows = new byte[80];
+        var typeRows = new byte[88];
         for (var index = 0; index < 2; index++)
         {
-            var offset = index * 40;
+            var offset = index * 44;
             Write(typeRows, offset, 1);
             Write(typeRows, offset + 4, 4);
             Write(typeRows, offset + 8, index == 0 ? 4u | producerTypeVisibility : 6u);
+            Write(typeRows, offset + 28, (uint)index + 1);
+            Write(typeRows, offset + 32, 1);
         }
-        var types = new TrRmTypeDefTableReader(typeRows, 2, names, modules, 0, 0, 0, 0);
+        var types = new TrRmTypeDefTableReader(typeRows, 2, names, modules, 0, 0, 2, 0);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmLayoutRow(2, 0, 0, 0, 0, 0, 0, 0),
+        ], types, targetProfiles, 0);
         byte[] typeSpecBytes = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1, 2, 0, 0, 0);
         var signatureRows = new byte[24];
@@ -196,7 +203,8 @@ public sealed class TrRmImportExportTableReaderTests
             List<(ushort Kind, byte[] Bytes, int Count)> sections = [
                 (0x0001, moduleRows, 2), (0x0002, nameBytes, 8),
                 (0x0010, moduleRefRows, 1), (0x0011, typeSpecBytes, 1),
-                (0x0013, typeRows, 2), (0x0016, methodRows, 2),
+                (0x0013, typeRows, 2), (0x0015, layoutBytes, 2),
+                (0x0016, methodRows, 2),
                 (0x0017, signatureRows, 1),
                 (0x001C, importRows, importRows.Length / 12),
                 (0x001D, exportRows, exportRows.Length / 8),

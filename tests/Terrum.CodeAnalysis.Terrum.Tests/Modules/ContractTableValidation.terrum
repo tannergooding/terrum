@@ -10,7 +10,7 @@ public static bool TryValidateContractTable(int32 recordCount,
         || signatureCount <= 0 || signatureCount > 0xFF_FFFF
         || !IsValidContractCount(paramCount)
         || typeSpecCount <= 0 || typeSpecCount > 0xFF_FFFF
-        || typeDefCount * 40 != Host.TypeDefs.Length
+        || typeDefCount * 44 != Host.TypeDefs.Length
         || methodDefCount * 28 != Host.Methods.Length
         || signatureCount * 24 != Host.Signatures.Length
         || paramCount * 16 != Host.Params.Length
@@ -52,9 +52,9 @@ public static bool TryValidateContractTable(int32 recordCount,
 
     for (mut int32 type = 1; type <= typeDefCount; type = type + 1)
     {
-        int32 rowStart = (type - 1) * 40;
-        if (!TryReadContractTypeDefWord(rowStart, 32, init var first)
-            || !TryReadContractTypeDefWord(rowStart, 36, init var count)
+        int32 rowStart = (type - 1) * 44;
+        if (!TryReadContractTypeDefWord(rowStart, 36, init var first)
+            || !TryReadContractTypeDefWord(rowStart, 40, init var count)
             || !TryAssignContractOwnerRange(first, count, 0x13, type, recordCount))
         {
             return false;
@@ -470,8 +470,8 @@ bool TryReadContractByte(int32 rowStart, int32 rowLength, int32 offset,
 
 bool TryReadContractTypeDefWord(int32 rowStart, int32 offset, init ref<uint32> value)
 {
-    if (rowStart < 0 || rowStart > Host.TypeDefs.Length - 40
-        || offset < 0 || offset > 36
+    if (rowStart < 0 || rowStart > Host.TypeDefs.Length - 44
+        || offset < 0 || offset > 40
         || !TryReadContractTypeDefByte(rowStart + offset, init var first)
         || !TryReadContractTypeDefByte(rowStart + offset + 1, init var second)
         || !TryReadContractTypeDefByte(rowStart + offset + 2, init var third)

@@ -590,7 +590,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Write(reference, 8, targetPolicy);
         var references = new TrRmModuleRefTableReader(expectedTarget ? reference : [],
             expectedTarget ? 1 : 0, names, modules);
-        var ownerBytes = ownerFlags is null ? [] : new byte[40];
+        var ownerBytes = ownerFlags is null ? [] : new byte[44];
         if (ownerFlags is not null)
         {
             Write(ownerBytes, 0, 3);

@@ -59,9 +59,9 @@ public sealed class TrRmTypeDefTableReaderTests
     [Test]
     public void RejectsOverlappingAndUnownedFieldRanges()
     {
-        var duplicate = new byte[80];
+        var duplicate = new byte[88];
         Type().CopyTo(duplicate, 0);
-        Type().CopyTo(duplicate, 40);
+        Type().CopyTo(duplicate, 44);
         Assert.Throws<InvalidDataException>(() => Create(duplicate, typeCount: 2));
 
         var unowned = Type();
@@ -79,8 +79,7 @@ public sealed class TrRmTypeDefTableReaderTests
         Assert.Throws<InvalidDataException>(() => GetFieldName(bytes, 2));
 
         foreach (var (offset, replacement) in new (int, byte)[] {
-            (0, 0), (0, 2), (4, 0), (8, 0), (8, 2), (12, 3), (12, 8),
-            (16, 0),
+            (0, 0), (0, 2), (4, 0), (8, 0), (8, 2), (12, 3),
         })
         {
             var invalid = Field();
@@ -127,11 +126,10 @@ public sealed class TrRmTypeDefTableReaderTests
 
     private static byte[] Field()
     {
-        var bytes = new byte[20];
+        var bytes = new byte[16];
         Write(bytes, 0, 1);
         Write(bytes, 4, 2);
         Write(bytes, 8, 1);
-        Write(bytes, 16, uint.MaxValue);
         return bytes;
     }
 
@@ -152,7 +150,7 @@ public sealed class TrRmTypeDefTableReaderTests
 
     private static byte[] Type()
     {
-        var bytes = new byte[40];
+        var bytes = new byte[44];
         Write(bytes, 0, 1);
         Write(bytes, 4, 2);
         Write(bytes, 8, 4);

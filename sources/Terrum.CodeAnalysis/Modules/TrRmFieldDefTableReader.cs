@@ -10,30 +10,24 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>The borrowed FieldDef, TypeDef and String sections must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmFieldDefTableReader
 {
-    private const int RowSize = 20;
+    private const int RowSize = 16;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
+    private readonly TrRmTypeDefTableReader _types;
     private readonly int _recordCount;
 
-    /// <summary>Validates FieldDef rows and requires layouts for fixed-offset fields.</summary>
+    /// <summary>Gets the number of validated FieldDef rows.</summary>
+    public int Count => _recordCount;
+
+    /// <summary>Validates FieldDef rows and their owning TypeDef ranges.</summary>
+    /// <param name="section">The borrowed 16-byte-row FieldDef section.</param>
+    /// <param name="recordCount">The number of FieldDef rows.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
     public TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs)
-        : this(section, recordCount, strings, types, typeSpecs, default, false)
-    {
-    }
-
-    /// <summary>Validates FieldDef rows and fixed offsets against their assigned layout sizes.</summary>
-    public TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
-        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
-        TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts)
-        : this(section, recordCount, strings, types, typeSpecs, layouts, true)
-    {
-    }
-
-    private TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
-        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
-        TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts, bool validateLayoutSizes)
     {
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
             || recordCount != types.FieldCount || (long)recordCount * RowSize != section.Length)
@@ -43,44 +37,31 @@ public readonly ref struct TrRmFieldDefTableReader
 
         _rows = section;
         _strings = strings;
+        _types = types;
         _recordCount = recordCount;
-        var invalidLayoutSize = false;
         for (var row = 1; row <= recordCount; row++)
         {
             var owner = Read(row - 1, 0);
             var name = Read(row - 1, 4);
             var spec = Read(row - 1, 8);
             var flags = Read(row - 1, 12);
-            var offset = Read(row - 1, 16);
             if (owner == 0 || owner > types.Count || owner != types.GetFieldOwner(row)
                 || name is 0 or > 0xFF_FFFF
                 || spec == 0 || spec > typeSpecs.Count
-                || (flags & ~7u) != 0 || (flags & 3) == 3)
+                || (flags & ~15u) != 0 || (flags & 3) == 3)
             {
                 throw InvalidField();
             }
 
-            if (offset != uint.MaxValue)
-            {
-                var layoutRow = types.GetLayoutRow((int)owner);
-                if (layoutRow == 0)
-                {
-                    throw InvalidField();
-                }
-
-                if (validateLayoutSizes && offset >= layouts.GetSize(layoutRow))
-                {
-                    invalidLayoutSize = true;
-                }
-            }
-
             _ = _strings.DecodeName((int)name);
         }
+    }
 
-        if (invalidLayoutSize)
-        {
-            throw InvalidField();
-        }
+    /// <summary>Gets the owning TypeDef row for a validated FieldDef row.</summary>
+    public int GetOwnerTypeDef(int row)
+    {
+        CheckRow(row);
+        return _types.GetFieldOwner(row);
     }
 
     /// <summary>Gets the decoded name for a FieldDef row.</summary>
@@ -112,13 +93,6 @@ public readonly ref struct TrRmFieldDefTableReader
     {
         CheckRow(row);
         return Read(row - 1, 12);
-    }
-
-    /// <summary>Gets the byte offset for a validated FieldDef row.</summary>
-    public uint GetByteOffset(int row)
-    {
-        CheckRow(row);
-        return Read(row - 1, 16);
     }
 
     private void CheckRow(int row)

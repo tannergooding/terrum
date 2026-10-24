@@ -209,6 +209,7 @@ public sealed class SourceFileTableValidationComponentTests
         WriteWord(modules, 40, 1);
         WriteWord(modules, 44, 1);
         WriteWord(modules, 48, 2);
+        WriteWord(modules, 52, 1);
         WriteWord(modules, 80, 1);
         WriteWord(modules, 84, 1);
         WriteWord(modules, 88, 1);

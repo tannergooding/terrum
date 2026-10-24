@@ -5,12 +5,13 @@ public static bool TryValidateGenericParamTable(int32 recordCount,
     int32 typeDefCount, int32 methodDefCount, int32 sourceFileCount,
     int32 featureCount, int32 fieldCount, int32 genericParamCount,
     int32 layoutCount, int32 contractCount, int32 methodSigCount,
-    int32 constraintCount, int32 bodyCount)
+    int32 typeSpecCount, int32 constraintCount, int32 bodyCount)
 {
     if (recordCount < 0 || recordCount > 0xFF_FFFF
         || recordCount != genericParamCount
         || constraintCount < 0 || constraintCount > 0xFF_FFFF
-        || recordCount * 20 != Host.GenericParams.Length
+        || typeSpecCount < 0 || typeSpecCount > 0xFF_FFFF
+        || recordCount * 32 != Host.GenericParams.Length
         || Host.ConstraintOwners.Length != constraintCount + 1
         || !TryValidateMethodDefTable(methodDefCount, moduleCount, stringCount,
             moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
@@ -24,7 +25,7 @@ public static bool TryValidateGenericParamTable(int32 recordCount,
     mut int32 declaredFormalCount = 0;
     for (mut int32 type = 1; type <= typeDefCount; type = type + 1)
     {
-        if (!TryReadTypeDefTableWord((type - 1) * 40, 24, init var formalCount)
+        if (!TryReadTypeDefTableWord((type - 1) * 44, 24, init var formalCount)
             || formalCount > uint32(recordCount - declaredFormalCount))
         {
             return false;
@@ -63,14 +64,32 @@ public static bool TryValidateGenericParamTable(int32 recordCount,
     mut uint32 cachedFormalCount = 0;
     for (mut int32 row = 1; row <= recordCount; row = row + 1)
     {
-        int32 rowStart = (row - 1) * 20;
+        int32 rowStart = (row - 1) * 32;
         if (!TryReadGenericParamTableWord(rowStart, 0, init var owner)
             || !TryReadGenericParamTableWord(rowStart, 4, init var ordinal)
             || !TryReadGenericParamTableWord(rowStart, 8, init var name)
             || !TryReadGenericParamTableWord(rowStart, 12, init var firstConstraint)
             || !TryReadGenericParamTableWord(rowStart, 16, init var constraintRangeCount)
+            || !TryReadGenericParamTableByte(rowStart + 20, init var formalKind)
+            || !TryReadGenericParamTableByte(rowStart + 21, init var ownershipDomain)
+            || !TryReadGenericParamTableByte(rowStart + 22, init var nullabilityDomain)
+            || !TryReadGenericParamTableByte(rowStart + 23, init var reserved)
+            || !TryReadGenericParamTableWord(rowStart, 24, init var constantTypeSpec)
+            || !TryReadGenericParamTableWord(rowStart, 28, init var defaultArgument)
             || name == 0 || name > 0xFF_FFFF || name > uint32(stringCount)
-            || !IsValidGenericParamRange(firstConstraint, constraintRangeCount, constraintCount))
+            || !IsValidGenericParamRange(firstConstraint, constraintRangeCount, constraintCount)
+            || reserved != 0
+            || (formalKind == 1
+                ? ownershipDomain < 1 || ownershipDomain > 3
+                    || nullabilityDomain < 1 || nullabilityDomain > 2
+                    || constantTypeSpec != 0
+                    || (defaultArgument != 0 && defaultArgument > uint32(typeSpecCount))
+                : formalKind == 2
+                    ? ownershipDomain != 0 || nullabilityDomain != 0
+                        || constantTypeSpec == 0
+                        || constantTypeSpec > uint32(typeSpecCount)
+                        || constraintRangeCount != 0 || defaultArgument != 0
+                    : true))
         {
             return false;
         }
@@ -81,7 +100,7 @@ public static bool TryValidateGenericParamTable(int32 recordCount,
         {
             if (owner != cachedOwner)
             {
-                int32 ownerOffset = (ownerRow - 1) * 40;
+                int32 ownerOffset = (ownerRow - 1) * 44;
                 if (!TryReadTypeDefTableWord(ownerOffset, 20, init var firstFormal)
                     || !TryReadTypeDefTableWord(ownerOffset, 24, init var formalCount))
                 {
@@ -166,8 +185,8 @@ bool IsValidGenericParamRange(uint32 first, uint32 count, int32 total)
 
 bool TryReadGenericParamTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
 {
-    if (rowStart < 0 || rowStart > Host.GenericParams.Length - 20
-        || offset < 0 || offset > 16
+    if (rowStart < 0 || rowStart > Host.GenericParams.Length - 32
+        || offset < 0 || offset > 28
         || !TryReadGenericParamTableByte(rowStart + offset, init var first)
         || !TryReadGenericParamTableByte(rowStart + offset + 1, init var second)
         || !TryReadGenericParamTableByte(rowStart + offset + 2, init var third)

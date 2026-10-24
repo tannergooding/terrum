@@ -110,7 +110,7 @@ public sealed class TrRmMethodDefTableReaderTests
         ], names, 0, 1, 1, 0);
         var modules = new TrRmModuleTableReader(moduleBytes, 3, names, 0, 1, 1, 0);
         var typeBytes = TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(1, 5, 4, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(1, 5, 4, 0, 0, 0, 0, 0, 0, 0, 0),
         ], names, modules, 0, 0, 0, 0);
         var types = new TrRmTypeDefTableReader(typeBytes, 1, names, modules, 0, 0, 0, 0);
         var signatures = new TrRmMethodSigTableReader(Signature(), 1, TypeSpecs(), 0, 0);
@@ -144,7 +144,7 @@ public sealed class TrRmMethodDefTableReaderTests
         Write(moduleRows, 88, 2);
         Write(moduleRows, 92, 1);
         var modules = new TrRmModuleTableReader(moduleRows, 2, names, 0, 1, 2, 0);
-        var typeRow = new byte[40];
+        var typeRow = new byte[44];
         Write(typeRow, 0, 3);
         Write(typeRow, 4, 4);
         Write(typeRow, 8, 4);

@@ -31,12 +31,11 @@ public readonly ref struct TrRmContractTableReader
     private readonly ImmutableArray<TrRmNativeParameterContract>[] _nativeParameters;
     private readonly TrRmNativeAbiContract[] _nativeAbis;
     private readonly bool[] _hasNativeAbis;
-    private readonly uint[] _nativeBlittableTargetRequirements;
 
     public TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader typeSpecs)
+        TrRmTypeSpecTableReader typeSpecs, bool developmentProfile = false)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != types.ContractCount || recordCount != methods.ContractCount
@@ -53,7 +52,6 @@ public readonly ref struct TrRmContractTableReader
         _nativeParameters = new ImmutableArray<TrRmNativeParameterContract>[methods.Count + 1];
         _nativeAbis = new TrRmNativeAbiContract[methods.Count + 1];
         _hasNativeAbis = new bool[methods.Count + 1];
-        _nativeBlittableTargetRequirements = new uint[types.Count + 1];
         var owners = new uint[recordCount + 1];
         for (var type = 1; type <= types.Count; type++)
         {
@@ -81,7 +79,8 @@ public readonly ref struct TrRmContractTableReader
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
             if (owners[row] == 0 || owner != owners[row]
                 || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0
-                || (kind is 1 or 5 or 0x10 or 0x13
+                || (!developmentProfile && kind is 0x10 or 0x11 or 0x12)
+                || (kind is 1 or 5 or 0x10
                     && !singletons.Add((owner, kind))))
             {
                 throw InvalidContract();
@@ -226,27 +225,7 @@ public readonly ref struct TrRmContractTableReader
                     }
                     break;
                 case 0x13:
-                    if (data.Length != 20 || owner >> 24 != 0x13)
-                    {
-                        throw InvalidContract();
-                    }
-
-                    var blittableType = (int)(owner & 0xFF_FFFF);
-                    var blittableTargetRequirement = Read(data, 8);
-                    var blittableFlags = types.GetFlags(blittableType);
-                    var blittableLayout = (blittableFlags >> 4) & 0x03;
-                    if (((blittableFlags >> 2) & 0x03) != 1
-                        || blittableLayout is not (1 or 3)
-                        || types.GetLayoutRow(blittableType) == 0
-                        || types.GetGenericRange(blittableType).Count != 0
-                        || blittableTargetRequirement != 1 || Read(data, 12) != 0
-                        || Read(data, 16) != 1)
-                    {
-                        throw InvalidContract();
-                    }
-
-                    _nativeBlittableTargetRequirements[blittableType] = blittableTargetRequirement;
-                    break;
+                    throw InvalidContract();
                 default:
                     throw InvalidContract();
             }
@@ -268,14 +247,6 @@ public readonly ref struct TrRmContractTableReader
             }
         }
 
-        for (var type = 1; type < _nativeBlittableTargetRequirements.Length; type++)
-        {
-            if (_nativeBlittableTargetRequirements[type] != 0
-                && cleanupTypes.Contains(type))
-            {
-                throw InvalidContract();
-            }
-        }
     }
 
     internal ReadOnlySpan<byte> GetRow(int row)
@@ -343,10 +314,6 @@ public readonly ref struct TrRmContractTableReader
 
     internal TrRmNativeAbiContract GetNativeAbi(int methodRow)
         => HasNativeAbi(methodRow) ? _nativeAbis[methodRow] : throw InvalidContract();
-
-    internal uint GetNativeBlittableTargetRequirement(int typeDefRow)
-        => typeDefRow > 0 && typeDefRow < _nativeBlittableTargetRequirements.Length
-            ? _nativeBlittableTargetRequirements[typeDefRow] : 0;
 
     internal ImmutableArray<TrRmNativeParameterContract> GetNativeParameters(int methodDefRow)
         => methodDefRow > 0 && methodDefRow < _nativeParameters.Length

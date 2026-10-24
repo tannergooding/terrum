@@ -27,11 +27,11 @@ public sealed class TrRmGenericParamTableReaderTests
         Write(signature, 16, 0);
         Write(signature, 20, 0);
         var formals = Formals();
-        Write(formals, 20, 0x1300_0001);
-        Write(formals, 24, 1);
+        Write(formals, 32, 0x1300_0001);
+        Write(formals, 36, 1);
         Assert.That(GetConstraintOwner(formals, 1, signature, type), Is.EqualTo(1));
 
-        Write(formals, 24, 0);
+        Write(formals, 36, 0);
         Assert.Throws<InvalidDataException>(() =>
             GetConstraintOwner(formals, 1, signature, type));
     }
@@ -46,9 +46,11 @@ public sealed class TrRmGenericParamTableReaderTests
     [TestCase(16,(byte)(0))]
     [TestCase(20,(byte)(0))]
     [TestCase(20,(byte)(2))]
-    [TestCase(23,(byte)(0))]
+    [TestCase(21,(byte)(0))]
+    [TestCase(22,(byte)(0))]
+    [TestCase(23,(byte)(1))]
     [TestCase(24,(byte)(1))]
-    [TestCase(28,(byte)(0))]
+    [TestCase(28,(byte)(2))]
     public void RejectsBadFormalOwnerOrdinalNameAndConstraintRange(int offset, byte replacement)
     {
         var bytes = Formals();
@@ -69,28 +71,54 @@ public sealed class TrRmGenericParamTableReaderTests
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(Formals(), 1, signature: sig));
 
         var bytes = Formals();
-        Write(bytes, 32, 1);
+        Write(bytes, 32, 0x1300_0001);
         Write(bytes, 36, 1);
+        Assert.Throws<InvalidDataException>(() => GetConstraintOwner(bytes, 1));
+
+        bytes = Formals();
+        Write(bytes, 44, 1);
+        Write(bytes, 48, 1);
+        Assert.Throws<InvalidDataException>(() => GetConstraintOwner(bytes, 1));
+
+        bytes = Formals();
+        Write(bytes, 12, 0);
+        Write(bytes, 16, 0);
+        Write(bytes, 44, 0);
+        Write(bytes, 48, 0);
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(bytes, 1));
 
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(Formals()[..^1], 1));
     }
 
     [Test]
-    public void ConstraintRowChecksOwnershipWithoutAssigningKindsOrWitnesses()
+    public void ConstraintRowsPreserveTheirKindAndPayload()
     {
         var row = Constraint();
-        Write(row, 12, 0x1600_0001);
-        row[4] = 0xFF;
-        row[5] = 0xFF;
         CreateConstraint(row);
+        var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
+            [("", 0), ("Module", 0), ("Widget", 0), ("Build", 0), ("T", 0), ("U", 0)]), 6);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 1, 0);
+        var types = new TrRmTypeDefTableReader(Type(), 1, names, modules, 0, 2, 0, 0);
+        byte[] specRow = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        var typeSpecs = new TrRmTypeSpecTableReader(specRow, 1, 1, 0, 2, 0);
+        var signatures = new TrRmMethodSigTableReader(Signature(), 1, typeSpecs, 0, 2);
+        var methods = new TrRmMethodDefTableReader(Method(), 1,
+            names, modules, types, signatures, 0, 0);
+        var formals = new TrRmGenericParamTableReader(Formals(), 2,
+            names, types, methods, signatures, 1);
+        var constraints = new TrRmConstraintTableReader(row, 1, formals, typeSpecs);
+        Assert.That(constraints.GetOwnerGenericParam(1), Is.EqualTo(1));
+        Assert.That(constraints.GetKind(1), Is.EqualTo((ushort)2));
+        Assert.That(constraints.GetPayload(1), Is.EqualTo(1u));
     }
     [TestCase(0,(byte)(0))]
     [TestCase(0,(byte)(2))]
+    [TestCase(4,(byte)(0))]
+    [TestCase(4,(byte)(4))]
     [TestCase(6,(byte)(1))]
     [TestCase(7,(byte)(1))]
     [TestCase(8,(byte)(0))]
-    [TestCase(8,(byte)(2))]
+    [TestCase(8,(byte)(4))]
     public void RejectsInvalidConstraintOwnerFlagsAndTarget(int offset, byte replacement)
     {
         var row = Constraint();
@@ -153,7 +181,7 @@ public sealed class TrRmGenericParamTableReaderTests
 
     private static byte[] Type()
     {
-        var row = new byte[40];
+        var row = new byte[44];
         Write(row, 0, 1);
         Write(row, 4, 3);
         Write(row, 8, 4);
@@ -181,20 +209,27 @@ public sealed class TrRmGenericParamTableReaderTests
 
     private static byte[] Formals()
     {
-        var rows = new byte[40];
+        var rows = new byte[64];
         Write(rows, 0, 0x1300_0001);
         Write(rows, 8, 5);
         Write(rows, 12, 1);
         Write(rows, 16, 1);
-        Write(rows, 20, 0x1600_0001);
-        Write(rows, 28, 6);
+        rows[20] = 1;
+        rows[21] = 3;
+        rows[22] = 1;
+        Write(rows, 32, 0x1600_0001);
+        Write(rows, 40, 6);
+        rows[52] = 1;
+        rows[53] = 1;
+        rows[54] = 1;
         return rows;
     }
 
     private static byte[] Constraint()
     {
-        var row = new byte[16];
+        var row = new byte[12];
         Write(row, 0, 1);
+        Write(row, 4, 2);
         Write(row, 8, 1);
         return row;
     }

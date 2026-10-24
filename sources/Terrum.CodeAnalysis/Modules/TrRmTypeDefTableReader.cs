@@ -10,7 +10,7 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>The borrowed TypeDef, Module and String sections must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmTypeDefTableReader
 {
-    private const int RowSize = 40;
+    private const int RowSize = 44;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly TrRmModuleTableReader _modules;
@@ -25,6 +25,15 @@ public readonly ref struct TrRmTypeDefTableReader
     public int LayoutCount => _layoutCount;
     public int ContractCount => _contractCount;
 
+    /// <summary>Validates TypeDef rows, names, flags and owned table ranges.</summary>
+    /// <param name="section">The borrowed 44-byte-row TypeDef section.</param>
+    /// <param name="recordCount">The number of TypeDef rows.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="modules">The validated Module table.</param>
+    /// <param name="fieldCount">The number of FieldDef rows.</param>
+    /// <param name="genericParamCount">The number of GenericParam rows.</param>
+    /// <param name="layoutCount">The number of Layout rows.</param>
+    /// <param name="contractCount">The number of Contract rows.</param>
     public TrRmTypeDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         int fieldCount, int genericParamCount, int layoutCount, int contractCount)
@@ -52,13 +61,12 @@ public readonly ref struct TrRmTypeDefTableReader
             _ = ReadNamespace(row - 1);
             _ = ReadName(row - 1);
             var flags = Read(row - 1, 8);
-            if ((flags & ~0x3Fu) != 0 || (flags & 3) == 3
+            if ((flags & ~0x0Fu) != 0 || (flags & 3) == 3
                 || ((flags >> 2) & 3) == 0
                 || !ValidRange(row, 12, fieldCount)
                 || !ValidRange(row, 20, genericParamCount)
-                || !ValidRange(row, 32, contractCount)
-                || Read(row - 1, 28) > layoutCount
-                || ((flags & 0x33) == 0 && Read(row - 1, 28) != 0))
+                || !ValidRange(row, 28, layoutCount)
+                || !ValidRange(row, 36, contractCount))
             {
                 throw InvalidType();
             }
@@ -146,12 +154,6 @@ public readonly ref struct TrRmTypeDefTableReader
         return _fieldOwners[row];
     }
 
-    public int GetLayoutRow(int row)
-    {
-        CheckRow(row);
-        return (int)Read(row - 1, 28);
-    }
-
     public uint GetFlags(int row)
     {
         CheckRow(row);
@@ -164,10 +166,17 @@ public readonly ref struct TrRmTypeDefTableReader
         return ((int)Read(row - 1, 20), (int)Read(row - 1, 24));
     }
 
+    /// <summary>Gets the one-based Layout range owned by a validated TypeDef row.</summary>
+    public (int Start, int Count) GetLayoutRange(int row)
+    {
+        CheckRow(row);
+        return ((int)Read(row - 1, 28), (int)Read(row - 1, 32));
+    }
+
     public (int Start, int Count) GetContractRange(int row)
     {
         CheckRow(row);
-        return ((int)Read(row - 1, 32), (int)Read(row - 1, 36));
+        return ((int)Read(row - 1, 36), (int)Read(row - 1, 40));
     }
 
     private string ReadNamespace(int row)

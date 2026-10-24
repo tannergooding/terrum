@@ -235,12 +235,12 @@ public sealed class ContractTableValidationComponentTests
         var methodRows = clauses.Select((clause, index) => (clause, index))
             .Where(static item => item.clause.Owner >> 24 == 0x16)
             .Select(static item => item.index + 1).ToArray();
-        byte[] typeDefs = new byte[40];
+        byte[] typeDefs = new byte[44];
         WriteWord(typeDefs, 0, 1);
         WriteWord(typeDefs, 4, 3);
         WriteWord(typeDefs, 8, 4);
-        WriteWord(typeDefs, 32, typeRows.Length == 0 ? 0u : (uint)typeRows[0]);
-        WriteWord(typeDefs, 36, (uint)typeRows.Length);
+        WriteWord(typeDefs, 36, typeRows.Length == 0 ? 0u : (uint)typeRows[0]);
+        WriteWord(typeDefs, 40, (uint)typeRows.Length);
         byte[] methods = new byte[28];
         WriteWord(methods, 0, 1);
         WriteWord(methods, 4, 4);

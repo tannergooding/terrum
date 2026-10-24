@@ -3,32 +3,37 @@ namespace Terrum.CodeAnalysis;
 public static bool TryValidateFeatureTable(int32 recordCount)
 {
     if (recordCount < 0 || recordCount > 0xFF_FFFF
-        || recordCount * 8 != Host.Features.Length)
+        || recordCount * 8 != Host.Features.Length
+        || Host.FeatureRevisions.Length != 14)
     {
         return false;
     }
 
-    mut uint32 previousFeatureId = 0;
+    for (mut int32 featureId = 0; featureId < 14; featureId = featureId + 1)
+    {
+        Host.FeatureRevisions[featureId] = 0;
+    }
+
     for (mut int32 row = 0; row < recordCount; row = row + 1)
     {
         int32 rowStart = row * 8;
         if (!TryReadFeatureTableWord(rowStart, init var featureId)
-            || !TryReadFeatureTableWord(rowStart + 4, init var minimumRuleRevision)
-            || featureId <= previousFeatureId)
+            || !TryReadFeatureTableWord(rowStart + 4, init var ruleRevision)
+            || !((featureId >= 1 && featureId <= 7)
+                || (featureId >= 9 && featureId <= 13))
+            || ruleRevision != 1)
         {
             return false;
         }
 
-        int32 maximumRuleRevision = featureId == 1 ? 8
-            : featureId == 0x0100 || featureId == 0x0101 || featureId == 0x0102
-                || featureId == 0x0103 || featureId == 0x0104 ? 1 : 0;
-        if (maximumRuleRevision == 0 || minimumRuleRevision == 0
-            || minimumRuleRevision > uint32(maximumRuleRevision))
+        int32 slot = int32(featureId);
+        if (Host.FeatureRevisions[slot] != 0
+            && uint32(Host.FeatureRevisions[slot]) != ruleRevision)
         {
             return false;
         }
 
-        previousFeatureId = featureId;
+        Host.FeatureRevisions[slot] = int32(ruleRevision);
     }
 
     return true;

@@ -49,68 +49,62 @@ public sealed class FieldDefTableValidationComponentTests
         var modules = EncodeModules();
         var noLayoutType = EncodeTypeDefs(0);
         var laidOutType = EncodeTypeDefs(1);
-        var layouts = EncodeLayouts(4);
-        var fields = EncodeFields(1, 4, 1, 0, uint.MaxValue);
+        var layouts = Array.Empty<byte>();
+        var fields = EncodeFields(1, 4, 1, 0);
         const int largeRecordCount = 512;
         var manyTypes = EncodeTypeDefs(Enumerable.Range(0, largeRecordCount)
-            .Select(static index => (3u, 0x14u, (uint)index + 1, 1u, (uint)index + 1))
+            .Select(static index => (3u, 4u, (uint)index + 1, 1u, (uint)index + 1))
             .ToArray());
-        var manyLayouts = EncodeLayouts(Enumerable.Range(0, largeRecordCount)
-            .Select(static index => ((uint)index + 1, 1u, 4u, 4u, 0u, 0u))
-            .ToArray());
-        var manyFields = new byte[largeRecordCount * 20];
+        var manyLayouts = Array.Empty<byte>();
+        var manyFields = new byte[largeRecordCount * 16];
         for (var row = 0; row < largeRecordCount; row++)
         {
-            var offset = row * 20;
+            var offset = row * 16;
             WriteWord(manyFields, offset, (uint)row + 1);
             WriteWord(manyFields, offset + 4, 4);
             WriteWord(manyFields, offset + 8, 1);
-            WriteWord(manyFields, offset + 16, 0);
+            WriteWord(manyFields, offset + 12, 0);
         }
         var cases = new List<TableCase> {
             Valid(strings, modules, noLayoutType, [], fields, typeSpecs),
             Valid(strings, modules, laidOutType, layouts,
-                EncodeFields(1, 4, 1, 0, 0), typeSpecs, layoutCount: 1),
+                EncodeFields(1, 4, 1, 0), typeSpecs, layoutCount: 1),
             Valid(strings, modules, laidOutType, layouts,
-                EncodeFields(1, 4, 1, 0, 3), typeSpecs, layoutCount: 1),
+                EncodeFields(1, 4, 1, 8), typeSpecs, layoutCount: 1),
             Valid(strings, modules, manyTypes, manyLayouts, manyFields, typeSpecs,
                 recordCount: largeRecordCount, typeDefCount: largeRecordCount,
                 fieldCount: largeRecordCount, layoutCount: largeRecordCount),
             Valid(strings, modules, EncodeTypeDefs(
-                    (3, 0x14, 0, 0, 2), (5, 0x14, 1, 1, 1)),
-                EncodeLayouts((2, 1, 4, 4, 0, 0), (1, 0, 0, 4, 0, 0)),
-                EncodeFields(2, 4, 1, 0, 3), multiTypeSpecs,
+                    (3, 4, 0, 0, 2), (5, 4, 1, 1, 1)),
+                [],
+                EncodeFields(2, 4, 1, 0), multiTypeSpecs,
                 typeDefCount: 2, layoutCount: 2),
             Rejected(strings, modules, laidOutType, layouts,
-                EncodeFields(1, 4, 1, 0, 4), typeSpecs, layoutCount: 1),
+                EncodeFields(1, 4, 1, 0x10), typeSpecs, layoutCount: 1),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 4, 1, 0, 0), typeSpecs),
-            Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(2, 4, 1, 0, uint.MaxValue), typeSpecs),
+                EncodeFields(2, 4, 1, 0), typeSpecs),
             Rejected(strings, modules, EncodeTypeDefs(
                     (3, 4, 0, 0, 0), (5, 4, 1, 1, 0)),
-                [], EncodeFields(1, 4, 1, 0, uint.MaxValue),
+                [], EncodeFields(1, 4, 1, 0),
                 multiTypeSpecs, typeDefCount: 2),
             Rejected(strings, modules, EncodeTypeDefs((3, 4, 0, 0, 0)), [],
-                EncodeFields(1, 4, 1, 0, uint.MaxValue), typeSpecs, fieldCount: 0),
+                EncodeFields(1, 4, 1, 0), typeSpecs, fieldCount: 0),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 0, 1, 0, uint.MaxValue), typeSpecs),
+                EncodeFields(1, 0, 1, 0), typeSpecs),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 6, 1, 0, uint.MaxValue), typeSpecs),
+                EncodeFields(1, 6, 1, 0), typeSpecs),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 4, 0, 0, uint.MaxValue), typeSpecs),
+                EncodeFields(1, 4, 0, 0), typeSpecs),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 4, 2, 0, uint.MaxValue), typeSpecs),
+                EncodeFields(1, 4, 2, 0), typeSpecs),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 4, 1, 3, uint.MaxValue), typeSpecs),
+                EncodeFields(1, 4, 1, 3), typeSpecs),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 4, 1, 8, uint.MaxValue), typeSpecs),
+                EncodeFields(1, 4, 1, 16), typeSpecs),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 4, 1, 0, uint.MaxValue)[..^1], typeSpecs),
+                EncodeFields(1, 4, 1, 0)[..^1], typeSpecs),
             Rejected(strings, modules, noLayoutType, [],
-                EncodeFields(1, 4, 1, 0, uint.MaxValue), typeSpecs, typeSpecCount: 0),
-            Rejected(strings, modules, laidOutType, EncodeLayouts(0),
-                EncodeFields(1, 4, 1, 0, 0), typeSpecs, layoutCount: 1),
+                EncodeFields(1, 4, 1, 0), typeSpecs, typeSpecCount: 0),
         };
 
         var malformedNameStrings = EncodeStringSection(
@@ -120,7 +114,7 @@ public sealed class FieldDefTableValidationComponentTests
             [0, 1, 0, 0, 70, 0, 0, 0],
             [0, 1, 0, 0, 128, 0, 0, 0]);
         cases.Add(Rejected(malformedNameStrings, EncodeModules(), noLayoutType, [],
-            EncodeFields(1, 5, 1, 0, uint.MaxValue), typeSpecs, stringCount: 5));
+            EncodeFields(1, 5, 1, 0), typeSpecs, stringCount: 5));
 
         var invalidByteWords = fields.Select(static value => (int)value).ToArray();
         invalidByteWords[0] = 256;
@@ -140,7 +134,6 @@ public sealed class FieldDefTableValidationComponentTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StringTableText.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/ModuleTableValidation.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/TypeDefTableValidation.terrum",
-            "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/LayoutTableValidation.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/TypeSpecTableValidation.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/FieldDefTableValidation.terrum",
         })
@@ -165,15 +158,12 @@ public sealed class FieldDefTableValidationComponentTests
                 new HostBuffer("Rows", PrimitiveType.Int32, [.. testCase.Strings], false),
                 new HostBuffer("Modules", PrimitiveType.Int32, [.. testCase.Modules], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
-                new HostBuffer("Layouts", PrimitiveType.Int32, [.. testCase.Layouts], false),
                 new HostBuffer("FieldDefs", PrimitiveType.Int32, [.. testCase.FieldDefs], false),
                 new HostBuffer("TypeSpecs", PrimitiveType.Int32, [.. testCase.TypeSpecs], false),
                 new HostBuffer("IdentitySlots", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.ModuleCount + 1)], true),
                 new HostBuffer("FieldOwners", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, testCase.FieldCount + 1)], true),
-                new HostBuffer("LayoutOwners", PrimitiveType.Int32,
-                    [.. Enumerable.Repeat(123, testCase.LayoutCount + 1)], true),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
                     testCase.RecordCount,
@@ -250,13 +240,9 @@ public sealed class FieldDefTableValidationComponentTests
                 testCase.TypeDefs.Select(static value => checked((byte)value)).ToArray(),
                 testCase.TypeDefCount, strings, modules, testCase.FieldCount,
                 testCase.GenericParamCount, testCase.LayoutCount, testCase.ContractCount);
-            var layouts = testCase.LayoutCount == 0 ? default
-                : new TrRmLayoutTableReader(
-                    testCase.Layouts.Select(static value => checked((byte)value)).ToArray(),
-                    testCase.LayoutCount, types);
             _ = new TrRmFieldDefTableReader(
                 testCase.FieldDefs.Select(static value => checked((byte)value)).ToArray(),
-                testCase.RecordCount, strings, types, typeSpecs, layouts);
+                testCase.RecordCount, strings, types, typeSpecs);
             return true;
         }
         catch (InvalidDataException)
@@ -278,53 +264,33 @@ public sealed class FieldDefTableValidationComponentTests
     }
 
     private static byte[] EncodeTypeDefs(uint layoutRow)
-        => EncodeTypeDefs((3, layoutRow == 0 ? 4u : 0x14u, 1u, 1u, layoutRow));
+        => EncodeTypeDefs((3, 4u, 1u, 1u, layoutRow));
 
     private static byte[] EncodeTypeDefs(params (uint Name, uint Flags, uint FieldFirst,
         uint FieldCount, uint Layout)[] rows)
     {
-        var typeDefs = new byte[rows.Length * 40];
+        var typeDefs = new byte[rows.Length * 44];
         for (var row = 0; row < rows.Length; row++)
         {
-            var offset = row * 40;
+            var offset = row * 44;
             WriteWord(typeDefs, offset, 1);
             WriteWord(typeDefs, offset + 4, rows[row].Name);
             WriteWord(typeDefs, offset + 8, rows[row].Flags);
             WriteWord(typeDefs, offset + 12, rows[row].FieldFirst);
             WriteWord(typeDefs, offset + 16, rows[row].FieldCount);
             WriteWord(typeDefs, offset + 28, rows[row].Layout);
+            WriteWord(typeDefs, offset + 32, rows[row].Layout == 0 ? 0u : 1u);
         }
         return typeDefs;
     }
 
-    private static byte[] EncodeLayouts(uint size)
-        => EncodeLayouts((1, 1, size, 4u, 0u, 0u));
-
-    private static byte[] EncodeLayouts(params (uint Owner, uint Target, uint Size,
-        uint Alignment, uint Pack, uint Flags)[] rows)
+    private static byte[] EncodeFields(uint owner, uint name, uint typeSpec, uint flags)
     {
-        var layouts = new byte[rows.Length * 24];
-        for (var row = 0; row < rows.Length; row++)
-        {
-            var offset = row * 24;
-            WriteWord(layouts, offset, rows[row].Owner);
-            WriteWord(layouts, offset + 4, rows[row].Target);
-            WriteWord(layouts, offset + 8, rows[row].Size);
-            WriteWord(layouts, offset + 12, rows[row].Alignment);
-            WriteWord(layouts, offset + 16, rows[row].Pack);
-            WriteWord(layouts, offset + 20, rows[row].Flags);
-        }
-        return layouts;
-    }
-
-    private static byte[] EncodeFields(uint owner, uint name, uint typeSpec, uint flags, uint offset)
-    {
-        var field = new byte[20];
+        var field = new byte[16];
         WriteWord(field, 0, owner);
         WriteWord(field, 4, name);
         WriteWord(field, 8, typeSpec);
         WriteWord(field, 12, flags);
-        WriteWord(field, 16, offset);
         return field;
     }
 

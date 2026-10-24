@@ -98,8 +98,8 @@ public sealed partial class ImportTableValidationComponentTests
             ExpectedFound = false,
         };
         var requirements = valid with {
-            Modules = SetWord(valid.Modules, 8, 1),
-            ModuleRefs = SetWord(valid.ModuleRefs, 8, 1),
+            Modules = SetWord(SetWord(valid.Modules, 8, 1), 12, 1),
+            ModuleRefs = SetWord(SetWord(valid.ModuleRefs, 4, 1), 8, 1),
             ExpectedTarget = 1,
             ExpectedPolicy = 1,
         };
@@ -233,14 +233,17 @@ public sealed partial class ImportTableValidationComponentTests
             if (testCase.HasHostedOracle)
             {
                 var hosted = ValidateHosted(testCase);
-                Assert.That(hosted.Valid, Is.EqualTo(testCase.ExpectedValid));
+                Assert.That(hosted.Valid, Is.EqualTo(testCase.ExpectedValid),
+                    $"Hosted differential case {caseIndex}");
                 if (hosted.Valid)
                 {
                     Assert.That(hosted.Found, Is.EqualTo(testCase.ExpectedFound));
                     if (hosted.Found)
                     {
-                        Assert.That(hosted.Target, Is.EqualTo(testCase.ExpectedTarget));
-                        Assert.That(hosted.Policy, Is.EqualTo(testCase.ExpectedPolicy));
+                        Assert.That(hosted.Target, Is.EqualTo(testCase.ExpectedTarget),
+                            $"Hosted differential case {caseIndex}");
+                        Assert.That(hosted.Policy, Is.EqualTo(testCase.ExpectedPolicy),
+                            $"Hosted differential case {caseIndex}");
                     }
                 }
             }
@@ -318,10 +321,10 @@ public sealed partial class ImportTableValidationComponentTests
         WriteWord(methods, 32, 6);
         WriteWord(methods, 36, 1);
 
-        var typeDefs = new byte[80];
+        var typeDefs = new byte[88];
         for (var row = 0; row < 2; row++)
         {
-            int offset = row * 40;
+            int offset = row * 44;
             WriteWord(typeDefs, offset, 1);
             WriteWord(typeDefs, offset + 4, 4);
             WriteWord(typeDefs, offset + 8, 6);
@@ -430,11 +433,11 @@ public sealed partial class ImportTableValidationComponentTests
                 out var requirements);
             return (true, found, requirements.TargetRequirement, requirements.RuntimePolicy);
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException) when (!testCase.ExpectedValid)
         {
             return (false, false, 0, 0);
         }
-        catch (OverflowException)
+        catch (OverflowException) when (!testCase.ExpectedValid)
         {
             return (false, false, 0, 0);
         }
@@ -445,6 +448,7 @@ public sealed partial class ImportTableValidationComponentTests
         var rows = new byte[96];
         WriteWord(rows, 0, 2);
         WriteWord(rows, 4, 1);
+        WriteWord(rows, 8, 1);
         WriteWord(rows, 32, 1);
         WriteWord(rows, 36, 1);
         WriteWord(rows, 40, 1);

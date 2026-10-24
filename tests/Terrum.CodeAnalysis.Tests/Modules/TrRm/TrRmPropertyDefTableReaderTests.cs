@@ -84,7 +84,7 @@ public sealed class TrRmPropertyDefTableReaderTests
 
     private static byte[] Type()
     {
-        var row = new byte[40];
+        var row = new byte[44];
         Write(row, 0, 1);
         Write(row, 4, 3);
         Write(row, 8, 4);

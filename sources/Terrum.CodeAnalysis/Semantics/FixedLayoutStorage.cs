@@ -16,6 +16,14 @@ public static class FixedLayoutStorage
     /// <exception cref="ArgumentException">A commitment, transitive field, or recorded layout is invalid.</exception>
     /// <exception cref="NotSupportedException">The declaration graph exceeds verification limits.</exception>
     public static ImmutableArray<int> Validate(ImmutableArray<BoundStruct> structures)
+        => Compute(structures, validateRecordedLayout: true).Alignments;
+
+    internal static ImmutableArray<BoundStruct> Materialize(
+        ImmutableArray<BoundStruct> structures)
+        => Compute(structures, validateRecordedLayout: false).Structures;
+
+    private static (ImmutableArray<BoundStruct> Structures, ImmutableArray<int> Alignments)
+        Compute(ImmutableArray<BoundStruct> structures, bool validateRecordedLayout)
     {
         if (structures.IsDefault)
         {
@@ -28,6 +36,7 @@ public static class FixedLayoutStorage
         var states = new byte[structures.Length];
         var alignments = new int[structures.Length];
         var heights = new int[structures.Length];
+        var computedStructures = new BoundStruct[structures.Length];
         var names = new HashSet<string>(StringComparer.Ordinal);
         var remaining = SemanticVerifier.MaximumAnalysisVisits;
         for (var index = 0; index < structures.Length; index++)
@@ -36,12 +45,13 @@ public static class FixedLayoutStorage
             {
                 throw Invalid();
             }
+            computedStructures[index] = structures[index];
             if (structures[index].BlittableTargetRequirement != 0)
             {
                 Visit(index, 0);
             }
         }
-        return [.. alignments];
+        return ([.. computedStructures], [.. alignments]);
 
         void Visit(int index, int depth)
         {
@@ -77,6 +87,8 @@ public static class FixedLayoutStorage
             var size = 0L;
             var alignment = 1;
             var height = 1;
+            var computedFields = ImmutableArray.CreateBuilder<BoundStructField>(
+                structure.Fields.Length);
             foreach (var field in structure.Fields)
             {
                 if (--remaining < 0)
@@ -98,8 +110,8 @@ public static class FixedLayoutStorage
                     || NativePointerTypes.IsType(field.Type)
                     || NativeFunctionPointerTypes.IsType(field.Type))
                 {
-                    width = ValueLayout.Size(field.Type, structures);
-                    fieldAlignment = ValueLayout.Alignment(field.Type, structures);
+                    width = ValueLayout.Size(field.Type, computedStructures);
+                    fieldAlignment = ValueLayout.Alignment(field.Type, computedStructures);
                 }
                 else
                 {
@@ -117,25 +129,36 @@ public static class FixedLayoutStorage
                     {
                         throw Invalid();
                     }
-                    width = structures[nested].Size;
+                    width = computedStructures[nested].Size;
                     fieldAlignment = alignments[nested];
                     height = Math.Max(height, heights[nested] + 1);
                 }
                 var offset = structure.IsTransparent ? 0 : Align(size, fieldAlignment);
-                if (offset > int.MaxValue - width || field.Offset != offset || field.Size != width)
+                if (offset > int.MaxValue - width
+                    || (validateRecordedLayout
+                        && (field.Offset != offset || field.Size != width)))
                 {
                     throw Invalid();
                 }
+                computedFields.Add(field with {
+                    Offset = (int)offset,
+                    Size = width,
+                });
                 size = offset + width;
                 alignment = Math.Max(alignment, fieldAlignment);
             }
-            if ((structure.IsTransparent ? size : Align(size, alignment)) != structure.Size
-                || structure.Size < 1)
+            var computedSize = structure.IsTransparent ? size : Align(size, alignment);
+            if (computedSize is < 1 or > int.MaxValue
+                || (validateRecordedLayout && structure.Size != computedSize))
             {
                 throw Invalid();
             }
             alignments[index] = alignment;
             heights[index] = height;
+            computedStructures[index] = structure with {
+                Fields = computedFields.MoveToImmutable(),
+                Size = (int)computedSize,
+            };
             states[index] = 2;
         }
     }

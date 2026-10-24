@@ -10,9 +10,11 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmGenericParamTableWriterTests
 {
-    private static readonly TrRmGenericParamRow TypeFormal = new(0x1300_0001, 0, 5, 1, 1);
-    private static readonly TrRmGenericParamRow MethodFormal = new(0x1600_0001, 0, 6, 0, 0);
-    private static readonly TrRmConstraintRow Constraint = new(1, ushort.MaxValue, 1, 0x1600_0001);
+    private static readonly TrRmGenericParamRow TypeFormal =
+        new(0x1300_0001, 0, 5, 1, 1, 1, 3, 1, 0, 0);
+    private static readonly TrRmGenericParamRow MethodFormal =
+        new(0x1600_0001, 0, 6, 0, 0, 1, 1, 1, 0, 0);
+    private static readonly TrRmConstraintRow Constraint = new(1, 2, 1);
 
     [Test]
     public void EmitsDistinctTypeAndMethodFormalsWithOwnedConstraint()
@@ -22,7 +24,7 @@ public sealed class TrRmGenericParamTableWriterTests
         var moduleBytes = Module();
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, 0, 1, 1, 0);
         var typeBytes = Type();
-        var types = new TrRmTypeDefTableReader(typeBytes, 1, strings, modules, 0, 2, 0, 0);
+        var types = new TrRmTypeDefTableReader(typeBytes, 1, strings, modules, 0, 2, 1, 0);
         var specBytes = Spec();
         var specs = new TrRmTypeSpecTableReader(specBytes, 1, 1, 0, 2, 0);
         var sigBytes = Signature();
@@ -37,22 +39,27 @@ public sealed class TrRmGenericParamTableWriterTests
             strings, types, methods, signatures, 1);
         var constraintRows = new[] { Constraint };
         var constraintBytes = TrRmConstraintTableWriter.Encode(constraintRows, formals, specs);
-        Assert.That(formalBytes.Length, Is.EqualTo(40));
-        Assert.That(constraintBytes.Length, Is.EqualTo(16));
+        Assert.That(formalBytes.Length, Is.EqualTo(64));
+        Assert.That(constraintBytes.Length, Is.EqualTo(12));
         Assert.That(formals.GetConstraintOwner(1), Is.EqualTo(1));
-        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(constraintBytes.AsSpan(4)), Is.EqualTo(ushort.MaxValue));
-        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(12)), Is.EqualTo(Constraint.WitnessRef));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(constraintBytes.AsSpan(4)), Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(8)), Is.EqualTo(Constraint.Payload));
 
         formalRows[0] = TypeFormal with { NameStringRow = 0 };
-        constraintRows[0] = Constraint with { TargetTypeSpecRow = 0 };
+        constraintRows[0] = Constraint with { Payload = 0 };
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(formalBytes.AsSpan(8)), Is.EqualTo(5u));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(constraintBytes.AsSpan(8)), Is.EqualTo(1u));
 
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+        ], types, targetProfiles, 0);
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleBytes),
             new TrRmSection(0x0002, 0, 6, names),
             new TrRmSection(0x0011, 0, 1, specBytes),
             new TrRmSection(0x0013, 0, 1, typeBytes),
+            new TrRmSection(0x0015, 0, 1, layoutBytes),
             new TrRmSection(0x0016, 0, 1, methodBytes),
             new TrRmSection(0x0017, 0, 1, sigBytes),
             new TrRmSection(0x0019, 0, 2, formalBytes),
@@ -86,7 +93,7 @@ public sealed class TrRmGenericParamTableWriterTests
             Constraint with { OwnerGenericParamRow = 2 },
         ]));
         Assert.Throws<InvalidDataException>(() => EncodeConstraints([
-            Constraint with { TargetTypeSpecRow = 0 },
+            Constraint with { Payload = 0 },
         ]));
     }
 
@@ -94,7 +101,7 @@ public sealed class TrRmGenericParamTableWriterTests
     {
         var strings = new TrRmStringTableReader(Names(), 6);
         var modules = new TrRmModuleTableReader(Module(), 1, strings, 0, 1, 1, 0);
-        var types = new TrRmTypeDefTableReader(Type(), 1, strings, modules, 0, 2, 0, 0);
+        var types = new TrRmTypeDefTableReader(Type(), 1, strings, modules, 0, 2, 1, 0);
         var specs = new TrRmTypeSpecTableReader(Spec(), 1, 1, 0, 2, 0);
         var signatures = new TrRmMethodSigTableReader(Signature(), 1, specs, 0, 2);
         var methods = new TrRmMethodDefTableReader(Method(), 1, strings, modules,
@@ -106,7 +113,7 @@ public sealed class TrRmGenericParamTableWriterTests
     {
         var strings = new TrRmStringTableReader(Names(), 6);
         var modules = new TrRmModuleTableReader(Module(), 1, strings, 0, 1, 1, 0);
-        var types = new TrRmTypeDefTableReader(Type(), 1, strings, modules, 0, 2, 0, 0);
+        var types = new TrRmTypeDefTableReader(Type(), 1, strings, modules, 0, 2, 1, 0);
         var specs = new TrRmTypeSpecTableReader(Spec(), 1, 1, 0, 2, 0);
         var signatures = new TrRmMethodSigTableReader(Signature(), 1, specs, 0, 2);
         var methods = new TrRmMethodDefTableReader(Method(), 1, strings, modules,
@@ -136,12 +143,14 @@ public sealed class TrRmGenericParamTableWriterTests
 
     private static byte[] Type()
     {
-        var row = new byte[40];
+        var row = new byte[44];
         Write(row, 0, 1);
         Write(row, 4, 3);
         Write(row, 8, 4);
         Write(row, 20, 1);
         Write(row, 24, 1);
+        Write(row, 28, 1);
+        Write(row, 32, 1);
         return row;
     }
 

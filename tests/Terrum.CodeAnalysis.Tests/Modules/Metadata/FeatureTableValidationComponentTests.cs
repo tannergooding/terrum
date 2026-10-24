@@ -34,20 +34,18 @@ public sealed class FeatureTableValidationComponentTests
         var cases = new List<TableCase> {
             Valid([]),
             Valid([1, 1]),
-            Valid([1, 6]),
-            Valid([1, 7]),
-            Valid([1, 8]),
-            Valid([0x0100, 1]),
-            Valid([0x0102, 1]),
-            Valid([0x0103, 1]),
-            Valid([0x0100, 1, 0x0101, 1, 0x0104, 1]),
-            Valid([0x0100, 1, 0x0101, 1, 0x0102, 1, 0x0103, 1, 0x0104, 1]),
+            Valid([2, 1]),
+            Valid([7, 1]),
+            Valid([9, 1]),
+            Valid([13, 1, 1, 1]),
+            Valid([1, 1, 2, 1, 9, 1, 10, 1, 11, 1, 12, 1, 13, 1]),
+            Valid([1, 1, 1, 1]),
             Rejected([0, 1]),
-            Rejected([2, 1]),
+            Rejected([3, 2]),
             Rejected([1, 0]),
-            Rejected([1, 9]),
-            Rejected([0x0100, 2]),
-            Rejected([0x0105, 1]),
+            Rejected([1, 2]),
+            Rejected([8, 1]),
+            Rejected([14, 1]),
             Rejected([1, 1, 1, 2]),
             Rejected([1, 1, 2]),
             new([], -1, false, true),
@@ -79,6 +77,7 @@ public sealed class FeatureTableValidationComponentTests
             var compilation = Compilation.Create(components,
             [
                 new HostBuffer("Features", PrimitiveType.Int32, [.. testCase.Features], false),
+                new HostBuffer("FeatureRevisions", PrimitiveType.Int32, [.. new int[14]], true),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                     [testCase.RecordCount, testCase.ExpectedValid ? 1 : 0], false),
             ], policy);
@@ -111,7 +110,20 @@ public sealed class FeatureTableValidationComponentTests
     {
         try
         {
-            _ = new TrRmFeatureTableReader(ToBytes(testCase.Features), testCase.RecordCount);
+            var features = new TrRmFeatureTableReader(
+                ToBytes(testCase.Features), testCase.RecordCount);
+            var revisions = new Dictionary<uint, uint>();
+            for (var row = 1; row <= features.Count; row++)
+            {
+                var feature = features.GetFeature(row);
+                if (!IsAssignedFeature(feature.FeatureId) || feature.RuleRevision != 1
+                    || (revisions.TryGetValue(feature.FeatureId, out var revision)
+                        && revision != feature.RuleRevision))
+                {
+                    return false;
+                }
+                revisions[feature.FeatureId] = feature.RuleRevision;
+            }
             return true;
         }
         catch (InvalidDataException)
@@ -119,6 +131,9 @@ public sealed class FeatureTableValidationComponentTests
             return false;
         }
     }
+
+    private static bool IsAssignedFeature(uint featureId)
+        => featureId is >= 1 and <= 7 or >= 9 and <= 13;
 
     private static byte[] ToBytes(int[] values)
         => values.Select(static value => checked((byte)value)).ToArray();

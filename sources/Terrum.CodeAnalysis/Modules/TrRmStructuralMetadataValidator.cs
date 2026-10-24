@@ -15,7 +15,8 @@ public static class TrRmStructuralMetadataValidator
         internal ValidatedExecutionTables(TrRmStringTableReader strings,
             TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
             TrRmTypeSpecTableReader typeSpecs, TrRmFieldDefTableReader fields,
-            TrRmLayoutTableReader layouts,
+            TrRmLayoutTableReader layouts, TrRmLayoutFieldTableReader layoutFields,
+            TrRmTargetProfileTableReader targetProfiles,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
             TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
             TrRmContractTableReader contracts, TrRmNativeImportTableReader nativeImports,
@@ -29,6 +30,8 @@ public static class TrRmStructuralMetadataValidator
             TypeSpecs = typeSpecs;
             Fields = fields;
             Layouts = layouts;
+            LayoutFields = layoutFields;
+            TargetProfiles = targetProfiles;
             Signatures = signatures;
             Parameters = parameters;
             Methods = methods;
@@ -47,6 +50,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmFieldDefTableReader Fields { get; }
         internal TrRmLayoutTableReader Layouts { get; }
+        internal TrRmLayoutFieldTableReader LayoutFields { get; }
+        internal TrRmTargetProfileTableReader TargetProfiles { get; }
         internal TrRmMethodSigTableReader Signatures { get; }
         internal TrRmParamTableReader Parameters { get; }
         internal TrRmMethodDefTableReader Methods { get; }
@@ -110,6 +115,8 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0013, out var typeDefBytes, out var typeDefCount);
         _ = index.TryGetSection(0x0014, out var fieldDefBytes, out var fieldDefCount);
         _ = index.TryGetSection(0x0015, out var layoutBytes, out var layoutCount);
+        _ = index.TryGetSection(0x0023, out var layoutFieldBytes, out var layoutFieldCount);
+        _ = index.TryGetSection(0x0048, out var targetProfileBytes, out var targetProfileCount);
         _ = index.TryGetSection(0x0016, out var methodDefBytes, out var methodDefCount);
         _ = index.TryGetSection(0x0017, out var methodSigBytes, out var methodSigCount);
         _ = index.TryGetSection(0x0018, out var paramBytes, out var paramCount);
@@ -163,11 +170,15 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmTypeArgTableReader(typeArgBytes, typeArgCount, typeSpecs);
         var types = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
             strings, modules, fieldDefCount, genericParamCount, layoutCount, contractCount);
-        var layouts = layoutCount == 0 ? default
-            : new TrRmLayoutTableReader(layoutBytes, layoutCount, types);
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, targetProfileCount);
+        var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
+            types, targetProfiles, layoutFieldCount);
         var fields = fieldDefCount == 0 ? default
             : new TrRmFieldDefTableReader(fieldDefBytes, fieldDefCount, strings, types,
-                typeSpecs, layouts);
+                typeSpecs);
+        var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
+            layoutFieldCount, layouts, types, fields);
         var signatures = methodSigCount == 0 ? default
             : new TrRmMethodSigTableReader(methodSigBytes, methodSigCount,
                 typeSpecs, paramCount, genericParamCount);
@@ -184,14 +195,14 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmConstraintTableReader(constraintBytes, constraintCount,
                 generics, typeSpecs);
         var contracts = new TrRmContractTableReader(contractBytes, contractCount,
-            types, methods, signatures, parameters, typeSpecs);
-        ValidateBlittableLayouts(types, layouts, contracts);
+            types, methods, signatures, parameters, typeSpecs, developmentProfile);
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports);
         var nativeImports = new TrRmNativeImportTableReader(nativeImportBytes,
-            nativeImportCount, strings, methods, signatures, parameters, typeSpecs, contracts);
+            nativeImportCount, strings, methods, signatures, parameters,
+            typeSpecs, contracts, layouts);
         var nativeFunctionPointerSignatures =
             new TrRmNativeFunctionPointerSignatureTableReader(
                 nativeFunctionPointerSignatureBytes, nativeFunctionPointerSignatureCount,
@@ -210,7 +221,7 @@ public static class TrRmStructuralMetadataValidator
             }
         }
         ValidateNativeBoundaryFeatureAssignments(features, modules, typeSpecs, signatures,
-            parameters, methods, bodies, contracts, nativeImports, nativeCallables,
+            parameters, methods, bodies, contracts, layouts, nativeImports, nativeCallables,
             nativeFunctionPointerSignatures, nativeVTables, developmentProfile);
         var sourceFiles = sourceFileCount == 0 ? default
             : new TrRmSourceFileTableReader(sourceFileBytes, sourceFileCount, strings, modules);
@@ -300,7 +311,8 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceFiles;
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
-            fields, layouts, signatures, parameters, methods, bodies, contracts, nativeImports,
+            fields, layouts, layoutFields, targetProfiles, signatures, parameters, methods,
+            bodies, contracts, nativeImports,
             nativeCallables, nativeFunctionPointerSignatures, nativeVTables, imports);
     }
 
@@ -309,6 +321,7 @@ public static class TrRmStructuralMetadataValidator
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmMethodDefTableReader methods,
         TrRmBodyTableReader bodies, TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
@@ -325,7 +338,7 @@ public static class TrRmStructuralMetadataValidator
             var (typeStart, typeEnd) = modules.GetTypeDefRange(module);
             for (var type = typeStart; type < typeEnd; type++)
             {
-                hasNativeBoundaryContracts |= contracts.GetNativeBlittableTargetRequirement(type) != 0;
+                hasNativeBoundaryContracts |= layouts.HasBlittableVariant(type);
             }
             var (methodStart, methodEnd) = modules.GetMethodDefRange(module);
             for (var method = methodStart; method < methodEnd; method++)
@@ -525,30 +538,6 @@ public static class TrRmStructuralMetadataValidator
     private static bool IsNativePointerType(ReadOnlySpan<byte> typeSpec)
         => typeSpec.Length >= 3 && typeSpec[2] == 0x8C
             && typeSpec[0] is 0x01 or 0x0C;
-
-    private static void ValidateBlittableLayouts(TrRmTypeDefTableReader types,
-        TrRmLayoutTableReader layouts, TrRmContractTableReader contracts)
-    {
-        for (var type = 1; type <= types.Count; type++)
-        {
-            var targetRequirement = contracts.GetNativeBlittableTargetRequirement(type);
-            if (targetRequirement == 0)
-            {
-                continue;
-            }
-
-            var layoutRow = types.GetLayoutRow(type);
-            if (layoutRow == 0
-                || layouts.GetTargetRequirement(layoutRow) != targetRequirement
-                || layouts.GetSize(layoutRow) == 0
-                || layouts.GetAlignment(layoutRow) == 0
-                || layouts.GetPack(layoutRow) != 0
-                || layouts.GetFlags(layoutRow) != 0)
-            {
-                throw InvalidMetadata();
-            }
-        }
-    }
 
     private static InvalidDataException InvalidMetadata()
         => new("Invalid TRRM structural metadata.");

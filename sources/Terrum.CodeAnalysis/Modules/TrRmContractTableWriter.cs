@@ -14,7 +14,7 @@ public static class TrRmContractTableWriter
     public static byte[] Encode(IReadOnlyList<TrRmContractRow> rows,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader typeSpecs)
+        TrRmTypeSpecTableReader typeSpecs, bool developmentProfile = false)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var rowCount = rows.Count;
@@ -54,7 +54,7 @@ public static class TrRmContractTableWriter
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(rowCount * sizeof(uint)),
             (uint)(dataOffset - indexLength));
         _ = new TrRmContractTableReader(result, rowCount,
-            types, methods, signatures, parameters, typeSpecs);
+            types, methods, signatures, parameters, typeSpecs, developmentProfile);
         return result;
     }
 }

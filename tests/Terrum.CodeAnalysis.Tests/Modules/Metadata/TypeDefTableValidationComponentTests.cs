@@ -101,7 +101,7 @@ public sealed class TypeDefTableValidationComponentTests
                 (1, 4, 4, 0, 0, 0, 0, 0, 1, 0),
                 (1, 5, 4, 1, 1, 0, 0, 0, 0, 0)), fieldCount: 1),
             Rejected(strings, modules, EncodeTypeDefs(
-                (1, 4, 4, 0, 0, 0, 0, 1, 0, 0),
+                (1, 4, 4, 0, 0, 0, 0, 2, 0, 0),
                 (1, 5, 4, 1, 1, 0, 0, 0, 0, 0)), fieldCount: 1, layoutCount: 1),
         };
 
@@ -204,7 +204,7 @@ public sealed class TypeDefTableValidationComponentTests
         ]);
         var modules = EncodeModules(1, 1);
         var typeDefs = EncodeTypeDefs((1, 3, 4, 1, 1, 0, 0, 0, 0, 0));
-        var fieldDefs = EncodeFieldDef(1, 4, 1, 0, uint.MaxValue);
+        var fieldDefs = EncodeFieldDef(1, 4, 1, 0);
         var typeSpecs = TrRmTypeSpecTableWriter.Encode(
             [TrRmTypeSpecTableWriter.Builtin(8)], 1, 0, 0, 0);
         var recursiveTypeSpecs = TrRmTypeSpecTableWriter.Encode(
@@ -231,7 +231,6 @@ public sealed class TypeDefTableValidationComponentTests
             "sources/Terrum.CodeAnalysis.Terrum/Modules/StringTableText.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/ModuleTableValidation.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/TypeDefTableValidation.terrum",
-            "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/LayoutTableValidation.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/TypeSpecTableValidation.terrum",
             "tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/FieldDefTableValidation.terrum",
         })
@@ -279,7 +278,6 @@ public sealed class TypeDefTableValidationComponentTests
                     [.. modules.Select(static value => (int)value)], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32,
                     [.. typeDefs.Select(static value => (int)value)], false),
-                new HostBuffer("Layouts", PrimitiveType.Int32, [], false),
                 new HostBuffer("FieldDefs", PrimitiveType.Int32,
                     [.. fieldDefs.Select(static value => (int)value)], false),
                 new HostBuffer("TypeSpecs", PrimitiveType.Int32,
@@ -288,8 +286,6 @@ public sealed class TypeDefTableValidationComponentTests
                     [.. Enumerable.Repeat(123, 2)], true),
                 new HostBuffer("FieldOwners", PrimitiveType.Int32,
                     [.. Enumerable.Repeat(123, 2)], true),
-                new HostBuffer("LayoutOwners", PrimitiveType.Int32,
-                    [.. Enumerable.Repeat(123, 1)], true),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
                     1, 1, 5, 0, 1, 0, 0, -1, 1, 0, 0, 0, 1,
@@ -387,14 +383,13 @@ public sealed class TypeDefTableValidationComponentTests
     }
 
     private static byte[] EncodeFieldDef(uint owner, uint name, uint typeSpec,
-        uint flags, uint byteOffset)
+        uint flags)
     {
-        var field = new byte[20];
+        var field = new byte[16];
         WriteWord(field, 0, owner);
         WriteWord(field, 4, name);
         WriteWord(field, 8, typeSpec);
         WriteWord(field, 12, flags);
-        WriteWord(field, 16, byteOffset);
         return field;
     }
 
@@ -418,10 +413,10 @@ public sealed class TypeDefTableValidationComponentTests
         uint FieldFirst, uint FieldCount, uint GenericFirst, uint GenericCount,
         uint Layout, uint ContractFirst, uint ContractCount)[] rows)
     {
-        var section = new byte[rows.Length * 40];
+        var section = new byte[rows.Length * 44];
         for (var row = 0; row < rows.Length; row++)
         {
-            var offset = row * 40;
+            var offset = row * 44;
             WriteWord(section, offset, rows[row].Namespace);
             WriteWord(section, offset + 4, rows[row].Name);
             WriteWord(section, offset + 8, rows[row].Flags);
@@ -430,8 +425,9 @@ public sealed class TypeDefTableValidationComponentTests
             WriteWord(section, offset + 20, rows[row].GenericFirst);
             WriteWord(section, offset + 24, rows[row].GenericCount);
             WriteWord(section, offset + 28, rows[row].Layout);
-            WriteWord(section, offset + 32, rows[row].ContractFirst);
-            WriteWord(section, offset + 36, rows[row].ContractCount);
+            WriteWord(section, offset + 32, rows[row].Layout == 0 ? 0u : 1u);
+            WriteWord(section, offset + 36, rows[row].ContractFirst);
+            WriteWord(section, offset + 40, rows[row].ContractCount);
         }
         return section;
     }

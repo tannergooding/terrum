@@ -198,7 +198,7 @@ public sealed class MethodDefTableValidationComponentTests
         ], stringReader, 0, 1, 2, 0);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, stringReader, 0, 1, 2, 0);
         var typeBytes = TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(2, 3, 4, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0),
         ], stringReader, modules, 0, 1, 0, 2);
         var types = new TrRmTypeDefTableReader(typeBytes, 1, stringReader,
             modules, 0, 1, 0, 2);
@@ -258,8 +258,8 @@ public sealed class MethodDefTableValidationComponentTests
         ], stringReader, 0, 2, 2, 0);
         var modules = new TrRmModuleTableReader(moduleBytes, 2, stringReader, 0, 2, 2, 0);
         var typeBytes = TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(3, 4, 4, 0, 0, 0, 0, 0, 0, 0),
-            new TrRmTypeDefRow(3, 5, 4, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(3, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(3, 5, 4, 0, 0, 0, 0, 0, 0, 0, 0),
         ], stringReader, modules, 0, 0, 0, 0);
         var types = new TrRmTypeDefTableReader(typeBytes, 2, stringReader,
             modules, 0, 0, 0, 0);
@@ -294,8 +294,8 @@ public sealed class MethodDefTableValidationComponentTests
         ], stringReader, 0, 2, 2, 0);
         var modules = new TrRmModuleTableReader(moduleBytes, 2, stringReader, 0, 2, 2, 0);
         var typeBytes = TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(3, 4, 4, 0, 0, 0, 0, 0, 0, 0),
-            new TrRmTypeDefRow(3, 5, 4, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(3, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(3, 5, 4, 0, 0, 0, 0, 0, 0, 0, 0),
         ], stringReader, modules, 0, 0, 0, 0);
         var types = new TrRmTypeDefTableReader(typeBytes, 2, stringReader,
             modules, 0, 0, 0, 0);
@@ -367,7 +367,7 @@ public sealed class MethodDefTableValidationComponentTests
         }
 
         return TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(2, 3, 4, 0, 0, 0, 0, 0, 0, 0),
+            new TrRmTypeDefRow(2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0),
         ], strings, modules, 0, 1, 0, contractCount);
     }
 

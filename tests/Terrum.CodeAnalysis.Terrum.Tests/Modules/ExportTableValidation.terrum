@@ -16,7 +16,7 @@ public static bool TryValidateExportTable(int32 recordCount,
         || recordCount * 8 != Host.Exports.Length
         || moduleCount * 48 != Host.Modules.Length
         || moduleRefCount * 12 != Host.ModuleRefs.Length
-        || typeDefCount * 40 != Host.TypeDefs.Length
+        || typeDefCount * 44 != Host.TypeDefs.Length
         || methodDefCount * 28 != Host.Methods.Length
         || propertyDefCount * 20 != Host.Properties.Length
         || Host.ImportExpectedDefinitions.Length != importRecordCount + 1
@@ -68,7 +68,7 @@ public static bool TryValidateExportTable(int32 recordCount,
         }
         if (ownerType != 0)
         {
-            if (!TryReadTypeDefTableWord((ownerType - 1) * 40, 8, init var ownerFlags)
+            if (!TryReadTypeDefTableWord((ownerType - 1) * 44, 8, init var ownerFlags)
                 || (ownerFlags & 3) != 2)
             {
                 return false;
@@ -111,7 +111,7 @@ bool TryGetExportVisibilityOwner(uint32 definition,
     if (table == 0x13)
     {
         if (row > uint32(typeDefCount)
-            || !TryReadTypeDefTableWord((int32(row) - 1) * 40, 8,
+            || !TryReadTypeDefTableWord((int32(row) - 1) * 44, 8,
                 init var flags))
         {
             return false;

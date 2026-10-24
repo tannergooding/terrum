@@ -54,23 +54,26 @@ public sealed class GenericParamConstraintTableValidationComponentTests
             WithFormalWord(valid, 12, 0),
             WithFormalWord(valid, 16, 0),
             WithFormalWord(valid, 32, 1),
-            WithFormalWord(valid, 36, 0),
+            WithFormalWord(valid, 48, 0),
+            WithFormalWord(valid, 20, 0),
+            WithFormalWord(valid, 24, 1),
             WithFormalBytes(valid, ToBytes(valid.GenericParams[..^1])),
             WithConstraintWord(valid, 0, 0),
             WithConstraintWord(valid, 0, 3),
+            WithConstraintHalfWord(valid, 4, 0),
+            WithConstraintHalfWord(valid, 4, 4),
             WithConstraintHalfWord(valid, 6, 1),
             WithConstraintWord(valid, 8, 0),
-            WithConstraintWord(valid, 8, 2),
+            WithConstraintWord(valid, 8, 4),
             WithConstraintBytes(valid, ToBytes(valid.Constraints[..^1])),
             valid with { TypeSpecCount = -1, ExpectedValid = false },
             valid with { TypeSpecCount = 0x1000000, ExpectedValid = false },
             valid with { ConstraintCount = 1, ExpectedValid = false },
         };
 
-        var overlappingRanges = WithFormalWord(valid, 32, 1);
+        var overlappingRanges = WithFormalWord(valid, 44, 1);
         cases.Add(overlappingRanges);
-        var unownedRange = WithFormalWord(valid, 32, 0);
-        cases.Add(WithFormalWord(unownedRange, 36, 0));
+        cases.Add(WithFormalWord(valid, 44, 0));
 
         var invalidConstraintByte = valid.Constraints.ToArray();
         invalidConstraintByte[15] = 256;
@@ -206,13 +209,16 @@ public sealed class GenericParamConstraintTableValidationComponentTests
         var signature = Signature();
         WriteWord(signature, 16, 0);
         WriteWord(signature, 20, 0);
-        var genericParams = new byte[genericParamCount * 20];
+        var genericParams = new byte[genericParamCount * 32];
         for (var index = 0; index < genericParamCount; index++)
         {
-            var offset = index * 20;
+            var offset = index * 32;
             WriteWord(genericParams, offset, 0x1300_0001);
             WriteWord(genericParams, offset + 4, (uint)index);
             WriteWord(genericParams, offset + 8, 5);
+            genericParams[offset + 20] = 1;
+            genericParams[offset + 21] = 3;
+            genericParams[offset + 22] = 1;
         }
 
         var groupedCase = testCase with {
@@ -317,7 +323,7 @@ public sealed class GenericParamConstraintTableValidationComponentTests
 
     private static byte[] Type()
     {
-        var row = new byte[40];
+        var row = new byte[44];
         WriteWord(row, 0, 1);
         WriteWord(row, 4, 3);
         WriteWord(row, 8, 4);
@@ -345,29 +351,33 @@ public sealed class GenericParamConstraintTableValidationComponentTests
 
     private static byte[] GenericParams()
     {
-        var rows = new byte[40];
+        var rows = new byte[64];
         WriteWord(rows, 0, 0x1300_0001);
         WriteWord(rows, 8, 5);
         WriteWord(rows, 12, 1);
         WriteWord(rows, 16, 1);
-        WriteWord(rows, 20, 0x1600_0001);
-        WriteWord(rows, 28, 6);
-        WriteWord(rows, 32, 2);
-        WriteWord(rows, 36, 1);
+        rows[20] = 1;
+        rows[21] = 3;
+        rows[22] = 1;
+        WriteWord(rows, 32, 0x1600_0001);
+        WriteWord(rows, 40, 6);
+        WriteWord(rows, 44, 2);
+        WriteWord(rows, 48, 1);
+        rows[52] = 1;
+        rows[53] = 3;
+        rows[54] = 1;
         return rows;
     }
 
     private static byte[] Constraints()
     {
-        var rows = new byte[32];
+        var rows = new byte[24];
         WriteWord(rows, 0, 1);
-        WriteHalfWord(rows, 4, ushort.MaxValue);
+        WriteHalfWord(rows, 4, 2);
         WriteWord(rows, 8, 1);
-        WriteWord(rows, 12, 0xDEAD_BEEF);
-        WriteWord(rows, 16, 2);
-        WriteHalfWord(rows, 20, 0xFFFE);
-        WriteWord(rows, 24, 1);
-        WriteWord(rows, 28, uint.MaxValue);
+        WriteWord(rows, 12, 2);
+        WriteHalfWord(rows, 16, 2);
+        WriteWord(rows, 20, 1);
         return rows;
     }
 

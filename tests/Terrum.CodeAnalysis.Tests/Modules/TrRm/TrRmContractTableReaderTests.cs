@@ -204,18 +204,28 @@ public sealed class TrRmContractTableReaderTests
         Write(module, 40, 1);
         Write(module, 44, 1);
         var modules = new TrRmModuleTableReader(module, 1, names, 0, typeRows, 1, 0);
-        var type = new byte[typeRows * 40];
+        var type = new byte[typeRows * 44];
         for (var index = 0; index < typeRows; index++)
         {
-            var offset = index * 40;
+            var offset = index * 44;
             Write(type, offset, 1);
             Write(type, offset + 4, index == 0 ? 3u : 4u);
             Write(type, offset + 8, index == 0 ? typeFlags : 4u);
-            Write(type, offset + 32, index == 0 ? typeFirst : secondTypeFirst);
-            Write(type, offset + 36, index == 0 ? typeCount : secondTypeCount);
+            Write(type, offset + 28, (uint)index + 1);
+            Write(type, offset + 32, 1);
+            Write(type, offset + 36, index == 0 ? typeFirst : secondTypeFirst);
+            Write(type, offset + 40, index == 0 ? typeCount : secondTypeCount);
         }
         var types = new TrRmTypeDefTableReader(type, typeRows, names, modules,
-            0, 0, 0, declaredCount);
+            0, 0, typeRows, declaredCount);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutRows = new TrRmLayoutRow[typeRows];
+        for (var index = 0; index < typeRows; index++)
+        {
+            layoutRows[index] = new TrRmLayoutRow(index + 1, 0, 0, 0, 0, 0, 0, 0);
+        }
+        var layouts = TrRmLayoutTableWriter.Encode(
+            layoutRows, types, targetProfiles, 0);
         byte[] spec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         if (pointerParameter)
         {
@@ -269,12 +279,14 @@ public sealed class TrRmContractTableReaderTests
             }
 
             var emitted = TrRmContractTableWriter.Encode(
-                rows, types, methods, signatures, parameters, typeSpecs);
+                rows, types, methods, signatures, parameters, typeSpecs,
+                developmentProfile: true);
             Assert.That(emitted, Is.EqualTo(section));
             section = emitted;
         }
         _ = new TrRmContractTableReader(section, recordCount,
-            types, methods, signatures, parameters, typeSpecs);
+            types, methods, signatures, parameters, typeSpecs,
+            developmentProfile: true);
         if (frameArtifact)
         {
             var artifact = TrRmArtifactWriter.Encode([
@@ -282,6 +294,7 @@ public sealed class TrRmContractTableReaderTests
                 new TrRmSection(0x0002, 0, 5, nameBytes),
                 new TrRmSection(0x0011, 0, 1, spec),
                 new TrRmSection(0x0013, 0, (uint)typeRows, type),
+                new TrRmSection(0x0015, 0, (uint)typeRows, layouts),
                 new TrRmSection(0x0016, 0, 1, method),
                 new TrRmSection(0x0017, 0, 1, signature),
                 new TrRmSection(0x001B, 0, (uint)recordCount, section),

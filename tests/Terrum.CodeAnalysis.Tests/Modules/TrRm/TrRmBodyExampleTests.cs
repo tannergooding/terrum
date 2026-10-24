@@ -1528,7 +1528,7 @@ public sealed class TrRmBodyExampleTests
         BinaryPrimitives.WriteUInt32LittleEndian(reference, 2);
         var references = new TrRmModuleRefTableReader(expectedTarget ? reference : [],
             expectedTarget ? 1 : 0, names, modules);
-        byte[] typeDef = new byte[40];
+        byte[] typeDef = new byte[44];
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(4), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(8),
