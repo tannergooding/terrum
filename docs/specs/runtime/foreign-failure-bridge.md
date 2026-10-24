@@ -19,8 +19,8 @@ procedure-call contract.
 This bridge does not unify C++ exceptions, SEH records and Terrum failures.
 It assigns neither a universal exception base class nor a general source
 construction/capture API. [Local failure contracts](../language/local-failures.md)
-define Exception/category opt-in and explicit reference/Copy catch bindings;
-typed construction, captured state and actual dispatch support still require
+define self-typed exception classes and object-handle catch bindings; common
+factory use, captured state and actual dispatch support still require
 independently complete admitted contracts. A raw packet
 is not automatically an eligible `throw` operand or a payload for every catch.
 Missing local failure support declines the affected bridge before execution;
@@ -136,21 +136,22 @@ publication rule does not redefine all source outputs as transactional.
 The origin adapter contains its own supported propagation as well as that
 of the wrapped operation. Its normal wire entry has no escaping language
 exception. This does not make the wrapped source operation or receiving
-proxy NoThrow: raising from a failure packet remains a source failure effect.
-Selecting a bridge cannot erase that effect in binding or optimization.
+proxy failure-free: raising from a failure packet remains a source failure
+effect. Selecting a bridge cannot erase that effect in binding or optimization.
 
 ## 5. Typed mapping, propagation and causal replacement
 
-A receiving bridge declares its exact eligible local failure identity and
-mapping. Complete type identity, qualifications, dependencies, payload
+A receiving bridge declares its exact eligible local exception identity and
+mapping. Complete type identity, qualifications, dependencies, object
 ownership and domain agreement matter; a same-spelled type is insufficient.
 The mapping may retain the packet as opaque owned state or construct a
-specifically supported local failure value. There is no mandatory conversion
+specifically supported local exception object. There is no mandatory conversion
 to text, boxing, universal `Exception` or normal `Error` result.
 
 Perform the selected mapping before entering local failure dispatch.
-An ordinary local payload must have its exact admitted Exception capability;
-a captured event instead needs its separately checked propagation protocol.
+An ordinary local mapping must produce an exact admitted exception class
+implementing `IException<TSelf>` through its selected creation contract; a
+captured event instead needs its separately checked propagation protocol.
 The annotation alone supplies neither mapping, capture nor domain ownership.
 Typed catch tests do not invoke arbitrary foreign mappers, inspect an
 unadmitted exception object or dynamically guess a failure type.

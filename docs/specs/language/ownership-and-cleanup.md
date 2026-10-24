@@ -6,14 +6,16 @@ partial cleanup. [Structural flow](initialization-and-flow.md) supplies place
 states; [dependencies](dependencies-and-views.md) supplies retained backing;
 [task responsibility](task-responsibility.md) supplies completion obligations.
 An ownership contract grants neither write authority nor a physical layout.
+The shared [definitions](../language.md#definitions-and-notation) distinguish
+copying, aliasing, references, lifetime and ownership.
 
 ## Values, storage and structural state
 
 One live unique value has one responsible holder. Explicit transfer changes
 that holder, vacates its source, and preserves the actual value's complete
 type, resources, dependencies and outstanding protocol obligations.
-Borrowed children, copied handles and collector roots are not additional
-owners. A type promising Copy cannot contain a field whose duplication would
+Non-owning references/views to children, copied handles and collector roots
+are not additional owners. A type promising Copy cannot contain a field whose duplication would
 duplicate an owning obligation or declare an owning Cleanup operation.
 
 Distinguish acquiring storage, initializing a field, establishing a complete
@@ -203,13 +205,14 @@ unchecked postcondition, must establish the boundary.
 ## Complete-value Cleanup and transitive field retirement
 
 The resolved no-argument Cleanup schema designates one primary cleanup
-operation on an eligible unique type. It is nonrepeatable; multiple selected
-operations reject. Its target is a synchronous parameterless readonly
-instance method returning void, with checked NoThrow and nonsuspending
-cleanup. Static methods, constructors, accessors, async/extern or
-caller-unsafe declarations cannot supply this automatic operation.
-The method's ordinary name does not register it. Partial member authorship
-and generic substitution preserve the exact selected operation identity.
+operation on an eligible unique value, aliasable class object or boxed
+payload. It is one object-level obligation, not one operation per handle or
+box alias. It is nonrepeatable; multiple selected operations reject. Its
+target is a synchronous parameterless readonly instance method returning
+void. Static methods, constructors, accessors, async/extern or
+caller-unsafe declarations cannot supply this automatic operation. The
+method's ordinary name does not register it. Partial member authorship and
+generic substitution preserve the exact selected operation identity.
 
 Cleanup is invoked by value retirement, not directly through ordinary calls,
 overload lookup, an interface-name convention or a Close method. It grants
@@ -226,10 +229,20 @@ On complete retirement, run the selected authored body once, then
 automatically retire fields in reverse declaration order. Each complete owning
 child recursively performs its own body-then-fields cleanup. Without an
 authored body, perform just the derived field retirement.
-Retire borrowed descriptors, roots and other field-held obligations under
-their actual contracts; never destroy a borrowed referent merely because its
+Retire non-owning descriptors, roots and other field-held obligations under
+their actual contracts; never destroy a referenced value merely because its
 descriptor is a field. Release containing storage only after the value's
 remaining transitive obligations permit it.
+
+The backing policy selects when this one obligation runs. Normal shared class
+or box backing invokes Cleanup once after the final strong hold and bounded
+dependency retire; unreachable strong cycles under this policy are not
+collected and can therefore keep Cleanup from running. GC backing invokes it
+once after the collector establishes unreachability and before reclamation;
+the time is nondeterministic. GC Cleanup cannot resurrect or republish its
+receiver, and runs on an unspecified runtime cleanup thread. Its full
+transitive cleanup must therefore be thread-neutral or safely transferable;
+the language does not require an affinity-preserving cleanup scheduler.
 
 This order is not reverse acquisition order. A field's later replacement or
 repair does not change its declaration position. For an allowed partial
@@ -239,13 +252,17 @@ Failure of unpublished construction instead uses reverse acquisition order.
 There is no dynamic topological reorder to repair an incompatible lifetime
 or callback dependency.
 
-Generated retirement and every automatic child cleanup are nonthrowing and
-nonsuspending, including on unwind and explicit discard. Complete Cleanup
-eligibility must establish that full transitive contract, not just the
-authored body's annotation. Protocol-specific settlement can be required
-before such retirement is eligible. Ordinary authored finally/defer may
-throw or await under its own contract; it is not this generated Cleanup body.
-An unsupported destructor or dependency schedule diagnoses before use.
+Compiler-invoked Cleanup runs only during normal retirement; it is not
+generated as exceptional-unwind cleanup. If an invoked Cleanup throws, that
+failure propagates under ordinary exception rules and the remaining generated
+owner/field cleanup does not resume during that unwind. Retirement has not
+completed, and the runtime does not infer that the remaining obligations were
+discharged. Exceptional cleanup is authored explicitly in crossed `finally`
+blocks. Nonsuspension remains required for this Cleanup operation.
+Automatic Cleanup is not a separate user-callable finalizer API or a
+universal Dispose convention. Its GC-triggered retirement path has the
+backing-specific rules above. An unsupported destructor or dependency
+schedule diagnoses before use.
 
 ## Dependencies, carriers and exceptional ownership
 
@@ -295,10 +312,13 @@ Replacing a derived-cleanup type with an authored Cleanup type, changing
 observable field-retirement order or weakening the complete-receiver boundary
 is incompatible with callers relying on the old contract.
 
-A source/body checker establishes actual state and cleanup truth; a binary
-consumer requires the checked evidence or explicit semantic producer/audit
-trust and its supported representation. Unsupported partial storage,
-receiver/field/cleanup facts or required rules reject before affected use.
+A source/body checker establishes actual state and cleanup truth; the producer
+is responsible for publishing correct contracts. A binary consumer validates
+encoded state and cleanup record structure, references and required support
+before affected use, then may rely on published facts without semantic
+re-proof. An implementation cannot claim support without required partial
+storage, receiver/field/cleanup facts or rules; unsupported required input is
+rejected before affected use.
 Logical approval allocates no live-mask, acquisition journal, field-state
 record, root program, feature bit, table or opcode. Physical ownership and
 partial-state codecs, call crossings and managed/native storage profiles remain

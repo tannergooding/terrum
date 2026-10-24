@@ -23,6 +23,10 @@ retains its contextual category and does not supply a type:
 `int8((-128))` constructs the signed literal directly, while
 `var value = (-128);` still lacks a target.
 
+No registered UTF-8 string-row target is assigned by this chapter. Reopen a
+target only for a concrete consumer and a complete target/value/registration
+contract; row encoding or sizing alone does not supply that contract.
+
 Names and callable groups are resolved before applicability. Literal-kind
 coverage may filter a candidate's static shape, but neither parsing, range,
 rounding, nominal validity nor execution budget selects an overload.
@@ -115,7 +119,7 @@ definition:
 
 ```terrum
 [Literal(LiteralKind.Integer)] [ConstEval]
-public static bool TryParse(TextSpan text, init ref<Port> value);
+public static bool TryParse(TextSpan text, ref<init Port> value);
 ```
 
 The method name and parameter labels are arbitrary; their exact identities
@@ -124,7 +128,7 @@ member of its target, with no method generic formals, receiver, defaults,
 `params`, extra inputs or additional outputs. Its containing target formals
 may substitute forward. The first parameter is the readonly by-value
 encoding-erased `TextSpan<void>` member; bare `TextSpan` has exactly that
-meaning. The second is the exact `init ref<Target>` mode, without writable,
+meaning. The second is the exact `ref<init Target>` type, without writable,
 optional-target or representation substitutions. The result is exact `bool`.
 An `out` parameter, returned optional, arbitrary delegate or same-layout
 carrier does not satisfy this signature.
@@ -133,8 +137,8 @@ Registration requires the Boolean outcome contract: true publishes a complete
 valid `Target`, false leaves the destination vacant. It does not require
 an additional `Pure` attribute: `ConstEval` already implies checked pure-form
 support. Parse refusal is a normal Boolean result, not an escaping exception.
-Ordinary-form `NoThrow`, totality and successful parsing of every token are
-not implied. The initialization contract applies to all normal paths;
+Ordinary-form totality and successful parsing of every token are not implied.
+The initialization contract applies to all normal paths;
 ordinary failure and partial construction retain their cleanup rules.
 A claimed selected pure form cannot escape a language failure on an admitted
 input. Private temporary mutation and construction into the vacant result are

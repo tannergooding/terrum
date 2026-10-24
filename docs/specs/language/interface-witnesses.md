@@ -31,6 +31,11 @@ Every requirement must have one selected binding. The producer checks its
 logical parameter/result types, modes, generic constraints, receiver access,
 caller safety, effects, initialization/output states, ownership, backing,
 capture, roots, cleanup, and any declared conditional guarantees.
+For a selected generic method, first substitute the declaring owner's
+arguments, then map method formals by ordinal with matching arity; formal
+names do not establish identity. Preserve each mapped formal's constraints,
+defaults and contracts. Reject reordered or otherwise adapted type arguments
+unless an explicit forwarding/projection contract is separately admitted.
 The [published evaluation contracts](published-predicates-and-effects.md)
 include supported forms, complete read/effect bounds and mapped NoAlias
 parameter requirements. A selected implementation cannot restrict the
@@ -122,12 +127,16 @@ module, source-unit, or type principals through inheritance and projection.
 Resolve the selected witness before projecting an associated member.
 `T.via<I>.Item` selects the `Item` binding belonging to that witness;
 unqualified `T.Item` needs one applicable supplying identity.
-An explicit binding wins over its replaceable default. Inherited conflicts
-use the same identity/default rules as callable requirements.
+For associated types, an explicit binding wins over its replaceable default;
+inherited conflicts use the same identity/default rules as callable
+requirements. For associated constants in this profile, every complete
+witness supplies a typed binding and declaration defaults are not admitted.
 
 Associated bindings preserve complete type identity, constant domain, and
 published validity. An alias may normalize to its target; a nominal wrapper,
 different qualification, or equal-width value domain cannot substitute for it.
+Associated constants remain compile-time identities, not runtime storage or
+callable methods.
 The identity clause `where T.via<I>.Item is U` first resolves `T`, `I`, the
 witness, and `U`, then checks exact normalized equality. It is not a new
 inference source, an assignability test, or a search for an implementing type.
@@ -142,18 +151,28 @@ No interface name implies numeric laws, purity, stable reads, covariance,
 constant eligibility, or a storage representation. Those are separate
 registered/published contracts.
 The [selected numeric groups](numeric-capabilities.md) explicitly publish
-their member sets, Copy constraints, inherited selection/comparison
-requirements and primitive witness matrix. Min/Max/Clamp remain one
-capability. The optional scalar composite adds no parsing, formatting,
-conversion or evaluation capability.
+their member sets, default Copy-capable formal domains, inherited
+selection/comparison requirements and primitive witness matrix.
+Min/Max/Clamp remain one capability. The optional scalar composite adds no
+parsing, formatting, conversion or evaluation capability.
 
-The resolved [Exception category schema](local-failures.md#1-registered-exception-capability)
-can designate an interface as a catch category. An explicit checked witness
-to its exact closed instance is nominal exception opt-in; structural lookup
-or another type's adapter is not. Inherited category paths follow the same
-finite identity/deduplication rules. Category membership supplies no
-storable interface value or Copy, and a category underscore catch tests
-without manufacturing either.
+Exception eligibility is the class-only
+[`IException<TSelf>` contract](local-failures.md#1-the-common-exception-contract),
+not an independently designated catch-category interface. Its self-typed
+nominal witness must identify the exact implementing exception class;
+structural lookup or another type's adapter does not confer eligibility.
+Catch selection and object-handle binding follow the local-failure contract.
+The common `IException<_>` catch view does not imply an arbitrary stored
+interface-object representation or boxing. The complete-type contract admits
+`G<_>` views for nominal generic types, retaining each value's hidden-type and
+witness correlation and exposing only operations valid for every hidden
+argument admitted by the constructor's declared constraints. A persisted
+consumer needs the required typed evidence or a checked reconstruction path.
+This does not select a general dynamic interface ABI; the physical witness
+carrier and representation remain in generic metadata integration. Hidden
+generic arguments are recovered through checked `G<var T>` patterns;
+contract-specific witness projections such as exception `via<T>` remain
+separately selected. There is no general runtime witness lookup.
 
 ## Qualified self-witness projection
 
@@ -235,7 +254,7 @@ public interface IEqual<this T>
     public bool Equals(T other);
 }
 
-public bool Same<T>(T left, T right) where T : [Copy], IEqual<T>
+public bool Same<T>(T left, T right) where T : IEqual<T>
 {
     return left.via<IEqual<T>>.Equals(right);
 }
@@ -318,11 +337,12 @@ independent consumer must bind, dispatch, or rely on them.
 The broad requested interface contract remains the generic caller's
 contract; private specialization does not expose a stronger refinement.
 
-Replacement compatibility must preserve the projected obligation as well
-as the original witness. A replacement that still satisfies `I<C>` can be
-incompatible with a retained `I<write C>` adaptation. The consumer checks
-the published projection and selected targets, not current private bodies.
-The [metadata requirements](../representation/logical-records.md#nominal-and-qualified-self-witnesses-encoding-pending)
+Replacement compatibility preserves the projected obligation as well as
+the original witness. A replacement that still satisfies `I<C>` can be
+incompatible with a retained `I<write C>` adaptation. An implementation
+claiming projection support uses the published projection and selected
+targets, not current private bodies; it need not re-prove producer facts.
+The [metadata requirements](../representation/logical-records.md#nominal-and-qualified-self-witnesses-assigned-families-codec-gates-remain)
 do not assign new table kinds, clause bits, opcodes, or a dispatch ABI.
 
 Projection neither introduces stored interface values nor opens an erased

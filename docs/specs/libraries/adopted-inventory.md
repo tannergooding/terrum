@@ -49,21 +49,21 @@ profile before affected source-independent use.
 | LCI-01 | Selected | Reserved scalar bindings | [26 mandatory complete identities](../overview/conformance.md#mandatory-scalar-catalog), including `void`; ordinary packages cannot define replacements |
 | LCI-02 | Selected | Scalar operators and conversions | [Exact data/count signatures and evaluation](../language/primitive-operators.md), [selected conversions](../conversions.md); no inferred promotion or new conversion pair |
 | LCI-03 | Selected | Numeric Abs/Min/Max/Clamp | [Same-type Abs](../language/absolute-value.md) and [selection](../language/numeric-selection.md) on the 20 numeric scalars, including Clamp's explicit ordered-bound requirement |
-| LCI-04 | Selected | Ten numeric interfaces | [Exact public static requirements, self/Copy constraints and primitive instances](../language/numeric-capabilities.md); coherent groups, with Min/Max/Clamp together and optional IScalarNumber composition |
-| LCI-05 | Selected | Value-layout queries | [Core RuntimeHelpers.SizeOf/AlignmentOf](../language/registered-queries.md#value-layout-queries): `public static nuint` result, one `[Sized]` type formal, no value inputs |
+| LCI-04 | Selected | Ten numeric interfaces | [Exact public static requirements, default Copy-capable formal domains and primitive instances](../language/numeric-capabilities.md); coherent groups, with Min/Max/Clamp together and optional IScalarNumber composition |
+| LCI-05 | Selected | Registered source queries and live Count witness | [Dedicated typeof/sizeof/alignof/offsetof/countof forms](../language/registered-queries.md#selected-query-forms); grammar-owned queries plus the shared Core `ICountable.Count : nint` property for live Place counts, not Core query-method identities |
 | LCI-06 | Selected | Evaluation-mode queries | [Readonly Boolean IsPureEval/IsConstEval](../language/published-predicates-and-effects.md#evaluation-modes) on the selected activation; not ambient mutable mode switches |
-| LCI-07 | Selected | Literal and LiteralKind schemas | [Target-owned four-kind registration](../language/literal-construction.md#checked-literal-record); accessible static `bool` parser with readonly `TextSpan<void>` input and exact `init ref<Target>` output |
+| LCI-07 | Selected | Literal and LiteralKind schemas | [Target-owned four-kind registration](../language/literal-construction.md#checked-literal-record); accessible static `bool` parser with readonly `TextSpan<void>` input and exact `ref<init Target>` output |
 | LCI-08 | Selected | TextBuilder/CollectionBuilder schemas | [Primary target-owned registration](../language/construction-handlers.md#target-owned-builder-schemas), one direct `typeof(Type)` recipe under owning target formals |
 | LCI-09 | Selected | TextTarget schema | [No-argument nonrepeatable parameter schema](../language/construction-handlers.md#texttarget-parameter-schema), one eligible by-value generic content formal with IFormattable evidence |
-| LCI-10 | Selected | `IBuilderFactory<this TBuilder>` | [Public static TryCreate](../language/construction-handlers.md#parameterless-builder-acquisition), no runtime inputs, one `init ref<TBuilder>`, Boolean live/vacant relation |
-| LCI-11 | Selected | `IBuilder<this TBuilder, TResult>` | [Public static TryBuild](../language/construction-handlers.md#consuming-builder-completion), by-value builder transfer and exact `init ref<TResult>`, Boolean live/vacant relation |
+| LCI-10 | Selected | `IBuilderFactory<this TBuilder>` | [Public static TryCreate](../language/construction-handlers.md#parameterless-builder-acquisition), no runtime inputs, one `ref<init TBuilder>`, Boolean live/vacant relation |
+| LCI-11 | Selected | `IBuilder<this TBuilder, TResult>` | [Public static TryBuild](../language/construction-handlers.md#consuming-builder-completion), by-value builder transfer and exact `ref<init TResult>`, Boolean live/vacant relation |
 | LCI-12 | Selected | IFormattable | [Public TryFormat<TWriter>](../language/construction-handlers.md#standard-text-operations), writable writer reference, readonly erased text format, Boolean result; TWriter requires ITextWriter |
 | LCI-13 | Selected | ITextWriter | [Public mut TryWrite/TryWriteScalar/TryWriteFormatted](../language/construction-handlers.md#standard-text-operations); validated text, rune or typed readonly value reference with int32 alignment and text format |
 | LCI-14 | Selected | `ICollectionBuilder<this TBuilder, TItem, TResult>` | [Public mut TryAdd(TItem)](../language/construction-handlers.md#collection-acceptance-and-spreads), inheriting exact factory/completion requirements; one complete selected item/result relationship |
-| LCI-15 | Selected | `ICursor<T>` / `ISequence<T, TCursor>` | [Public mut TryMoveNext(init ref<T>)/Close and readonly GetEnumerator](../language/iteration.md#nominal-protocol-identities), with exact TCursor witness |
+| LCI-15 | Selected | `ICursor<T>` / `ISequence<T, TCursor>` | [Public mut TryMoveNext(ref<init T>)/Close and readonly GetEnumerator](../language/iteration.md#nominal-protocol-identities), with exact TCursor witness |
 | LCI-16 | Selected | `IAsyncCursor<T>` / `IAsyncSequence<T, TCursor>` | [Task<bool> advance, Task<void> close, synchronous readonly GetAsyncEnumerator](../language/async-iteration.md#nominal-protocol-identities); inherited completion-output relation |
-| LCI-17 | Selected | `ILendingCursor<T>` / `ILendingSequence<T, TCursor>` | [Readonly sync lending](../language/lending-iteration.md#nominal-protocol-identities): `init ref<ref<T>>`, mut advance/close, readonly factory |
-| LCI-18 | Selected | `IWritableLendingCursor<T>` / `IWritableLendingSequence<T, TCursor>` | [Writable sync lending](../language/lending-iteration.md#nominal-protocol-identities): `init ref<write ref<T>>`, mut advance/close and mut factory |
+| LCI-17 | Selected | `ILendingCursor<T>` / `ILendingSequence<T, TCursor>` | [Readonly sync lending](../language/lending-iteration.md#nominal-protocol-identities): `ref<init ref<T>>`, mut advance/close, readonly factory |
+| LCI-18 | Selected | `IWritableLendingCursor<T>` / `IWritableLendingSequence<T, TCursor>` | [Writable sync lending](../language/lending-iteration.md#nominal-protocol-identities): `ref<init write ref<T>>`, mut advance/close and mut factory |
 | LCI-19 | Selected | `IAsyncLendingCursor<T>` / `IAsyncLendingSequence<T, TCursor>` | [Readonly async lending](../language/lending-iteration.md#nominal-protocol-identities): the readonly descriptor output reserved through `Task<bool>` completion; synchronous readonly factory and `Task<void>` close |
 | LCI-20 | Selected | `IAsyncWritableLendingCursor<T>` / `IAsyncWritableLendingSequence<T, TCursor>` | [Writable async lending](../language/lending-iteration.md#nominal-protocol-identities): the writable descriptor output reserved through completion; synchronous mut factory and `Task<void>` close |
 | LCI-21 | Selected | IteratorCursor/Iterator schemas | [No-argument primary schemas](../language/generated-producers.md#owned-named-cursor-registration); same-module unique named shell and sole callable definition, selecting exactly one of six direct roles |
@@ -71,14 +71,14 @@ profile before affected source-independent use.
 | LCI-23 | Selected | DependsOn/Captures/ForwardsBacking schemas | [Whole-source declaration recipes and targets](../language/dependencies-and-views.md#source-schemas-and-targets), with exact result/output/holder/operation phase; refinement cannot acquire ownership or add a source |
 | LCI-24 | Selected | Pure/ConstEval schemas | [No-argument primary callable/accessor contracts](../language/published-predicates-and-effects.md#checked-annotations-and-forms); author opt-in and actual checked form/program/value/resource support remain distinct |
 | LCI-25 | Selected | NoAlias parameter schema | [Invocation-bound checked parameter contract](../language/published-predicates-and-effects.md), not a writable-access, lifetime, pure-form or async-completion grant |
-| LCI-26 | Selected | Exception schema | [No-argument nominal capability/category opt-in](../language/local-failures.md#1-registered-exception-capability); no universal base type, payload layout or constructor evidence |
-| LCI-27 | Selected | RequireException schema | [Primary-callable-owned typeof(E) recipe](../language/requirement-failures.md#3-callable-owned-defaults-and-the-core-payload), required ExceptionType argument; explicit require<E> takes priority |
-| LCI-28 | Selected | Terrum.RequirementException | [Public nongeneric zero-data Exception/Copy struct and zero-parameter constructor](../language/requirement-failures.md#3-callable-owned-defaults-and-the-core-payload) for the runtime require fallback |
-| LCI-29 | Selected | Terrum.OverflowException/DivideByZeroException/ArgumentOutOfRangeException | [Three distinct public zero-data Exception/Copy structs](../language/scalar-failures.md#1-exact-core-payloads), each with one public zero-parameter constructor and exact scalar mappings |
-| LCI-30 | Selected | Terrum.InvalidBoundsException | [Reusable public zero-data Exception/Copy struct](../language/numeric-selection.md#4-reusable-invalidboundsexception), with one public zero-parameter constructor; Clamp selects it explicitly |
-| LCI-31 | Selected | Five standard runtime payloads | [Terrum.PostconditionException/IndexOutOfRangeException/OutOfMemoryException/InitializationCycleException/InitializationFailedException](../runtime/standard-failures.md#1-exact-core-identities-and-construction), each a public zero-data Exception/Copy struct with one public zero-parameter constructor |
+| LCI-26 | Selected | `IException<TSelf>` class contract | [Self-typed managed exception classes](../language/local-failures.md#1-the-common-exception-contract); no `[Exception]` attribute, universal base type, payload layout or constructor evidence |
+| LCI-27 | Selected | RequireException schema | [Primary-callable-owned typeof(E) recipe](../language/requirement-failures.md#3-callable-owned-defaults-and-the-core-exception-class), required ExceptionType argument; explicit require<E> takes priority |
+| LCI-28 | Selected | Terrum.RequirementException | [Public nongeneric exception class implementing `IException<RequirementException>`](../language/requirement-failures.md#3-callable-owned-defaults-and-the-core-exception-class), with ordinary zero-supplied construction for the runtime require fallback |
+| LCI-29 | Selected | Terrum.OverflowException/DivideByZeroException/ArgumentOutOfRangeException | [Three distinct public exception classes implementing their self-typed `IException<TSelf>` contracts](../language/scalar-failures.md#1-exact-core-exception-classes), with exact scalar mappings |
+| LCI-30 | Selected | Terrum.InvalidBoundsException | [Reusable public exception class implementing `IException<InvalidBoundsException>`](../language/numeric-selection.md#4-reusable-invalidboundsexception); Clamp selects it explicitly |
+| LCI-31 | Selected | Five standard runtime exception classes | [Terrum.PostconditionException/IndexOutOfRangeException/OutOfMemoryException/InitializationCycleException/InitializationFailedException](../runtime/standard-failures.md#1-exact-core-identities-and-creation), each implementing its self-typed `IException<TSelf>` contract |
 | LCI-32 | Selected | Terrum.CapturedException | [Public opaque nongeneric unique struct and public static Capture()](../language/captured-exceptions.md#1-exact-core-identity-and-public-surface), zero supplied inputs and checked lexical handler source; consuming captured propagation is compiler-owned |
-| LCI-33 | Selected | Cleanup retirement schema | [No-argument schema selecting a synchronous parameterless readonly void instance operation](../language/ownership-and-cleanup.md#complete-value-cleanup-and-transitive-field-retirement), with checked NoThrow/nonsuspending retirement and authored visibility; no name-only role or mandatory IDisposable interface |
+| LCI-33 | Selected | Cleanup retirement schema | [No-argument schema selecting a synchronous parameterless readonly void instance operation](../language/ownership-and-cleanup.md#complete-value-cleanup-and-transitive-field-retirement), nonsuspending and invoked only during normal retirement; a thrown failure propagates without resuming generated owner/field cleanup |
 | LCI-34 | Selected | ThreadTransferable/ThreadShareable schemas | [Explicit primary nominal opt-in and capability-owned local conditions](../runtime/sharing-and-handoff.md#explicit-source-opt-in-and-conditional-contracts); eligibility is not current handoff/share authority |
 | LCI-35 | Selected | Windows x64 Layout/Blittable/LayoutKind schemas | [Exact selected target schemas](../targets/windows-x64-data-layout.md#4-registered-source-layout-schemas), arguments, placements, enum cases and limits; not universal source layout or view/task ABI |
 | LCI-36 | Family | `Span<T>`, `TextSpan<TCodeUnit = void>`, contiguous projection | [Qualified view/text families](../libraries.md#views-shapes-and-tensor-primitives) and [backing contracts](../language/dependencies-and-views.md); no complete constructor/indexer/slicing/descriptor export catalog follows |
@@ -86,6 +86,10 @@ profile before affected source-independent use.
 | LCI-38 | Selected | Native package identity contract | [Exact case-sensitive ASCII identity](../native.md), actual packager syntax/capacity and independent target filename-collision rejection; not a Core type or portable name-length minimum |
 | LCI-39 | Selected | terrum.cli/1 tooling protocol | [Versioned envelope, nine command identifiers, result/execution/output/supervision contracts](../cli-protocol.md); no public compiler library or additional command catalog follows |
 | LCI-40 | Selected | Contained foreign failure bridge | [Paired adapters, affine domains, mapping and callback containment](../runtime/foreign-failure-bridge.md), with [selected Windows support](../targets/windows-x64-failure-bridge.md); not a universal exported packet or managed exception ABI |
+| LCI-41 | Selected | Terrum.AccessViolationException | [Dedicated Windows x64 mapping for `EXCEPTION_ACCESS_VIOLATION`](../language/local-failures.md#native-exception-normalization); self-typed `IException<TSelf>` class |
+| LCI-42 | Selected | Terrum.StackOverflowException | [Dedicated Windows x64 mapping for `EXCEPTION_STACK_OVERFLOW`](../language/local-failures.md#native-exception-normalization), catchable only after sufficient unwind recovery; self-typed `IException<TSelf>` class |
+| LCI-43 | Selected | Terrum.NativeException | [Opaque target-native fallback](../native.md#native-exception-objects), with stable Terrum-owned snapshot and caller-unsafe `GetNativeContext`; self-typed `IException<TSelf>` class |
+| LCI-44 | Selected | Terrum.UnreachableException | [Exact zero-data Copy failure payload](../runtime/standard-failures.md#6-executed-unreachable) used by the Body `unreachable` instruction; not an `IException<TSelf>` class or a general value-exception feature |
 
 The twelve iteration interfaces retain six different cursor requirements and
 six matching factories. Writable lending does not inherit readonly lending,
@@ -94,11 +98,12 @@ retain the complete witness, item, cursor, output mode and phase.
 Task shape alone supplies neither an async output relation nor a source
 annotation for registering another one.
 
-The selected ten zero-data failure identities are RequirementException,
-the three scalar payloads, InvalidBoundsException and the five standard
-runtime payloads. Each ordinary payload value is distinct from its affine
-event/cause responsibility. CapturedException is an additional opaque owner,
-not an eleventh Copy payload or an ordinary Exception category.
+The selected thirteen failure identities are RequirementException, the three
+scalar exception classes, InvalidBoundsException, the five standard runtime
+exception classes, AccessViolationException, StackOverflowException and
+NativeException. Each class instance is itself the propagation event;
+CapturedException is an additional opaque owner, not an eleventh exception
+class or an ordinary `IException<TSelf>` implementation.
 
 Source type properties such as Copy, Sized, ManagedStorable and TextCodeUnit
 retain their [checked complete-type contracts](../language/types-and-normalization.md)
@@ -119,10 +124,10 @@ declarations, witnesses, registrations or executable fallback paths.
 | LCO-03 | Direction | SpanAlgorithms and callback interfaces | [Algorithm direction](../libraries.md#collections-algorithms-and-application-services) constrains caller destination, access/effects, once-only callbacks and overlap; no complete standard algorithm catalog |
 | LCO-04 | Direction | Runtime IParsable/TryParse catalog | A [registered literal adapter](../language/literal-construction.md#signature-and-eligibility) has an exact selected signature; that does not adopt a general runtime parsing interface or primitive parser overloads |
 | LCO-05 | Direction | Terminal, streams, files, network and serialization | [Application-service direction](../libraries.md#collections-algorithms-and-application-services) uses selected typed formatting, not adopted destinations, buffering/backpressure, cancellation or hosting APIs |
-| LCO-06 | Direction | Fixed/scalable SIMD, masks, TensorShape/TensorSpan and TensorPrimitives | [Element/shape/alias/numerical constraints](../libraries.md#views-shapes-and-tensor-primitives) are direction, not a complete vector/mask family, storage ABI or operation set |
+| LCO-06 | Direction | Fixed/scalable SIMD with same-type lane predicates, TensorShape/TensorSpan and TensorPrimitives | [Element/shape/alias/numerical constraints](../libraries.md#views-shapes-and-tensor-primitives) are direction, not a complete vector family, storage ABI or operation set |
 | LCO-07 | Direction | Key comparer/hash and reduction APIs | [Library direction](../libraries.md) requires paired equality/hash domains and explicit strict/relaxed reductions; scalar operators and selection do not register these APIs |
 | LCO-08 | Deferred | Reusable/shared/cold tasks, awaiters, observers, schedulers, join/supervisor and cancellation APIs | The [selected affine owner/await contract](../language/task-responsibility.md) adds none of these public facilities or executor spellings |
-| LCO-09 | Deferred | General query/reflection/capability catalog | Only the [selected query subjects](../language/registered-queries.md#selected-identities-and-authority) are admitted; schema-specific nameof recipes are not a general string-query API |
+| LCO-09 | Deferred | General query/reflection/capability catalog | Only the [selected query subjects](../language/registered-queries.md#identity-and-authority) are admitted; schema-specific nameof recipes are not a general string-query API |
 | LCO-10 | Deferred | Incremental/deferred content and construction-evaluation policies | [Eager construction](../language/construction-handlers.md#deferred-evaluation-is-not-admitted) is selected; no eager/streaming/lazy policy cases, deferred callback or resumable formatter |
 | LCO-11 | Deferred | Additional CLI inspection/resolver/import commands | A legacy command/schema inventory is informative; each additional command requires the [selected envelope](../cli-protocol.md) and its own published contract |
 | LCO-12 | Direction | Concrete SpanTextWriter/Text storage and projection ABI | The [nominal writer role](../language/construction-handlers.md#standard-text-operations) and immutable text obligations are selected, not every writer's refusal atomicity, string facade or view representation |
@@ -151,8 +156,10 @@ Every claimed selected surface retains these independently required fields:
 | Supported envelope | Explicit actual capacity/work/state support and the operation's declared resource-failure behavior |
 
 A missing required field diagnoses or declines before affected use, even
-under trusted-producer admission. Successful lookup, type checking or a
-logical role table does not establish all later layers.
+when the consumer relies on producer correctness for external behavior.
+Producer trust does not supply required records or replace verification.
+Successful lookup, type checking or a logical role table does not establish
+all later layers.
 A profile must say which surfaces it supports and supply their transitive
 closure; an unspecified surface is not silently implemented.
 No ordinary-path hidden heap, collector, scheduler, encoding or OS substrate

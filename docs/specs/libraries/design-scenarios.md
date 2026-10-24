@@ -176,8 +176,9 @@ be repaired by dropping one. This path adds no Span constructors or codecs.
 **Provider:** an authored unique resource admits acquisition, complete and
 failed-construction retirement, nested dependencies, actual thread affinity
 and any required native ABI. Its resolved Cleanup schema selects a synchronous
-parameterless readonly void instance operation, with checked NoThrow and
-nonsuspending retirement under its authored visibility/access/effects.
+parameterless readonly void instance operation. Cleanup runs only on normal
+retirement, may throw under ordinary failure semantics, and is nonsuspending;
+authored visibility/access rules still apply.
 There is no mandatory public IDisposable member, finalizer or heap handle.
 
 **Consumer:** keep one live responsible holder, borrow only for admitted
@@ -256,7 +257,7 @@ program is inferred from conformance.
 
 ```terrum
 public static T Limit<T>(T value, T min, T max)
-    where T : [Copy], INumericSelection<T>
+    where T : INumericSelection<T>
 {
     return T.via<INumericSelection<T>>.Clamp(value, min, max);
 }

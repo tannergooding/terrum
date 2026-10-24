@@ -44,8 +44,8 @@ package formats. Participants
 communicate only through the established scalar and handle-free public `Copy`
 value contracts. Each persisted image has its own heap and root chain; an
 imported call preserves the caller's roots, and `ManagedHeap.Collect()` remains
-local to the image where it runs. The invocation-scoped `Host.Source`
-requirement is a semantic-module JIT capability, not a native graph capability.
+local to the image where it runs. The experimental `Host.Source` grant is not
+an accepted semantic-module or native-graph capability.
 The same selected private semantic-module revision supports private managed
 consumers through ordinary single-provider semantic
 linking and native single-provider or module-set entry points. Semantic linking places producer

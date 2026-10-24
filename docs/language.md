@@ -5,10 +5,28 @@ ownership-aware native execution model. The accepted language contracts are
 designed independently of the subset currently implemented by the C# compiler
 host.
 
+Start with [values, copying and aliases](specs/language.md#definitions-and-notation).
+Copying an eligible scalar creates independent data; copying a copyable object
+handle or eligible reference descriptor instead gives another path to the
+same object or place. A struct copy can therefore have independent field
+storage while its reference fields still alias existing data. Unique values cannot be
+implicitly duplicated: an explicit named `move` transfers responsibility and
+vacates the source, rather than silently changing assignment into a move.
+
+References and views are usable only while their referenced storage, backing
+and required access remain valid. `ref<T>` is non-owning; it does not
+universally extend the target's lifetime. An admitted managed root can keep
+an object reachable, but that is separate from a native resource's release,
+pinning, guard duties and cleanup. C#/.NET provides a useful copying/aliasing
+analogy, not Terrum's runtime rules: tracing GC is not reference counting,
+and C#'s historical `ref struct`, storage and escape restrictions are not
+universal Terrum restrictions. Stored, returned or suspended references still
+need an admitted complete contract and representation.
+
 The current design favors explicit writable access, checked initialization and
 cleanup, and target-defined behavior. Places are readonly by default; `mut`
 marks writable places or receivers, while `write` grants writable
-reference/view access. `init ref<T>` lends a vacant initialization destination
+reference/view access. `ref<init T>` supplies a vacant initialization destination
 under its [declared publication contract](specs/language-contracts.md#22-declared-outcome-relationships).
 The [source grammar](specs/grammar-spec.md)
 and [reference model](specs/language/references.md) define canonical signatures;

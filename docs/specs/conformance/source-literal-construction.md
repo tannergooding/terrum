@@ -43,7 +43,7 @@ independently of an unselected BID/DPD physical codec.
 | LREG-23 | Direct target use cannot access its registered method | Diagnose inaccessible construction |
 | LREG-24 | Parser is not ConstEval eligible | Reject required registration/execution capability |
 | LREG-25 | Target lacks Blittable/frozen Copy validity or value-codec admission | Unsupported literal result, not inferred from field shape |
-| LREG-26 | ConstEval parser annotation is assumed to establish ordinary NoThrow | Pure-form support is implied; ordinary NoThrow is not |
+| LREG-26 | ConstEval parser annotation is assumed to establish ordinary-form totality | Pure-form support is implied; ordinary-form totality is not |
 | LREG-27 | Parser method has a native name but no admitted body/cost recipe | Unsupported required execution |
 | LREG-28 | A secondary partial authors a changed semantic registration | Reject contract-changing secondary authorship |
 

@@ -8,25 +8,51 @@ This chapter owns the applicability of the assigned Contract clauses. The
 container and references. Source contracts, body truth and feature support are
 separate obligations. A well-framed row is not evidence that its declaration
 implements the promise or that its feature can execute.
+The [shared terminology](../language.md#definitions-and-notation) and
+[logical dependency requirements](logical-records.md#general-dependency-contracts-carrier-and-capability-integration-pending)
+explain reference/backing relationships. The approved Dependency row
+preserves those relationships; row presence alone does not establish body
+truth or capability support.
 
 Every Contract begins with `u32 ownerRow, u16 clauseKind, u16 flags=0`.
 Its offset-index extent includes this eight-byte header. The clause consumes
 exactly its assigned payload: trailing bytes are not padding, alternate
-versions or optional attributes. Unknown kinds, nonzero header flags, invalid
-reserved fields and out-of-range references reject their applicable admission.
-An accessed unknown required clause cannot be ignored even when its owner is uncalled
-or another clause would make its outcomes unreachable.
+versions or optional attributes. Producers emit only assigned clause kinds
+with valid flags, reserved fields and in-range references. A support claim
+for a required clause includes its meaning even when its owner is uncalled
+or another clause would make its outcomes unreachable. Consumers validate
+required clause shapes, owners, references and support, rejecting malformed
+or unsupported clauses before affected use; they are not required to prove
+the semantic truth of a structurally consumable clause. Diagnostic wording
+is not prescribed.
 
 Only TypeDef and MethodDef have Contract ranges in this schema. The assigned
-clause kind fixes its owner table: MethodDef for Effects/OutputState,
-TypeDef for Cleanup. `ownerRow` is a nonzero typed `u32` row index with
-reserved-zero high byte, not a DefId or table selector; its row must exist.
-A FieldDef, PropertyDef, MethodSig, GenericParam or Body cannot own one of
-these ranges. Reserved Transfer/Dependency shapes have no admitted owner
-application until their complete variants/owner rules are assigned. Each owner's
+clause kind fixes its owner table: MethodDef for Effects, OutputState,
+Dependency and NativeCallable; TypeDef for Cleanup. Transfer remains
+semantically inactive.
+`ownerRow` is a nonzero typed `u32` row index with reserved-zero high byte,
+not a DefId or table selector; a valid artifact names an existing row. A FieldDef, PropertyDef,
+MethodSig, GenericParam or Body cannot own one of these ranges. Each owner's
 `contractFirst/count` is `(0, 0)` for an empty range, or a nonempty contiguous
-in-bounds range. Mathematical range bounds must be established before
-indexing; wrapped addition cannot validate a range.
+in-bounds range. Producers encode ranges whose mathematical bounds fit the
+owning table.
+
+The approved static-initialization direction places `InitializationRole` and
+`InitializationDemand` as additional MethodDef-owned clause kinds in these
+ranges. The logical occurrence rules are settled: at most one role per
+method, required where the method has an initialization role; and zero or
+more demands, one per exact closed eager group, with duplicate group demands
+rejected. Role variants use one `InitializationRole` clause kind with a
+closed tag, not separate clause kinds. The approved candidate row shapes are
+20 bytes for `InitializationRole` (the 8-byte header followed by
+`u8 roleTag, u8 flags=0, u16 reserved=0, u32 eagerGroupRow,
+u32 ownerTypeSpec`) and 16 bytes for `InitializationDemand` (the header
+followed by `u32 eagerGroupRow, u32 ownerTypeSpec`). Role tags are
+`1=eager initializer`, `2=lazy initializer`,
+`3=authored static constructor`, `4=eager-phase helper`,
+`5=lazy-phase helper`; zero and unknown tags are invalid. Clause IDs and
+typed-reference encodings remain unassigned; these candidate shapes do not
+admit new physical kinds or change the currently assigned clause registry.
 
 Every Contract row belongs to exactly one range and names that range's owner
 under its clause-implied table.
@@ -48,33 +74,71 @@ There is no merge, last-row-wins or implicit disjunction rule.
 | Clause | Bytes | Admitted owner and subject | Occurrence key | Absence |
 |---|---:|---|---|---|
 | `0001` Effects | 12 | MethodDef; its declared callable extent | `(owner, Effects)`; at most one | Mask zero: no assigned promise bits and no caller-unsafe requirement |
-| `0002` OutputState | 16 | MethodDef with exact Boolean result; selected initialization-destination parameter | `(owner, OutputState, parameterOrdinal)`; at most one per parameter | No row supplies an additional Boolean state correlation |
+| `0002` OutputState | 20 | MethodDef; selected `ref<init T>` destination or `Span<init T>` range parameter and exact published normal-outcome predicate | `(owner, OutputState, parameterOrdinal, predicateRef)`; at most one per predicate/output pair | No row supplies an additional conditional state relation; unconditional complete output needs no row |
 | `0003` Transfer | 16 | No semantically admitted application; transfer/cleanup mode values are unassigned | No semantically admitted occurrence or assigned variant key | Does not erase required transfer or cleanup obligations |
-| `0004` Dependency | 20 | No semantically admitted application; result/source kinds and flags are unassigned | No semantically admitted occurrence or assigned variant key | Does not establish fresh backing or erase required dependencies |
+| `0004` Dependency | 20 | MethodDef; result, checked init-output or retained holder/receiver relation | `(owner, destinationKind, destinationOrdinal, phase, sourceKind, sourceOrdinal)` | No row supplies an additional dependency relation |
 | `0005` Cleanup | 12 | TypeDef with admitted Unique and selected complete-value cleanup contracts | `(owner, Cleanup)`; at most one | No designated authored cleanup operation; transitive retirement is not thereby suppressed |
+| `000C` NativeCallable | 12 | MethodDef; effective native calling convention | `(owner, NativeCallable)`; at most one | Method has no native-callable role |
 
-Effects is usable in the bounded scalar executable profile. OutputState and
-Cleanup have inspectable assigned shapes and the applicability rules below,
-but remain non-executable until their complete publication, exceptional,
-ownership and feature obligations are admitted. Transfer and Dependency
-payloads can be inspected as reserved shapes in the common TypeDef/MethodDef
-container; no payload value, including all-zero bytes, activates a variant.
-No semantic consumer may use or discard such a required reserved clause.
+The NativeCallable payload is `u8 callingConvention, u8 flags=0,
+u16 reserved=0`. Convention values are `1=Unmanaged`, `2=Cdecl`,
+`3=Stdcall` and `4=Vectorcall`; zero, unknown values and nonzero reserved
+fields reject. The clause marks the MethodDef as native-callable and makes
+calls through that role caller-unsafe. Interface-level source defaults are
+published as the effective convention on each method declared by that
+interface; inherited methods retain their declaring method's convention.
+A method-level source contract selects the effective convention for that
+method. Method-form NativeExport references this exact unique clause rather
+than copying the convention; an import's own NativeImport record carries its
+effective convention and does not require a NativeCallable clause merely to
+form a native address.
+
+Published predicates use a logical attachment: each
+`PredicateGraph` is referenced by a MethodDef-owned typed `Contract` clause
+using one clause kind for all predicate phases. Its payload retains the phase
+and an explicit zero-based, contiguous `u32` phase-local declaration ordinal
+independent of physical clause-row order. The `u8` phase tags are
+`1=Precondition` and `2=NormalPostcondition`; zero and unknown tags are
+invalid. Gaps and duplicate ordinals are invalid. Body-level
+`static require`/`static ensure` obligations
+are not these declaration attachments. The graph owns its root, subjects and
+occurrence tree
+rather than duplicating callable/phase/order
+identity, and references its own separate actual read-footprint record. The
+callable-level allowed-root contract remains distinct. This clause is not yet
+in the assigned matrix. Its approved candidate extent is 20 bytes total: the
+8-byte Contract header followed by
+`u8 phaseTag, u8 flags=0, u16 reserved=0, u32 phaseLocalOrdinal,
+u32 predicateGraphRef`. The field uses the standard typed row reference: a
+little-endian `u32` row index in `1..0xFF_FFFF` with reserved-zero high byte.
+Its target table is fixed by the assigned clause kind, and binding remaps it
+through the typed-reference map. It is not a polymorphic `DefId`.
+The clause kind and PredicateGraph section/Feature assignment remain open.
+
+Effects retains its assigned bounded use. OutputState and Dependency have
+approved row semantics, but executable admission requires their complete
+predicate, place, publication, dependency and capability-closure obligations.
+The OutputState predicate target is owned by the shared published-predicate
+codec. Dependency destinations do not use a NativeOutput row. Transfer
+remains reserved and semantically inactive;
+no payload value, including all-zero bytes, activates an ownership-transfer
+variant. No semantic consumer may use or discard an unsupported required
+clause.
 
 Absence never substitutes for a required source or retained contract. In
 particular, a producer must preserve an adopted source default's normalized
 meaning under its governing rules. Missing OutputState is not permission to
-guess that a Boolean method initializes on true, on false or unconditionally.
-The bounded row does not encode arbitrary conditional predicates or later
-completion phases; a required relation outside its shape needs its admitted
-representation or before-use rejection.
+guess a conditional output relation. A relation outside the assigned
+predicate, destination or phase representation needs its complete admitted
+carrier or before-use rejection.
 
 ## 3. Effects
 
 An Effects payload is one little-endian `u32` mask. The only assigned bits are
-`01` NoThrow, `02` DoesNotReturn and `04` caller-unsafe. All eight combinations
-are structurally permitted; bits `08..80000000` reject rather than becoming
-private extensions. Valid combination does not prove implementation truth.
+`02` DoesNotReturn and `04` caller-unsafe. The four combinations of those
+bits are structurally permitted; the retired `01` NoThrow bit and bits
+`08..80000000` reject rather than becoming private extensions. A valid
+combination does not prove implementation truth.
 
 Each callable owns its own mask. A PropertyDef uses its selected getter's
 complete MethodDef contract; there is no property-owned Effects row or
@@ -90,19 +154,15 @@ owner solely for that representation. This equivalence does not permit two
 Effects rows, even when both are zero. Canonicality auditing is separate from
 this semantic equivalence.
 
-NoThrow bounds escaping failures over the declared extent. It is not Pure,
-ConstEval, termination, no-allocation, no-blocking or no-safepoint. In
-particular, an async declaration's established
-[execution extent](../language/async-execution.md#effects-and-independent-contracts)
-is not shortened by this mask, and the bounded scalar codec does not thereby
-encode async completion. Caller-unsafe is an obligation on the call site; it
-does not authorize unsafe operations inside the callee or grant receiver
-write, alias separation or lifetime authority.
+Caller-unsafe is an obligation on the call site; it does not authorize unsafe
+operations inside the callee or grant receiver write, alias separation or
+lifetime authority. The current draft row set does not thereby encode async
+completion.
 
 The [directional binding relation](binding-and-replacement.md#3-bounds-predicates-and-retained-observations)
-preserves expected promise bits and does not add caller-unsafe to a safe
-expectation. Applicability is checked before that comparison; numeric mask
-ordering, a private body or a stronger effect cannot cure an invalid owner.
+preserves expected DoesNotReturn and caller-unsafe facts without treating
+mask values as an ordering. Applicability is checked before that comparison;
+a private body or stronger unrelated contract cannot cure an invalid owner.
 
 ## 4. DoesNotReturn and actual completion
 
@@ -110,8 +170,8 @@ The checked source [no-return contract](../language/expressions-and-statements.m
 is applicable to any declared logical result type, not only `void`.
 It promises that the actual invocation has no normal completion. An escaping
 failure or divergent execution can satisfy it; returning a value, returning
-unit or normally falling through cannot. NoThrow is independent: their
-combination cannot satisfy both by an escaping failure.
+unit or normally falling through cannot. DoesNotReturn states only the
+absence of a normal completion; it does not bound which failures may escape.
 
 The declaration and every call keep their ordinary complete signature, result
 type, argument arity, modes and source validation. DoesNotReturn does not introduce
@@ -120,14 +180,16 @@ adaptation or permission to ignore ill-typed unreachable source.
 No result is published on the absent normal edge, but its declared type is
 not erased from metadata or the typed Body inventory.
 
-For the current `Call`, zero result ID is still legal only when the selected
-result is `void`; a non-unit no-return target requires the ordinary typed
-result definition operand. That result cannot be observed through a normal
-continuation that does not exist. The bounded terminal-call shape retains its
-following Fail fallback; only a no-return target admitted under the
-producer-trust/audit policy makes
-that fallback unreachable. It does not excuse earlier failures or required
-framing, type and supported-form validation of retained records.
+The register-codec `CallSite` has no serialized result-definition ID. A
+normal unit-returning call uses result selector `None` and continues; a
+normal non-unit call uses a register or Home result selector. A call whose
+bound target has verified `DoesNotReturn` uses result selector `None` for any
+declared result type and is the terminal instruction of its Block, with no
+normal successor or published result. The target keeps its complete
+signature, and its selected Effect contract—not a unit result or sentinel—
+distinguishes this terminal call from a normal unit call. No following `Fail`
+fallback or legacy result-ID escape is part of this schema. Required framing,
+type and supported-form validation still precedes affected use.
 
 A task/cursor factory that returns normally does not satisfy DoesNotReturn
 because the returned operation later fails, diverges or never produces an
@@ -137,52 +199,94 @@ to that operation's actual identity and extent; it cannot be substituted for
 its creator's contract.
 
 Applicability alone neither proves no-return truth nor enables unsupported
-result representations. The scalar profile retains its existing type/call
-matrix; signatures outside it are rejected before affected execution.
+result representations. A consumer must support the exact representation and
+all required capability prerequisites before affected execution; a partial
+implementation profile does not define a reduced TRRM 1.0 conformance floor.
 Removing a retained no-return promise breaks callers that relied on its
 absent normal edge. Adding it cannot erase independently promised normal
 completion, output states, cleanup or phase obligations.
 
 ## 5. OutputState
 
-OutputState selects a zero-based `parameterOrdinal` in the owner's actual
-MethodSig. Its Param row must belong to that signature and ordinal, with
-mode `01` and the complete unpinned readonly outer `ref<T>` required for an
-initialization destination. Mode `00`, `implicit`, `write ref<T>` and
-`pin ref<T>` are not substitutes. Inner `T` retains its full qualification;
-it can be unit or an optional value without confusing vacancy with presence.
-The result must be the normalized atomic `bool`, not an optional Boolean,
-integer, same-sized nominal type or later `Task<bool>` completion.
+Each OutputState payload is `u32 parameterOrdinal, u32 predicateRef, u8
+state, u8 reserved[3]=0`. It selects a zero-based formal in the owner's
+MethodSig whose complete type is `ref<init T>` or `Span<init T>`; the
+parameter uses ordinary Param mode `00`. The complete TypeSpec preserves the
+initialization capability/view. This does not use a special initialization
+parameter mode, `init ref<T>`, or an ordinary `ref<T>` with a mode-only
+reinterpretation.
+The predicate is an exact published normal-outcome predicate identity, not a
+second expression language, numeric status heuristic or name-based test.
+Canonical Boolean-success defaults use their normalized true/false
+predicates; authored non-Boolean statuses use their checked predicates.
 
-`onTrue` and `onFalse` independently select vacant `0` or fully initialized
-`1`; all four pairs can describe explicit source contracts. `onExceptional`
-must be `0`, and the reserved byte must be zero. Fully initialized means a
-valid complete value and its actual ownership/dependencies, not zeroed
-storage. A false initialized-null optional is distinct from false vacancy.
-Partial initialization and pending publication cannot be encoded as state `1`.
+`state` is `0` for vacant or `1` for fully complete and publishable.
+Unconditional outputs are complete on normal return and need no row.
+For `Span<init T>`, complete means every element in the whole range is a valid
+live `T`; no mixed or prefix-initialized state is represented. Fully complete
+includes actual ownership and dependencies, not zeroed storage; a live
+optional containing null is distinct from vacancy. Partial initialization is
+never state `1`. Exceptional state is indeterminate and is not encoded by
+this clause.
 
-Different initialization parameters can have different state pairs. They
-occupy different keys even within one method; two rows for the same ordinal
-reject instead of refining or combining that output. The ordinal is not the
-receiver, result, a Param table row number or a field offset. Sharing a
-MethodSig does not share a MethodDef's clauses.
+The occurrence key includes both the parameter ordinal and predicate
+identity. Duplicate pairs reject. For one output and one normal outcome,
+applicable rows must agree on state; a declaration whose predicates make the
+published state ambiguous is invalid. Distinct outputs and distinct
+predicates remain independent. A predicate reference must resolve in the
+shared published-predicate codec. Deferred completion uses phase-specific
+dependencies and does not retarget this normal-invocation relation.
 
-The relation applies to the specified invocation's normal Boolean observation,
-with its existing checks and cleanup. Async completion, producer advancement
-and lending require their own identity/phase/reservation contracts; this row
-does not retarget itself because a signature looks familiar. NoThrow or
-DoesNotReturn neither changes its bytes nor deletes a retained state promise.
-The absence of a possible outcome is not proof that a different exact state
-contract satisfies binding.
+## 6. Dependency
 
-## 6. Cleanup
+Each Dependency payload is `u8 destinationKind, u8 sourceKind, u8
+relationship, u8 phase, u32 destinationOrdinal, u32 sourceOrdinal`. Values
+are:
+
+| Field | Value | Meaning |
+|---|---:|---|
+| `destinationKind` | `1` | Normal result |
+|  | `2` | Checked initialization output |
+|  | `3` | Retained formal holder |
+|  | `4` | Retained receiver |
+| `sourceKind` | `1` | Formal parameter |
+|  | `2` | Receiver |
+| `relationship` | `1` | Borrow source storage |
+|  | `2` | Forward existing backing |
+|  | `3` | Declared union of both relationships |
+| `phase` | `1` | Normal publication |
+|  | `2` | Retention/capture into an existing holder on every applicable exit |
+|  | `3` | Deferred-completion publication |
+
+Ordinals are zero for the result and receiver; formal ordinals follow the
+MethodSig declaration order. Destination ordinals identify their selected
+result, formal output or retained holder. Source ordinals identify formals or
+the receiver in the same declaration namespace.
+
+An explicit empty-source row has `sourceKind`, `relationship` and
+`sourceOrdinal` all zero. It cannot coexist with source rows for the same
+destination kind/ordinal and phase. Nonempty rows use only assigned nonzero
+source and relationship values. Rows are keyed by destination kind/ordinal,
+phase and source kind/ordinal; relationship `3` is an explicit declared
+union, not an inferred merge. Repeated rows express multiple sources and
+destinations without a fixed count cap.
+
+`Dependency` records backing and retention relations, not ownership
+transfer. Ownership handoff is derived from the complete type, explicit
+call/Body transfer, responsible holder and selected Cleanup identity.
+Reserved Transfer remains inactive. The row has no general field or
+subregion path; an implementation cannot claim support for a required shape
+that the selected shared contracts cannot identify. The shared row does not
+extend source lifetimes, authorize unrelated storage, or prove body truth.
+
+## 7. Cleanup
 
 The Cleanup payload is a nonzero typed `u32` MethodDef row index, not a DefId,
 Body index, String or interface-name convention. It designates the exact
 operation required by the source
 [complete-value cleanup contract](../language/ownership-and-cleanup.md#complete-value-cleanup-and-transitive-field-retirement):
 a synchronous parameterless readonly instance method of the selected unique
-type, returning void, with checked NoThrow and nonsuspending cleanup.
+type, returning void, with nonsuspending cleanup.
 Static methods, constructors, accessors, async/extern or caller-unsafe
 declarations cannot supply that automatic operation.
 The current MethodDef target selector supplies no method-generic argument
@@ -202,24 +306,23 @@ target and available signature/effects facts, but independent semantic use
 requires all admitted uniqueness, role, phase and ownership records. An
 unsupported or missing fact rejects use; it is not filled in from a name.
 
-NoThrow does not prove termination. A cleanup that never completes cannot be
+Cleanup does not prove termination. A cleanup that never completes cannot be
 treated as having completed retirement, discharged remaining fields or
 released responsibility. Conversely, applicability does not add a general
 termination promise or forbid divergence merely because it is undesirable.
 Complete retirement keeps authored cleanup before reverse-declaration fields,
 and partial owners keep their distinct structural retirement rules.
 
-## 7. Binding, rewriting and evidence boundaries
+## 8. Binding, rewriting and evidence boundaries
 
-Required owner, range, extent, ordinal, mask and reserved-value checks on
-accessed records survive producer trust. A consumer checks the complete range
-it uses, without scanning unrelated ranges solely for global orphan/overlap
-proof. Producers and broader validation claims still establish those global
-invariants. Known ownership contradictions reject under the
-[reader-trust partition](reader-trust.md). A complete binding retains every
-applicable clause and any additional
+Producers establish valid owner, range, extent, ordinal, mask and
+reserved-value relationships, including global orphan/overlap invariants.
+Consumers check the encoded ranges and relationships needed for safe
+consumption before relying on them; any broader structural validation claim
+states its additional scope. A complete binding retains every applicable
+clause and any additional
 provider fact actually used by optimization, with its selected subjects and
-phases. The mask, row existence or body absence is not a trust credential.
+phases. The mask, row existence or body absence is not proof of semantic correctness.
 
 Reordering or packing remaps every clause-implied typed owner row, Contract
 range, referenced

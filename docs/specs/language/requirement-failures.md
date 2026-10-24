@@ -1,15 +1,16 @@
 # Runtime requirement failures
 
 This chapter owns logical `requirement-failures/1`: runtime failure-type
-selection, ordinary zero-input construction, callable-owned defaults and
-Core's minimum requirement payload. [Local failures](local-failures.md) own
+selection, ordinary zero-supplied-argument construction, callable-owned defaults and Core's
+minimum RequirementException contract. [Local failures](local-failures.md) own
 Exception eligibility, propagation responsibility and catch bindings.
 [Calls](calls-and-inference.md) and [construction cleanup](ownership-and-cleanup.md)
 retain their ordinary rules.
 
-The selected contract introduces no failure factory, implicit diagnostic
-arguments, universal exception base or captured-failure API. It assigns no
-physical attribute, payload, constructor, handler or operation-state codec.
+The selected contract uses ordinary constructor binding for the selected
+failure type; it adds no separate failure-factory mechanism, implicit diagnostic arguments,
+universal exception base or captured-failure API. It assigns no physical
+attribute, exception-class, constructor, handler or operation-state codec.
 
 ## 1. Runtime forms and selection
 
@@ -41,34 +42,32 @@ RequireException does not override it. Arithmetic, capacity and hardware
 failures retain their separate mappings. The `require` marker on a
 policy form retains its policy-selection meaning.
 
-## 2. Ordinary zero-input construction
+## 2. Ordinary zero-supplied-argument construction
 
-On a failed runtime check, perform the source-equivalent ordinary construction
-`new E()` with zero supplied arguments. E must satisfy the complete concrete
-Exception payload contract, and that construction must be statically admitted
-at the check's semantic code owner.
+On a normally false runtime check, construct the selected exception type
+through ordinary constructor resolution with zero explicitly supplied
+arguments. This does not invoke `E.Create()` or select a failure factory.
+E must be a concrete managed exception class satisfying the exact exception
+eligibility contract in [local failures](local-failures.md). That evidence
+does not establish that a suitable constructor is accessible or applicable.
+The selected ordinary binding may use a parameterless constructor, optional
+parameter defaults, or an admitted empty `params` expansion under the normal
+overload, accessibility, default-value and ownership rules.
 
-Use ordinary constructor lookup, accessibility, qualification, generic
-formation, argument mapping, applicability and ranking. Published optional
-argument defaults or an eligible empty params expansion may participate:
-zero supplied arguments is not a new zero-formal-only overload rule.
-No constructor is selected by name resemblance, lower allocation cost or a
-private body. Required message, context or allocator parameters are not
-invented. No factory, type-call conversion, union case, enum-zero value or
-default-value fallback is tried after ordinary construction fails to bind.
+Retain the exact selected constructor binding, including any default/empty
+expansion records. A missing, ambiguous, inaccessible or unsupported
+zero-supplied binding rejects the affected source/artifact; do not guess a
+default, infer a constructor from the exception interface/body, retry a
+different class, or fall back to a common factory. The constructor receives
+no failed predicate, source text, parameter name, allocator or caller context
+unless ordinary bound default/parameter rules explicitly supply it.
+The built-in `UnreachableException` is a runtime failure payload, not an
+`IException<E>` class, and cannot be selected by `require<E>`.
 
-Exception eligibility supplies no constructor evidence. `where T : [Exception]`
-alone therefore cannot establish `new T()` or `require<T>`. A statically known
-constructed failure family can expose its ordinary checked constructor under
-its published constraints. An opaque formal still needs whatever constructor
-evidence its admitted source contract can actually provide; this chapter
-introduces no new generic constructor constraint or body-based inference.
-
-Aliases and type recipes retain the exact complete payload, representation
-and qualifications. A category interface is not payload storage. A raw
-descriptor or optional wrapper is not made throwable by this construction.
-An eligible enum/union still needs an actual admitted ordinary construction;
-the annotation does not add one to its grammar.
+Aliases and type recipes retain the exact exception-class identity and
+qualifications. `IException<_>` is an existential view, not a concrete class
+to instantiate. A raw descriptor or optional wrapper is not made throwable
+by a constructor binding.
 
 Use an explicit conditional throw when construction needs inputs:
 
@@ -79,10 +78,12 @@ if (offset < int32(0))
 }
 ```
 
-Here ParseFailure is an independently eligible type with that ordinary
-constructor, not a new standard failure identity.
+Here ParseFailure is an independently eligible exception class with that
+ordinary constructor for this explicit source path, not a new standard
+failure identity. A failed `require` instead uses its selected
+zero-supplied-argument constructor binding.
 
-## 3. Callable-owned defaults and the Core payload
+## 3. Callable-owned defaults and the Core exception class
 
 Core supplies the resolved `RequireException` semantic attribute. It is
 nonrepeatable, primary-callable-owned and has one required type-reference
@@ -98,12 +99,15 @@ The argument binds in the primary callable's declaration environment,
 including enclosing and own type/constant formals, under ordinary lookup,
 effective accessibility and finite normalization. Prefix placement does
 not capture caller formals or imports. It neither evaluates a reflection
-object nor runs a constructor. A complete symbolic application uses ordinary
+object nor constructs the exception. A complete symbolic application uses ordinary
 forward substitution; open generic syntax, unresolved inference holes and
 cyclic aliases are not recipes.
-Every admitted substitution must establish the complete concrete Exception
-payload facts under the declaration's constraints. A malformed or ineligible
-default is not excused by an explicit selector elsewhere.
+Every admitted substitution must establish a complete concrete eligible
+exception class under the declaration's constraints. The selected
+zero-supplied constructor binding is resolved for each check that uses the
+recipe; the annotation does not itself select or prove that binding. A
+malformed or ineligible default is not excused by an explicit selector
+elsewhere.
 
 The schema applies to named functions/methods, instance/static constructors,
 operators/conversions and individual accessor or Cleanup callables, including
@@ -127,17 +131,19 @@ selector on its own requirement.
 | Otherwise | Core's exact `Terrum.RequirementException` identity |
 
 All written attributes/types remain valid source contracts; an explicit
-selector does not excuse a malformed annotation. Constructor availability is
-checked for the type actually selected at each check, not granted by an
+selector does not excuse a malformed annotation. Constructor availability
+is checked for the type actually selected at each check, not granted by an
 unused default recipe.
 
-`Terrum.RequirementException` is a public, nongeneric, zero-data nominal
-struct with the checked Exception and ordinary Copy contracts and one public
-zero-parameter instance constructor. That constructor establishes the complete
-zero-data value without authored effects or contract predicates. This does
-not make the propagation event Copy, select a byte layout, require heap
-allocation or add message, parameter-name or stack-trace fields.
-Provenance remains part of the independently owned propagation event.
+`Terrum.RequirementException` is the exact public nongeneric managed class
+implementing `IException<RequirementException>`. Its common factory creates
+the exception object using its type-owned `DefaultMessage`; the class also
+has an ordinary zero-supplied-argument constructor binding for runtime
+requirements. The selected ConstructorBinding uses that ordinary binding,
+not the common factory. This does not make the propagation event `Copy`,
+select a byte layout, require a particular allocation strategy or add a
+parameter-name or stack-trace guarantee. The exception object itself is the
+event and carries its ordinary runtime provenance/parent relationship.
 
 The fallback selects the Core identity, not a source lookup for a similarly
 named user type. The attribute's short spelling still uses ordinary resolved
@@ -152,14 +158,6 @@ type or its semantic precondition owner.
 For example, with the shown declarations and admitted runtime support:
 
 ```terrum
-[Exception]
-public struct BadInput
-{
-    public BadInput()
-    {
-    }
-}
-
 [RequireException(typeof(BadInput))]
 public void CheckOffset(int32 offset)
     require offset >= int32(0)
@@ -168,9 +166,10 @@ public void CheckOffset(int32 offset)
 }
 ```
 
-The precondition uses BadInput. The body check explicitly selects the
-ordinary resolved RequirementException type. Neither constructor runs on
-a successful check.
+Assume BadInput is an eligible exception class with a valid
+zero-supplied-argument constructor binding. The precondition uses that
+ordinary binding. The body check explicitly selects the ordinary resolved
+RequirementException type. Neither constructor runs on a successful check.
 
 ## 4. Semantic ownership is not physical execution location
 
@@ -195,33 +194,32 @@ cursor methods. Creation clauses keep their producer owner; separately
 authored shell-member clauses keep their own member owner.
 This selects no new callables or declaration scopes beyond the source grammar.
 
-The constructed E's constructor has its own authored checks and defaults.
-The outer requirement does not become an ambient constructor policy.
+The selected E constructor implementation has its own authored checks and
+defaults. The outer requirement does not become an ambient construction policy.
 Recursive construction, nontermination or a constructor with no normal exit
 retains ordinary semantics; no substitute failure is fabricated.
 
 ## 5. Evaluation, output state and responsibility
 
 Evaluate the predicate or adapted call once under its existing source-order
-contract. On success, publish the normal unit/output result without invoking
-E's constructor or forming a failure event.
+contract. On success, publish the normal unit/output result without constructing
+E or forming a failure event.
 For lifting, initialized null and an initialized Boolean false remain valid
 payloads; declared output availability is not a guessed status-success group.
 A non-Boolean ordinary operand needs an explicit predicate.
 
-On failure, construct E once. Only after complete ordinary publication of
-that fresh result can propagation take responsibility and establish the
-requirement check's fresh event/origin. Transfer a unique result without
-Copy; never stage a partial or vacant E as a complete payload.
-The standard construction, staging and delivery contracts retain a responsible
-holder at every step.
+On failure, execute E's selected ordinary construction binding once. Its
+completely initialized result is the exception object and fresh event; do not
+create a detached payload or second event wrapper. The constructor and
+delivery contracts retain a responsible holder at every step.
 
 Failure evaluating the operand propagates that actual failure without
-invoking E's constructor. Failure in declaration initialization, constructor
+constructing E. Failure in constructor initialization, its authored
 preconditions/body/postconditions or final validation likewise propagates its
 actual failure, with acquired-state cleanup and no fabricated outer E event.
-If construction cleanup replaces that failure, retain the original cause
-and its complete dependencies under the local-failure contract.
+If a constructor failure replaces a pending exception in a handler, the runtime
+retains the pending object through `ParentException`; it does not fabricate
+another E.
 Later transport/resource failure follows the selected propagation contract;
 it cannot restore a consumed source, return normally or guess another E.
 
@@ -245,26 +243,26 @@ remains stable while construction executes.
 
 ## 6. Effects, phases and failure channels
 
-Construction, defaults/params staging, static initialization, partial cleanup
+Constructor execution, selected default/empty-params binding, static initialization, partial cleanup
 and propagation participate in the check's ordinary access, caller-safety,
 ownership, dependency and effect obligations. A safe Boolean requirement
 does not grant authority for an unsafe constructor.
-Exception/RequireException annotations imply neither Pure nor NoThrow.
-A selected pure or valid-domain NoThrow form must establish the applicable
-bound through all admitted false/construction paths, or prove those paths
-absent. An internally handled failure retains its actual effects.
+Exception/RequireException annotations imply neither Pure nor a failure-free
+contract. A selected Pure form must establish its applicable effect bound
+through all admitted false/construction paths, or prove those paths absent.
+An internally handled failure retains its actual effects.
 
 Normal check elimination still preserves operand effects, saved output/state
 facts and every retained rule/default/constructor fact used by the proof.
 Required constant evaluation follows its existing program/value/failure
 rules; these runtime defaults do not change static proof failures into
-runtime payload construction or authorize a new constant program.
+runtime exception creation or authorize a new constant program.
 
 A declaration precondition fails before entering the body, so an unentered
 body finally/defer does not run. Already transferred arguments and initialized
-constructor fields retain ordinary callee/partial-state cleanup.
+constructor-owned fields retain ordinary callee/partial-state cleanup.
 For ordinary async execution, failure before operation establishment remains
-synchronous; escaping check or constructor failure after establishment is
+synchronous; escaping check or construction failure after establishment is
 failed completion, even inline or before the first await.
 Producer creation remains synchronous, while body/advance/close use their
 already selected operation contracts. Moving generated code or resuming on
@@ -273,27 +271,27 @@ another permitted flow changes neither its default nor its failure channel.
 ## 7. Publication and independent admission
 
 Retain the resolved Core/default schema and fallback identity, complete
-selected type or substituted recipe, explicit-versus-default selection,
-semantic check owner and phase, bound ordinary constructor and its published
-signature/default/params/contract facts. Also retain complete value/state,
-payload/provenance, dependency, cleanup and execution support.
+selected exception-class type or substituted recipe, explicit-versus-default
+selection, semantic check owner and phase, exact ConstructorBinding and
+complete value/state, provenance, dependency, cleanup and execution support.
 An independent consumer must not rerun source-name overload lookup or invent
-a factory from an attribute string.
+a constructor binding from an attribute string.
 
 Replacement preserves facts actually retained by the client: changing a
 relied-on selected failure, constructor binding, source owner, output state,
 effect or failure channel requires the ordinary compatibility check.
 Unrelated additions are not universally breaking, and equal machine
-signatures do not erase constructor or payload obligations.
+signatures do not erase exception-class or factory obligations.
 Proof-dependent removal still retains the particular facts it used.
 
 Trusted readers remain selective. Missing required Core identity, type,
-constructor, default/phase, payload or cleanup support declines before
+factory, default/phase, provenance or cleanup support declines before
 affected use; raw runtimePolicy, optional debug names and private code are
-not complete records. Other payloads cannot stand in for missing Core support.
+not complete records. Other exception classes cannot stand in for missing
+Core support.
 This logical selection allocates no Feature ID, Attr tag, opcode, TypeSpec,
-constructor ABI or exception-region layout.
+factory ABI or exception-region layout.
 
 [Conformance cases](../conformance/source-requirement-failures.md) distinguish
-supplied finite source/default/construction/state facts from actual compiler,
+supplied finite source/default/constructor/state facts from actual compiler,
 Core bootstrap, runtime roots, cleanup and physical-codec evidence.

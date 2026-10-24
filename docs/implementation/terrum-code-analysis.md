@@ -2,23 +2,41 @@
 
 The
 [`Terrum.CodeAnalysis.Terrum` source project](../../sources/Terrum.CodeAnalysis.Terrum/README.md)
-contains maintained, bounded Terrum-authored compiler components, not an
+contains maintained Terrum-authored compiler components, but is not yet an
 independently bootstrapped compiler. The approved
-[source grammar](../specs/grammar-spec.md) defines the language target, not
-implementation status or approval of these components' sketched library APIs.
-The compilation-local `TokenCursor` uses `init ref<Token>` for both sequential
-and indexed reads because exhaustion and out-of-range results leave their
-destinations vacant. Its
-[accepted bounded view contract](../proposals/span-backed-token-cursor.md#accepted-bounded-exception)
-does not establish general view representation or persisted captures.
-These components do not replace or link into the C# implementation. The native
-profile executes the range, character, integer and nested token components and
-a bounded token scanner; a separate non-persisted component runner exercises
-`TokenCursor`.
-The hosted `frontend-component` also composes `WideIntegerFacts` and
-`IntegerParsing` with `TokenIntegerSnapshot` to revalidate scanner integer
-magnitudes during frontend construction; projection still uses the hosted
-verifier and emitter.
+[source grammar](../specs/grammar-spec.md) defines the language, not the
+limits of individual prototypes in this inventory.
+
+The C#-authored and Terrum-authored compilers are standalone implementations.
+The intended pre-GA fallback, when Terrum does not yet support a source
+feature, is to invoke the C# compiler as a separate process on the original
+source. No AST or partial semantic projection is handed between compilers.
+This process-level routing is not yet established by the component tests;
+the long-term goal is matching general support and then removing the C#
+implementation after GA.
+
+The existing `TokenCursor`, v87/v88 scalar projection and private
+`Span<Token>` module paths are implementation prototypes, not selected
+compiler interfaces. The intended parser path uses `Span<Token>` directly
+with the accepted backing/lifetime obligations; it does not require a cursor
+wrapper or persistent span schema. Tests that compile these prototypes remain
+implementation evidence only.
+
+Private `Host.Source` grants, the persisted scanner profile, and the scalar
+frontend invocation profiles below are unselected prototypes. Compiler input
+is source text; JIT input is semantic metadata. These experiments do not make
+the original source file a runtime value or define a compiler-to-JIT source
+handoff.
+
+The hosted verifier currently reports `TRM3016` at its 100,000-visit
+implementation default. Most passes use separate counters, but
+`IndexedBody.Verify` still receives a counter shared across the program's
+functions. The selected design is cached per-function analysis with a
+caller-provided budget and a measured default; 100,000 is provisional, not a
+source or program-wide cap. A function's published contracts, rather than
+private facts found by inspecting its body, govern calls. JIT/AOT or metadata
+emission may retain private whole-program/module facts in compiler state, but
+they are not persisted as cross-module guarantees.
 The full-solution build also produces
 `artifacts\bin\sources\Terrum.CodeAnalysis.Terrum\<configuration>\terrum-compiler-primitives.dll`
 from `BitOperations`, `CharacterFacts`, `Float32MathSelection`,
@@ -49,9 +67,9 @@ provisional `terrum-compiler-primitives-source-grant.dll` from
 `WideIntegerFacts`, `SourceIntegerParsing`,
 `Utf16CodeUnits` and `Utf16Scalar`,
 with a hash-bound export manifest; it does not change the source-free
-compiler-primitives DLL or establish a stable ABI. Its
-[native source-grant boundary](../proposals/native-source-grant-library.md)
-remains deferred, including promotion of its input/result and failure contracts.
+compiler-primitives DLL or establish a stable ABI. The native source-grant
+companion remains an experiment with no adopted export ABI or result contract;
+see [CG-018](conformance-gaps.md#cg-018).
 This maintained native
 compiler-primitives library exports `Terrum.CodeAnalysis.SourceRange.TryCreate`,
 `Terrum.CodeAnalysis.IsAsciiDigit`,
@@ -164,7 +182,7 @@ numeric slices directly to `float32` or `float64` bits, without rounding
 multi-limb workspace and are covered by semantic-module parity tests for ties,
 subnormal and overflow boundaries, malformed spellings, deterministic random
 values and long significand/exponent inputs under both runtime policies. The
-maintained source-grant companion also exports its two scalar `int64`
+provisional source-grant companion also exports its two scalar `int64`
 entry points with `int32` start/length parameters. The classifier admits only
 the internal by-value owner transfers, lexical views and canonical buffer
 intrinsics required by their verified helper closure; the exports remain
@@ -202,22 +220,30 @@ continue; acyclic loops without a reachable backedge remain outside that
 emitter. Audited equal-width reinterpretations preserve source `int32`
 checked-count semantics in its `uint32` bridge.
 
-The [development encoding inventory](trrm-encoding-history.md) distinguishes
-current standard assignments from the executable prototype's overlapping
-floating bytes. The [output inventory](output-profiles.md#provisional-trrm-output-bodies)
+The executable prototype still uses development-schema encodings; it is not
+current-registry input. [CG-001](conformance-gaps.md#cg-001) tracks complete
+producer/consumer migration. The
+[output inventory](output-profiles.md#provisional-trrm-output-bodies)
 records the separate scoped-unsafe `0x2E` experiment, not an accepted standard
 instruction or persistence contract. Floating helper parity is not proof of
 unified-registry conformance. Those byte assignments must not be inferred from
 the component table below.
 
-The separate Terrum-authored scalar frontend projects scalar/void functions,
+**The scalar frontend projection described below is an unselected prototype.**
+The C# host currently audits/verifies/emits its projected buffers in tests,
+but the selected compiler architecture has no AST or partial-semantic handoff
+between implementations. Any transitional C# fallback is a separate process
+on original source.
+
+The separate Terrum-authored scalar frontend prototype projects scalar/void functions,
 initialized scalar locals, structured branches/loops, named loop transfers,
 requirements/discards and selected function effects. Complete-program switch
 supports `int32`, `uint32`, `int64`, `uint64`, `bool` and `char16` selectors,
 distinct constant arms and a final `_` arm; guards, patterns, fallthrough and
 missing/misplaced defaults reject. Source-audited switch records evaluate the
-selector once; cleanup-contained transfers additionally need the
-[finite dispatcher/counting proof](../proposals/scalar-frontend-cleanup-switch-transfer.md).
+selector once; cleanup-contained transfers follow ordinary CFG and cleanup
+contracts in the
+[source execution cases](../specs/conformance/source-values-and-execution.md).
 Verification and emission remain hosted.
 
 Complete programs inventory declarations in the supported global or namespace
@@ -259,15 +285,50 @@ Raw-bit helper tests below do not widen those source/profile boundaries.
 General attributes, references, callable values, typed catches, filters and
 unproved static proofs remain unsupported.
 
-## Projection identities and resources
+<a id="projection-identities-and-resources"></a>
+## Projection prototype identities and resources
 
-The current scanner is `scanner-10`/schema 10, with `CharacterLiteral` kind 103
+The current scanner implementation uses `scanner-10`/schema 10, with `CharacterLiteral` kind 103
 and `DotDot`, `DotDotCaret`, `QuestionDot` kinds 104–106. Diagnostics 11/12
 describe invalid/unsupported maximal punctuation runs. Token recognition is
 not parser/binder support: hosted bounded indexing/ranges consume `^`,
 `..`/`..^`, while `?.` remains token-only. Native scalar spacing admits only
 the supported `init ref<T>` delimiters, not general generic contexts.
 Raw scanner buffers carry no historical-schema marker or reader selection.
+
+The following v87/v88 projection identities and resource values describe
+existing prototype code and tests only. They are not selected invocation
+profiles, source limits, compiler interoperability formats, or a language
+subset. The projection path is to be removed or replaced by the standalone
+compiler transition described in
+[bootstrap composition](bootstrap-frontend-composition.md).
+
+### Prototype `scanner-10` invocation profile (not selected)
+
+The unselected persisted scanner prototype uses this descriptor order; its
+private profile identity binds the schema version, source limit, names,
+element types, access, capacity formulas, readonly tables,
+token/trivia/diagnostic/integer record domains and enum assignments.
+
+| Ordinal | Buffer | Type/access | Capacity or contents |
+|---:|---|---|---|
+| 0 | `Source` | readonly `char16` | `N`, at most 16,384 code units |
+| 1 | `XidStart` | readonly `int32` | Canonical Unicode start-range table |
+| 2 | `XidContinue` | readonly `int32` | Canonical Unicode continuation-range table |
+| 3 | `Tokens` | writable `int32` | `3 * (N + 1)` words, including real EOF |
+| 4 | `Diagnostics` | writable `int32` | `1 + 3 * N` words |
+| 5 | `Trivia` | writable `int32` | `1 + 4 * N` words |
+| 6 | `Keywords` | readonly `int32` | Canonical keyword table |
+| 7 | `Operators` | readonly `int32` | Canonical operator table |
+| 8 | `IntegerValues` | writable `int32` | `1 + 5 * N` words |
+| 9 | `EscapeKeywords` | readonly `int32` | Canonical escaped-keyword table |
+
+Each invocation allocates fresh, disjoint output buffers and uses canonical
+readonly tables. The host validates every copied result family before
+releasing native storage and returns owned results only after normal
+completion; diagnostics are a completed scan result, not a runtime failure.
+The profile has no hosted-lexer fallback and does not authorize caller-chosen
+tables, a general multi-buffer registry, source retention or persisted AOT.
 
 Projection tags are private validation details, separate from scanner schema,
 semantic-module revisions and native ABI identity:
@@ -301,17 +362,16 @@ fallback uses the scanner's real EOF. There is no separate 64-token
 snapshot/function gate in this path. Snapshot backing stays live through
 inventory, parser retries and fallback, without a managed-chain copy/rescan.
 
-The separately fingerprinted, unapproved
-[summary invocation profiles](../proposals/scalar-frontend-invocation-profile.md)
-both have twelve buffers, but select 64 or at most 16,385 total tokens including
-real EOF. Their decoder token-end limits are 63 and source-derived,
-respectively. Function/node limits are independent; ten short functions
-fitting profile 1 do not establish coverage of all 32 frames.
+The unselected scalar-frontend prototype has separately fingerprinted private
+summary invocation profiles with twelve buffers; they use 64 or at most
+16,385 total tokens including real EOF. Their decoder token-end limits are 63
+and source-derived, respectively; the profile identities do not fall back to
+each other. Function/node limits are independent; ten short functions fitting
+profile 1 do not establish coverage of all 32 frames.
 The [composition inventory](bootstrap-frontend-composition.md) records exact
-publication/resource combinations, direct-source bootstrap support and the
-known fourth-call-child audit mismatch. The
-[consolidated proposal](../proposals/bootstrap-frontend-profiles.md) owns pending
-support decisions, not this inventory.
+publication/resource combinations, selected direct-source/bootstrap profiles
+and the known fourth-call-child audit mismatch. The inventory distinguishes
+profile capacity from current hosted support.
 
 Capacity definitions are in
 [`ScalarFrontendHost`](../../sources/Terrum.CodeAnalysis/Lexing/ScalarFrontendHost.cs),
@@ -320,11 +380,29 @@ and [invocation identity/audit](../../sources/Terrum.CodeAnalysis/Lexing/ScalarF
 the [complete-program fixtures](../../tests/Terrum.CodeAnalysis.Tests/Semantics/Frontend/ScalarFrontendInvocationProfileTests.CompleteProgram.cs)
 assert 2,274/712/780/61/25,025 and exercise the distinct token profiles.
 
+The scanner JIT adapter copies and validates tokens, diagnostics, trivia and
+integer-value records before returning an owned result; lexical diagnostics
+are a completed scan, not runtime failure. The scalar frontend adapter then
+requires complete v88 publication, copies scanner results, decodes the
+program, audits it against the original source and selected runtime policy,
+and compares every summary word—including unused fields—with the independently
+audited projection before returning owned results. The zeroed publication
+scratch is reconstructed separately; the Terrum reader's overwritten summary
+is not reused as output scratch. A hosted parser fallback, positive token
+count alone, or structurally valid but source-inconsistent summary is not
+profile success. Runtime failure and malformed publication return no
+success-shaped partial result.
+
 ## Private semantic-module revisions
 
 These are private structured-IR revisions, **not** TRRM `(major, minor)` or
 v87/v88 projection tags. The writer selects from retained features; it does not
 always emit the highest revision understood by the reader.
+
+The current reader/writer also contains experimental Span<Token> roles and
+operations in some private revisions. Those span payloads are not selected
+for persistence; do not treat their revisions or tests as an accepted
+compiler interface.
 
 | Retained facts, without an overriding native feature | Writer selection |
 |---|---|
@@ -361,7 +439,7 @@ Private roles/layouts, invocation requirements, backing, staged arguments,
 initialization, owner liveness and cleanup are revalidated after read/link.
 Public/imported/exported span signatures, returned spans and persisted cursor
 captures remain outside the
-[unapproved private-span slice](../proposals/token-span-semantic-module.md).
+[prototype-only private span note](modules.md#experimental-private-token-span-payloads-not-selected).
 
 The exact selections and gates are in
 [`ModuleCompiler.Write`/`ReadModuleHeader`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
@@ -477,6 +555,11 @@ or compiler self-build.
 
 ## Component inventory
 
+Rows for `TokenCursor` and the scalar frontend/projection describe current
+code and tests, not selected compiler interfaces. The target parser uses
+`Span<Token>` directly; the Terrum and C# compilers do not exchange projected
+syntax or semantic records.
+
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
 | [ArtifactDirectoryValidation](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Modules/ArtifactDirectoryValidation.terrum) | Candidate TRRM header/directory framing, binary-search section lookup, optional reference-slot validation, and current hosted Feature assignment/Module feature-range checks using caller-provided per-entry scratch arrays; all input words must represent bytes | AOT/JIT under both policies compare framing, lookup metadata, slot selectors/target-row bounds and provisional Feature behavior with `TrRmArtifactIndex`, including absent lookups, malformed headers/policies/strides/extents/slots, missing Module, zero/nonzero gaps, trailing bytes and invalid feature/module ranges; follows the approved ascending-payload-offset rule, so it rejects an out-of-order artifact accepted by the hosted index; Feature assignments remain provisional, other table payloads and linking remain separate |
@@ -559,7 +642,7 @@ or compiler self-build.
 | [CharacterFacts](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/CharacterFacts.terrum) | Shared ASCII digit, hex-digit and newline decisions | Executed with `char16` comparisons, checked numeric type-call conversions and verified NoThrow classification contracts; persisted semantic-module JIT checks ASCII-digit, hex-digit and line-break behavior across every UTF-16 code unit, including successful digit publication and failed-output vacancy/reuse, and verifies `GetDecimalDigit` for all ten digits under both policies; Windows x64 compiler-primitives DLL integration invokes every export, exhaustively checks digit/newline classification, and checks decimal/hexadecimal mapping, rejection, output preservation and canaries; the Terrum `ComponentTestRunner` now exhaustively checks all three classifications/mappings over UTF-16 code units |
 | [Token](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
 | [ComponentTestRunner](../../tests/Terrum.CodeAnalysis.Terrum.Tests/TestHelpers/ComponentTestRunner.terrum) | Explicit entry harness composing bounded range, character-fact, UTF-16, IntegerFacts, token, CopyAlgorithms, finite float math selection, wide and checked integer arithmetic, IntegerFormatting, IntegerFloatConversion, Char16FloatConversion, FloatingArithmetic, FloatingComparison, FloatingFormatConversion, FloatingNegation, FloatingIntegerConversion, IntegerMath, IntegerSaturation, IntegerWrapping, checked-conversion, and bit-operation tests | Persisted consumer executes the independently compiled producer through both JIT and AOT under both runtime policies; char16 conversion exhausts every code unit, floating addition/subtraction/multiplication/division covers rounding/subnormal/special-value boundaries, floating comparisons cover signed zeros and unordered NaNs, float-format checks cover subnormal, overflow and NaN-classification boundaries, and negation checks preserve exact raw payloads; test selection remains explicit and host-orchestrated |
-| [TokenCursor](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenCursor.terrum) | Read-only traversal and repeatable indexed reads of a validated `TokenSnapshot` without copying or owning its backing; indexed reads do not advance the remaining view | Hosted binding, mandatory verification and Windows x64 emission support only `Span<Token>`; `uint64` is the internal unsigned native-width index carrier, with full-width bounds checks before address calculation. `[Captures(nameof(tokens))]` preserves the owner dependency through copies, moves, joins and unwind. The scalar frontend passes the unadvanced snapshot view through parser methods and reads bounded indexed windows without storing the view. The [dedicated non-persisted Terrum component runner](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/TokenCursorComponentTestRunner.terrum) compiles the separate `TokenCursorTests.terrum` fixture in one compilation and checks ordered reads, exhaustion, negative/out-of-range indexes, and indexed-read non-consumption; the cursor's compilation-local span/capture metadata is never serialized. AOT/JIT also traverses every token in a maximum-length scanner snapshot under both policies while the owner remains live. No source-level `nuint`, mutable/writable spans, general slicing, arbitrary stored views, exports or persistence; see [the bounded cursor proposal](../proposals/span-backed-token-cursor.md#accepted-bounded-exception). |
+| [TokenCursor](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenCursor.terrum) | Read-only traversal and repeatable indexed reads of a validated `TokenSnapshot` without copying or owning its backing; indexed reads do not advance the remaining view | Hosted binding, mandatory verification and Windows x64 emission support only `Span<Token>`; `uint64` is the internal unsigned native-width index carrier, with full-width bounds checks before address calculation. `[Captures(nameof(tokens))]` preserves the owner dependency through copies, moves, joins and unwind. The scalar frontend passes the unadvanced snapshot view through parser methods and reads bounded indexed windows without storing the view. The [dedicated non-persisted Terrum component runner](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/TokenCursorComponentTestRunner.terrum) compiles the separate `TokenCursorTests.terrum` fixture in one compilation and checks ordered reads, exhaustion, negative/out-of-range indexes, and indexed-read non-consumption; the cursor's compilation-local span/capture metadata is never serialized. AOT/JIT also traverses every token in a maximum-length scanner snapshot under both policies while the owner remains live. No source-level `nuint`, mutable/writable spans, general slicing, arbitrary stored views, exports or persistence; see the [bounded cursor profile](view-and-owner-profiles.md#tokencursor-view). |
 | [RangeTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Text/RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed by `ComponentTestRunner` alongside `TokenTests` against an independent multi-source producer; C# still owns test discovery and execution orchestration |
 | [CharacterFactsTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Lexing/CharacterFactsTests.terrum) | Decimal digits, exhaustive ASCII-digit/line-break/hex classification and mapping across all UTF-16 code units | Executed by the explicitly composed `ComponentTestRunner` against the independent multi-source producer |
 | [Utf16CodeUnitsTests](../../tests/Terrum.CodeAnalysis.Terrum.Tests/Text/Utf16CodeUnitsTests.terrum) | Exhaustive BMP decoding/width, every valid supplementary surrogate pair, and unpaired-surrogate rejection | Executed by the explicitly composed `ComponentTestRunner` against the independent multi-source producer |
@@ -589,13 +672,13 @@ or compiler self-build.
 | [TokenDiagnosticSnapshot](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and positive source-bounded ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, vacancy-only `init ref` reads, invalid buffer/range rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure; a maximum-length malformed-UTF-16 source retains and validates every diagnostic after token publication rejects |
 | [ScalarParserTypes](../../sources/Terrum.CodeAnalysis.Terrum/Syntax/ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Vacancy-only `init ref` helper outputs; scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
 | [ScalarFrontend](../../sources/Terrum.CodeAnalysis.Terrum/Semantics/ScalarFrontend.terrum), [ScalarFrontendProgram](../../sources/Terrum.CodeAnalysis.Terrum/Semantics/ScalarFrontendProgram.terrum) | Bounded v87 standalone/v88 complete frontend over a successful scanner snapshot; see the [source/control-flow envelope](#scalar-frontend-and-interchange) and [resources](#projection-identities-and-resources). Character literals require representable `char16` contexts. Visible-local lifetime ending, explicit/inferred vacant locals, scalar constants, nested cleanup/recovery and foldable-true static proofs are supported. Result/error objects and internal handled/header-end values use conditional `init ref` outputs: handled diagnostics return a result, while false leaves outputs vacant. | Produces source-bound projections for independent hosted audit/verification/emission. Aliases are reconstructed from source, scanner integer records supply constants and `CharacterLiteral` decodes `Host.Source`. Authored literal helpers supply independently audited floating bits. Inventory/parsing borrow an indexed `Span<Token>`; function windows add synthetic EOF, standalone fallback retains real EOF, and the owner stays live through retries without a managed-chain copy or rescan. The persisted primitives DLL and `build-component` do not consume its typed result. |
-| [ScalarFrontendProjection](../../sources/Terrum.CodeAnalysis.Terrum/Semantics/ScalarFrontendProjection.terrum) | Host-owned 2,274-word `Frontend` and 25,025-word `FrontendProgram`; completion is written last. Standalone output/diagnostics use v87; complete headers, function bodies and decoded summaries use v88. Compact-expression and tree/statement layouts are both current. Unused extensions are zero; absent call targets are `-1`. | `ScalarFrontendHost` checks source anchors, types, literals, node order/ownership, precedence, roots, modes, local binding/initialization/liveness, scopes, control flow, returns, mutability, conversions and declaration effects. Complete audits also check declaration sets, duplicate names, frame coverage, callees and argument ownership. Shared verification checks effects, definite publication and reachable completion under the selected policy. See [current bounds](#projection-identities-and-resources), including the [fourth-child audit mismatch](bootstrap-frontend-composition.md#exact-private-identities-and-resources); this is not a standalone compiler or machine-code encoder. |
+| [ScalarFrontendProjection](../../sources/Terrum.CodeAnalysis.Terrum/Semantics/ScalarFrontendProjection.terrum) | Host-owned 2,274-word `Frontend` and 25,025-word `FrontendProgram`; completion is written last. Standalone output/diagnostics use v87; complete headers, function bodies and decoded summaries use v88. Compact-expression and tree/statement layouts are both current. Unused extensions are zero; absent call targets are `-1`. | `ScalarFrontendHost` checks source anchors, types, literals, node order/ownership, precedence, roots, modes, local binding/initialization/liveness, scopes, control flow, returns, mutability, conversions and declaration effects. Complete audits also check declaration sets, duplicate names, frame coverage, callees and argument ownership. Shared verification checks effects, definite publication and reachable completion under the selected policy. See [current bounds](#projection-identities-and-resources) and the [compiler migration gaps](bootstrap-frontend-composition.md#current-migration-gaps); this projection is prototype evidence, not the selected compiler architecture. |
 | [ScalarFunctionParser](../../sources/Terrum.CodeAnalysis.Terrum/Syntax/ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Success-only parse helpers and every scalar evaluator output use vacancy-only `init ref`. Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](../../sources/Terrum.CodeAnalysis.Terrum/Syntax/ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | Vacancy-only `init ref` outputs; AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](../../sources/Terrum.CodeAnalysis.Terrum/Syntax/ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | Vacancy-only `init ref` parse/evaluator outputs; AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
 | [ScalarConditionalAddParser](../../sources/Terrum.CodeAnalysis.Terrum/Syntax/ScalarConditionalAddParser.terrum) | Separate bounded probe of a Boolean-controlled checked addition of two named integer parameters with a fallback return of the first parameter | Vacancy-only `init ref` parse/evaluator outputs; AOT/JIT under both policies check successful addition, both overflow directions, and that a skipped addition cannot fail; scanner-owned tokens and shared scalar range guards, not general branch parsing or a bootstrap compiler |
 | [ScalarComparisonConditionalParser](../../sources/Terrum.CodeAnalysis.Terrum/Syntax/ScalarComparisonConditionalParser.terrum) | Separate bounded probe of two named integer/`char16` parameters used in a six-way comparison predicate selecting one parameter per `if`/`else` return | Vacancy-only `init ref` parse/evaluator outputs; AOT/JIT under both policies check signed/unsigned and code-unit extrema, selected versus discarded arms, and rejected unbound/swapped identifiers; scanner-owned token records, not an adopted Body encoding or a bootstrap parser |
-| [Scanner](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Escaped identifier scans reuse each decoded scalar; comment trivia reads non-surrogate units directly and decodes surrogate units only when needed; quoted-token loops and literal decoders likewise advance non-surrogate units directly and decode surrogate pairs only when needed; trivia and punctuation loops reuse current code units, numeric scans cache each current unit, keyword/operator matching filters by one cached leading unit, and hexadecimal integer/float classification shares one mantissa scan while valid floats resume at their exponent; a fixed-seed mixed-radix corpus checks hosted parity for valid and malformed decimal, binary and hexadecimal spellings; explicitly compiled with `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `Utf16Scalar`, `CharacterLiteral` and `StringEscape`; `init ref` comment-scalar widths plus vacancy-only punctuation and magnitude helper outputs; executed through fixed checked host buffers with overflow-safe record-capacity checks; the `scanner-10` persisted JIT profile is provisionally implemented under the [scanner invocation-profile proposal](../proposals/scanner-invocation-profile.md) and compares host token/diagnostic parity across every BMP `\u` escape, every valid supplementary `\U` scalar and all 2,048 rejected surrogate-valued `\U` escapes in bounded source grants, plus above-maximum boundaries, every raw supplementary quoted scalar, every raw surrogate code unit in an isolated quoted token, every supplementary scalar in both identifier-start and identifier-continue positions, a maximum-length quoted source ending in U+10FFFF and maximum-length sources ending in each unpaired surrogate; general source-grant semantic-module execution remains outside this profile; see the [precise subset](../scanner.md) |
+| [Scanner](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Escaped identifier scans reuse each decoded scalar; comment trivia reads non-surrogate units directly and decodes surrogate units only when needed; quoted-token loops and literal decoders likewise advance non-surrogate units directly and decode surrogate pairs only when needed; trivia and punctuation loops reuse current code units, numeric scans cache each current unit, keyword/operator matching filters by one cached leading unit, and hexadecimal integer/float classification shares one mantissa scan while valid floats resume at their exponent; a fixed-seed mixed-radix corpus checks hosted parity for valid and malformed decimal, binary and hexadecimal spellings; explicitly compiled with `SourceRange`, `CharacterFacts`, `Utf16CodeUnits`, `Utf16Scalar`, `CharacterLiteral` and `StringEscape`; `init ref` comment-scalar widths plus vacancy-only punctuation and magnitude helper outputs; executed through fixed checked host buffers with overflow-safe record-capacity checks; the prototype `scanner-10` private JIT profile compares host token/diagnostic parity across every BMP `\u` escape, every valid supplementary `\U` scalar and all 2,048 rejected surrogate-valued `\U` escapes in bounded source grants, plus above-maximum boundaries, every raw supplementary quoted scalar, every raw surrogate code unit in an isolated quoted token, every supplementary scalar in both identifier-start and identifier-continue positions, a maximum-length quoted source ending in U+10FFFF and maximum-length sources ending in each unpaired surrogate; source-grant semantic-module execution remains prototype evidence, not a selected compiler interface; see the [precise subset](../scanner.md) |
 | [ManagedScanner](../../sources/Terrum.CodeAnalysis.Terrum/Lexing/ManagedScanner.terrum) | Copy a completed compiled scanner token stream into newly published managed storage or a sequential cursor | AOT/JIT parity with host token kinds/ranges under both policies; lexical failure, undefined token kinds, empty non-EOF records, other malformed host records and more than 64 tokens leave the output vacant; only one final zero-length EOF is valid; independent copies survive clear and collection |
 | [Host APIs](../../library/compiler-host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
@@ -631,19 +714,19 @@ publishing an output. Inputs remain ordinary eagerly evaluated values.
 to that `init ref<T>` implementation and publishing only after successful
 selection.
 
-`SourceText` exposes only source-grant queries: UTF-16 code-unit length,
-checked code-unit reads, validation of half-open ranges, and streaming line
-reads against the current immutable `Host.Source`. It retains no pointer or
-source text, creates no runtime string, and does not carry a diagnostic path.
-Persisted semantic-module JIT coverage checks exact reads of all 65,536 UTF-16
-code units, including surrogate units, across fresh grants under both runtime
-policies.
+The prototype `SourceText` component exposes only source-grant queries:
+UTF-16 code-unit length, checked code-unit reads, validation of half-open
+ranges, and streaming line reads against the current immutable `Host.Source`.
+It retains no pointer or source text, creates no runtime string, and does not
+carry a diagnostic path. Prototype semantic-module JIT tests check exact reads
+of all 65,536 UTF-16 code units, including surrogate units, across fresh
+grants under both runtime policies.
 Its ranges remain offsets for the current invocation's source grant; this
 facade is not the hosted, owning `SourceText` collection.
 
 `SourceLines` builds coordinate and ordinal queries on the `SourceText` facade,
 without retaining a pointer, borrowing writable storage or allocating a line table.
-The host binds the original candidate snapshots through
+The prototype host binds the original candidate snapshots through
 `Compilation.Create(trees, buffers)`, preserving source-associated diagnostics
 and the single-source capability restrictions without merging source text.
 `TryReadSourceLine` reads the suffix starting at a valid code-unit offset; callers
@@ -659,18 +742,15 @@ an executed bounded component, not an efficient indexed replacement. Together
 these source-grant helpers still do not implement the hosted `SourceText`
 collection.
 
-Current semantic modules can persist these four source reads symbolically
-and propagate the reserved `Host.Source` requirement to an independent
-consumer. `NativeJit.ExecuteWithSourceGrant` links and executes that
-source-dependent program with one readonly `char16` snapshot of at most 16,384
-code units, copied into fresh invocation storage. Source contents, sample
-lengths and addresses are not stored in artifacts. This is provisional support
-under the still-unapproved source-grant proposal; graphs, module sets, native
-DLLs and persisted AOT images remain unsupported. The scanner also has
-provisional persisted semantic-module JIT support:
+The experimental private semantic-module path can persist these four source
+reads symbolically and propagate a `Host.Source` requirement to an independent
+consumer. `NativeJit.ExecuteWithSourceGrant` exercises that prototype with one
+readonly `char16` snapshot copied into fresh invocation storage. This is not an
+accepted compiler/JIT profile or source-file runtime capability. The scanner
+also has an unselected persisted semantic-module prototype:
 `scanner-10` artifacts retain the fingerprinted profile identity and canonical
 buffer descriptors but no sample contents or capacities. The dedicated
-`NativeJit.ExecuteWithScannerProfile` adapter supplies fresh source, readonly
+`NativeJit.ExecuteWithScannerProfile` prototype adapter supplies fresh source, readonly
 tables and output buffers for every invocation, then returns only copied and
 validated token, diagnostic, trivia and integer results after normal
 completion. Regression coverage reuses the same producer and consumer
@@ -683,9 +763,7 @@ valid supplementary scalar is also checked as raw quoted-string content and
 in both identifier-start and identifier-continue positions; every raw
 surrogate code unit is tested in an isolated quoted token. A maximum-length
 quoted source ends with the valid U+10FFFF surrogate pair, and maximum-length
-identifier inputs end with each unpaired surrogate code unit. The
-[scanner-profile proposal](../proposals/scanner-invocation-profile.md)
-remains unapproved; this support does not make the scanner or scalar frontend
+identifier inputs end with each unpaired surrogate code unit. This support does not make the scanner or scalar frontend
 independent of hosted verification and emission. Integer-value records are
 also checked against binary, decimal and hexadecimal `uint64` maximum and
 overflow expectations. A maximum-length alternating identifier/whitespace

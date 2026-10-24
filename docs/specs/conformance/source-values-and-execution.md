@@ -27,7 +27,7 @@ Command helpers return `void` unless a case states another type.
 | UNIT-15 | Compare two effectful unit-producing expressions | Evaluate both in order; equality true, inequality false |
 | UNIT-16 | `default<void>` | `()` |
 | UNIT-17 | A field of type `void` with a valid initializer | Permit; preserve initialization/effects without payload bytes |
-| UNIT-18 | A Copy-only generic formal receives `()` | Infer/retain complete `void`, subject to its other constraints |
+| UNIT-18 | An unmarked generic formal receives `()` | Admit complete `void` in the default Copy-capable, non-null domain, subject to its other constraints |
 | UNIT-19 | A valid `Option<void>` specialization | Distinguish absent from present unit; no second unit value |
 | UNIT-20 | `TextSpan<void>` | Retain its explicit encoding-erasure contract; not unit elements |
 | UNIT-21 | `void token = ReadInt();` | Diagnose missing `int32`-to-`void` conversion |
@@ -121,6 +121,7 @@ the condition sequence fixes the stated true/false outcomes.
 | EXEC-38 | Value-producing `require` yields a non-unit output | Use/bind/transfer or explicitly discard it; statement checking cannot silently drop it |
 | EXEC-39 | An empty statement | No evaluation, declaration, or extra value |
 | EXEC-40 | `unsafe` or a selected policy wraps a statement | Preserve result consumption, initialization, and cleanup rules |
+| EXEC-41 | A backward switch-arm `continue` creates a cycle inside a `finally` body | Accept as ordinary CFG; do not require a termination proof. If the cycle never exits, the `finally` body does not complete and later exits/cleanup do not occur |
 
 Tuple/collection construction, imported callability, async/producer phase
 identities, and complete primitive operator catalogs retain their canonical

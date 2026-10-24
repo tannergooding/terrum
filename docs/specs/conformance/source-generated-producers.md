@@ -127,7 +127,7 @@ proofs, GC, task representation or physical producer codecs.
 | PGPHASE-09 | Advance faults or early close occurs | No normal body completion guarantee |
 | PGPHASE-10 | Cursor check observes moved input/released body guard | Reject unavailable source; no retained-byte or snapshot repair |
 | PGPHASE-11 | Creator is Pure but resumed body writes externally | Creation promise alone does not authorize pure advancement |
-| PGPHASE-12 | Creator NoThrow succeeds but resumed body/close can fail | Later operation needs its own promise; no implicit propagation |
+| PGPHASE-12 | Creator completes normally but resumed body/close can fail | Keep later-operation failures distinct from successful creation; no implicit propagation |
 | PGPHASE-13 | Creator parameter has NoAlias | No post-creation separation extent for captured accesses |
 | PGPHASE-14 | Creator has ConstEval | No automatic constant advancement/close or encodable affine cursor result |
 | PGPHASE-15 | Generated operation declares effect/evaluator capability | Check resumed code, captures, output, clauses and cleanup under admitted support |
@@ -173,6 +173,6 @@ proofs, GC, task representation or physical producer codecs.
 | PGRET-07 | Generated frame is assumed layout-independent across body edits | Retain actual layout/ABI dependency or explicit independently admitted opaque contract |
 | PGRET-08 | Held opcode/table slot or optional Attr field is used for required generation | No physical allocation/codec selected |
 | PGRET-09 | Module/source ownership is inferred from generated debug names | Require retained semantic owner/unit identities |
-| PGRET-10 | Arbitrary generated-body assertion is trusted solely because record is present | Explicit producer/audit trust or validation, not flag proof |
+| PGRET-10 | Arbitrary generated-body assertion is treated as true solely because a structural record exists | Producer remains responsible for truth; consumers validate the record's structure and references but are not required to re-prove the assertion. Optional audits do not prove arbitrary external behavior |
 | PGRET-11 | Named generated type is treated as a freestanding runtime requirement | Required task/reference/root/capture capabilities remain profile-explicit |
 | PGRET-12 | Finite producer traces and schema fixtures pass | Not compiler, arbitrary body/lifetime, GC, concurrency or codec conformance |

@@ -51,12 +51,12 @@ module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 development-TRRM loop envelope described above is a different wire format.
-Revision 76 is the semantic-module base. Private revisions 77 through 80 add
-private span metadata, fixed-layout commitments, direct imports and outputs,
-and direct `NativeParameter` input metadata, respectively; revisions 79 and 80
-retain the applicable earlier private fields. Revision 81 combines private
-span roles with fixed-layout facts for source-granted modules that do not
-retain direct native imports. Revision 82 adds concrete native function-pointer
+Revision 76 is the semantic-module base. The current reader/writer prototypes
+also contain private span payloads in revisions 77 and 79–88, but persisted
+`Span<Token>` operations were not selected; those tags are prototype state,
+not an accepted schema. Private revisions also cover fixed-layout commitments,
+direct imports/outputs, and `NativeParameter` inputs. Revision 82 adds
+concrete native function-pointer
 signature tables, native-callable function identities, and
 function-address/indirect-call nodes. Revision 83 adds typed native-pointer
 tables and pointer-address/read/write nodes. Set and graph dependency paths
@@ -104,17 +104,20 @@ not persisted as an independent capability; removing the only scope rejects.
 | Instance constructors inside `unsafe(expr)` or an unsafe block | Public non-unique `Copy` owners, recursively exportable layouts and by-value explicit parameters. Receiver slots remain separate from explicit inputs, and valid named-argument mappings are retained. Managed-class factories, unique owners, unsupported parameter modes and non-exportable layouts reject. |
 
 These persistence slices do not change the native ABI, add TRRM execution or
-move scalar-frontend verification/emission out of the host. They do not approve
-the broader [reference-call metadata proposal](../proposals/reference-call-metadata.md).
+move scalar-frontend verification/emission out of the host. They do not
+complete the shared [Dependency contract](../specs/representation/contract-clauses.md)
+or its [CG-002 physical gates](conformance-gaps.md#cg-002).
 Existing unsafe-block operation support remains separate from the expression
 slices above.
 
-The invocation-scoped source grant and `scanner-10` profile have provisional
-semantic-module JIT implementation support, but both proposals are deferred
-and neither amends the accepted, source-independent semantic-module execution
-contract. The scanner profile is not integrated into a compiler path, and its
-16,384-code-unit source ceiling remains provisional. These capabilities do not
-imply graph, module-set, native DLL, or persisted AOT support.
+The private `Host.Source` grant, `scanner-10` invocation, scalar-frontend
+invocation profiles, and native source-grant companion are not selected.
+Existing implementations are prototype evidence only; they do not add a
+source-text runtime capability or amend the source-independent
+semantic-module execution contract. Compiler input remains source text, while
+JIT input is semantic metadata. No 16,384-code-unit grant limit or persisted
+scanner/frontend profile is part of the compiler contract, and no graph,
+module-set, native DLL, or persisted-AOT support follows.
 
 ## Current artifact and loading rules
 
@@ -193,6 +196,22 @@ Nested writes persist their root slot and field-index path, not an unchecked
 byte offset or pointer. The linker remaps value identities and verifies every
 path against the selected layouts before native address calculation.
 
+## Experimental private token-span payloads (not selected)
+
+Prototype revisions and tests once persisted role/tag records for
+`Span<Token>` operations in development `.trm` modules. The user selected
+compilation-local span use instead; no private or standard persistence schema
+for token spans is accepted. Do not author new artifacts relying on those
+role/tag records. The existing reader/writer/tests are prototype evidence to
+remove or isolate during implementation cleanup; they do not establish a
+public span ABI, persisted capture protocol, or `.trrm` feature.
+
+If a concrete persisted component consumer is later approved, it must receive
+a fresh design decision and independently reconstruct source provenance,
+backing, index/bounds, staged dependencies, retirement and cleanup after
+reading/linking. Matching old private revision numbers would not make the
+prototype payload an accepted schema.
+
 ## Proposed compatibility contracts
 
 The proposed opaque/evolvable-by-default direction does not retroactively make
@@ -232,8 +251,12 @@ not selected limits for the pre-v1 `TRRM` specification. This format is not auth
 safety and declared-contract compatibility, not provenance. Reader regressions
 exercise the current revision and rejection of retired or malformed inputs;
 they do not promise compatibility with historical artifacts.
-Linked programs additionally pass the semantic verifier's 100,000-visit work
-budget, including conditional-flow analysis.
+Most current C# verifier passes use separate provisional 100,000-visit
+counters, but `IndexedBody.Verify` still receives one counter shared across
+the program's functions. This is implementation behavior, not the selected
+policy. The selected direction is cached per-function analysis with a
+caller-provided measured default; do not treat 100,000 as a program-wide or
+source-validity limit.
 Host-provided buffer capabilities are outside this module format and are
 rejected at artifact creation rather than silently dropped.
 

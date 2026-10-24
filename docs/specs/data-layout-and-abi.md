@@ -49,6 +49,13 @@ old-format readers, or migration shims. An artifact retained for use must still
 be admitted under its exact selected schema and published contracts; it must
 not be silently reinterpreted under an incompatible schema.
 
+For `option<C>` where `C` is a managed class handle, `option<ref<T>>` and
+`option<ptr<T>>`, the null representation is the selected absence niche;
+present null payloads are not representable. This does not erase a checked
+reference's descriptor, backing, provenance or lifetime obligations, or a raw
+pointer's obligations. It does not select a universal encoding for other
+optional types, and exact descriptor layouts remain target-profile facts.
+
 An [emitted constant](language/proof-and-constant-evaluation.md#constant-execution-domain)
 requires the transitive per-target Blittable commitment in addition to frozen
 Copy validity and an admitted value codec. Internal evaluator storage and
@@ -238,8 +245,8 @@ validity, lifetime and access-safety rules are met.
 The selected Windows x64 profile defines transitive fixed-layout field
 eligibility independently of a bounded compiler slice. The
 [registered source schemas](targets/windows-x64-data-layout.md#4-registered-source-layout-schemas)
-are specified; physical metadata encoding remains unassigned and no
-implementation support is implied. The
+are specified; physical metadata encoding is defined by the selected TRRM
+schema and no implementation support is implied. The
 [implemented source profile](../implementation/layout-profiles.md#implemented-public-fixed-layout-source-profile)
 does not add a standard target/Feature identity or narrow those target rules.
 
@@ -265,6 +272,31 @@ cannot cross an independently replaceable dynamic boundary; they may be used
 where producer and consumer remain layout-coupled through compilation,
 rebuild, or invalidation. JIT versus AOT labels alone do not determine that
 coupling.
+
+An assigned TRRM `Layout` row carries the declared layout kind, alignment,
+packing and an ordered complete `LayoutField` list. Every type has a default
+variant; an exact registered `TargetProfile` variant replaces that entire
+layout-and-fields payload for the matching profile. Variants do not merge
+sparsely and do not form a fallback chain. The selected target ABI derives
+physical field offsets, aggregate size and final alignment; these derived
+values are not serialized as producer-authored facts. AOT emission selects
+and locks its applicable target profile, while a general `.trrm` module may
+retain multiple complete alternatives without being target-locked.
+
+An interface may use `Layout(Blittable)` to commit to a stable interface
+layout and vtable ABI under the selected target profile. Its vtable slots,
+receiver representation, inheritance layout, adjustments and any required
+thunks follow that target ABI; there is no universal slot order or generic
+flattening rule. The interface's directly declared methods retain declaration
+order, and inherited methods retain the layout/convention contract of their
+declaring interface. An unsupported target mapping rejects affected use.
+`Layout(Blittable)` establishes the vtable representation, not native method
+signatures; interface calls also require `NativeCallable` contracts for their
+slots. Conversely, `NativeCallable` alone makes a method ABI-addressable
+without promising an interface vtable. Interface declarations have no
+standalone code address; an implementing method may be addressed through its
+concrete type when its slot contract is satisfied. Default interface
+implementations are not required by this contract.
 
 A `Sequential` annotation on a nonpublic compact struct is a checked subset of
 this contract, not a `Blittable` or stable public ABI promise: it does not by
@@ -329,23 +361,29 @@ discriminated-union/sum types are a separate higher language feature. See the
 
 ## Value-layout observations
 
-[Core SizeOf/AlignmentOf](language/registered-queries.md#value-layout-queries)
-observe the complete normalized value representation under this selected
-target profile. Size includes its layout padding, not call-register slots,
-serialization or allocation overhead. Handle/descriptor subjects do not
-implicitly select object payload or backing storage; `void` has zero payload
-extent and an explicitly supplied target zero-data alignment rule.
-The target record must supply exact `nuint`-representable extent and positive
-alignment. Unsupported, malformed or missing layouts do not produce sentinels
-or host-derived values.
+The dedicated [`sizeof`, `alignof` and `offsetof` queries](language/registered-queries.md#layout-observation-and-authorization)
+observe the complete normalized representation under the selected target
+profile. Size includes layout padding, not call-register slots, serialization
+or allocation overhead. Handle/descriptor subjects do not implicitly select
+object payload or backing storage. `sizeof` returns nonnegative `nint`; zero
+extent is valid. `alignof` also returns nonnegative `nint`, with
+`alignof(void) == 0` meaning no placement requirement; stored types require
+a positive alignment. Results exceeding `nint.MaxValue`, malformed layouts
+and absent target rules are unsupported, not wrapped values or host-derived
+sentinels.
+The semantic display uses the same query names; it does not prescribe a wire
+opcode or target helper. JIT/AOT selects folding or lowering only after the
+target representation and its dependencies are known.
 
-`[Sized]` supplies an admitted runtime layout query, not an independently
-persistent constant guarantee. A retained observation needs the queried
-representation's published fixed commitment or complete layout-coupled
-rebuild/rebind/invalidation dependencies. A Blittable scalar result does not
-make a private queried layout Blittable. Querying a stable class handle
-likewise does not freeze unmeasured object payload. These rules add no
-universal reference encoding, object-size API or target layout table.
+`Blittable` commits layout facts per target and permits safe layout
+observation. Non-Blittable layout observations require unsafe authorization
+and remain version-sensitive, not compatibility promises. A retained
+observation needs the queried representation's published fixed commitment
+or complete layout-coupled rebuild/rebind/invalidation dependencies. A
+Blittable scalar result does not make a private queried layout Blittable.
+Querying a stable class handle does not freeze unmeasured object payload.
+These rules add no universal reference encoding, object-size API or target
+layout table.
 
 ## Representation access is not numeric conversion
 

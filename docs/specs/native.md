@@ -10,10 +10,13 @@ source/runtime obligations.
 
 This chapter retains native binding, call and code-lifetime obligations.
 The [Windows x64 native profile](targets/windows-x64.md) owns complete scalar
-storage, fixed rootless calls, stable projected borrows, owner transfer and
-non-unwinding default foreign deployment. The bounded rules below retain
+storage, fixed rootless calls, stable projected reference inputs, owner transfer and
+target exception-unwind rules. The bounded rules below retain
 their admitted scalar/compact-value/owner scope. Neither scope selects a
 general managed ABI or admits every source type at a foreign boundary.
+The shared [definitions](language.md#definitions-and-notation) distinguish
+copying a value, aliasing a referent, a checked reference and a raw pointer;
+none of those explanations selects an additional native representation.
 
 The optional [Windows x64 failure bridge](targets/windows-x64-failure-bridge.md)
 separately specifies contained exception interchange and its matched
@@ -40,6 +43,86 @@ required helpers. Missing support declines the crossing; it does not silently
 allocate, box, copy a loan, add a retain, rebind source or choose a JIT fallback.
 A platform loader's successful image load is not semantic admission or proof
 that native instructions implement a declared body contract.
+
+## Native declaration roles
+
+The resolved Core declaration schemas `NativeImport`, `NativeCallable` and
+`NativeExport` define distinct roles; matching names or an `extern` modifier
+alone do not establish them.
+
+`NativeImport` binds a static bodyless callable declaration or a directly
+addressable static data field to a library symbol. Omitted `ResolutionMode`
+means `Link`; `Dynamic` is explicit for either callables or data. Link mode
+uses the configured native linker, which may select static or shared inputs.
+Dynamic mode uses the selected target loader and retains the provider library
+for the lifetime of the importing Terrum module/image, without a per-pointer
+unload lease. Callable imports use the closed
+`NativeCallingConvention` values `Unmanaged`, `Cdecl`, `Stdcall` and
+`Vectorcall`; omitted `CallConv` means `Unmanaged`. Data imports have no call
+convention. An omitted entry name is the exact declaration name, not an
+inferred suffix or decoration; an explicit name supplies the exact target
+symbol spelling. Instance-oriented APIs use an authored static import or
+wrapper with an explicit receiver.
+
+`ResolutionPolicy` applies only to Dynamic imports. Link imports encode no
+runtime loader policy. The finite policies are `Default` and
+`CompatibilitySearch`; omitted policy means `Default`. Each target follows
+its documented loader behavior or rejects a policy it cannot implement.
+On Windows, `Default` uses `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS` (application
+directory, System32 and registered user directories, with no current-directory
+or `PATH` fallback); `CompatibilitySearch` uses the documented ordinary
+unqualified loader search. On Linux, both currently use bare-name `dlopen`
+search, including the process-start `LD_LIBRARY_PATH` input, because that API
+does not provide a distinct per-call search flag. These names are not security
+guarantees, arbitrary resolver hooks or permission to implement library-
+specific fallback.
+
+Native imports and native-callable invocation are caller-unsafe, including
+scalar-only signatures and imported-data reads/writes. An `unsafe`
+declaration propagates caller-unsafety; its body still needs explicit unsafe
+authorization for unsafe operations. Imported data uses only the target's
+directly interoperable scalar, pointer/function-pointer or `Blittable Copy`
+representation. There is no implicit marshalling, rooting, pinning,
+initialization, ownership transfer or lifetime extension. Provider
+`FieldDef` mutability controls imported write authority: a read-only import
+may bind to a mutable provider, but a writable import cannot bind to a
+read-only provider. `mut` is not hardware page protection or a guarantee
+against unsafe native writes.
+
+`NativeCallable` makes an authored method's selected native signature and
+effective convention stable for native function-pointer use; it does not
+create an OS-visible symbol or an interface vtable. Interface-level
+`NativeCallable` supplies the default convention to methods declared there;
+inherited slots retain their declaring method's convention, and a method-level
+contract overrides its own slot. Abstract interface methods have no
+standalone code address; a conforming implementation may be addressed through
+its concrete type. `NativeAddress` may form a pointer to a callable
+`NativeImport` without an additional `NativeCallable` marker.
+
+`NativeExport` explicitly publishes a static method or directly addressable
+static data field as an OS-visible symbol, independently of Terrum visibility
+or ordinary `.trrm` Export keys. A method export implies `NativeCallable` and
+uses its one effective-convention contract; a field export exposes the
+`FieldDef` storage, not a copy, and has no calling convention. Instance
+methods and fields are not directly exported; authored static wrappers use
+explicit receivers. Omitted export names use the exact declaration name,
+subject to target symbol encoding. Duplicate output-image symbol names
+reject.
+
+The function-pointer type-use attribute
+`[NativeCallConv(NativeCallingConvention.Cdecl)]` appears immediately before
+`fnptr`. Its explicit closed enum argument is part of function-pointer type
+identity; it is not an implicit cast or a convention on `func`. The same
+enum is used for effective conventions on callable imports, `NativeCallable`
+and method exports. There is no standalone `NativeAbi` role.
+
+All native calls, member receivers, hidden result storage, explicit argument
+order, generated frames, stack walking and unwind metadata follow the
+selected target platform ABI for the effective call convention. There is no
+universal member-call order or Terrum-specific stack-walk convention.
+Terrum-generated code follows the target ABI, including only leaf-function,
+optimized-code or other departures that ABI permits. A target mapping that
+cannot be implemented completely rejects affected use.
 
 Private values and code can change where the implementation controls and
 regenerates both sides. Independently replaceable boundaries preserve their
@@ -123,11 +206,11 @@ crossings still require separate complete target/runtime contracts.
 
 ## Runtime and code lifetime
 
-Failure policy is explicit. The existing bounded fail-fast and checked-failure
-implementations are distinct from a general checked-exception transport.
 Source arithmetic, requirement, cleanup and output observations remain their
 canonical language/runtime contracts; a target cannot define them merely by
-inheriting a hardware trap or host exception.
+inheriting a hardware trap or host exception. Explicit unsafe
+`try`/`catch` handles modeled local failures without a runtime-policy opt-in;
+uncaught failures may still fail fast.
 
 Code and its required helpers, unwind data, collectors and cleanup providers
 remain valid while any admitted call, retained value, root or cleanup
@@ -143,9 +226,40 @@ Process-start regeneration, supervised execution and a private staging
 directory are not sandboxing, authentication or a hot-unload protocol.
 
 The Windows profile [identifies its exact imported platform portions](targets/windows-x64.md#3-imported-platform-rules).
-OS unwind support does not define foreign exception-object interchange.
-Default calls remain direct and non-unwinding; explicitly selected special
-adapters under the [contained bridge](runtime/foreign-failure-bridge.md)
-bear exception-interchange cost and obligations. The [selected local categories](runtime/standard-failures.md) still need
-their actual runtime/physical codecs; other callback profiles are not supplied by
-the native packet or OS tables.
+Its OS unwind support supplies frame recovery, not exception identity. Native
+imports remain direct calls; the separate `NativeExceptionUnwind` capability
+permits supported native exceptions to unwind inward and be normalized before
+source catch matching. Terrum exceptions do not unwind outward through native
+frames; native exports and callbacks contain reverse-boundary propagation.
+The explicitly selected [contained bridge](runtime/foreign-failure-bridge.md)
+remains a distinct paired normal-return protocol and does not define this
+native unwind path.
+
+## Native exception objects
+
+An admitted native event is normalized to an established Terrum exception
+class or to the opaque Core `NativeException` class implementing
+`IException<NativeException>`. Its stable Terrum-owned snapshot exposes
+read-only `TargetProfileId: u32`, `TargetProfileRuleRevision: u32`,
+`EventDomain: Text`, `EventCode: nuint` and `Message` members. The fallback
+message is `A native exception occurred.`; warranted descriptive text may
+also be Terrum-owned, but foreign exception text is never copied. The event
+code uses native pointer width and is interpreted by its target-defined
+domain. These instance values are not serialized in `.trrm`.
+
+The caller-unsafe `GetNativeContext()` returns opaque `ptr<void>?`, or `null`
+when the target/event cannot safely expose a context. A non-null pointer's
+availability, lifetime and copy requirements follow the target ABI; the
+stable exception snapshot does not retain the native context. Unsafe access
+does not waive known lifetime, provenance or access constraints. Windows x64
+normalizes ordinary SEH events and defines its dedicated mappings in the
+[target profile](targets/windows-x64.md#6-native-exception-unwinding-and-normalization).
+An uncaught normalized event fails fast. Process termination, forced unwinds,
+`longjmp` and cancellation are excluded; stack overflow is catchable only
+after unwinding has recovered enough stack for exception construction and
+handling.
+
+Native exception propagation is not a caller-propagated language effect.
+Matching a call convention alone does not admit exception unwinding; the
+selected target ABI and runtime must support the complete feature before
+affected use.

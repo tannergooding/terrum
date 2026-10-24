@@ -20,6 +20,49 @@ true. A constant result is not proof that a runtime call has that result
 for arbitrary inputs, effects or unspecified choices. Neither request can
 silently become a runtime check, parser, call or default value.
 
+## Staged constant evaluation
+
+Required constant evaluation is a compile-time obligation, but not every
+result must be known by the Terrum source compiler. Work whose inputs and
+semantics are already fixed is evaluated during Terrum compilation and
+published as a frozen typed value. Target-dependent work remains a typed,
+required evaluation for JIT/AOT compilation, where the selected target ABI
+and representation are known. It must resolve before program execution; it
+does not become a runtime query or call.
+The selected Development/Debug or Release source arithmetic profile is
+already resolved when source operations enter required constant evaluation.
+Checked operations fail during Development/Debug evaluation; Release
+wrapping operations use exact modulo-`2^width` results. Target-deferred
+constant work retains those explicit operation policies rather than choosing
+again from the JIT/AOT consumer's configuration.
+
+For example, `sizeof(int32)` can fold during Terrum compilation when its
+representation is fixed, while `sizeof(nint)` is resolved against the
+selected target during JIT/AOT compilation. A user `[ConstEval]` call may
+likewise remain as typed target-constant work when its body is admitted and
+the required target inputs are not yet available. Its semantic display is
+`call`; that display selects neither a physical encoding nor an execution
+time. `[Pure]` alone allows an optional optimizer fold, not required
+compile-time execution.
+
+Use **constant evaluation** for evaluating a concrete request, **required
+constant evaluation** when source requires success, and **constant folding**
+for an optional compiler transformation. **Constant execution** names the
+admitted execution mechanism and its `ConstantExecution` record; that record
+references an ordinary checked Body or exact intrinsic, not a second
+instruction stream. **Static proof** establishes an obligation over all
+required reachable states. Runtime static initialization remains a separate
+load-scoped storage protocol. `[ConstEval]` is an author opt-in/form contract,
+not an execution-time promise, and semantic `const` display names a typed
+value rather than its provenance; see the
+[operation display map](../il-instruction-set.md#operation-identity-encoding-and-presentation).
+
+Only unresolved work and the exact admitted body/dependency closure needed
+to perform it are retained. A body is not retained solely to replay
+computation already completed and frozen during Terrum compilation. No
+required evaluation may silently fall back to runtime when its target work,
+resource envelope or selected dependency is unavailable.
+
 ## Scalar proof facts
 
 The floor tracks by-value scalar parameters, local bindings and staged scalar
@@ -63,7 +106,8 @@ the proof budget.
 | Read/copy an available tracked scalar | Copy its current fact; do not share the new binding's revision |
 | Initialize/replace a local | Advance that binding's revision and install the computed fact on the successful edge |
 | End/move a value | Remove its numeric fact and invalidate relationships using that revision |
-| Integer add/subtract/multiply or negation | Compute endpoint bounds under the actual same-type checked operation; prove safety only when every represented operand combination succeeds |
+| Checked integer add/subtract/multiply or negation | Compute endpoint bounds under the exact same-type operation; prove safety only when every represented operand combination succeeds |
+| Release-default or explicit wrapping integer arithmetic | Compute exact results modulo the destination width; when operands are not exact, conservatively use the complete result-type domain |
 | Integer division | Require a nonzero divisor and exclude the signed-minimum/negative-one pair before proving totality |
 | Integer remainder | Require a nonzero divisor; signed minimum remainder negative one is zero, not quotient overflow |
 | Integer bitwise operation | Exact when operands are exact; otherwise the complete type range is sufficient |
@@ -71,13 +115,16 @@ the proof budget.
 | Floating primitive arithmetic | No arithmetic failure for valid value operands; exact finite/class results use the selected IEEE format |
 | Declared nominal operation, getter, or ordinary call | Use its published safety/effect contract; no private-body numeric inference is required by this floor |
 
-Integer arithmetic transfer first determines whether all represented
+Checked integer arithmetic transfer first determines whether all represented
 combinations succeed, all fail, or safety is not established. On a normal
 successful edge, intersect computed bounds with the result type's range.
 This normal-edge fact does not prove that the preceding check cannot fail.
-Except for exact results and identity/copy, output exclusions need not survive
-arithmetic. Bitwise and shift result precision beyond exact constants is not
-required; count safety is still required.
+Release-default and explicit wrapping operations do not fail for arithmetic
+overflow; modulo results are tracked exactly for exact operands and otherwise
+conservatively widened to the complete result type. Except for exact results
+and identity/copy, output exclusions need not survive arithmetic. Bitwise
+and shift result precision beyond exact constants is not required; count
+safety is still required.
 
 For division, split the dividend into negative/nonnegative intervals and the
 divisor into negative/positive intervals, normalize each, and evaluate the
@@ -271,11 +318,13 @@ their last reference-floor use.
 `[ConstEval]` means the registered constant-execution opt-in on a declaration,
 not arbitrary same-named metadata. It implies
 [checked pure-form support](published-predicates-and-effects.md#checked-annotations-and-forms)
-and explicit admission to required Terrum evaluation. It does not imply
-ordinary-form `NoThrow`, termination, all-input success or constant-only
-invocation. `[Pure]` alone can authorize backend folding, not required
-Terrum interpreter admission. The body and all source binding still validate
-normally, including the declared form/effect guarantees.
+and explicit admission to required compile-time evaluation at Terrum or
+target JIT/AOT stages when their inputs are available. It does not imply
+ordinary-form totality, termination, all-input success or constant-only
+invocation, and it does not permit runtime fallback. `[Pure]` alone can
+authorize optional backend folding, not required compile-time execution. The
+body and all source binding still validate normally, including the declared
+form/effect guarantees.
 
 The minimum value domain includes the 26 scalar values, admitted nominal
 enums, and inline Copy tuples/optionals/unions/nominal value aggregates whose
@@ -296,7 +345,7 @@ input sequences. Internal typed references/views point to those logical
 regions, obey ordinary access/backing/lifetime rules, and are not host pointers.
 These private/input values need not satisfy emitted-constant layout/codec
 admission unless they themselves become emitted results. A selected pure
-call's `init ref<T>` destinations are logical results, not permission to
+call's `ref<init T>` destinations are logical results, not permission to
 overwrite pre-existing input state.
 No result may reference an evaluator activation or temporary input region.
 A published static-data-backed value requires its own admitted backing and
@@ -438,13 +487,22 @@ charged. A code-unit/element read is the cell-read action, not a second
 additional charge for that same read; selecting its checked element is
 the separate selection action.
 
-A bulk intrinsic needs a versioned exact action expansion or resource recipe
-over its validated logical inputs, including work and live scratch/value
-storage. Repeated work, copying, decoding and element traversal cannot be
-hidden in one native helper step. Without such a recipe or an available
-eligible body, it is unsupported in required work. This applies particularly
-to registered literal parsers and handlers. Registration admits the actual
-body/intrinsic and input transformation, not a cheap method name.
+A bulk intrinsic used for required constant execution needs a versioned,
+compact deterministic resource recipe over its validated logical inputs. The
+intrinsic registration owns and versions the recipe; each execution retains
+the exact intrinsic identity and its transformed inputs rather than copying
+the recipe. The recipe must determine exact semantic work and peak incremental live
+scratch/value storage attributable to the intrinsic; ordinary input/result
+slots, entered frames and result encoding use the common evaluator rules. The
+serialized contract is the recipe, not an expanded semantic-action stream.
+Repeated work, copying, decoding and element traversal cannot be hidden in one
+native helper step. The consumer validates the recipe and its inputs,
+computes the charges and checks the selected envelope before execution;
+producer-reported totals are not semantic evidence. Without such a recipe or
+an available eligible body, the intrinsic is unsupported in required work.
+This applies particularly to registered literal parsers and handlers.
+Registration admits the actual body/intrinsic and input transformation, not a
+cheap method name.
 
 Semantically repeated calls/parses cost their full expansion even if a cache
 avoids physical execution. Materialization/argument copies and live state are
@@ -572,13 +630,15 @@ intention is not that commitment.
 
 [Registered value-layout queries](registered-queries.md) additionally retain
 their exact complete subject, target and representation dependencies.
-A `nuint` result has its own scalar value codec; this does not freeze the
+A `nint` result has its own scalar value codec; this does not freeze the
 queried layout. A retained layout-dependent observation requires its published
 fixed promise or explicitly admitted coupled rebuild/rebind/invalidation
-records, including dependent derived uses. `[Sized]` alone supports runtime
-queries, not an unresolved generic definition's numeric constant.
-The intrinsic recipe reads one immutable target layout fact under ordinary
-call/read/return accounting without allocating or traversing a T value.
+records, including dependent derived uses. `Blittable` permits safe
+per-target layout observation; other layout queries require unsafe
+authorization and are version-sensitive. An unresolved generic definition's
+runtime layout does not supply a definition-time numeric constant. The query
+observes one immutable target layout fact under ordinary read/return
+accounting without allocating or traversing a T value.
 
 Constant metadata records typed scalar/field/tag values and their promised
 representation observations. Target codegen supplies endian, alignment,

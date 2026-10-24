@@ -10,7 +10,7 @@ namespace Terrum.Collections;
 // exposes existing element-slot authority; generic T retains its qualification.
 [CollectionBuilder(typeof(ListBuilder<>))]
 public mut class List<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     private mut write ManagedBuffer<T> _items;
     private mut nuint _count;
@@ -71,7 +71,7 @@ public mut class List<T>
 }
 
 public mut unique struct ListBuilder<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     public ListBuilder(nuint capacityHint);
 
@@ -81,7 +81,7 @@ public mut unique struct ListBuilder<T>
 }
 
 public mut unique struct ListWriteAccess<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     // View: this result cannot escape the guard or overlap another writable extraction.
     [ViewOf(Access.Write)]
@@ -89,7 +89,7 @@ public mut unique struct ListWriteAccess<T>
 }
 
 public mut class LinkedListNode<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     private mut LinkedList<T>? _owner;
     private mut write LinkedListNode<T>? _previous;
@@ -117,7 +117,7 @@ public mut class LinkedListNode<T>
 
 [CollectionBuilder(typeof(LinkedListBuilder<>))]
 public mut class LinkedList<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     private mut write LinkedListNode<T>? _first;
     private mut write LinkedListNode<T>? _last;
@@ -161,7 +161,7 @@ public mut class LinkedList<T>
 // Failure/abandonment detaches and releases the partial chain exactly once;
 // TryBuild publishes the completed list and consumes the builder's ownership.
 public mut unique struct LinkedListBuilder<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     // Capacity is only a hint, not contiguous-storage or eager-node allocation.
     public LinkedListBuilder(nuint capacityHint);
@@ -174,7 +174,7 @@ public mut unique struct LinkedListBuilder<T>
 // This cursor yields a Copy value; lending/consuming item protocols are
 // separate contracts, not inferred from the cursor's implementation.
 public mut unique struct LinkedListCursor<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     public mut bool MoveNext();
 
@@ -183,7 +183,7 @@ public mut unique struct LinkedListCursor<T>
 
 // Internal storage contracts; not user-facing collection-policy parameters.
 internal mut class ManagedBuffer<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T : [ManagedStorable], [Copy]
 {
     // Each list gets fresh zero-capacity storage with write access; this is not
     // a shared readonly empty singleton that can be upgraded by assignment.

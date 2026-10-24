@@ -84,7 +84,7 @@ results or admission of the still-open physical representations.
 | TTLIFE-07 | Async consumer retains captured views | Require exact completion-bounded dependencies and cleanup; source capture being eager is insufficient |
 | TTLIFE-08 | Interface requirement has TextTarget but selected implementation uses another name/annotation | Retain the requirement's exact parameter capability; forward formed content without source replay |
 | TTLIFE-09 | Fresh content holder includes mutable shared backing under NoAlias | Holder identity/Copy does not establish region separation |
-| TTLIFE-10 | User treats TextTarget as Pure, ConstEval, NoThrow or allocator permission | No such implication; selected operation/evaluation/provider contracts govern |
+| TTLIFE-10 | User treats TextTarget as Pure, ConstEval or allocator permission | No such implication; selected operation/evaluation/provider contracts govern |
 
 ## Independent records and evolution
 

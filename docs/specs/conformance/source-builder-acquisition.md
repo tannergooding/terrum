@@ -67,6 +67,6 @@ not execution of a compiler/factory or physical metadata admission.
 | AQVER-03 | Producer weakens output validity, exception cleanup or backing relationship | Incompatible retained obligations |
 | AQVER-04 | Producer changes private allocation strategy within every published obligation | No incompatibility solely from private strategy; observable identity/effects remain checked |
 | AQVER-05 | Source factory operation is optimized or eliminated | Preserve declared effects, refusal, identity, initialization, lifetime and cleanup |
-| AQVER-06 | Parameterless factory is treated as Pure, ConstEval or NoThrow | No such implication; selected evaluation/effect contracts govern |
+| AQVER-06 | Parameterless factory is treated as Pure or ConstEval | No such implication; selected evaluation/effect contracts govern |
 | AQVER-07 | Linking remaps factory references | Preserve exact complete witness/member/self/output and dependency identities |
 | AQVER-08 | Factory role is placed into an unassigned metadata carrier/opcode | No physical allocation admitted by this logical approval |

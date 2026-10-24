@@ -26,7 +26,7 @@ namespace Terrum.Numerics;
 //     where TVector : [Copy], IAdditionOperators<TVector, TVector, TVector>
 //     where TMask : [Copy]
 // {
-//     each T : [SimdElement], [Copy], [Sized];
+//     each T : [SimdElement], [Copy];
 //     member simd64<T>  with simd64mask<T>,  width 64;
 //     member simd128<T> with simd128mask<T>, width 128;
 //     member simd256<T> with simd256mask<T>, width 256;
@@ -50,17 +50,18 @@ namespace Terrum.Numerics;
 //     }
 // }
 
-// Concrete fixed-width values are sized when their complete lane layout
-// permits it. Their ordinary addition witness is shared with unrelated types:
-// both operands and result are the same exact vector instantiation.
+// Concrete fixed-width values have a target-selected extent when their
+// complete lane layout is supported. Their ordinary addition witness is
+// shared with unrelated types: both operands and result are the same exact
+// vector instantiation.
 public struct simd128<T> : IAdditionOperators<simd128<T>, simd128<T>, simd128<T>>
-    where T : [SimdElement], [Copy], [Sized];
+    where T : [SimdElement], [Copy];
 
 public struct simd128mask<T>
-    where T : [SimdElement], [Copy], [Sized];
+    where T : [SimdElement], [Copy];
 
 // Other registered fixed-width members have independently validated widths,
 // element predicates and matching mask types. No mask is inferred from a name.
-// Hardware-scalable simd<T> is a separate genuinely scalable, initially
-// sizeless type, never an alias for a host-selected fixed width. Its ABI and
-// predicate restrictions require a target-specific checked profile.
+// Hardware-scalable simd<T> has a target/runtime-defined extent rather than
+// a host-selected fixed width. Its ABI and predicate restrictions require a
+// target-specific checked profile.

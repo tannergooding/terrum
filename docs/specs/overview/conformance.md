@@ -113,25 +113,25 @@ propagation, without admitting a foreign unwinder through Terrum frames.
 Target/rule agreement does not activate missing physical
 records, managed/view/task crossings or private package standards.
 
-[Local failures](../language/local-failures.md) define the nominal Exception
-capability and explicit readonly reference versus Copy-gated catch bindings.
-The propagation extent retains its owner through selection and active rethrow;
-an input copy is not a captured event. Category witnesses do not manufacture
-interface storage, a universal base or boxing. Other compiler/runtime failure
-catalogs and physical payload/handler/cause support remain separately admitted.
+[Local failures](../language/local-failures.md) define self-typed managed
+exception classes, their common existential view and object-handle catch
+bindings. The propagation extent retains the same exception object through
+selection and active rethrow; binding does not transfer event responsibility.
+Other compiler/runtime failure catalogs and physical class/factory/handler/
+cause support remain separately admitted.
 
 [Runtime requirement failures](../language/requirement-failures.md) select
-ordinary `new E()` with zero supplied arguments on the failed path, primary callable
-RequireException recipes and exact Core RequirementException fallback.
+the common self-typed exception factory on the failed path, primary callable
+RequireException recipes and the exact Core RequirementException fallback.
 Explicit selectors win; helper/lambda/generation/async execution retains
-each check's semantic owner. Constructor failure is its actual failure,
+each check's semantic owner. Factory failure is its actual failure,
 not a fabricated E or permission to erase initialized outputs. Other failure
-catalogs and complete physical constructor/default/handler records remain open.
+catalogs and complete physical factory/default/handler records remain open.
 
 [Captured exceptions](../language/captured-exceptions.md) select one opaque
 affine Core CapturedException and direct no-argument Capture in the active
-source handler body. Publication transfers the existing event, not its payload
-copy; catch borrows keep their original extent. Named consuming throw requires
+source handler body. Publication transfers the existing exception object/event;
+catch bindings preserve its identity. Named consuming throw requires
 move and preserves origin/causes/dependencies. Transferred handlers cannot
 reuse or retire that responsibility. No shared/typed family, thread capability
 or physical capture/cause codec follows.
@@ -147,17 +147,19 @@ separates required row/owner/subject checks from body truth and feature support.
 An inspectable output/cleanup shape or all-zero reserved variant does not
 enable its missing publication, ownership or execution contracts.
 
-[Reader trust](../representation/reader-trust.md) separates complete producer
-validity from access-scoped consumer checks. Trusted indexes permit selective
-reads without a preliminary Body scan; bounds and exposed contradictions
-still reject. Whole-artifact validation, semantic audit and canonicality
-are distinct claims. Table-specific references have schema-owned namespaces.
+[Consumer verification](../representation/reader-trust.md) requires
+structural safe-consumption checks and support admission for selected
+artifacts and retained dependencies before affected use. Producers remain
+responsible for truthful facts; consumers may rely on those facts without
+semantic re-proof. Optional deeper audits claim only their examined scope,
+and do not prove arbitrary provider behavior or authored unsafe promises.
+Table-specific references have schema-owned namespaces.
 
 [Encoding canonicality](../representation/encoding-canonicality.md) requires
-minimal writer widths and logical-first-use maps while ordinary readers
-accept equivalent, otherwise valid noncanonical encodings. Explicit audits
-reject deviations in their stated scope; no universal general/compact form
-or preliminary trusted Body scan is required. Invalid fields, values,
+the shortest equivalent assigned instruction form and logical-first-use
+maps while ordinary readers accept equivalent, otherwise valid noncanonical
+encodings. Explicit audits reject deviations in their stated scope; no
+preliminary all-Body scan is required. Invalid fields, values,
 references and unsupported affected semantics retain their rejection rules.
 
 [Resource accounting](../representation/resource-accounting.md) separates
@@ -251,8 +253,8 @@ admitted constant recipe without an ambient language status facility.
 These logical contracts do not supply missing physical execution support.
 
 [Core scalar checked failures](../language/scalar-failures.md) separately
-select zero-data nominal OverflowException, DivideByZeroException and
-ArgumentOutOfRangeException payloads. Their exact arithmetic/conversion/count
+select nominal OverflowException, DivideByZeroException and
+ArgumentOutOfRangeException exception classes. Their exact arithmetic/conversion/count
 mapping preserves no-result failure and complete source event/phase state.
 It does not turn floating IEEE outcomes, diagnostics, expected API results,
 termination or hardware faults into local exceptions, nor activate missing
@@ -281,15 +283,16 @@ identity retains the complete nominal domain and carrier value, without
 executing user equality or erasing validity. Required construction and
 physical generic/value records keep their independent admission obligations.
 
-[Registered Core queries](../language/registered-queries.md) bind exact
-compiler-known identities, not arbitrary same-spelled helpers.
-SizeOf/AlignmentOf are ordinary nuint-returning generic value-layout APIs;
-the complete subject and selected target determine the observation.
-Sized supports runtime evidence without a universal compile-time number.
+[Registered queries](../language/registered-queries.md) are dedicated
+compiler-known forms, not ordinary Core methods or arbitrary same-spelled
+helpers. `sizeof`, `alignof`, `offsetof`, `typeof` and `countof` observe their
+complete subject under the selected target and authority rules. `sizeof` and
+`alignof` return nonnegative `nint`, with `alignof(void) == 0` denoting no
+placement requirement.
 Retained layout-dependent results keep published fixed promises or explicit
 coupled rebuild/rebind/invalidation obligations through derived uses.
 The result's scalar codec does not freeze a replaceable queried layout.
-No new query keyword, reflection object or physical intrinsic ID is assigned.
+The logical forms do not assign a reflection object or physical intrinsic ID.
 
 The [published-predicate and effect contract](../language/published-predicates-and-effects.md)
 defines logical input-state purity, checked form authorization, inherited
@@ -327,7 +330,10 @@ explicit user-type opt-in and capability-owned ordinary where conditions.
 An unmet condition does not invalidate a confined instantiation. Actual
 handoff, immutable publication, scoped exclusion and scalar access have their
 own checked authority, alias, endpoint and lifetime contracts. Custom/native
-algorithms retain existing scoped-unsafe and semantic producer/audit trust.
+algorithms retain scoped-unsafe implementation responsibility; consumers
+validate the selected structures and support, then rely on producer-published
+facts without mandatory semantic re-proof. Optional audits do not prove
+arbitrary provider behavior or authored unsafe promises.
 These logical rules alone do not admit physical tokens or a target profile.
 [Concurrent executions](../runtime/concurrent-executions.md) separately
 defines exact location/source generations, communication, coherence,
@@ -392,7 +398,7 @@ producer frame, async/lending contract or physical operation is supplied.
 
 [Async value iteration](../language/async-iteration.md) separately selects
 exact IAsyncSequence<T, TCursor>/IAsyncCursor<T> with synchronous factory or
-direct acquisition, completion-published TryMoveNextAsync(init ref<T>) and
+direct acquisition, completion-published TryMoveNextAsync(ref<init T>) and
 awaited CloseAsync. Pending destination/cursor access is reserved until checked
 completion observation and cleanup establish the exact live/vacant relation.
 Task status, cancellation request and same-shaped Task<bool> alone supply
@@ -448,7 +454,7 @@ Features using those facilities retain explicit dependencies:
 | Concurrent sharing and atomics | The shared-memory model, authority protocol, supported representation, and progress/coordination requirements |
 | Async and producers | Completion, captured-lifetime, cleanup, affinity, and selected scheduling/close contracts |
 | Fixed SIMD | Element/mask semantics and the admitted fixed-width target representation; semantics-preserving software lowering is permitted |
-| Scalable SIMD | The target's genuinely scalable, sizeless representation and call/storage restrictions; a fixed preferred width is not a substitute |
+| Scalable SIMD | The target's genuinely scalable representation and call/storage restrictions; a fixed preferred width is not a substitute |
 | Foreign calls and callbacks | The exact foreign ABI, validity, authority, lifetime, and unwind-containment contracts |
 | Independently consumed artifacts | Required schema/rule/feature identities and complete published contracts with before-use admission |
 
@@ -475,11 +481,13 @@ The [format-version contract](../representation/format-versioning.md) makes
 released major/minor assignments stable exact schema identities. Beta/preview
 drafts keep `(1, 0)` without pair-update or compatibility duties and still
 require exact out-of-band agreement; no released schema is assigned yet.
-Numeric revision order, the reader's default edition and producer trust do
-not establish support or compatibility. Header/directory framing and natural
-checks on accessed forms remain mandatory. Trusted selective access need not
-scan uncalled code or all indexes; a broader validation claim checks its
-stated scope under [reader trust](../representation/reader-trust.md).
+Numeric revision order, the reader's default edition and producer correctness
+do not establish support or compatibility. Valid artifacts satisfy their
+selected schema's header/directory framing and record relationships.
+Consumers perform the structural safe-consumption checks and support
+admission required for the affected use. Semantic re-proof is not mandatory;
+optional audits may be limited to their stated scope. See
+[consumer verification](../representation/reader-trust.md).
 The [Module manifest](../representation/semantic-manifests.md) encodes exact
 governing editions and Feature requirements. Edition `1` preserves the bounded
 interchange baseline; no extra capability IDs or richer codecs are registered.

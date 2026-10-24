@@ -3,6 +3,11 @@
 The source language defines checking, binding, and abstract evaluation
 independently of any compiler's current support.
 
+The [shared definitions](../language.md#definitions-and-notation) explain
+copying, aliasing, references, lifetime and scope before the technical
+borrow/loan/lease terms. They provide common terminology, not another owner
+for the focused contracts below.
+
 | Chapter | Canonical responsibility |
 |---|---|
 | [Source design overview](../language.md) | Selected direction, integration summaries and explicitly unselected extensions |
@@ -18,10 +23,10 @@ independently of any compiler's current support.
 | [Async value iteration](async-iteration.md) | Synchronous async-cursor acquisition, pending initialization reservations, exact completion/output correlations, forwarding and awaited loop close |
 | [Lending iteration](lending-iteration.md) | Distinct readonly/writable sync/async roles, element-place aliases, reference outputs, cursor-bound defaults and checked backing/invalidation refinements |
 | [Async execution](async-execution.md) | Eager execution, logical operation establishment, suspension-independent failure channels, completion/cleanup and responsible observation |
-| [Task responsibility](task-responsibility.md) | Affine Core Task<T>, consuming await with named move, distinct observation/payload/output facts and explicit every-exit settlement/transfer |
+| [Task responsibility](task-responsibility.md) | Affine Core Task<T>, Task-specific operations on the general Task<_> existential view, consuming await, distinct observation/payload/output facts and explicit every-exit settlement/transfer |
 | [Ownership and cleanup](ownership-and-cleanup.md) | Structural partial field state, write/init-authorized transfer and repair, complete Cleanup receivers, replacement and complete versus failed-construction retirement |
-| [Local failures](local-failures.md) | Nominal Exception capability, complete payload/category subjects, explicit reference/Copy catch bindings, active rethrow and retained responsibility |
-| [Requirement failures](requirement-failures.md) | Explicit runtime selectors, ordinary `new E()` on failure, primary callable defaults, Core fallback, actual constructor failure and output preservation |
+| [Local failures](local-failures.md) | Self-typed exception classes, complete catch subjects, object-handle bindings, active rethrow and retained responsibility |
+| [Requirement failures](requirement-failures.md) | Explicit runtime selectors, ordinary zero-supplied construction, primary callable defaults, Core fallback, actual construction failure and output preservation |
 | [Captured exceptions](captured-exceptions.md) | Exact opaque affine Core owner, lexical Capture, handler/borrow responsibility, same-event consuming throw and transitive retirement/admission |
 | [Generated producers](generated-producers.md) | Owned named affine cursor shells, generic/capture mapping, lazy body/yield, creation versus operation clauses, required close and async lifecycle |
 | [Dependencies and views](dependencies-and-views.md) | Whole-source identities, DependsOn/Captures/ForwardsBacking, stored and returned values, retained destinations, phases and checked member/witness constraints |
@@ -34,14 +39,14 @@ independently of any compiler's current support.
 | [Complete types](types-and-normalization.md) | Type terms, qualifier positions, actual-write constraints, finite substitution, optional and requested-access boxing normalization, payload selection, and signature identity |
 | [Thread capabilities](../runtime/sharing-and-handoff.md) | Resolved primary-type opt-in, capability-owned ordinary where conditions, complete-form eligibility and separately checked current protocol authority |
 | [Constant generics](constant-generics.md) | Initial domains, derived Transparent primitive-wrapper eligibility, canonical nominal/carrier value identity, checked construction, forwarding and independent contracts |
-| [Registered queries](registered-queries.md) | Exact Core identities, SizeOf/AlignmentOf value subjects, runtime type evidence, target values and fixed/coupled retained observations |
+| [Registered queries](registered-queries.md) | Dedicated type/layout/count forms, complete subjects, target values, authorization, Count witnesses and fixed/coupled retained observations |
 | [Calls and inference](calls-and-inference.md) | Argument mapping, finite typed and delayed callable evidence, contextual completion, candidate ranking, and reusable omitted-output destinations |
 | [Built-in scalar operators](primitive-operators.md) | Mandatory signatures, exact data/count contexts, integer and floating edge domains, comparisons, and checked place/accessor updates |
 | [Absolute-value members](absolute-value.md) | Same-type numeric Abs signatures, checked integer magnitude, floating value classes, failure/result states and explicit-variant admission |
 | [Numeric selection members](numeric-selection.md) | Same-type Min/Max/Clamp signatures, NaN/zero/cohort selection, ordered-bound preconditions, InvalidBoundsException and call/state/admission |
 | [Floating environment](floating-environment.md) | Sign-only Abs/negation, quiet processing-result NaNs, deterministic admitted constant recipe and no ambient status facility |
-| [Numeric capabilities](numeric-capabilities.md) | Exact coherent Core groups, combined selection, self/Copy constraints, primitive witnesses and optional composition |
-| [Scalar checked failures](scalar-failures.md) | Exact zero-data Core payloads, checked overflow/unrepresentability, integer zero division, original-count validation and event/state/phase admission |
+| [Numeric capabilities](numeric-capabilities.md) | Exact coherent Core groups, combined selection, default Copy-capable formal domains, primitive witnesses and optional composition |
+| [Scalar checked failures](scalar-failures.md) | Exact Core exception classes and common creation contract, checked overflow/unrepresentability, integer zero division, original-count validation and event/state/phase admission |
 | [Proof and constant execution](proof-and-constant-evaluation.md) | Local scalar facts/transfers, conservative invalidation, executed-path eligibility, reproducible NaNs, dependencies, and portable resource accounting |
 | [Published predicates and pure evaluation](published-predicates-and-effects.md) | Unified logical input-state purity, forms/modes, finite reads/effects, NoAlias parameters, initialization results and published predicate admission |
 
@@ -77,7 +82,7 @@ mode/witness selection, writable acquisition, exact descriptor publication,
 element aliases, surviving backing/refinements, async reservations and close.
 [Async-execution cases](../conformance/source-async-execution.md) cover
 caller/establishment versus established failure, inline and suspended execution,
-completion checks/cleanup, NoThrow attribution and responsible observation.
+completion checks/cleanup, failure attribution and responsible observation.
 [Task responsibility cases](../conformance/source-task-responsibility.md) cover
 affine identity, guarded owner transfer, consuming waits, terminal and payload
 observation, exceptional settlement, cancellation boundaries and admission.

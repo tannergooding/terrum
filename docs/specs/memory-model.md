@@ -10,8 +10,8 @@ Accepted call and lifetime rules live in [language](language.md),
 source forms and their open boundaries are in the
 [grammar](grammar-spec.md). The
 [proof/evaluation chapter](language/proof-and-constant-evaluation.md) owns
-the selected floor; its remaining physical integration and extensions are in
-the [static-proof proposal](../proposals/static-proof-and-constant-evaluation.md).
+the selected floor; its remaining physical integration gates are tracked in
+[CG-010](../implementation/conformance-gaps.md#cg-010).
 [Data layout and ABI contracts](data-layout-and-abi.md) separates required
 primitive guarantees from physical layout, interchange and procedure calls;
 its remaining [profile and implementation work](data-layout-and-abi.md#profile-specification-and-implementation-work)
@@ -20,6 +20,10 @@ does not reopen the accepted memory guarantees.
 this document does not claim a concurrent runtime or these atomic APIs exist.
 
 ## Definitions
+
+Copying, aliasing, references, lifetime and loan/lease meanings use the shared
+[language definitions](language.md#definitions-and-notation). The terms below
+describe concurrency and hardware access, not a different reference model.
 
 Hardware and language specifications do not use one universal vocabulary.
 The vocabulary here starts from hardware access properties, not a particular
@@ -47,7 +51,7 @@ These terms describe independent dimensions; none is a synonym for
 | Volatile access | A language- or platform-specific contract that must be qualified below; the word alone does not select one. | A portable cross-language meaning or an automatic atomic RMW. |
 | Readonly access | A restriction on mutation through one access path. | Immutability of reachable state or permission to share concurrently. |
 | Immutable value/graph | A value or defined reachable extent that cannot be changed through any permitted alias for the promised lifetime. | Transferability, safe publication, or thread-safety of external state it references. |
-| Transfer | A checked handoff of usable authority between execution contexts. | Concurrent use by the sender and receiver. |
+| Thread transfer / handoff | A checked handoff of usable authority between execution contexts, distinct from an ordinary ownership move within one execution. | Concurrent use by the sender and receiver. |
 | Sharing | A checked permission for concurrent aliases, governed by an access and lifetime protocol. | Correctness of every algorithm using those aliases. |
 | Thread-confined | Access is restricted to one execution thread at a time, with no concurrent competing access. | Permanent attachment to that thread; a checked handoff may transfer authority. |
 | Thread-affine | Use is restricted to a designated thread or executor. | Merely being unshared, or permission to transfer to a different thread. |
@@ -243,8 +247,12 @@ scoped exclusion guards and explicit shared scalar access. Managed-reference
 operations additionally require the collector contracts described below.
 Their [checked authority and endpoint rules](runtime/sharing-and-handoff.md#published-proof-and-admitted-protocols)
 are independent of the event-observation model below. Arbitrary synchronization
-algorithms use the existing scoped-unsafe implementation responsibility and
-producer/audit trust, not a new nominal proof marker.
+algorithms use the existing scoped-unsafe implementation responsibility. The
+producer is responsible for the truth of published implementation contracts;
+consumers validate selected record structure, references and support needed
+for safe consumption, then may rely on those contracts without semantic
+re-proof. Optional audits do not prove arbitrary synchronization algorithms
+or authored unsafe promises. This does not create a new nominal proof marker.
 
 Reader/writer cardinality belongs to the access protocol, not separate
 transfer/share capability variants:
@@ -276,8 +284,10 @@ The checker has these obligations:
   unsynchronized access to `T`.
 - For opaque imported types, the provider publishes a versioned contract that
   is authoritative for consumers and identifies its checked proof or
-  explicitly trusted implementation boundary. Consumers validate their use
-  of that contract; a native implementation is not thereby machine-checked.
+  explicitly trusted implementation boundary. Source use is checked against
+  the published contract; consumers validate the metadata's structure and
+  required references before use but do not re-prove its truth or arbitrary
+  provider behavior. A native implementation is not thereby machine-checked.
 - Preserve authority and lifetime restrictions through wrappers and projections.
 
 Sending a mutable handle while retaining an independently usable alias does
@@ -823,8 +833,9 @@ compiler path:
   code cannot rely on observing every outcome the abstract model permits.
 - Persisted module contracts record the capability proof/refinement,
   generic conditions, atomic type/layout/order requirements, runtime helper
-  requirements, and target-profile dependencies. Consumers reject missing or
-  incompatible contracts before execution rather than trust a nominal marker.
+  requirements, and target-profile dependencies. A support or binding claim
+  requires the applicable contract facts; a nominal marker alone does not
+  establish them. Handling missing or unsupported metadata is not prescribed.
 - A runtime lock fallback, if permitted for an atomic type, has an explicit
   progress/reentrancy contract and is compatible with cancellation, cleanup,
   and signal restrictions. Collector barriers and safe-point behavior remain

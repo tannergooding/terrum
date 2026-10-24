@@ -12,6 +12,11 @@ sufficient resources. A selected pure form is checked over its declared
 valid-input domain, not certified by one successful evaluation.
 Examples named Square use the canonical range precondition and mode guard.
 An ordinary result, initialized-null value and vacant output remain distinct.
+Invalid producer-published metadata violates producer obligations. Consumers
+reject metadata that is structurally unsafe, malformed or unsupported before
+affected use; they are not required to detect a structurally consumable but
+semantically false assertion. Optional semantic audits may examine it.
+Diagnostic wording and internal check order are not prescribed.
 
 ## Purity and valid-input domains
 
@@ -38,7 +43,7 @@ An ordinary result, initialized-null value and vacant output remain distinct.
 | PURE-19 | A selected form performs volatile or atomic observations | Reject that effect; readonly and acquire ordering are insufficient |
 | PURE-20 | A selected form synchronizes, blocks or suspends | Reject selected-form purity |
 | PURE-21 | A valid-input selected form can escape checked arithmetic failure | Reject the purity claim unless its domain/checks establish absence |
-| PURE-22 | A caller violates the declared precondition | Preserve its ordinary check/failure; no unconditional NoThrow inference |
+| PURE-22 | A caller violates the declared precondition | Preserve its ordinary check/failure; Pure's exception exclusion applies only on its valid domain |
 | PURE-23 | A pure recursion/loop does not terminate for some admitted input | No termination guarantee; do not eliminate it solely because it is pure |
 | PURE-24 | Required constant work exhausts its envelope in otherwise pure computation | Required resource diagnostic, not parser false or an alternative value |
 | PURE-25 | A private write uses a copied handle into pre-existing external storage | External write remains impure; copying the descriptor does not privatize backing |
@@ -46,7 +51,7 @@ An ordinary result, initialized-null value and vacant output remain distinct.
 | PURE-27 | A mode-unselected branch contains a known external effect | Permit only when the checked pure domain excludes its execution |
 | PURE-28 | A supposedly unused branch has an unknown instruction or invalid source form | Reject structural validation before selection |
 | PURE-29 | A selected form invokes fail-fast or process termination | Observable termination effect is impure; nonreturning does not mean pure |
-| PURE-30 | A computation merely has DoesNotReturn or NoThrow | Neither supplies a purity, input-dependency or totality guarantee |
+| PURE-30 | A computation merely has DoesNotReturn or has no failure on one observed input | Neither supplies a purity, input-dependency or totality guarantee |
 
 ## Modes, propagation and authorization
 
@@ -57,7 +62,7 @@ An ordinary result, initialized-null value and vacant output remain distinct.
 | PMODE-03 | An authorized pure form receives nonconstant runtime inputs | IsPureEval=true, IsConstEval=false |
 | PMODE-04 | Terrum evaluates a required constant request | IsPureEval=true, IsConstEval=true |
 | PMODE-05 | An authorized backend selects constant evaluation | Both flags true; backend folding is not Terrum source opt-in |
-| PMODE-06 | A selected state claims false/true | Impossible combination; reject malformed mode semantics |
+| PMODE-06 | Producer publishes an impossible false/true evaluation-mode state | Verification rejects before affected use |
 | PMODE-07 | Optimization removes an ordinary computation without changing its form | No automatic flag change |
 | PMODE-08 | Input arguments happen to be compile-time constants | No implicit form selection or call admission from their constancy alone |
 | PMODE-09 | A nested eligible call reads the mode queries | Inherit the selected activation's mode |
@@ -102,7 +107,7 @@ instrumentation.
 | PREAD-09 | An input region read is absent from a claimed pure record | Reject incomplete contract, even if the current examples never expose it |
 | PREAD-10 | An ordinary call has no published effect record | Conservative unknown, not an empty read/write set |
 | PREAD-11 | A public Count getter reads private representation | Publish receiver-state dependency without requiring caller access to that private field |
-| PREAD-12 | An imported getter has no body but a complete checked pure/read contract | Predicate use can rely on the contract; required execution additionally needs a body/intrinsic |
+| PREAD-12 | An imported getter has no body but a complete checked pure/read contract | After structural checks and support admission, predicate use may rely on the declared contract; required execution additionally needs a body/intrinsic |
 | PREAD-13 | Two observations differ in selected form/rules/code/target semantics | Do not reuse from input equality alone |
 | PREAD-14 | A read-only RVA region has proven immutable extent and publication | Admit its immutable dependency, retaining artifact/load lifetime |
 | PREAD-15 | Data has RVA placement but writable aliases or an unproved immutable extent | Do not infer immutable pure data |
@@ -256,7 +261,7 @@ initialization, but cannot be both live and vacant.
 | PPRED-03 | A predicate uses initialization/presence/admitted type tests | Apply structural rules; never read vacancy to discover its state |
 | PPRED-04 | A predicate calls an accessible checked pure Count getter | Admit with complete receiver/input-state dependencies |
 | PPRED-05 | A readonly getter lacks purity/read contracts | Readonly is not sufficient predicate-call admission |
-| PPRED-06 | A getter promises NoThrow but reads mutable ambient state | NoThrow alone is insufficient |
+| PPRED-06 | A getter's failure behavior is bounded but it reads mutable ambient state | A failure bound alone is insufficient for Pure admission |
 | PPRED-07 | A public clause directly references a private field/helper | Reject hidden caller requirements at effective accessibility |
 | PPRED-08 | A public pure getter hides private representation behind its contract | Permit the visible abstraction; do not export private field access |
 | PPRED-09 | A clause uses a checked helper/operator/conversion with complete roots | Admit its selected identity, valid call domain and actual dependencies |
@@ -295,7 +300,7 @@ initialization, but cannot be both live and vacant.
 | PVER-09 | Devirtualization/pinning reveals stronger private implementation facts | Do not strengthen source-visible contracts from those facts |
 | PVER-10 | A retained qualified-self adaptation forwards a pure callable | Preserve selected identity, form, capture, output and read dependencies |
 | PVER-11 | Independent consumer sees unknown mandatory predicate/effect rules | Reject before affected use, not optional-attribute fallback |
-| PVER-12 | Bounded Effects NoThrow bit is used as the new Pure/ConstEval carrier | Reject unsupported interpretation; no new mask/opcode assignment |
+| PVER-12 | Retired Effects bit `0x01` is treated as a Pure/ConstEval carrier | Reject the malformed clause; the bit has no assigned interpretation |
 | PVER-13 | Required constant result is a Copy Auto aggregate with no Blittable promise | Reject emitted result admission despite eligible computation |
 | PVER-14 | Blittable result lacks Copy/frozen validity or a constant codec | Blittable alone is insufficient |
 | PVER-15 | Private evaluator slots/views lack emitted-value layout/codec admission | Permit internal use if their actual execution/access domain is admitted |

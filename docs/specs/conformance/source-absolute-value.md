@@ -2,8 +2,8 @@
 
 These cases apply to [absolute-value-members/1 and checked-integer-magnitude/1](../language/absolute-value.md).
 They require the stated selected declarations and execution support. They do
-not select the remaining generic-math hierarchy, an unchecked variant, a
-failure payload catalog or a physical intrinsic.
+not select the remaining generic-math hierarchy, an unchecked variant, an
+exception-class catalog or a physical intrinsic.
 
 Finite evidence uses supplied exact identities, target widths, valid scalar
 values, call/effect facts and result destinations. Exhaustive 8-bit inputs
@@ -95,7 +95,7 @@ decoding, arithmetic providers or observable signaling/status behavior.
 | AVAD-04 | Wrong retained native target width | Cannot silently use the host or another target's domain |
 | AVAD-05 | Same carrier but wrapped, saturated or unsigned-result replacement | Does not satisfy the checked member's retained contract |
 | AVAD-06 | Support for only an equal-width different scalar identity | Does not admit the missing owner |
-| AVAD-07 | Mathematical safety facts versus an unconditional NoThrow expectation | Require the actual applicable domain and complete checked guarantee |
+| AVAD-07 | Mathematical safety facts versus the complete operation contract | Require the actual applicable domain and all checked failure/effect guarantees |
 | AVAD-08 | Pure alone, ConstEval with support, or neither | Preserve distinct authorization and actual-program requirements |
 | AVAD-09 | Missing constant program or a reached constant failure | No runtime fallback or published constant result |
 | AVAD-10 | Compiler-only dependency with no retained runtime path versus an actual retained helper | Only the actual retained closure requires runtime support |

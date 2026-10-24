@@ -34,18 +34,18 @@ name-based intrinsic members.
 | PFORM-17 | An ordinary package declares primitive-like names/operators | Do not replace reserved primitive identities or built-in arithmetic |
 | PFORM-18 | Equality/inequality uses two same-typed values of any mandatory scalar | Produce bool under that scalar's observation rules |
 | PFORM-19 | Boolean/unit/code-unit/scalar values request excluded arithmetic or updates | Reject unavailable operation, not a numeric carrier adaptation |
-| PFORM-20 | An atomic metadata code is recognized but execution support is absent | Reject required physical execution before use; source matrix does not allocate a feature/opcode |
+| PFORM-20 | An atomic metadata code is recognized but execution support is absent | No support claim for required physical execution; reject before use. The source matrix does not allocate a feature/opcode |
 
 ## Integer arithmetic and exact bits
 
 | Case | Expression or situation | Required result |
 |---|---|---|
-| PINT-01 | `int8(127) + int8(1)` | Overflow failure; no result |
-| PINT-02 | `int8(-128) - int8(1)` | Overflow failure |
-| PINT-03 | `uint8(255) + uint8(1)` | Overflow failure |
-| PINT-04 | `uint8(0) - uint8(1)` | Overflow failure, not 255 |
-| PINT-05 | `int8(16) * int8(8)` | Overflow failure, not -128 |
-| PINT-06 | `uint8(16) * uint8(16)` | Overflow failure, not zero |
+| PINT-01 | `int8(127) + int8(1)` | Development/Debug: OverflowException, no result. Release: int8 -128 by modulo 256. |
+| PINT-02 | `int8(-128) - int8(1)` | Development/Debug: OverflowException. Release: int8 127. |
+| PINT-03 | `uint8(255) + uint8(1)` | Development/Debug: OverflowException. Release: uint8 zero. |
+| PINT-04 | `uint8(0) - uint8(1)` | Development/Debug: OverflowException. Release: uint8 255. |
+| PINT-05 | `int8(16) * int8(8)` | Development/Debug: OverflowException. Release: int8 -128, not a checked failure. |
+| PINT-06 | `uint8(16) * uint8(16)` | Development/Debug: OverflowException. Release: uint8 zero. |
 | PINT-07 | Minimum signed I divided by same-typed -1 | Quotient overflow failure |
 | PINT-08 | Minimum signed I remainder same-typed -1 | Same-typed zero; do not use failing combined quotient/remainder |
 | PINT-09 | Any I divided/remainder by same-typed zero | Division-by-zero failure |
@@ -58,16 +58,18 @@ name-based intrinsic members.
 | PINT-16 | `uint8(7) / uint8(3)` | uint8 2 |
 | PINT-17 | `uint8(7) % uint8(3)` | uint8 1 |
 | PINT-18 | Unary negation of zero in each unsigned I | Same-typed zero |
-| PINT-19 | Unary negation of any nonzero unsigned I | Overflow failure, not promotion or wrapping |
-| PINT-20 | `-int8(-128)` | Overflow failure |
+| PINT-19 | Unary negation of nonzero unsigned I | Development/Debug: OverflowException; Release: modulo-width `0 - x`; no promotion |
+| PINT-20 | `-int8(-128)` | Development/Debug: OverflowException; Release: int8 -128 |
 | PINT-21 | `-int8(0xFF)` | int8 1 after typed bit-pattern construction |
 | PINT-22 | `~int8(0x0F)` | int8 -16, bits F0 |
 | PINT-23 | `int8(0xFF) & int8(0x7F)` | int8 127 |
 | PINT-24 | `int8(0x80) \| int8(1)` | int8 -127, bits 81 |
 | PINT-25 | `int8(0xAA) ^ int8(0xFF)` | int8 85, bits 55 |
 | PINT-26 | `int128(-170141183460469231731687303715884105728) % int128(-1)` | int128 zero; the corresponding quotient fails |
-| PINT-27 | Native arithmetic crosses its selected target's signed/unsigned endpoint | Checked failure at that target width, independent of compiler host |
+| PINT-27 | Native arithmetic crosses its selected target's signed/unsigned endpoint | Development/Debug: checked failure; Release: same-width wrapping, independent of compiler host |
 | PINT-28 | Zero dividend in a signed integer divided/remainder by a nonzero integer | Ordinary integer zero; no signed-zero integer state |
+| PINT-29 | An explicit checked operation runs in Release, or an explicit wrapping operation runs in Development/Debug | The explicit operation's encoded policy wins; the build profile does not reinterpret it |
+| PINT-30 | A checked arithmetic operation is imported by a JIT/AOT consumer built under the other source profile | Preserve the artifact's checked/wrapping operation; consumer configuration does not change it |
 
 ## Shift controls and lowering
 
@@ -96,11 +98,11 @@ name-based intrinsic members.
 | PSHIFT-21 | Left and right expressions have effects, then count is invalid | Evaluate left, then right, then fail; no result or update store |
 | PSHIFT-22 | Left data evaluation fails | No right evaluation or shift |
 | PSHIFT-23 | A negative/too-wide source count meets a uint32-count IL shift | Preserve invalid-count failure before exact successful-path conversion; no conversion-overflow substitution |
-| PSHIFT-24 | Count expression first performs checked unsigned negation of nonzero | Operand overflow failure precedes the shift; do not relabel it invalid count |
+| PSHIFT-24 | Count expression first performs explicitly checked unsigned negation of nonzero | Overflow precedes the shift in every profile; do not relabel it invalid count |
 | PSHIFT-25 | `uint128(1) << int8(127)` | Valid; width checking must not first construct int8(128) |
 | PSHIFT-26 | A result-only generic count call needs the built-in control context | Its unresolved result can receive int32; an independently typed count is not retargeted |
 | PSHIFT-27 | Signed logical right shift lowers through unsigned bits | Same-width bit-preserving views and zero fill, then original signed result type; no numeric range conversion |
-| PSHIFT-28 | Unsigned unary negation lowers into the initial scalar Body | Use checked typed-zero subtraction where supported; do not give signed CheckedNegate new unsigned semantics |
+| PSHIFT-28 | Unsigned unary negation produces a shift count | Development/Debug: checked same-type `0 - x` fails before the shift for nonzero `x`; Release: same-width wrapping completes before ordinary shift-count validation |
 
 ## Floating formats and observable edges
 
@@ -198,4 +200,4 @@ an atomicity or transaction guarantee.
 | PUPDATE-22 | A shared scalar uses a built-in update | No atomic RMW guarantee; require its sharing/coordination protocol |
 | PUPDATE-23 | A target is vacant, immutable, or lacks required writable access | Reject missing read/update permission; no implicit initialization |
 | PUPDATE-24 | Floating `/= 0` produces infinity/NaN under the selected format | Store its normal floating result; do not impose integer division failure |
-| PUPDATE-25 | Arithmetic/update result feeds a NoThrow body | Prove any required check cannot fail and include accessor/RHS effects; don't infer totality from a literal spelling |
+| PUPDATE-25 | Arithmetic/update result is used in a context requiring a proven failure bound | Prove any required check cannot fail and include accessor/RHS effects; do not infer totality from a literal spelling |

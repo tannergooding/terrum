@@ -1,10 +1,13 @@
 # Interchange resource-accounting conformance
 
 These cases apply [resource accounting](../representation/resource-accounting.md),
-[reader trust](../representation/reader-trust.md), [canonicality](../representation/encoding-canonicality.md)
-and the exact `trrm/1-draft-unified-3` schema. Numerical limits in fixtures
+[consumer verification](../representation/reader-trust.md), [canonicality](../representation/encoding-canonicality.md)
+and the exact `trrm/1-draft-register-il-1` schema. Numerical limits in fixtures
 are selected test envelopes, not portable minima. Finite action/graph models
 do not certify an arbitrary verifier, resource codec or production consumer.
+Cases involving malformed metadata state producer violations and require
+consumer rejection before affected use under mandatory verification.
+Optional audits account only for work they actually perform.
 
 ## 1. Envelopes and portable capacity
 
@@ -27,20 +30,20 @@ do not certify an arbitrary verifier, resource codec or production consumer.
 
 | Case | Input or observation | Required outcome |
 |---|---|---|
-| IRBO-01 | Directory count needs count times 16 bytes | Check the complete product and containing slice before traversal/allocation |
-| IRBO-02 | Variable index has count plus one entries | Check the full four-byte index extent, not count times four |
-| IRBO-03 | Fixed row count/stride product exceeds its section | Invalid input; capacity cannot legitimize it |
-| IRBO-04 | Selected row offsets are in range but another row is unvisited | Bound the selected pair; no preliminary whole-index scan |
-| IRBO-05 | Offset plus length or alignment exceeds its containing domain | Reject without wrapping or converting to a small host index |
+| IRBO-01 | Producer emits a directory count whose count-times-16 extent exceeds the section | Verification rejects before affected use |
+| IRBO-02 | Producer omits entries from a count-plus-one variable index | Verification rejects before affected use |
+| IRBO-03 | Producer emits a fixed row count/stride product beyond its section | Producer violates the selected schema; capacity cannot make it valid |
+| IRBO-04 | A valid artifact has selected row offsets while another row is unvisited | Mandatory verification validates required index framing/ownership before use; a deeper audit of unrelated semantic claims reports only its actual scope |
+| IRBO-05 | Producer emits offset/length/alignment values outside their containing domain | Verification rejects before affected use |
 | IRBO-06 | Table rows cross 255/256 and 65,535/65,536 | Preserve fixed reference/index widths and independent capacities |
 | IRBO-07 | Present count reaches the 24-bit maximum or next value | Maximum remains representable if other framing holds; next value is invalid |
 | IRBO-08 | Zero list or eligible empty Blob is supplied | Preserve its valid empty form and zero payload charge |
-| IRBO-09 | Empty String/semantic row lacks required framing | Reject, not a free zero-byte object |
-| IRBO-10 | Variable-size element count lacks enough containing bytes | Reject before speculative allocation/recursive processing |
-| IRBO-11 | Signature-derived compact-linear parameters cross a local width/capacity | Check the omitted inventory before descriptor construction |
-| IRBO-12 | A multi-result operation crosses the derived value limit | Count every result before establishing any of them |
-| IRBO-13 | Offset sentinel is all ones | Marker, not an allocation count or forced capacity |
-| IRBO-14 | Selected reference is in range under an envelope | Still enforce actual namespace, null and reserved-field rules |
+| IRBO-09 | Producer emits an empty String/semantic row without required framing | Verification rejects before affected use |
+| IRBO-10 | Producer emits a variable-size element count without enough containing bytes | Producer violates the selected schema; no speculative-allocation check is mandated |
+| IRBO-11 | Flattened receiver/formal inventory or a HomeMap reaches/exceeds the `u16` index domain | Permit at most 65,536 local/formal slots; reject overflow rather than widening or wrapping |
+| IRBO-12 | Body maps, fixed Block entries, record offsets/data or code bytes approach the row extent | Account the exact 33-byte stream prefix, fixed map/Block sizes, `(recordCount+1)*4` offsets, record extent and `codeByteLength` without wrapped products |
+| IRBO-13 | A Body-local index equals `0xFFFF` | Treat it as an ordinary usable index when its inventory count is 65,536; it is not an absence or offset sentinel |
+| IRBO-14 | A valid selected reference is used under an envelope | It has the schema-assigned namespace, nullability and reserved-field meaning |
 | IRBO-15 | Nested row or Body would reset root work | Same root ledger; only per-object capacity is local |
 | IRBO-16 | A complete traversal exceeds its remaining capacity/work | Explicitly decline; no skipped-element completion claim |
 
@@ -53,10 +56,10 @@ do not certify an arbitrary verifier, resource codec or production consumer.
 | IRTX-03 | Transcoding output is exactly at or above selected capacity | Check exact output/bound before append; at-limit succeeds, excess declines |
 | IRTX-04 | Decoder uses a counting pass then a writing pass | Both passes consume their action expansion |
 | IRTX-05 | Streaming text validation does not retain decoded content | No mandatory whole decoded buffer, but complete actual work remains charged |
-| IRTX-06 | Selected name/path/key has malformed encoding or embedded zero | Existing use-specific invalidity rejects |
+| IRTX-06 | Producer supplies a name/path/key with malformed encoding or embedded zero | Verification rejects affected use before binding |
 | IRTX-07 | Unrelated String has malformed scalar content | Selected lookup does not traverse it; no claim of whole-String semantic validity |
-| IRTX-08 | String unitCount is maximum at each width | Product/header/terminator/alignment use full checked size, not a truncated count |
-| IRTX-09 | Large String count is paired with a short actual row | Framing rejects before content allocation |
+| IRTX-08 | String unitCount is maximum at each width | A valid producer encodes full product/header/terminator/alignment without truncation |
+| IRTX-09 | Producer pairs a large String count with a short actual row | Verification rejects before affected use |
 | IRTX-10 | Copy/re-encoding retains source while building output | Simultaneous charges; no early-retirement accounting shortcut |
 | IRTX-11 | Tiny input requests an unsupported expansion recipe | Decline affected use; no uncharged helper or new codec |
 | IRTX-12 | Raw/ill-formed literal or segmented String permission is inferred from capacity | Remains unassigned; resource policy is not semantic permission |
@@ -95,7 +98,7 @@ do not certify an arbitrary verifier, resource codec or production consumer.
 | IRWK-09 | Iterative audit has many simultaneously active logical expansions | Depth/state limits still apply; native stack avoidance is not free capacity |
 | IRWK-10 | Structural decoding occurs during a semantic audit | Charge structural and semantic counters separately; neither borrows the other's budget |
 | IRWK-11 | Recipe has no expansion for an intrinsic or required rule | Decline metered use/claim, not guessed one-step cost |
-| IRWK-12 | Finite resource graph model is offered as arbitrary predicate/body verification | Independent truth evidence required |
+| IRWK-12 | Finite resource graph model is offered as mandatory consumer proof of arbitrary predicate/body truth | Do not require such proof for safe consumption; producer truth remains required, and any optional audit must state its scope |
 | IRWK-13 | Different algorithm/recipe is compared under the same numeric envelope | Report actual recipe; no cross-recipe deterministic-result guarantee |
 | IRWK-14 | Loader accounting is offered as replacing the source proof/ConstEval machine | Separate unchanged source contracts remain required |
 
@@ -105,9 +108,9 @@ do not certify an arbitrary verifier, resource codec or production consumer.
 |---|---|---|
 | IRSC-01 | Structural work, semantic work, depth or state would exceed a limit | Explicit dimension/scope refusal before the action |
 | IRSC-02 | Required audit exhausts after checking a proper subset | No complete-scope certificate or fallback execution |
-| IRSC-03 | Selected trusted seek fits while an unvisited block would not | Seek can succeed; no full-body resource/validation claim |
+| IRSC-03 | Selected seek fits while an unvisited block would not | Seek can succeed; no full-body resource/validation claim |
 | IRSC-04 | Whole-Body/artifact claim is requested after selected access only | Decline the overbroad claim |
-| IRSC-05 | Producer trust is offered after exposed invalidity or exhaustion | Does not turn either into successful validation |
+| IRSC-05 | Producer responsibility is offered after exposed invalidity or exhaustion | Does not turn either into successful validation |
 | IRSC-06 | Counter arithmetic or charge is negative/overflowing | Never wrap; invalid accounting/configuration is distinct from input validity |
 | IRSC-07 | Cancelled/OOM/I/O-failed work reports deterministic budget exhaustion | Report actual host failure, no reproducible envelope-result substitution |
 | IRSC-08 | Receipt omits actual envelope, recipe, peak or checked scope | Insufficient resource/validation claim |

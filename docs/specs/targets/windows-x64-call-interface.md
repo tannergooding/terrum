@@ -129,13 +129,30 @@ captured reference identities while later arguments or nested calls execute.
 Pre-invocation failure prevents the call and retires still-caller-owned
 staged values under the ordinary scope order.
 
+This physical sequence describes the ordinary C-style call mapping. A
+`NativeCallable` member or interface slot follows the effective convention's
+target ABI for receiver placement, hidden result storage, explicit arguments,
+and any required inheritance/vptr adjustment. Do not assume the C-style
+explicit-receiver order above or impose a universal `this`/result/arguments
+sequence. A consumer that cannot implement the target ABI's exact mapping
+rejects the affected call.
+
+For Windows x64 `NativeCallable` instance methods using `Unmanaged`, `Cdecl`
+or `Stdcall`, the member ABI places the implicit `this` receiver first, then
+hidden result storage when required, then explicit parameters. Thus `this`
+uses RCX and an indirect result pointer uses RDX; subsequent arguments use the
+ordinary shared physical-ordinal classification. This differs from the
+C-style explicit-receiver sequence above. `Vectorcall` uses its distinct
+MSVC mapping; its receiver, result and argument placement must follow that
+mapping or the affected call is rejected. Interface-subobject and multiple-
+inheritance adjustments likewise follow the selected target ABI.
+
 For example, `(uint8, float64, int32, float32, uint64)` uses
 RCX/XMM1/R8/XMM3/stack. An indirect aggregate result for
 `(int32, float64, int32, float32)` uses hidden RCX, then
 RDX/XMM2/R9/stack. Counting floating registers separately is wrong.
-The receiver here is an explicit C-style parameter; direct native C++
-member-call conventions, including their special this/result ordering,
-are outside this profile.
+the receiver in this example is an explicit C-style parameter, not a hidden
+member receiver.
 
 ## 4. By-value copies and result storage
 
@@ -157,9 +174,12 @@ survive. It does not authorize hidden heap allocation, rooting or ownership
 duplication.
 
 An indirect result receives separate caller-prepared storage of the exact
-result extent, with its complete object alignment. The hidden pointer is
-physical position zero, and the same pointer is returned in RAX.
-It is not an ordinary logical parameter or a result reference.
+result extent, with its complete object alignment. For an ordinary C-style
+call, the hidden pointer is physical position zero, and the same pointer is
+returned in RAX. A `NativeCallable` instance method using `Unmanaged`,
+`Cdecl` or `Stdcall` places `this` first and the hidden result pointer second,
+as specified above; other conventions follow their target mapping. The hidden
+pointer is not an ordinary logical parameter or a result reference.
 The caller cannot read T until its complete normal result is published.
 Result and argument supporting storage remain independent unless a checked
 lowering proves the selected ABI, alias, identity and publication contracts
@@ -177,6 +197,11 @@ an aggregate carrier does not initialize it or make a raw foreign call safe.
 The ABI imposes no proposal-specific maximum aggregate storage size.
 
 ## 5. Stable input borrows and initialization
+
+“Borrow” here is the non-owning reference relationship in the shared
+[definitions](../language.md#definitions-and-notation), projected only for
+the admitted stable call extent below. It is not an ABI-indirect by-value
+copy, owner transfer or automatic lifetime extension.
 
 This profile admits call-extent ref<T>/write ref<T> inputs and initialization
 destinations only when their complete T has admitted fixed rootless storage,
@@ -202,7 +227,7 @@ passing its explicitly packed enclosing record is a different operation.
 Overlapping arguments remain possible under ordinary reference rules unless
 their actual owner/guard/NoAlias protocol prohibits them.
 
-An init ref<T> parameter points to reserved vacant caller storage.
+An `ref<init T>` parameter points to reserved vacant caller storage.
 It is not a writable alias to a live owner or readable default.
 The complete declaration publishes initialized/vacant states for each
 normal result, including an explicitly live failure output when admitted.
@@ -215,8 +240,11 @@ responsible. A normal outcome requiring vacancy retires them before return;
 one requiring a complete value publishes only after its declared checks and
 completion obligations. Bytes written and a returned buffer pointer do not
 by themselves establish value initialization or ownership.
-An admitted special failure adapter preserves the canonical exceptional
-vacancy/cleanup relation; raw unwinding is not an ordinary foreign result.
+Under `NativeExceptionUnwind`, an admitted native exception can unwind inward
+through the target ABI and is normalized before source catch matching. It is
+not an ordinary output state or a status result; an unhandled event fails
+fast, and no unwinding exception fabricates a normal result or output
+publication.
 
 ## 6. Complete owners and retirement entries
 
@@ -243,9 +271,11 @@ consumes a value using the aggregate ABI. This is the generated/runtime
 retirement entry, not an ordinary user-callable alias to the authored
 readonly Cleanup method.
 
-The retirement driver preserves the complete source contract: authored
-Cleanup body once, then live owning fields in reverse declaration order,
-with nonthrowing, nonsuspending transitive retirement.
+The retirement driver preserves the complete source contract during normal
+retirement: authored Cleanup body once, then live owning fields in reverse
+declaration order. Cleanup is nonsuspending but may raise an ordinary
+exception; if it does, propagation begins and the remaining generated
+owner/field cleanup does not resume during that unwind.
 An indirect parent retirement argument uses distinct supporting storage;
 writes to that consumed argument cannot corrupt the original child payloads
 required for later child retirement. No physical duplicate bits create a

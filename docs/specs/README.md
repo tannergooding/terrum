@@ -17,6 +17,11 @@ indexes; summaries do not independently redefine another chapter's rules.
 
 ## Source language
 
+Start with [definitions and notation](language.md#definitions-and-notation):
+values, copying, aliases, references and lifetime, followed by the precise
+borrow/loan/lease and scope meanings and common abbreviations. The focused
+chapters below remain the owners of their individual contracts.
+
 | Contract | Specification |
 |---|---|
 | UTF-8 compilation input, UTF-16 snapshots, and distinct origin coordinates | [Source input](language/source-input.md) |
@@ -32,8 +37,8 @@ indexes; summaries do not independently redefine another chapter's rules.
 | Eager async execution, operation establishment, failure channels and completion ownership | [Async execution](language/async-execution.md) |
 | Affine Task<T>, consuming await, payload/output observation and explicit every-exit settlement | [Task responsibility](language/task-responsibility.md) |
 | Structural partial field moves, complete Cleanup receivers, replacement and exact retirement order | [Ownership and cleanup](language/ownership-and-cleanup.md) |
-| Nominal Exception opt-in, complete catch subjects, explicit borrowed/Copy bindings and active propagation ownership | [Local failures](language/local-failures.md) |
-| Runtime require selectors, ordinary zero-input failure construction, callable-owned defaults and Core RequirementException | [Requirement failures](language/requirement-failures.md) |
+| Self-typed exception classes, complete catch subjects, object-handle bindings and active propagation ownership | [Local failures](language/local-failures.md) |
+| Runtime require selectors, ordinary zero-supplied construction, callable-owned defaults and Core RequirementException | [Requirement failures](language/requirement-failures.md) |
 | Opaque affine Core CapturedException, lexical Capture, original-event transfer and consuming rethrow | [Captured exceptions](language/captured-exceptions.md) |
 | Owned named affine producer cursors, capture, lazy yield and creation/operation/close contracts | [Generated producers](language/generated-producers.md) |
 | Whole receiver/formal sources, retained destinations, backing-only forwarding and checked member constraints | [Dependencies and views](language/dependencies-and-views.md) |
@@ -52,7 +57,7 @@ indexes; summaries do not independently redefine another chapter's rules.
 | Same-type Min/Max/Clamp members, floating selection rules and exact invalid-bound precondition failure | [Numeric selection](language/numeric-selection.md) |
 | Sign-only floating operations, quiet processing-result NaNs, constant recipes and no ambient status | [Floating environment](language/floating-environment.md) |
 | Coherent Core numeric groups, combined Min/Max/Clamp and exact primitive witness matrix | [Numeric capabilities](language/numeric-capabilities.md) |
-| Exact zero-data Core payloads for scalar overflow, integer zero division and invalid shift counts | [Scalar checked failures](language/scalar-failures.md) |
+| Exact Core exception classes for scalar overflow, integer zero division and invalid shift counts | [Scalar checked failures](language/scalar-failures.md) |
 | Portable scalar proofs, deterministic constant execution, and exact resource accounting | [Proof and constant execution](language/proof-and-constant-evaluation.md) |
 | Published predicates, input-state purity, evaluation modes, NoAlias parameters and dependency-safe results | [Published predicates and pure evaluation](language/published-predicates-and-effects.md) |
 | Language design and accepted direction | [Language](language.md) |
@@ -71,7 +76,7 @@ logical execution obligations from physical interchange and target support.
 | Contract | Specification |
 |---|---|
 | Explicit and conditional thread capability opt-in, actual handoff/publication/guard authority | [Sharing and handoff](runtime/sharing-and-handoff.md) |
-| Storage, loans, backing, roots and retirement | [Lifetimes](lifetimes.md) |
+| Reference lifetimes, backing, roots, loans and retirement | [Lifetimes](lifetimes.md) |
 | Exact concurrent observations, mixed SC/fences, causal justification and storage generations | [Concurrent executions](runtime/concurrent-executions.md) |
 | Shared CPU policy, access/library direction and target/platform boundaries | [Memory model](memory-model.md) |
 | Paired contained adapters, affine failure domains, mapping/causes and callback responsibility | [Foreign failure bridge](runtime/foreign-failure-bridge.md) |
@@ -86,9 +91,9 @@ logical execution obligations from physical interchange and target support.
 | Provider/consumer paths, FDG comparison and deliberate responsibility/output departures | [Library design scenarios](libraries/design-scenarios.md) |
 | Exact scalar Abs subjects/signature, integer magnitude and admitted floating result classes | [Absolute value](language/absolute-value.md) |
 | Exact scalar Min/Max/Clamp signatures, selection observations and reusable InvalidBoundsException | [Numeric selection](language/numeric-selection.md) |
-| Nominal zero-data scalar failure catalog, exact mappings and event/phase/admission boundaries | [Scalar checked failures](language/scalar-failures.md) |
+| Nominal scalar exception-class catalog, exact mappings and event/phase/admission boundaries | [Scalar checked failures](language/scalar-failures.md) |
 | Independent numeric capability groups and optional same-type scalar composition | [Numeric capabilities](language/numeric-capabilities.md) |
-| Zero-data standard runtime payloads, construction, state and recoverable-publication boundaries | [Standard runtime failures](runtime/standard-failures.md) |
+| Standard runtime exception classes, creation, state and recoverable-publication boundaries | [Standard runtime failures](runtime/standard-failures.md) |
 
 ## Semantic interchange
 
@@ -104,7 +109,7 @@ allocation, metadata/Body semantics and independent conformance evidence.
 | Required governing-edition field, exact capability lists, derived prerequisites and physical manifest admission | [Module semantic manifests](representation/semantic-manifests.md) |
 | Selected import identities, complete directed contract satisfaction and retained replacement obligations | [Binding and replacement](representation/binding-and-replacement.md) |
 | Assigned clause ownership, uniqueness, defaults and result-type-independent no-return | [Contract clauses](representation/contract-clauses.md) |
-| Trusted selective reads, required natural access checks and table-implied references | [Reader trust](representation/reader-trust.md) |
+| Producer truth obligations, mandatory structural safe-consumption checks and schema-owned references | [Consumer verification](representation/reader-trust.md) |
 | Canonical writers, equivalent noncanonical ordinary reads and explicit scoped audits | [Encoding canonicality](representation/encoding-canonicality.md) |
 | Scoped capacity, deterministic structural/audit recipes and deferred numerical portable minima | [Resource accounting](representation/resource-accounting.md) |
 | Required source/runtime declaration, witness, phase, ownership and evaluation records whose physical codecs remain gated | [Logical record requirements](representation/logical-records.md) |
@@ -134,7 +139,7 @@ interoperability, without equating storage with formal foreign mappings.
 |---|---|
 | Windows x64 fixed rootless boundary and imported platform rules | [Windows x64 native](targets/windows-x64.md) |
 | All scalar storage, BID decimal, source schemas, packing/alignment and safe access | [Windows x64 data layout](targets/windows-x64-data-layout.md) |
-| Standard-only primitive admission, positional carriers, stable borrows, outputs and owners | [Windows x64 call interface](targets/windows-x64-call-interface.md) |
+| Standard-only primitive admission, positional carriers, stable reference inputs, outputs and owners | [Windows x64 call interface](targets/windows-x64-call-interface.md) |
 | Cheap non-unwinding default, preservation, PE/unwind, closure/origin and code lifetime | [Windows x64 deployment](targets/windows-x64-deployment.md) |
 | Explicit Boolean/result/owned-packet wire, domain release and synchronous callback containment | [Windows x64 failure bridge](targets/windows-x64-failure-bridge.md) |
 

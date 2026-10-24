@@ -79,7 +79,7 @@ generated async implementation and completion-clause phase:
 [IteratorCursor]
 public mut unique struct PositiveCursor : ICursor<int32>
 {
-    public mut bool TryMoveNext(init ref<int32> item)
+    public mut bool TryMoveNext(ref<init int32> item)
         ensure !return || *item > int32(0);
 }
 ```
@@ -155,7 +155,7 @@ or close responsibility. Any backing-only claim still has to preserve the
 actual captured frame state and every guard/owner required through release.
 Later generated outputs use their own exact member/formal/phase contracts.
 
-Standard producer declarations do not capture `init ref<T>` formals: their
+Standard producer declarations do not capture `ref<init T>` formals: their
 ordinary invocation output contract cannot be deferred into later advancement.
 Use an explicit eager wrapper for ordinary creation outputs. This does not
 restrict the generated advance operation's separately selected init output.
@@ -309,7 +309,7 @@ bridge is supplied.
 
 ## Effects, retained identity and representation
 
-The creator's Pure, NoThrow, ConstEval and NoAlias annotations govern its
+The creator's Pure, ConstEval and NoAlias annotations govern its
 synchronous creation extent, including its applicable checks/failure cleanup.
 They do not promise pure/no-throw/constant enumeration or post-return input
 separation. A generated operation's declared effects cover its actual resumed
@@ -329,7 +329,7 @@ The retained logical registration includes:
 | Execution | Unstarted/suspended/exhausted/failed/closed states; lazy entry, typed yield, body completion and active-scope/cleanup ownership |
 | Operations | Exact advance/close requirements, authored/generated clauses/effects, output version/publication and async establishment/observation |
 | Loans and retirement | Broad or available checked refined origins/invalidation, surviving item/copy/reborrow, pending operation settlement and once-only close |
-| Representation and admission | Complete generated frame capability/layout dependencies, supported rules and explicit producer/audit trust |
+| Representation and admission | Complete generated frame capability/layout dependencies and supported rules; producer is responsible for published body facts |
 
 Distinct producer definitions remain distinct named cursor identities even
 with equal code, layout or emitted values. Private state-machine code/layout

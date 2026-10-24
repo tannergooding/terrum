@@ -5,7 +5,9 @@
 These rules define logical `interchange-requirements/1`. The
 [Module manifest](semantic-manifests.md) supplies its current physical
 edition/Feature protocol under the [registry](registry.md) and
-[metadata](../il-metadata.md), without activating richer capability codecs.
+[metadata](../il-metadata.md). The draft registry still lacks registrations
+and physical carriers for some approved capabilities; those gaps do not define
+a reduced TRRM 1.0 conformance floor.
 
 The [persistence taxonomy](persistence.md) distinguishes normative `.trrm`
 interchange from implementation-private saved IR and native containers.
@@ -14,7 +16,7 @@ binding or target obligations, and a private wrapper does not select an
 embedded normative payload's schema or governing rules.
 
 An artifact has **one encoding schema**. The schema fixes every encoded
-field's namespace, shape, reference interpretation and required validation.
+field's namespace, valid shape and reference interpretation.
 A Module cannot select another decoder for its rows or Bodies, even when
 physical tables contain several modules. An enclosing PE/ELF format, source
 edition, registry label, target ABI or runtime policy is not the encoding
@@ -42,7 +44,7 @@ Each logical Module independently owns these semantic requirements:
 | Dependencies | Selected module/definition identities and complete retained expected contracts, including their required semantics |
 
 These are semantic identities, not mutable package labels, source spelling,
-physical row numbers, producer trust flags or an integer "at least" test.
+physical row numbers, producer-assertion flags or an integer "at least" test.
 A feature revision identifies rules, not a producer's implementation version.
 Published logical contracts such as `task-responsibility/1` do not thereby
 receive physical Feature IDs.
@@ -86,8 +88,9 @@ This is a logical obligation set, not a requirement to duplicate identical
 physical rows. An encoding may share or derive records only under its
 specified rules; the complete exact requirements must remain recoverable.
 Unknown required identities, missing prerequisite definitions and conflicting
-revisions of one feature within that Module reject before affected use.
-An implementation cannot resolve a conflict by picking the larger revision.
+revisions of one feature violate the producer's requirements obligation or
+fall outside the selected schema. An implementation cannot claim support by
+picking the larger revision.
 One revision can support another only through the explicit compatibility
 rule; it does not rewrite the Module's required identity.
 
@@ -106,64 +109,72 @@ are not limited to the selected entry method, branch or anticipated execution
 path. Lazy compilation does not permit discovering an unsupported required
 feature only after affected source behavior has started.
 
-Finite recursive dependency graphs are checked without endless recursive
-expansion: an already identified Module/requirement does not acquire another
-identity when reached again. A graph cycle is not itself permission for
-recursive storage, static initialization, cleanup or execution that its
-canonical contract forbids. Unresolved or conflicting selected identities
-remain failures, not empty dependencies.
+Finite recursive dependency graphs have a finite closure: an already
+identified Module/requirement does not acquire another identity when reached
+again. A graph cycle is not itself permission for recursive storage, static
+initialization, cleanup or execution that its canonical contract forbids.
+Unresolved or conflicting selected identities do not denote empty
+dependencies or establish a support claim.
 
-## 3. Before-use admission
+## 3. Support claims and producer validity
 
-Admission distinguishes the scope of physical validation from semantic
-support for retained modules:
+This chapter defines valid artifact requirements and the scope of an
+implementation's support claim. Source compilation checks authored source.
+Consumers of reconstructed metadata, JIT and AOT inputs must perform the
+structural, range, reference, schema-support and binding checks needed for
+safe affected use; they are not required to semantically re-prove
+producer-published facts. The implementation chooses the checks' internal
+organization and diagnostic wording.
 
 | Scope | Required boundary |
 |---|---|
-| Entire supplied artifact | Select the exact encoding schema and establish bounded header/directory framing; no preliminary scan of every row or Body is implied |
-| Actual record/index/reference access | Check the selected extent, namespace, reserved values, exposed shape and local consistency under the [reader-trust contract](reader-trust.md) |
-| Selected modules and retained dependencies | Recover exact governing editions and complete semantic requirements; establish supported rules, representations and substrates before affected binding, evaluation, lowering or execution |
-| Every retained binding/replacement edge | Resolve selected definitions and check complete directed expected/provider satisfaction, target and runtime compatibility |
-| Authored body facts | Establish their truth by source checking or the admitted semantic producer/audit policy; no support flag or integrity check proves them |
+| Entire artifact | A valid artifact selects one exact schema and satisfies its framing and section rules; safely decode the selected input before binding or use |
+| Records, indexes and references | Validate schema-owned namespaces, assigned shapes, ranges and consistent references before affected use |
+| Selected modules and retained dependencies | A support claim includes their exact governing editions, complete semantic requirements, representations and substrates |
+| Retained binding/replacement edges | Check the complete directed expected/provider relation, target and runtime contracts needed for the selected binding; this does not prove either implementation honors its contract |
+| Authored body facts | Producers establish truth by source checking; consumers safely decode supported reconstructed bodies and may rely on their published facts without semantic re-proof |
 
 A structural inspector may report recognized unsupported semantics without
-executing them. A consumer's ability to decode a known feature is distinct
-from its ability to implement the required behavior. Execution support for
-known but unretained semantics need not be claimed. Trusted access still performs the schema's
-natural header/directory and selected-record checks; a whole-artifact
-structural validator additionally checks every required payload in its scope.
-The present bounded profile imposes no preliminary all-Body scan.
+executing them. Decoding a known feature is distinct from implementing its
+required behavior. Execution support for known but unretained semantics need
+not be claimed. Structural safe-consumption checks and support admission
+cover the selected artifact and retained dependency closure before code
+generation or execution; semantic audits remain optional and separately
+identified.
 
-An unknown required directory section rejects on directory admission.
-Unknown opcode, type/qualifier/constraint/clause forms reject when decoded
-or used, not through a mandatory search of unvisited payloads.
 A producer must not hide undeclared required semantics in an uncalled Body
-or unselected Module; a trusted consumer relies on complete declared
-requirements without scanning for a lie. A whole-artifact validator detects
-unknown forms within its scope. A known but unsupported semantic requirement
-cannot be used in a retained contract. Optional nonsemantic sections, debug paths,
-Attr rows, unused bits and producer-chosen labels cannot carry or activate
+or unselected Module. Consumers determine the selected artifact's complete
+requirements and safely decode relevant required bodies rather than treating
+the manifest as proof that no additional required forms are present. A known
+but unsupported semantic requirement does not
+establish a support claim. Optional nonsemantic sections, debug paths, Attr
+rows, unused bits and producer-chosen labels cannot carry or activate
 required behavior.
 
-In `trrm/1-draft-unified-3`, Module's required `governingRuleEdition` identifies
-its exact baseline and its Feature range supplies explicit extra requirements.
-The current edition is `1`, with no registered extra Feature IDs; valid current
-producers use `(0, 0)`. This means the explicit bounded interchange baseline,
-not "all language features" or the reader's default edition. Exact draft
+In `trrm/1-draft-register-il-1`, Module's required `governingRuleEdition` identifies
+its exact baseline and its Feature range supplies explicit additional
+requirements. Edition `1` is the accepted TRRM 1.0 semantic baseline; it does
+not select a reduced execution profile. The registry assigns Feature IDs 9-12,
+while their complete registrations and prerequisite closure remain
+in integration. A module that needs no additional
+registered feature uses `(0, 0)`; that empty range does not assert that the
+consumer implements every accepted TRRM 1.0 contract. Exact draft
 schema/catalog agreement remains out of band. Reserved header bytes or a
 same-spelled attribute cannot substitute for the required Module manifest.
 
-Required rejection on an actual access or admission does not depend on
-producer trust. Malformed framing,
-missing required representations, unsupported requirements, incompatible
-bindings and target/runtime mismatches are distinct causes under the
-[diagnostic categories](../overview/conformance.md#behavior-and-diagnostic-categories).
-An implementation may combine diagnostic reporting but must not replace any
-failure with a success-shaped value, runtime fallback or skipped required check.
-Resource exhaustion likewise declines admission explicitly under
-[resource accounting](resource-accounting.md), separately from invalid input,
-unsupported semantics and host failure. Capacity declarations cannot replace
-complete retained requirements or expand the checked/trusted scope.
+Malformed framing, missing required representations, unsupported
+requirements, incompatible bindings and target/runtime mismatches are
+distinct validity or support conditions. This specification defines the
+conditions for a valid artifact and a correct support claim. Consumers reject
+structurally unsafe, malformed or unsupported input, incompatible bindings
+and target/runtime mismatches before affected use; a semantically false but
+structurally consumable producer assertion remains a producer violation and
+need not be detected by the consumer. Diagnostic wording and rejection order
+are not prescribed. Resource exhaustion remains governed by
+[resource accounting](resource-accounting.md) for supported operations,
+separately from artifact validity and semantic support. Capacity declarations
+cannot replace complete retained requirements or expand an optional audit's
+claimed scope.
 
 Admission discovers declared requirements through supported records, not by
 running a dependency's initialization, parser, equality, getter or cleanup
@@ -184,22 +195,22 @@ feature.
 
 | Retained surface | Required published/operational content | Current physical boundary |
 |---|---|---|
-| [Scalar and unit values](../language/primitive-operators.md) | Exact type/result/parameter identity, values, rounding/failure and operation domains | The bounded profile admits nine primitive identities and its stated Body-local optional scalars; all 26 language-floor identities remain mandatory for source conformance, not automatically executable in this codec |
+| [Scalar and unit values](../language/primitive-operators.md) | Exact type/result/parameter identity, values, rounding/failure and operation domains | The current draft registry does not yet encode every accepted type/operation capability; implementation and artifact admission require complete type, operation and prerequisite closure, not a fixed scalar execution profile |
 | [Absolute-value members](../language/absolute-value.md) | Exact owning scalar/member, same-type value formal/result, target width, checked magnitude domain, failure/result state, actual effects and required helper/program dependencies | Primitive codes and equal ABI do not register a member, variant, constant program or overflow payload; complete member/call/failure support remains gated without new intrinsic or opcode allocation |
-| [Numeric selection members](../language/numeric-selection.md) | Exact Min/Max/Clamp owner/formals/results, NaN/zero/cohort observations, target width, explicit ordered-bound predicate/Core construction, source precondition state/phase and full actual dependencies | [Selection records](logical-records.md#numeric-selection-and-bounds-failures-encoding-pending) remain unassigned; machine compare/selects and equal payload ABI do not register a member or admit its precondition/event program |
+| [Numeric selection members](../language/numeric-selection.md) | Exact Min/Max/Clamp owner/formals/results, NaN/zero/cohort observations, target width, explicit ordered-bound predicate/Core exception class and factory, source precondition state/phase and full actual dependencies | [Selection records](logical-records.md#numeric-selection-and-bounds-failures-encoding-pending) remain unassigned; machine compare/selects and equal exception-class ABI do not register a member or admit its precondition/event program |
 | [Floating environment and representation](../language/floating-environment.md) | Sign-only Abs/negation, quiet processing-result NaNs, deterministic admitted constant recipe, no ambient status facility and independent target control duties | Bounded floating families do not supply missing formats/member/constant programs; no new ambient-state codec or opcode follows |
-| [Grouped numeric capabilities](../language/numeric-capabilities.md) | Exact Core self/formal/member identities, Copy constraints, grouped selection, inherited requirements and complete primitive witness matrix | [Witness records](logical-records.md#floating-representation-and-numeric-witnesses-encoding-pending) remain incomplete; primitive codes/member names do not encode generic dispatch or constant authorization |
-| [References and outputs](../language/references.md) | Complete access/pin/representation, input versus initialization mode, actual output states, loans and failure publication | Param modes `00/01` and TypeSpec shapes are assigned; execution of general references, initialization destinations and correlated outputs remains gated |
+| [Grouped numeric capabilities](../language/numeric-capabilities.md) | Exact Core self/formal/member identities, default Copy-capable domains, grouped selection, inherited requirements and complete primitive witness matrix | [Witness records](logical-records.md#floating-representation-and-numeric-witnesses-encoding-pending) remain incomplete; primitive codes/member names do not encode generic dispatch or constant authorization |
+| [References and outputs](../language/references.md) | Complete access/backing/root/pin/representation, input versus initialization mode, actual output states, loans and failure publication | Ordinary Param mode `00` and the distinct `ref<init T>` TypeSpec are assigned logically; GC TypeSpec identity, predicate/dependency registrations and other physical carriers remain gates, not category-wide exclusions |
 | [File access and friends](logical-records.md#source-unit-access-and-definition-identity-encoding-pending) | Semantic source-unit principals, definition identities and exact access grants preserved through relocation | SourceFile debug paths and existing visibility bits are not these records |
 | [Nominal witnesses](../language/interface-witnesses.md) | Complete interface/self/member/associated identities, substitutions, constraints and checked adaptations | Existing TypeDef/Constraint shapes do not encode complete witness/projection dispatch |
 | [Generics and constants](../language/constant-generics.md) | Formal/domain/default identities, canonical nominal/carrier values, validity and target value-codec commitments | Inspectable generic rows and scalar bits alone do not admit generic export, constant arguments or wrappers |
 | [Static initialization](logical-records.md#static-initialization-and-load-scope-encoding-pending) | Loaded closed-type groups, initializer order, phase authority, trigger/failure/recovery and cleanup/load dependencies | Instance FieldDef/MethodDef shapes, packed row order and reserved flags are not static records |
-| [Local exception eligibility](../language/local-failures.md) | Resolved primary Exception/category facts, exact complete subjects/witnesses, borrowed/Copy/discard inputs, active event ownership/provenance and input retirement | Attribute/category/payload/handler/operation-state codecs remain unassigned; a marker name or raw runtimePolicy cannot supply them |
-| [Core scalar failures](../language/scalar-failures.md) | Exact zero-data payload/constructor identities, numeric/count domain, original operation site, no-result state, policy/effects/phase and complete event/transport dependencies | [Scalar catalog records](logical-records.md#scalar-failure-catalog-encoding-pending) remain unassigned; scalar opcodes, equal zero bits and raw runtimePolicy do not admit payload/handler execution |
-| [Standard runtime categories](../runtime/standard-failures.md) | Fixed postcondition/index/recoverable-allocation/cycle/failed-unit payloads, original versus fresh events, actual output/cleanup state and runtime/load dependencies | [Category records](logical-records.md#standard-runtime-categories-encoding-pending) remain incomplete; a failed-state bit cannot share the original event or prove recoverable OOM transport |
-| [Runtime requirement failures](../language/requirement-failures.md) | Explicit/default complete E, primary RequireException/Core identities, source owner/phase, ordinary zero-input constructor binding/defaults/effects, actual failure and output/cleanup states | Full default/constructor/operation/value/phase codecs remain unassigned; source names, scalar defaults and runtimePolicy cannot activate them |
+| [Local exception eligibility](../language/local-failures.md) | Exact self-typed exception-class and common-view witnesses, complete catch subjects, object-handle bindings, active event ownership/provenance and input retirement | Class/factory/handler/operation-state codecs remain unassigned; a source name or raw runtimePolicy cannot supply them |
+| [Core scalar failures](../language/scalar-failures.md) | Exact exception-class/factory identities, numeric/count domain, original operation site, no-result state, policy/effects/phase and complete event/transport dependencies | [Scalar catalog records](logical-records.md#scalar-failure-catalog-encoding-pending) remain unassigned; scalar opcodes, class identity alone and raw runtimePolicy do not admit exception creation/handler execution |
+| [Standard runtime categories](../runtime/standard-failures.md) | Fixed postcondition/index/recoverable-allocation/cycle/failed-unit exception classes, original versus fresh events, actual output/cleanup state and runtime/load dependencies | [Category records](logical-records.md#standard-runtime-categories-encoding-pending) remain incomplete; a failed-state bit cannot share the original event or prove recoverable OOM transport |
+| [Runtime requirement failures](../language/requirement-failures.md) | Explicit/default complete E, primary RequireException/Core identities, source owner/phase, exact ordinary zero-supplied constructor binding/effects, actual failure and output/cleanup states | Full default/constructor/operation/value/phase codecs remain unassigned; source names, scalar defaults and runtimePolicy cannot activate them |
 | [Captured exception ownership](../language/captured-exceptions.md) | Exact Core owner/member, lexical handler source and transfer state, preserved event/payload/causes, input extents, creation/throw/retirement programs, phase/effects and complete dependencies | Registration/context/owner/handler/cause/phase codecs remain unassigned; a Capture name, opaque words or reserved failure band cannot supply them |
-| [Checked failure and patterns](logical-records.md#pattern-evidence-and-handler-selection-encoding-pending) | Typed failure/captured-type evidence, source-order post-unwind selection, live filters, causal replacement, roots and cleanup | Fail-fast scalar execution is assigned; checked-exception transport/handler bodies are not supplied by `runtimePolicy=1` alone |
+| [Checked failure and patterns](logical-records.md#pattern-evidence-and-handler-selection-encoding-pending) | Typed failure/captured-type evidence, source-order post-unwind selection, live filters, causal replacement, roots and cleanup | The lexical exception-region and handler contracts are approved; exact runtime/registry carriers and complete prerequisite closure remain gates, not a fail-fast-only execution floor |
 | [Effects and predicates](../language/published-predicates-and-effects.md) | Exact form/domain, finite reads/effects, selected predicates, NoAlias extents, initialization results and rule dependencies | Bounded Effects is not a codec for Pure/ConstEval, predicate programs, NoAlias or completion effects |
 | [Literal construction](../language/literal-construction.md) | Target-owned kind/signature/input recipes, required parser/program/intrinsic and valid frozen value | Existing Attr or ConstBits data does not encode registrations, all target values or interpreter eligibility |
 | [Eager construction](../language/construction-handlers.md) | Builder recipes, nominal acquisition/drain/completion, typed capture graphs, TextTarget and exact spread/formatter obligations | No handler/graph/capture codec follows from a builder TypeSpec or annotation |

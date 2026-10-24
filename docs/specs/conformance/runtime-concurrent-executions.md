@@ -185,7 +185,7 @@ D reads y then x. The opposite outcome is C = (1, 0), D = (1, 0).
 | CADM-02 | A primitive order is unknown, invalid or not compile-time known | Reject, not a relaxed/no-op fallback |
 | CADM-03 | Actual authority or compatible access extent is absent | Observation consistency does not repair it |
 | CADM-04 | Logical concurrent-executions/1 is selected | No physical opcode, feature number, certificate or Attr allocation follows |
-| CADM-05 | An arbitrary source/native synchronization algorithm is supplied | It still needs checked evidence or existing explicit unsafe/producer trust |
+| CADM-05 | An arbitrary source/native synchronization algorithm is supplied | Verify represented contract facts before use; producer responsibility and unsafe implementation obligations remain explicit, and verification does not prove arbitrary algorithm behavior |
 | CADM-06 | A target maps source operations to ISA/helpers | Prove refinement for exact width, order, failure, roots and progress; stronger outcomes may form a subset |
 | CADM-07 | Optimization removes a result or changes access shape | Preserve every observable access/order/failure/lifetime effect |
 | CADM-08 | A finite permitted-observation assessment succeeds | No freshness, fairness, wait-freedom or complete execution proof |

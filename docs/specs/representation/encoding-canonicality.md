@@ -3,18 +3,19 @@
 ## 1. Ordinary reading, writing and auditing
 
 Ordinary readers accept structurally valid, semantically equivalent
-noncanonical encodings. In particular, a used operand class or Body-local
-field class may use a wider assigned width, and a Body type map may have a
-different consistently referenced order or distinct unused entries.
-These differences do not change the selected types, values, operations,
-effects or declaration identities.
+noncanonical encodings. For the register codec, this includes a longer
+assigned instruction form for the same operation, and TypeMap, MethodMap or
+ConstantMap entries with a different consistently referenced order,
+duplicates or distinct unused entries. These differences do not change
+selected types, values, operations, effects or declaration identities.
 
-Writers still emit the canonical widths and type-map order specified below.
+Writers emit the canonical instruction form and map order specified below.
 An explicit canonicality audit rejects departures within its stated scope.
 Ordinary acceptance is not a claim that the writer conformed, that the bytes
-are canonical, or that the whole artifact was examined. The
-[reader-trust contract](reader-trust.md) still permits selective access
-without a preliminary instruction-stream or global type-map scan.
+are canonical, or that the whole artifact was examined. The mandatory
+[consumer-verification contract](reader-trust.md) still applies; canonicality
+does not require an additional global scan beyond structural safe-consumption
+checks and support admission. Semantic re-proof remains optional.
 
 Other assigned writer requirements remain owned by their forms, including
 [omission of zero-mask Effects](contract-clauses.md#3-effects).
@@ -22,159 +23,159 @@ This chapter does not select one String encoding, require global
 deduplication or define a unique canonical artifact byte image.
 
 Noncanonical is not another name for malformed or unsupported. Reserved
-bits, unassigned codes, invalid references, duplicate map entries, missing
-required types, contradictory indexes, invalid declared-type values and
-unsupported affected semantics retain their existing rejection rules.
-Ordinary readers reject invalidity exposed by their accesses. No alternative
+bits, unassigned codes, invalid references, missing required types,
+contradictory indexes and invalid declared-type values
+violate the producer's valid-artifact obligations. Mandatory consumer
+verification rejects these invalid forms before affected use; this chapter
+does not prescribe diagnostic wording or internal check order. No alternative
 encoding relaxes binding, effects, ownership, unsafe authorization or the
-selected execution profile.
+selected execution profile for a valid artifact.
 
-## 2. Instruction widths
+## 2. Instruction forms
 
-For each instruction independently, a writer chooses the smallest assigned
-width that represents every actually encoded operand in that class:
+`instructionEncoding=01` selects the codec whose first byte fixes the whole
+instruction length: `00..0F` is one byte, `10..BF` is two bytes, and
+`C0..FF` is four bytes. There are no width classes, prefixes, variable-length
+integers, or alternate widths within an instruction.
 
-| Class | Canonical width |
-|---|---|
-| Body-local references | Smallest of 1, 2 or 4 bytes holding all unsigned local IDs in that instruction |
-| Counts | Smallest of 1, 2 or 4 bytes holding all encoded argument, case or exit-list counts |
-| Unsigned data | Smallest of 1, 2, 4 or 8 bytes holding every encoded bit pattern |
-| Signed data | Smallest of 1, 2, 4 or 8 bytes holding every encoded mathematical value in two's complement |
+For a logical operation with more than one assigned encoding, a canonical
+writer selects the shortest assigned form that preserves the same operation,
+typed operands and effects. A one-byte tuple is canonical only when its
+implied operands exactly match; short forms require their assigned register,
+map or record limits; otherwise use the appropriate long family. Equal-size
+equivalent forms use the lower primary value. This choice does not rewrite an
+operation tree, reassociate arithmetic, remove effects or substitute one
+sequence of operations for another.
 
-The common envelope is required when all class codes are zero. Otherwise
-the writer uses `F0 layout opcode`, with each class's canonical code. A wider
-assigned code for a **used** class is noncanonical but ordinarily accepted.
-Decoding zero-extends unsigned data and sign-extends signed data before
-checking the selected operation's declared-type rules.
+An ordinary reader accepts any assigned form whose complete operands and
+semantics are valid, including a longer form where a shorter equivalent is
+available. An explicit instruction-canonicality audit rejects that longer
+form. Unassigned primary values, invalid family controls, nonzero reserved
+fields and out-of-range indexes are malformed, not noncanonical.
 
-An unused class must still have code zero. A list count is an encoded count
-even when its value is zero; its class is used. An empty Switch case list
-does not encode any case data and therefore does not use the data class.
-Reserved layout bits, reference/count code 3 and `F0` followed by layout
-zero remain invalid encodings, not permissive width variants.
+Tiny and short Home stores, short reference stores and short place stores are
+eligible only for the assigned `sourceUse=1` CopyRead contract and a
+Copy-eligible source. Their destination must independently satisfy the
+selected state and write/initialization authority. A full Home store uses
+`D6` for its explicitly assigned CopyRead, Transfer or BorrowRead source-use
+mode when the operation's complete dependencies are derivable from the
+selected Home and current source facts. Other source-use modes, additional
+per-store formal/dependency contracts and non-Home destinations require the
+explicit SemanticStore record form; a writer must not encode them as compact
+CopyRead stores.
 
-Fixed metadata words, enums and other fixed-width fields never participate
-in these classes. A packed Call's local `m=0` uses a reference operand, but
-its following typed MethodDef row remains four bytes; row 256 or 65,536
-does not widen that zero local operand. The same distinction applies to
-FieldDef rows and Body type-map words.
+## 3. Body maps and implementation forms
 
-For example, these operation fragments both define int32 `r1` as 42 when
-local `t1` selects int32:
+Body-local indexes are always zero-based `u16`; every value, including
+`0xFFFF`, is valid. A corresponding count may range through 65,536. There is
+no narrower or wider assigned index form; an out-of-range reference or
+inventory is invalid, not a canonicality difference. Code offsets, byte
+lengths and instruction ordinals remain independent `u32` domains.
 
-```text
-02 01 01 2A
-F0 10 02 01 01 2A 00
-```
+TypeMap, MethodMap and ConstantMap entries are fixed-width records. Canonical
+writers order entries by first logical use, reuse identical tokens/values
+and omit unused entries. Ordinary readers accept consistently reordered
+maps, duplicate entries and distinct valid unused entries; a selected lookup
+need not scan the complete maps. HomeMap entries are distinct storage
+identities and are not deduplicated. HomeMap order is not canonicalized by
+this schema; a transformation that changes it remaps every Home reference
+and preserves each storage identity/state. A whole-Body audit does not claim
+a unique HomeMap ordering.
 
-The first is canonical. The second uses two-byte signed data and is accepted
-by an ordinary reader but rejected by a canonicality audit. Neither changes
-the result's int32 representation.
+Typed records follow first logical use in a canonical Body. Canonical writers
+omit unused records; ordinary readers accept reordered or duplicate records
+when all record/instruction references preserve meaning.
 
-## 3. Body-local widths and representation choice
+A canonical writer selects the eligible compact Body descriptor or
+instruction stream with the smallest complete serialized row. If equivalent
+eligible forms have the same size, the lower `implementationKind` byte wins.
+Ordinary readers accept any valid implementation form, whether or not a
+smaller equivalent descriptor or stream exists. Required support and
+semantic obligations do not change with the chosen form.
 
-Canonical Body-local width is the smallest assigned width that represents
-the selected form's complete local inventory. Include its encoded counts,
-IDs, list counts, ordinals and structural fields, together with the
-signature/operation-derived value inventory that a compact-linear Body must
-represent. Derivation cannot evade a local-ID limit merely because that
-form omits the corresponding stored count or descriptor.
+## 4. Body dependency maps and TypeSpecRef values
 
-General-form TypeSpec references, definition offsets and block/terminator
-offset arrays remain fixed `u32`; their numeric magnitude does not widen
-the general form's local field class. Compact-indexed offsets do belong to
-its local class, including the final block-data length. Widening that class
-widens all its local fields, not just its offsets.
+Each Body has an upfront TypeMap and MethodMap. Entries are fixed four-byte
+tokens, not instruction-width references. TypeMap entries resolve complete
+types in the Body's selected module context; MethodMap entries resolve a
+MethodDef or the exact imported expectation. Body-local indexes are fixed
+zero-based `u16` values, not artifact row numbers or variable-width fields.
+Required HomeMap, BlockEntryState, descriptor and operation types must be
+present and agree exactly under the selected formation rules.
 
-For compact-indexed width selection, recompute block-header/list lengths and
-relative offsets at each candidate local width. Choose the smallest candidate
-whose re-encoded local fields and offsets fit. The larger headers/lists of a
-wider representation do not justify that width when a narrower re-encoding
-fits. Instruction bytes are held fixed for this Body-local comparison;
-their class minima are checked independently by the full canonicality audit.
+Canonical writers order TypeMap entries by first logical use in HomeMap,
+BlockEntryState records, instructions and their referenced typed records.
+A pseudo token's base TypeMap dependency precedes the pseudo entry; ties
+preserve first-use order. MethodMap and ConstantMap entries follow first
+logical use from instructions and referenced records. Writers reuse one
+entry for the same resolved complete type, exact method token or exact
+typed constant; unused entries are omitted. Different Import tokens remain
+distinct when their expected contracts differ.
 
-An all-ones definition offset marking a block parameter is a sentinel, not
-a numeric offset whose bit pattern forces the widest layout. A writer
-regenerates the sentinel at the selected form's offset width. Real offsets
-must remain in their block and cannot be mistaken for that marker.
+Canonical token spelling follows the assigned identity forms: use `0xF2`
+for an assigned well-known type, `0xF3` for an eligible built-in family over
+an atomic argument, TypeDef and Import tokens for their exact unqualified
+nominal identities, and `0xF0`/`0xF1` when their pseudo schema exactly
+represents a constructed or qualified type. Use a TypeSpec token when no
+direct, inline or pseudo token represents the complete type. A TypeSpec
+token for an identity with an assigned direct/inline/pseudo form and a
+pseudo token with no constructor or modifier are valid ordinary inputs but
+noncanonical.
+For pseudo tokens, `0xF0` is canonical when either constructor is absent;
+`0xF1` is canonical only for the `generic<wrapper<T>>` order when both are
+present. The writer still lists each base dependency once and remaps every
+pseudo base index.
 
-An ordinary reader accepts an assigned wider Body-local width while
-retaining the form's exact field sequence, presence rules, bounds and
-signature-derived inventory checks. A too-narrow layout, reserved bits,
-unassigned form/width code or truncated field remains invalid.
+For non-Body complete-type fields, a canonical writer minimizes the complete
+artifact size while considering TypeSpec rows still required by nested or
+other references. If an eligible `0xF2`/`0xF3` reference and a row reference
+have equal total size, the writer uses the inline token. A TypeSpec row may
+remain when another field requires it; this does not make a row spelling
+canonical in an equal-size complete-type field. Ordinary readers accept both
+forms, and an audit reports noncanonical spelling only with the complete
+logical row/use inventory.
 
-Canonicality does not choose a universal representation for a logical Body.
-A valid general form is still accepted for a compact-eligible Body;
-compact-linear and compact-indexed retain their own eligibility rules.
-A writer's widths are minimal **within its chosen form**. No preference
-among those forms, new boundary-only encoding or offset-width class is
-introduced.
-
-## 4. Type maps
-
-Every map entry remains a distinct nonzero typed TypeSpec reference valid
-in the Body's selected module context. Local type IDs select that map,
-not artifact rows. Required signature, descriptor and operation types
-must be present and agree exactly under the existing formation rules.
-
-Writers order map entries by first logical use across place descriptors in
-place-ID order, then value descriptors in value-ID order, matching the general
-form's inventory sequence. Explicit type operands in instruction streams
-follow in block/instruction order. An omitted-storage form
-uses its reconstructed logical descriptors for this ordering, not the
-physical order in which its bytes happen to be decoded. Any signature-only
-types that the form requires follow those descriptors, with parameter types
-in declaration order and then the result type, before stream-only type uses.
-Writers omit entries not needed by these logical uses.
-
-Ordinary readers accept a different order only with all descriptors,
-explicit type operands and other local type selections consistently mapped.
-They also accept distinct, otherwise valid unused entries. This is not
-permission to omit required types, duplicate entries, change a complete
+Ordinary readers accept different orderings when all logical references are
+consistently remapped, as well as valid unused entries and duplicates
+resolving to the same type. They do not need to scan maps for duplicate
+identities. This is not permission to omit required types, change a complete
 nominal identity, ignore an accessed invalid TypeSpec or hide undeclared
 required semantics. Complete declared retained requirements remain governed
 by [admission](requirements-and-admission.md).
 
-Map-order and unused-entry canonicality needs the relevant complete logical
-use inventory. A trusted selected lookup need not construct it. A full
-canonicality audit does; a partial audit reports its narrower scope instead
-of certifying the whole map.
+Map-order, duplicate-entry and unused-entry canonicality needs the relevant
+complete logical use inventory. A selected lookup need not construct it. A
+full canonicality audit does; a partial audit reports its narrower scope
+instead of certifying the whole map.
 
 ## 5. Constant values and exact bits
 
-Width canonicality is separate from whether the selected type admits the
-decoded value:
+Instructions load typed ConstantMap entries; they do not carry variable-width
+literal bits. Constant identity is the complete type plus exact admitted
+value/representation, not numerical equality alone. Canonical writers reuse
+identical typed constants and omit unused entries. Ordinary readers accept
+duplicate entries and preserve their exact references.
 
-| Operation/type | Required interpretation |
-|---|---|
-| Integer `ConstBits` | Unsigned encoded pattern must fit the declared integer's bit width; then interpret that pattern with its declared signedness |
-| `ConstSigned` | Sign-extended mathematical value must fit the selected signed or unsigned destination's value domain |
-| Boolean `ConstBits` | Only decoded patterns 0 and 1 |
-| char16 `ConstBits` | Any code unit in `0..65535`, including surrogates; not a Unicode-scalar conversion |
-| void `ConstBits` | Only decoded zero, defining the singleton unit value |
-| binary32/binary64 `ConstBits` | Exact declared-width IEEE representation; nonzero bits beyond that width reject |
-
-Thus int32 `ConstBits` with pattern `FFFFFFFF` may use eight data bytes with
-four additional zero bytes during ordinary reading; it still means -1.
-Sign-extended `ConstSigned(-1)` may likewise use a wider signed field.
-Neither admits uint32 `ConstSigned(-1)` or an int32 mathematical value
-outside its range. A wider field does not create a wider scalar type.
-
-Boolean and unit zero may use wider zero fields, but other invalid patterns
-do not become legal. Widening floating data preserves signed zero and every
-NaN sign, signaling/quiet bit and payload bit. It does not execute arithmetic,
-quiet a NaN, normalize its payload or depend on host floating-point state.
-Unadmitted formats remain unsupported even if their storage size matches.
+Boolean constants admit only the two valid Boolean values; unit admits only
+its singleton value; `char16` admits every code unit including surrogates.
+Floating and decimal constants preserve every declared-format bit, including
+signed zero, NaN sign/state/payload and decimal cohort. Loading a constant
+does not run arithmetic, quiet a NaN, normalize a payload or depend on host
+floating-point state. Unadmitted constant formats remain unsupported even if
+their storage size matches an admitted type.
 
 ## 6. Re-encoding and evidence
 
-Shrinking or widening an instruction changes its byte extent. A rewriter
-repairs every affected definition, block, terminator and containing-row
-offset while retaining logical operation ordinals and references.
-Changing Body-local width also repairs its structural fields and sentinels.
-Changing map order remaps every local type selection in its actual context.
-Opaque bytes are not fixup lists; optional slotted data is preserved only
-under its [existing remap/drop contract](reader-trust.md#6-validation-claims-transformations-and-reuse).
+Changing an instruction form can change its byte extent. A rewriter
+reconstructs typed operations, records and control flow, then repairs every
+affected Block code offset/length, record offset, instruction ordinal and
+containing-row offset. Changing a Body map order remaps every affected
+zero-based reference in its actual context. Changing a token requires
+resolving and rebuilding the token and its row/Import context; byte
+substitution is not a valid remap. Optional SourceMap step-role slots are
+preserved only when the rewritten instruction has the same meaning and
+semantic step; otherwise the section is regenerated or dropped under the producer's
+[transformation obligations](reader-trust.md#5-transformations-verification-reuse-and-audit-claims).
 
 These operations preserve selected identities, values and exact bits, not
 merely storage size or a same-shaped signature. No effect may be dropped
@@ -182,13 +183,13 @@ because its result is unused, and no private-body optimization or nominal
 substitution is justified by canonicalization.
 
 An audit states whether it checked selected instructions, a Body's complete
-width/map rules or every applicable object in a declared artifact scope.
+instruction-form/map rules or every applicable object in a declared artifact scope.
 Unvisited payloads are not certified. Unsupported required interpretation
 or incomplete/exhausted work declines the requested claim; a trust decision
 does not supply missing canonicality evidence.
 
 The rules define `encoding-canonicality/1` under the exact
-`trrm/1-draft-unified-3` schema and out-of-band governing-chapter agreement.
+`trrm/1-draft-register-il-1` schema and out-of-band governing-chapter agreement.
 They change ordinary admission policy, not byte layouts, allocation,
 feature identity or executable membership. Numerical structural/semantic
 resource minima remain unassigned under the separate

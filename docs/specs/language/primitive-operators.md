@@ -8,7 +8,7 @@ supplies evaluation and access timing. These are language contracts, not a
 particular compiler's operation inventory.
 
 The [Core scalar failure catalog](scalar-failures.md) fixes exact checked
-payloads without changing these value domains: OverflowException for
+exception classes without changing these value domains: OverflowException for
 unrepresentable checked numeric results, DivideByZeroException for integer
 zero divisors and ArgumentOutOfRangeException for invalid source shift counts.
 Floating IEEE results, fail-fast and unsupported physical support remain
@@ -77,6 +77,10 @@ contracts. A same-spelled operator need not return its operand type or
 use these count contexts. Primitive operations cannot be redefined by
 ordinary packages or inferred from a Core member's name.
 
+The [semantic IL display map](../il-instruction-set.md#operation-identity-encoding-and-presentation)
+names the selected typed operation after binding; it does not change source
+operator selection, checked defaults, or a nominal call's witness contract.
+
 ## Operand contexts and evaluation
 
 Typed data evidence establishes the primitive `T`. Other typed data
@@ -115,11 +119,38 @@ are not permitted.
 
 ## Integer arithmetic and bit operations
 
-Default integer addition, subtraction, multiplication, negation and updates
-compute the mathematical result and fail if it is outside that same `T`'s
-range. Failure publishes no result. Signed negation therefore fails at the
-minimum. Unsigned negation is checked `0 - x`: zero produces zero, and
-every nonzero operand fails. It neither promotes to a signed type nor wraps.
+The standard source arithmetic profile selects the default policy for
+integer addition, subtraction, multiplication, negation and their compound/
+increment/decrement forms:
+
+| Source profile | Default integer arithmetic |
+|---|---|
+| Development or Debug | Checked; fail with `Terrum.OverflowException` when the mathematical result is outside the same `T` range |
+| Release | Wrapping modulo `2^width`, then interpreted in the same `T` |
+| Explicit checked or wrapping operation | Its declared policy in either profile |
+
+The profile is selected before body checking and required constant
+evaluation. Development/Debug checked failure publishes no result. Release
+wrapping is defined modular arithmetic, not undefined behavior or permission
+to assume overflow cannot occur. Signed negation at the minimum therefore
+fails in Development/Debug and wraps to the same minimum in Release. Unsigned
+negation follows the same profile policy for `0 - x`: zero remains zero;
+nonzero values fail in Development/Debug and wrap in Release. Neither profile
+promotes the operand.
+
+Division and remainder retain their independent rules in both profiles:
+division by zero fails, signed minimum divided by `-1` fails, and signed
+minimum remainder `-1` is zero. Shift-count validation, checked and
+saturating conversions, floating behavior, and explicit Core APIs are not
+changed by the arithmetic profile.
+
+The source compiler resolves the selected profile into explicit checked or
+wrapping Body operations. A JIT/AOT consumer executes those encoded semantics
+and does not reinterpret them using its own build configuration. Effect,
+NoThrow, constant-evaluation and optimization checks use the same selected
+policy; a Release build cannot erase a checked failure from an imported
+operation, and a Development build cannot turn a wrapping operation into a
+checked one.
 
 The separately adopted [Abs member](absolute-value.md) uses that same
 signed-minimum boundary: a same-type nonnegative magnitude or checked
@@ -186,17 +217,18 @@ to left shift. Shifted-out bits do not cause arithmetic overflow:
 
 ### Source counts and the scalar IL bridge
 
-The currently assigned [scalar Body shifts](../il-instruction-set.md#operation-encoding-and-normalized-effects)
-take `uint32` counts for their supported 32/64-bit integer data. They
-do not impose a `uint32` source parameter. Validate the source count
-domain first; every valid count in that profile then fits `uint32` and
-can be represented exactly. Its conversion must not introduce a different
-failure or erase a source count failure.
+The accepted [scalar Body shifts](../il-instruction-set.md#assigned-short-forms)
+take `uint32` counts for all twelve integer data identities. They do not
+impose a `uint32` source parameter. Validate the source count domain first;
+every valid count is below the data width (at most 128) and therefore fits
+`uint32` exactly. Its conversion must not introduce a different failure or
+erase a source count failure.
 
-A 32/64-bit [private native profile](../../implementation/native.md) using `int32` control
-operands needs the same source-domain check followed by exact successful-path
-representation. Its narrower current source coverage does not restrict the
-language count domain or establish that the complete bridge is implemented.
+A [private native profile](../../implementation/native.md) using `int32`
+control operands needs the same source-domain check followed by exact
+successful-path representation. Its narrower current source coverage does
+not restrict the accepted IL contract or establish that the complete bridge
+is implemented.
 
 Wrapping a `uint64` count such as `0x1_0000_0001` into `uint32` before
 checking would turn an invalid count into 1 and is not a valid lowering.
@@ -204,14 +236,13 @@ Checking a negative count through a throwing numeric conversion first
 would likewise change the failure category. Operands and checks keep
 their source order.
 
-The signed `>>>` operation can use an admitted same-width bit-preserving
-unsigned view, zero-filling shift, and bit-preserving result view, if the
-selected physical profile supports all of them. Checked unsigned negation
-can use typed-zero checked subtraction; the signed-only `CheckedNegate`
-opcode does not acquire unsigned semantics.
-Other widths/formats need supported representations and execution paths.
-Recognition of an atomic type code is not that support. No opcode/kind,
-escape, feature ID, or generic numeric witness is allocated by this chapter.
+The signed `>>>` operation can use a same-width bit-preserving unsigned view,
+zero-filling shift, and bit-preserving result view. Unsigned unary negation
+uses same-type `0 - x` under the selected arithmetic profile: checked in
+Development/Debug and wrapping in Release. The assigned IL has distinct
+checked and wrapping negate controls across all twelve integer identities;
+it does not impose a signed-only opcode restriction. Compiler execution
+support remains a separate implementation obligation.
 
 ## Floating arithmetic and comparisons
 

@@ -1,5 +1,5 @@
 {
-  "schema": "trrm/1-draft-unified-3",
+  "schema": "trrm/1-draft-register-il-1",
   "format_pair": [1, 0],
   "rule": "trrm-semantic-manifest/1",
   "scope": "Actual fixed manifest/framing bytes and explicitly schematic prerequisite/support facts; no extra capability or edition is registered.",

@@ -4,6 +4,8 @@ Target profiles own physical storage, procedure calls, foreign admission and
 deployment support. They refine the [core layout contracts](../data-layout-and-abi.md)
 without changing source identity, ownership or the
 [abstract memory model](../memory-model.md).
+The [semantic operation display map](../il-instruction-set.md#operation-identity-encoding-and-presentation)
+does not prescribe machine instructions, ABI carriers or target support.
 
 | Profile | Scope |
 |---|---|

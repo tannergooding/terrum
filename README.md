@@ -8,17 +8,17 @@ The compiler exposes a Unicode-aware, lossless syntax API and a bounded
 Windows x64 profile with direct PE emission and a JIT worker. The implemented
 subset includes checked scalar operations, compact values and unique owners,
 conditional outputs, bounded generics, managed roots/classes, and deterministic
-cleanup. General stored loans, managed layouts, general exception objects and
-the standard library are not implemented. See the
+cleanup. General stored references/views, managed layouts, general exception
+objects and the standard library are not implemented. See the
 [implementation reference](docs/implementation.md) for supported features and
 limits.
 
 The development [TRRM scalar path](docs/implementation.md#executable-trrm-scalar-interchange)
 emits metadata and compact-linear/indexed Bodies for a bounded
 source-free, fail-fast scalar subset. It uses the shared verifier and backend;
-general imported-call linking and checked-exception Body support are not
-implemented. Its development encoding is not verified conformance to the
-current unified registry.
+standard native-call linking and exception-region Body support remain
+incomplete. Its development encoding does not establish conformance to the
+[selected native-boundaries schema](docs/specs/representation/trrm-1.registry.json).
 
 The bounded [Terrum-authored scalar source frontend](docs/implementation/terrum-code-analysis.md)
 projects one snapshot of uniquely named global functions with direct scalar
@@ -28,9 +28,14 @@ the hosted verifier/emitter. This is separate
 from source-free TRRM support and is not a bootstrap compiler.
 
 The [grammar](docs/specs/grammar-spec.md) and design documents specify target
-contracts independently of compiler support. Places default to readonly,
-`mut` qualifies writable places/receivers, and `write` grants writable
-reference/view access. The implementation retains legacy `bool`/`out` beside
+contracts independently of compiler support, with
+[values, copying, aliases and lifetimes](docs/specs/language.md#definitions-and-notation)
+as the explanatory starting point. Copying an eligible reference descriptor
+aliases its referent; it does not duplicate ownership or universally extend
+the referent's lifetime.
+Places default to readonly; `mut` qualifies writable places/receivers, and
+`write` grants writable reference/view access. The implementation retains
+legacy `bool`/`out` beside
 distinct vacancy-only `bool`/`init ref<T>` outputs; `out T` is not canonical
 target syntax. The design-only scenario samples and library proposals are
 informative, not implemented APIs; the sample catalog distinguishes them from

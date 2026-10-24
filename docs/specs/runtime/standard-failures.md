@@ -1,7 +1,8 @@
 # Standard runtime failure categories
 
 This chapter owns `core-runtime-failures/1` and
-`failed-initialization-access/1`. It selects the following Core payloads
+`failed-initialization-access/1`. It selects the following Core exception
+classes
 and mappings without changing [local event ownership](../language/local-failures.md),
 [captured propagation](../language/captured-exceptions.md),
 [call phases](../language-contracts.md#3-contracts-bracket-semantic-body-completion)
@@ -14,7 +15,8 @@ The [scalar catalog](../language/scalar-failures.md), ordinary
 [invalid bounds](../language/numeric-selection.md#4-reusable-invalidboundsexception)
 retain their separate mappings.
 
-## 1. Exact Core identities and construction
+<a id="1-exact-core-identities-and-construction"></a>
+## 1. Exact Core identities and creation
 
 | Exact public Core identity | Selected failed operation |
 |---|---|
@@ -23,22 +25,36 @@ retain their separate mappings.
 | Terrum.OutOfMemoryException | Allocation exhaustion under an admitted recoverable-publication contract |
 | Terrum.InitializationCycleException | Cyclic demand for completion of an unfinished static group or lazy unit |
 | Terrum.InitializationFailedException | Waiting or later access requires completion of an already failed unit |
+| Terrum.UnreachableException | Execution of an admitted Body `unreachable` instruction or explicit throw of this exact Core value payload |
 
-Each is a nongeneric, zero-data nominal struct with the resolved Exception
-capability, ordinary Copy and one public zero-parameter instance constructor.
-That constructor establishes its complete value without authored checks,
-initialization code or other authored effects. No message, index, length,
-allocator, type-name, original-payload or stack-trace fields are required.
-The identities are distinct; aliases preserve identity but same-spelled
-provider types and equal zero bits do not substitute.
+The first five identities are distinct public nongeneric managed classes
+implementing their exact self-typed
+[`IException<TSelf>` contract](../language/local-failures.md#1-the-common-exception-contract).
+The common contract supplies durable `Message`, static `DefaultMessage`,
+creation paths, authored `InnerException`, runtime-owned `ParentException`
+and `IFormattable`. These standard classes add no category-specific index,
+length, allocator or stack-trace fields. The selected factory contract does
+not require a particular constructor signature or physical class layout.
+Aliases preserve identity; same-spelled provider types do not substitute.
 
-On a selected checked failure, construct the exact payload once and establish
-a fresh responsible propagation event at the failed semantic operation.
-Ordinary provenance, causes and dependencies belong to that event.
-Copy duplicates only the payload; an active or consuming captured rethrow
-preserves its original event. Zero data does not promise failure-free or
-allocation-free event preparation, a physical layout, generic constructor
-evidence, Pure, ConstEval, NoThrow or thread capability.
+`Terrum.UnreachableException` is the narrow value-payload exception selected
+by the instruction design: a public nongeneric zero-data `Copy` struct with
+a public zero-parameter constructor and no authored checks/effects. It is not
+a class or an `IException<TSelf>` implementation. A runtime failure event
+contains that typed payload plus its origin/causal context; those event facts
+are not fields in the struct. Exact `catch (UnreachableException)` binds the
+payload by value, bare catch handles its event, and the common
+`IException<_>` class view does not match it. No general struct-exception or
+payload-copy catch model is implied.
+
+On a selected checked failure, invoke the exact class's common creation path
+once. The resulting exception object is the fresh responsible propagation
+event at the failed semantic operation. Provenance, causes and dependencies
+belong to that object/event. Active or consuming captured propagation preserves
+the same object and event; copying a separately permitted handle does not
+duplicate event identity or responsibility. The common class/factory contract
+does not promise failure-free or allocation-free
+preparation, a particular layout, `Pure`, `ConstEval` or thread capability.
 
 Known missing required support declines before affected use.
 Actual preparation/transport failure follows its own admitted contract,
@@ -97,7 +113,7 @@ stale backing and unadmitted unsafe accesses are not checked index failures.
 
 ## 4. Recoverable allocation exhaustion
 
-OutOfMemoryException is the selected payload only when an allocation
+OutOfMemoryException is the selected exception only when an allocation
 operation's actual profile admits recoverable exhaustion and complete event
 publication. Such support includes the real preparation, transport, roots,
 cleanup and surviving runtime/code resources needed for the failed path.
@@ -114,7 +130,7 @@ failure retains its event/cause rules; no unprepared outer event is invented.
 This is not a promise that every physical OOM is catchable. A terminal or
 unrecoverable host failure remains that profile's explicit outcome.
 An implementation must not claim recoverable-publication support from a
-zero-data payload alone or silently change a selected recoverable operation
+class or common creation path alone or silently change a selected recoverable operation
 to terminal handling. Stack exhaustion, loader/evaluator resource budgets and
 unsupported runtime admission remain separate categories.
 No allocator API, automatic retry, mandatory emergency heap or suppressed
@@ -124,6 +140,11 @@ allocation failure is selected.
 
 Each existing loaded closed-type group and separate lazy field has its own
 initialization state. The default protocol has these logical transitions:
+
+The runtime owns lifecycle coordination and enforcement for these units.
+Artifacts provide typed group/field identities and initializer bodies; the
+runtime may store state in a side table or artifact-provided cells. This does
+not prescribe a physical state layout or operation spelling.
 
 | Unit state and access | Required outcome |
 |---|---|
@@ -147,15 +168,16 @@ including ordinary causal replacement by faulting partial cleanup. It is
 not wrapped in TypeInitializationException or converted merely because it
 crosses an initialization gate.
 The failed unit retains **failed state**, not shared ownership of that event
-or a reusable copy of its payload. Original event responsibility follows the
-invoking flow, including its possible non-Copy payload and captured lifetime.
+or a reusable exception object. Original event responsibility follows the
+invoking flow, including the original exception object/event and any captured
+owner lifetime.
 
-A waiting or later demand constructs a fresh InitializationFailedException
+A waiting or later demand creates a fresh InitializationFailedException
 at its own access. It does not rethrow, copy, borrow or implicitly capture the
 original event, and does not attach that event as an automatically shared
-cause. Its own actual construction and enclosing causal context still apply.
-Different failed accesses have different events even with equal zero-data
-payloads. Their creation does not reevaluate the initializer.
+cause. its own actual factory and enclosing causal context still apply.
+Different failed accesses have different events even when their exception
+messages are equal. Their creation does not reevaluate the initializer.
 
 Failed unpublished units do not automatically retry. A failed lazy field
 after completed group publication fails only that lazy unit. If its failure
@@ -164,16 +186,44 @@ event as well. Different generic/load identities remain independent.
 Publication/waiting supplies only the memory guarantees already required by
 the admitted sharing contract; it grants no later mutation authority.
 
-Existing exclusive unsafe recovery/suppression and quiescent unload rules
-remain unchanged. Recovery needs actual completed partial cleanup and valid
-dependencies; suppression grants no initialized-state facts. No concrete
-recovery API, shared captured-failure family or persistent original-event
-cache is introduced.
+An explicit unsafe request may reset only its exact failed group or lazy
+field, and only with exclusive recovery authority, completed partial-state
+cleanup and dependencies that remain valid. Ordinary access never triggers a
+retry, and the request does not reset sibling units or the module. Catching a
+fresh failure event does not reset the unit. No separate failure-suppression
+or mark-complete operation is selected; a future unsafe transition to
+`Complete` requires a demonstrated need and its own validity, cleanup and
+publication contract. The exact-unit request is one unsafe call to a
+registered runtime-owned member, not a dedicated Body operation; its operand
+is a closed tagged exact-unit reference distinguishing an eager group from a
+lazy field and resolving to the exact loaded-unit identity. Quiescent unload
+rules remain unchanged. The callable identity/signature and physical
+tagged-reference schema, shared captured-failure family and persistent
+original-event cache remain unassigned.
 
-## 6. Phases and independent admission
+## 6. Executed `unreachable`
+
+When a Body `unreachable` instruction executes, it creates a fresh ordinary
+failure event with exact Core payload `Terrum.UnreachableException`. It
+dispatches handlers and performs required cleanup under the ordinary
+exception-unwinding contract; it is not `failfast`, undefined behavior or a
+callable-owned `RequireException` fallback. Its origin is the instruction
+and semantic step location; optional SourceMap data supplies source
+coordinates without defining the event identity.
+
+The payload is a zero-data Copy struct with a total zero-parameter constructor.
+Creating the payload does not allocate or run authored failure-prone
+construction. Event preparation/transport still follows its admitted runtime
+contract. If that preparation actually fails, propagate that real failure;
+do not fabricate an `UnreachableException` event. Copying the payload value
+does not duplicate event identity. CapturedException transfers the complete
+event, and explicitly throwing the payload creates a new event at that throw
+site.
+
+## 7. Phases and independent admission
 
 All mappings retain the failed source site, complete predicate/index/
-allocation/unit domain, constructor identity, state, policy, effects,
+allocation/unit domain, factory identity, state, policy, effects,
 cleanup/cause responsibility and execution dependencies.
 Before async establishment the channel is synchronous; established async
 failure uses failed completion even inline. Producer creation and admitted
@@ -181,7 +231,7 @@ advance/close keep their ordinary channels. An outlined helper does not
 become another semantic owner.
 
 Static proof, invalid source, unsupported interchange and required-evaluator
-exhaustion are diagnostics/admission outcomes, not these runtime payloads.
+exhaustion are diagnostics/admission outcomes, not these runtime exceptions.
 Actual admitted constant failure prevents a required result; this catalog
 does not grant constant programs or failure codecs.
 No Feature ID, Attr tag, payload ABI, opcode, exception region or static

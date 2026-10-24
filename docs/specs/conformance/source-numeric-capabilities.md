@@ -24,7 +24,7 @@ actual source binder, dispatch program or physical witness codec.
 | NGCP-16 | A selection-only generic helper adds an undeclared addition | Selection call admits; addition rejects missing additive evidence |
 | NGCP-17 | Implementation uses different local formal names | Generic caller retains requirement labels left/right/value/min/max/count |
 | NGCP-18 | A selection witness changes Clamp's predicate or fixed Core failure | Reject incompatible retained contract |
-| NGCP-19 | Group/composite name is used to infer Pure/ConstEval/NoThrow | No such capability |
+| NGCP-19 | Group/composite name is used to infer Pure/ConstEval | No such capability |
 | NGCP-20 | Primitive witness dispatch changes signed overflow or floating NaN/sign rules | Reject changed primitive operation contract |
 | NGCP-21 | A nominal witness is used to assume associativity, total order or IEEE bits | Requires separate published evidence |
 | NGCP-22 | Count evidence is used as implicit numeric promotion | No data/count type merger or precheck narrowing |

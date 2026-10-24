@@ -11,7 +11,7 @@ Later-completion protocols need their separate supported profile.
 
 | Case | Situation | Required result |
 |---|---|---|
-| LIFT-01 | Boolean callable declares `init ref<int32>` and no additional marker | Eligible in matching/value-producing `require`; Boolean default supplies true-live/false-vacant |
+| LIFT-01 | Boolean callable declares `ref<init int32>` and no additional marker | Eligible in matching/value-producing `require`; Boolean default supplies true-live/false-vacant |
 | LIFT-02 | Callable has no initialization destination, but its name or ordinary reference parameter suggests output | No output eligibility by name, readonly/writable reference access, or arbitrary attribute |
 | LIFT-03 | A unit-result callable declares an eligible initialization destination | Ordinary normal completion must establish its declared output state; result need not be Boolean |
 | LIFT-04 | Destination has a complete qualified generic type supported at the call | Preserve that exact type, ownership, dependencies and formation obligations |
@@ -27,8 +27,8 @@ Later-completion protocols need their separate supported profile.
 | LIFT-14 | A pattern ignores a live owning output with `_` | Do not read it; retain required cleanup and other outstanding obligations |
 | LIFT-15 | An eligible output has type `void` | Preserve logical destination position and live/vacant state despite zero payload bytes |
 | LIFT-16 | Output publication occurs only after task completion or producer advancement | Do not lift at ordinary invocation completion or implicitly join/advance |
-| LIFT-17 | Required output/projection contracts lack physical profile support | Reject required semantic consumption; row framing alone is not execution support |
-| LIFT-18 | `Read()` and `Read(init ref<bool>)` are otherwise tied in an omission-permitting context | Diagnose ambiguity; identical payload types do not select a channel |
+| LIFT-17 | Implementation lacks physical support for required output/projection contracts | No support claim for the affected use; reject before use, with diagnostics left to the implementation; row framing alone is not execution support |
+| LIFT-18 | `Read()` and `Read(ref<init bool>)` are otherwise tied in an omission-permitting context | Diagnose ambiguity; identical payload types do not select a channel |
 | LIFT-19 | Supplied-argument quality or declared specificity establishes one winner | Select it under ordinary rules; hidden-output presence does not override that result |
 | LIFT-20 | A pattern's type would match only one tied ordinary/lifted candidate | Still diagnose call ambiguity before pattern checking |
 | LIFT-21 | Existing nongeneric/parameter-binding priorities resolve an otherwise tied pair | Preserve those ordinary priorities; no new output-count preference |
@@ -50,7 +50,7 @@ contract, not a guessed representation or implementation-derived builder.
 | CARG-04 | A positional argument follows an out-of-position label | Reject; no next-unfilled-slot search |
 | CARG-05 | An argument repeats a label or names an unknown label | Reject the mapping |
 | CARG-06 | A leading output is omitted before a supplied required input | Use the input's label; a positional input does not slide past the output |
-| CARG-07 | An ordinary value is supplied for `init ref<T>` | Reject the mode; no initialization permission from value conversion |
+| CARG-07 | An ordinary value is supplied for a `ref<init T>` parameter | Reject the mode; no initialization permission from value conversion |
 | CARG-08 | An explicit `init` argument names a live owner | Reject; passing a loan does not drop the owner |
 | CARG-09 | An explicit destination is vacant but has a different complete inner type | Reject invariant storage mismatch |
 | CARG-10 | An omitted ordinary parameter has a valid published Copy default | Use that selected value without reevaluating a provider body |
@@ -99,7 +99,7 @@ No case permits private callee-body inspection.
 | CINF-20 | Only an unknown `T?`, compatible `box<T>` or associated projection relates to an actual type | Do not invert it; require independent evidence |
 | CINF-21 | Another argument pins `T` before a non-injective formal is checked | Substitute forward and check its normalized type/binding |
 | CINF-22 | `write T` is proven redundant under the actual-write requirement | Treat it as the same formal, not a search for readonly originals |
-| CINF-23 | A known pin-reference argument meets the selected direct pointer formal edge | Infer its exact known referent forward; acquire no pin and search no intermediate type |
+| CINF-23 | A `ref<T>` or `gc ref<T>` argument is supplied directly to a `ptr<T>` formal | Reject; inference does not insert explicit unsafe pointer extraction, rooting or pinning |
 | CINF-24 | Explicit `T = C` is supplied with writable `C` values | Preserve the pin and use admitted attenuation; do not change `T` to write |
 | CINF-25 | Explicit `T = write C` is supplied with a readonly value | Reject the binding; inferred fallback cannot replace the pin |
 | CINF-26 | `Convert<_, int32>(typedValue)` has appropriate formals | Infer only the hole; keep the explicit result type |
@@ -137,7 +137,7 @@ No case permits private callee-body inspection.
 | CINF-58 | Function candidates with different declared generic arities accept the same explicit prefix | No type-name exact-arity preference; use ordinary argument quality/specificity or diagnose a tie |
 | CINF-59 | A selected type default exposes an injective constructor with an unresolved earlier formal | Match the forward shape to typed evidence; do not replace the default or invert arbitrary expressions |
 | CINF-60 | A written tuple under known `(T,T)` shape contains writable/readonly values of the same stem | Infer common element access and construct that tuple; an existing typed tuple's inner arguments remain exact |
-| CINF-61 | Expected `int32` consumes a lifted `require` from Boolean `Read<T>(init ref<T>)` | Infer T from the omitted output value, not the ordinary Boolean return, then require initialization |
+| CINF-61 | Expected `int32` consumes a lifted `require` from Boolean `Read<T>(ref<init T>)` | Infer T from the omitted output value, not the ordinary Boolean return, then require initialization |
 | CINF-62 | Matching `Read<T>()` has no typed/default evidence but an `int32` binding pattern | Reject unresolved T; arm type is not inference evidence |
 | CINF-63 | An admitted extension contract has an injective generic receiver parameter | Use its actual receiver as ordinary typed evidence without shifting written argument positions |
 | CINF-64 | `void result = require Read();` calls a selected `T Read<T>()` without outputs or typed evidence | Infer T=bool from the predicate context, not void from the enclosing unit result |
@@ -148,7 +148,7 @@ No case permits private callee-body inspection.
 | Case | Situation | Required result |
 |---|---|---|
 | CRANK-01 | Identity and access-attenuation candidates otherwise apply | Prefer identity |
-| CRANK-02 | `write pin ref<int32>` can bind `pin ref<int32>` or `write ptr<int32>` | Prefer access attenuation over the other direct binding |
+| CRANK-02 | `ref<int32>` or `gc ref<int32>` is supplied to `ptr<int32>` without explicit extraction | Reject; there is no implicit checked-reference-to-pointer edge to rank |
 | CRANK-03 | Two supplied arguments give crossed identity/attenuation advantages | Diagnose ambiguity; no summed score |
 | CRANK-04 | Distinct other admitted single-step bindings have equal quality | No invented cost, allocation or representation tie-breaker |
 | CRANK-05 | Ordinary by-value `T` and implicit formation of `ref<T>` both apply | Preserve the value-over-borrow result under ordinary quality/priorities |
@@ -161,7 +161,7 @@ No case permits private callee-body inspection.
 | CRANK-12 | A nongeneric exact declaration ties a generic one after quality and binding priorities | Prefer nongeneric |
 | CRANK-13 | A generic candidate has better supplied-argument quality | Preserve that win; nongeneric status is only a remaining tie-breaker |
 | CRANK-14 | Call supplies explicit generic arguments | Compare eligible generic declarations only |
-| CRANK-15 | Declarations would differ only by constraints or result type | Reject duplicate overload shape rather than rank the constraints/results |
+| CRANK-15 | Same-signature generic overload domains overlap or cannot be proven disjoint | Reject; do not rank constraints or use declaration order |
 | CRANK-16 | `Select(int8)` and `Select(int64)` receive untyped `300` | Ambiguous before value acceptance, although only int64 can represent it |
 | CRANK-17 | Only `Select(int8)` is selected for `300` | Diagnose range failure; do not retry another name, group or conversion |
 | CRANK-18 | Two registered integer-literal targets have different parser success/budgets | No parser execution or fit-based choice during selection |
@@ -172,6 +172,9 @@ No case permits private callee-body inspection.
 | CRANK-23 | Quality ties but parameter-binding preferences cross between supplied arguments | Diagnose ambiguity; do not count value-versus-borrow advantages |
 | CRANK-24 | Selected normal `params` form fails its registered literal parser while expanded form could accept the value | Diagnose the selected normal form; no parser-driven expanded fallback |
 | CRANK-25 | Within one selected eligible extension group, a writable receiver has identity versus attenuation bindings to the declared logical receiver | Include that receiver's ordinary quality; prefer identity without shifting written arguments |
+| CRANK-26 | Same-signature generic overloads have pairwise-disjoint domains proven by closed, exhaustive properties | Select the sole applicable declaration for the established actual type |
+| CRANK-27 | A generic body over a broad domain calls a constrained overload without proof or an explicit specialization branch | Reject; do not defer selection to each future actual |
+| CRANK-28 | Declarations differ only by result type | Reject duplicate overload shape; result types do not distinguish overloads |
 
 ## Hidden storage, scopes, and preparation
 
@@ -241,7 +244,8 @@ No case permits private callee-body inspection.
 
 ## Exact hidden-owner traces
 
-These finite fixtures use a synchronous unique owner with NoThrow cleanup,
+These finite fixtures use a synchronous unique owner whose cleanup returns
+normally on the exercised paths,
 an independent Copy count output, and no retained loans. Successful calls
 initialize both outputs; normal false calls leave both vacant. The statement
 subject is `TryRead(arguments) is (_, mut var count)`, so repeated scalar

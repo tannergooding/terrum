@@ -134,8 +134,8 @@ collector, view ABI, task representation or physical dependency codec.
 | DABI-04 | Descriptor rooting is treated as resource/guard preservation | Reject conflated obligation |
 | DABI-05 | Writable alias is manufactured through erasure/projection | Reject access/type upgrade |
 | DABI-06 | Old TokenCursor/compact-owner support is read as source-language limit | Implementation inventory is not normative general contract |
-| DABI-07 | Consumer lacks dependency rule or complete source/target records | Reject unsupported requirement |
-| DABI-08 | Attribute/structural record is treated as proof of arbitrary body truth | Require checked evidence or explicit producer/audit trust |
+| DABI-07 | Implementation lacks the dependency rule or complete source/target records | No support claim for the affected use; reject before use, with diagnostics left to the implementation |
+| DABI-08 | Attribute/structural record is treated as proof of arbitrary body truth | Producer remains responsible for truth; consumers validate record structure, references and support but are not required to re-prove the assertion. Optional audits do not prove arbitrary external behavior or authored unsafe promises |
 | DABI-09 | Held opcode/table/optional Attr is used for mandatory dependencies | No physical allocation activated by logical schema |
 | DABI-10 | View layout or anchor support changes behind same name | Compare actual retained target/layout/ABI contract |
 | DABI-11 | General task/collector/shared-access behavior is inferred from source recipes | No such substrate selection |

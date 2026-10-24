@@ -26,7 +26,7 @@ All other cases are assessable only against their stated finite facts.
 | CPID-04 | Transparent alias of exact Core owner/member-containing type | Preserve normalized identity and consuming route |
 | CPID-05 | Annotated wrapper contains a captured owner and is freshly thrown | New wrapper event/origin; do not flatten the captured field |
 | CPID-06 | Owner or owning wrapper claims ordinary Copy | Reject duplication of its event responsibility |
-| CPID-07 | CapturedException is used as ordinary Exception payload/catch subject | Reject; this distinct owner has no Exception eligibility |
+| CPID-07 | CapturedException is used as an ordinary exception object/catch subject | Reject; this distinct owner does not implement the selected `IException<TSelf>` contract |
 | CPID-08 | Constructor/type-call/default/zero/null creates a captured owner | No such creation contract or empty complete value |
 | CPID-09 | Capture registration has parameters, generic arity or a different result | Reject incorrect registered signature |
 | CPID-10 | Payload, descriptor or native packet converts directly to the owner | No implicit conversion/adoption; require separate admitted operation |
@@ -65,7 +65,7 @@ All other cases are assessable only against their stated finite facts.
 | Case | Scenario | Required outcome |
 |---|---|---|
 | CPHN-01 | Successful complete Capture publication | Exactly one owner replaces handler responsibility; event/payload/origin/causes unchanged |
-| CPHN-02 | Unique non-Copy payload is captured | No payload copy, constructor or original-throw replay |
+| CPHN-02 | Unique exception object/event is captured | No object copy, event wrapper or original-throw replay |
 | CPHN-03 | Preparation fails before publication | No result; source still owns original event and actual failure remains distinct |
 | CPHN-04 | Inner recovery handles preparation failure, then original handler retries | Retry can capture its still-owned original event |
 | CPHN-05 | Preparation failure escapes original responsible handler | Replacement retains original as cause after ordinary input/cleanup exits |
@@ -73,33 +73,33 @@ All other cases are assessable only against their stated finite facts.
 | CPHN-07 | Destination/call failure occurs after successful publication | Actual staged/transferred owner remains responsible; no source restoration |
 | CPHN-08 | Delivery fails after capture responsibility transfer | Retain the published/staged owner or admitted settlement; never lose the event |
 | CPHN-09 | Same handler calls Capture twice | Reject second use |
-| CPHN-10 | Same handler uses bare rethrow after successful Capture | Reject consumed source responsibility |
+| CPHN-10 | Same handler explicitly throws its active exception after successful Capture | Reject reuse of transferred source responsibility |
 | CPHN-11 | Handler ends normally with captured event in independent valid holder | End inputs; do not retire that holder's event |
-| CPHN-12 | Flow join mixes owned and transferred handler paths | Require owned state on every path reaching Capture/bare rethrow |
+| CPHN-12 | Flow join mixes owned and transferred handler paths | Require owned state on every path reaching Capture or explicit throw |
 | CPHN-13 | Captured owner moves or retires before source handler tries reuse | Neither operation revives source responsibility |
 | CPHN-14 | Captured event is consumed, caught by a new handler and captured again | New affine owner activation may retain the same event/origin |
 | CPHN-15 | Runtime tries to publish vacant, partial or wrong-owner state | Reject incomplete publication before source transfer |
 | CPHN-16 | Physical capture allocation/roots/delivery and actual OOM paths | Document-only; finite preparation outcomes are not implementation/OOM proof |
 
-## Catch inputs and complete dependency closure
+## Catch bindings and complete dependency closure
 
 | Case | Scenario | Required outcome |
 |---|---|---|
-| CPBR-01 | Capture while readonly unique-payload catch input is live | Preserve valid input use and same payload under the new owner |
-| CPBR-02 | Runtime attempts to copy or implicitly end that input to capture | Neither action is required/permitted as a hidden repair |
-| CPBR-03 | Catch reference descriptor is copied/reborrowed within its valid source extent | Keep descriptor copies bounded to that original extent |
-| CPBR-04 | Permitted alias changes payload-reachable state after Capture | Later valid input use observes actual changed state, not a snapshot |
-| CPBR-05 | Copy catch input remains live while captured event retires; an ordinary payload copy escapes | Copies retain their own backing/value contracts, not event responsibility or a handler-bound descriptor extent |
-| CPBR-06 | Catch descriptor escapes handler while captured owner stays alive | Diagnose original input-extent violation |
+| CPBR-01 | Capture while a concrete exception or common-view catch binding is live | Preserve the same object/event and binding validity under its ordinary scope |
+| CPBR-02 | Runtime attempts to copy a payload or end the binding to capture | Neither is required or permitted as a hidden repair |
+| CPBR-03 | Concrete and `IException<_>` bindings refer to one exception object | Preserve object identity without boxing or a copied event |
+| CPBR-04 | Permitted alias changes object state after Capture | Later valid binding use observes actual state, not a snapshot |
+| CPBR-05 | Catch binding remains live while captured owner retires | Keep the binding's ordinary object-root contract distinct from event responsibility |
+| CPBR-06 | Catch binding escapes its handler without a retained source relationship | Diagnose the invalid scope/dependency escape |
 | CPBR-07 | Captured payload's source storage generation changes | Reject affected use/transfer/retirement |
 | CPBR-08 | Returned captured event depends on the exited source frame | Reject escape; retained owner/root does not extend frame lifetime |
 | CPBR-09 | Captured payload/cause needs a guard that has ended | Reject affected path despite unchanged bytes |
 | CPBR-10 | Only a retained earlier cause has an invalid dependency | Reject; top payload independence cannot hide cause closure |
 | CPBR-11 | Owner's holder slot is separately borrowed | Block conflicting move/retirement; descriptor is not another owner |
-| CPBR-12 | Owner transfers to another valid holder while catch input remains live | Preserve event/input source; source holder becomes vacant |
-| CPBR-13 | Handler-local captured owner would retire before live catch input | Reject ordinary cleanup edge; no topological reorder or silent input end |
-| CPBR-14 | Staged return owner survives cleanup that ends original input | Permit dependency-valid owner escape after input end |
-| CPBR-15 | Direct captured throw stages owner before ending handler input | Keep event live through cleanup; select outside only after input ends |
+| CPBR-12 | Owner transfers to another valid holder while catch binding remains live | Preserve event/object identity; source holder becomes vacant |
+| CPBR-13 | Catch binding is used to duplicate captured event responsibility | Reject; a common object view is not a second event owner |
+| CPBR-14 | Staged return owner survives handler completion | Permit dependency-valid owner escape; catch binding ends at its scope |
+| CPBR-15 | Direct captured throw stages owner from its handler | Keep event live through applicable structured exits; select outside only after transfer |
 | CPBR-16 | Native/domain/code/runtime backing is retained through a cause | Preserve those complete dependencies through capture/move/retirement |
 | CPBR-17 | Payload has pending protocol/task obligations at capture/transfer | Transfer actual obligations; do not mark them settled |
 | CPBR-18 | Actual compiler root/borrow enforcement and arbitrary backing paths | Document-only; finite generation/borrow flags are not lowering proof |
@@ -108,7 +108,7 @@ All other cases are assessable only against their stated finite facts.
 
 | Case | Scenario | Required outcome |
 |---|---|---|
-| CPTH-01 | Named captured owner is thrown without move, even with Copy payload | Diagnose missing explicit owner transfer |
+| CPTH-01 | Named captured owner is thrown without move | Diagnose missing explicit owner transfer; event ownership is not copied |
 | CPTH-02 | Fresh Capture result is directly thrown | Transfer once without named move and preserve original event |
 | CPTH-03 | Captured throw operand has observable evaluation | Evaluate once before transfer/cleanup |
 | CPTH-04 | Operand evaluation fails before producing its captured owner | Propagate actual operand failure; do not fabricate/consume an outer owner |
@@ -116,7 +116,7 @@ All other cases are assessable only against their stated finite facts.
 | CPTH-06 | Operand is vacant, partial, readonly descriptor or wrong nominal type | Reject missing complete owning value |
 | CPTH-07 | Ordinary copied payload is freshly thrown instead | New event/origin; do not equate it with captured propagation |
 | CPTH-08 | Cleanup inspects the source holder after captured throw stages | Source already vacant; pending extent owns the live event |
-| CPTH-09 | Reference handler consumes just-captured owner and exits | End live inputs/cleanup before outward handler selection |
+| CPTH-09 | Handler consumes just-captured owner and exits | Run applicable structured exits before outward handler selection |
 | CPTH-10 | Authored cleanup replaces requested captured propagation | Preserve requested event as cause; no replay or source revival |
 | CPTH-11 | Requested event already owns an earlier cause chain | Retain the complete earlier chain beneath replacement |
 | CPTH-12 | Replacement would self-cause, duplicate a cause owner or create a cycle | Reject invalid responsibility graph |
@@ -136,12 +136,12 @@ All other cases are assessable only against their stated finite facts.
 | CPRT-04 | Captured handler completes normally while owner survives | Handler ends inputs only; no duplicate retirement |
 | CPRT-05 | Complete unused captured value is ordinarily discarded without live borrows | Checked nonthrowing/nonsuspending retirement, not original failure propagation |
 | CPRT-06 | Handler completes without capturing or rethrowing its event | Ordinary handling retires that still-owned event |
-| CPRT-07 | Source handler remains lexical after its captured owner retires | Capture/bare rethrow still reject; no resurrection |
+| CPRT-07 | Source handler remains lexical after its captured owner retires | Capture or explicit throw of the transferred event still rejects; no resurrection |
 | CPRT-08 | Pending task/guard obligation remains in payload or earlier cause | Reject unsupported retirement or enclosing exit |
 | CPRT-09 | Actual admitted protocol settlement removes remaining obligation | Permit exactly-once synchronous retirement |
 | CPRT-10 | Discard/replacement/cleanup is expected to insert wait/cancel/supervision | No such implicit operation or failure suppression |
 | CPRT-11 | Zero-argument Capture is treated as effect/resource-free | Require actual preparation/publication/transfer/cleanup effect bounds |
-| CPRT-12 | Enclosing NoThrow body internally handles a preparation failure | Bound only escaping failures; complete paths still need checked evidence |
+| CPRT-12 | Enclosing operation handles a preparation failure internally | The handled failure does not escape, but the complete path must still satisfy its effect/evaluation contract |
 | CPRT-13 | Capture/throw/cleanup escapes before versus after async establishment | Synchronous before; failed completion after, irrespective of suspension |
 | CPRT-14 | Non-async factory returns successful Task/CapturedException data | Factory remains synchronous; owner result is not failed completion |
 | CPRT-15 | Producer creation versus sync or established-async advance/close | Preserve selected source/operation failure channels |

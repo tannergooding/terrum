@@ -21,13 +21,18 @@ Row numbers, source paths, aliases, and ABI carriers are not that identity.
 |---|---|
 | Atomic value | One of the mandatory scalar identities, including inhabited `void`; widths with different identities do not merge |
 | Nominal type | Selected definition and complete ordered arguments; retain nominal validity, ownership and representation contracts |
+| Existential generic view | Selected generic constructor with explicit hidden argument slot(s); each value retains its complete hidden arguments and required evidence, distinct from `void` and inference holes |
 | Interface | Complete behavior instance; bare interface notation supplies no storable value representation |
 | Formal | Selected formal identity and declared constraints; no guessed implementation type |
 | Optional | One presence layer around the complete normalized inner type |
-| `ref<T>` | Checked descriptor for an eligible `T` place, with distinct outer access/pin and exact stored `T` |
+| `ref<T>` | Checked descriptor for an eligible live `T` place, with distinct outer access/backing policy and exact stored `T` |
+| `ref<init T>` | Checked non-owning initialization capability for an eligible `T` place; a distinct complete type that preserves the exact `T` |
+| `gc ref<T>` | Independently rooted locator for one initialized place in GC-backed storage; not a stable address or a general owner |
 | `ptr<T>` | Pointer representation retaining exact `T`, access and target contract; `ptr<void>` may be an explicitly opaque pointer |
 | `own<T>` | Unique native indirection to storage containing exactly `T`, not ownership of every target reachable through `T` |
-| `box<T>` | Requested managed representation with its outer access; compatible existing managed boxing normalizes without another box |
+| `box<T>` | Normal shared, stable managed representation with its outer access; compatible existing boxing normalizes without another box |
+| `gc box<T>` | Distinct GC-backed box representation; its collector-managed backing and root contract are not erased by normalization |
+| `gc C` | Distinct GC-backed class-handle representation; its root does not promise stable address or own independent resources reachable from the object |
 | `val<T>` | Eligible inline payload representation; type selection alone neither copies nor extracts a value |
 | Tuple | Ordered complete element types, arity at least two; labels are source-view information |
 | Callable | Callable family, closed ordered logical signature, representation/convention, and registered type qualifications |
@@ -36,8 +41,8 @@ Row numbers, source paths, aliases, and ABI carriers are not that identity.
 Every constructed form must satisfy its declaration/registration's
 formation obligations. Storage also needs a supported representation,
 validity, initialization, tracing/root, ownership and lifetime contract.
-An abstract interface, sizeless value, or unsupported target form cannot
-become storable by supplying a nominal name or arbitrary size number.
+An abstract interface or a value unsupported for the requested storage
+context cannot become storable by supplying a nominal name or size alone.
 A complete type has one declared copy/transfer contract; an instance's
 backing address or live/vacant state is not a new type identity.
 
@@ -59,18 +64,37 @@ not complete T values crossing ordinary calls or conversions. Copy eligibility,
 selected authored/derived Cleanup, field order and complete-receiver bounds
 are retained type contracts; equal layout does not erase them.
 
-[Exception eligibility](local-failures.md) likewise retains a resolved
-nominal declaration or exact category-witness route without changing complete
-arguments, representation or access. Aliases preserve the normalized fact;
-an unannotated wrapper does not inherit it from equal layout or an eligible
-field. Bare category interfaces are test subjects, not storable payloads.
-The marker adds no Copy, default value or valid escaping dependency.
-[Runtime requirement construction](requirement-failures.md) likewise needs
-the selected complete form's actual ordinary zero-input constructor evidence.
-Exception constraints do not establish `new T()`, and a callable's
-RequireException recipe is not an additional type capability or inference
-source. Alias normalization preserves the selected payload and constructor
-context rather than choosing another representation.
+[Exception eligibility](local-failures.md) requires a class's exact
+self-typed `IException<TSelf>` implementation without changing its complete
+arguments, representation or access. Aliases preserve the normalized class
+and witness; an unannotated wrapper does not inherit them from equal layout or
+an eligible field. `IException<_>` is a per-value existential view of an
+already-constructed object, not a category payload or concrete construction
+target. Its common instance contract is selected; exception eligibility adds
+no `Copy`, default value or valid escaping dependency. In an admitted type
+position, any nominal generic constructor may form an existential view by
+hiding any subset of its type-argument slots, including all of them. Constant
+generic argument slots retain their separate semantics. Visible type slots
+retain their exact complete arguments in the static type identity. Each value
+retains its own complete hidden arguments and required witness/evidence; only
+operations whose signatures and contracts are valid for every hidden argument
+admitted by the generic constructor's declared constraints are exposed. A
+successful generic type pattern may recover one or more concrete hidden
+arguments and their required evidence within that branch; each hidden slot can
+be captured with its own `var` binder. This does not imply covariance, erasure
+to `void`, or an arbitrary dynamic interface-object representation. This
+checked pattern is the only general recovery mechanism;
+`typeof(Place)` remains static and no runtime type/witness-inspection API is
+selected. In particular, `Task<_>` is not `Task<void>` and does not erase its
+owner's payload, failure or cleanup obligations; see
+[task responsibility](task-responsibility.md#existential-task-view).
+[Runtime requirement creation](requirement-failures.md) uses the selected
+class's common factory witness. An exception constraint establishes that
+factory only through the exact self-typed interface contract, not ordinary
+constructor evidence, and a callable's RequireException recipe is not an
+additional type capability or inference source. Alias normalization
+preserves the selected exception class and witness rather than choosing
+another representation.
 
 [Core CapturedException](captured-exceptions.md) is one exact nongeneric
 opaque affine identity, not a payload-specific type or Exception constraint.
@@ -90,8 +114,13 @@ the unit's reference restrictions.
 
 `mut` belongs to a binding/place or receiver, not a generic type argument.
 `unique` belongs to the selected nominal/representation ownership contract;
-it is not an interchangeable spelling of access. `init` is a parameter
-destination mode, not a representation family or qualifier inside `T`.
+it is not an interchangeable spelling of access. Declaration `init` selects
+the declaration's own storage. The inner `init` in `ref<init T>` instead
+qualifies the place designated by that checked reference; it is part of the
+complete reference type, not a general `init T` value type or parameter mode.
+`Span<init T>` is the separately admitted whole-range element-view form;
+`init` is not a free generic type-argument qualifier. The call-site reference
+argument remains explicit, as in `Create(ref init destination)`.
 
 `write` controls the immediate access contract of a reference/handle/view.
 It is admitted on a class-handle form, `ref`, `ptr`, compatible managed box,
@@ -102,10 +131,23 @@ type created by `write int32` or `write S`.
 An inline payload selected by `val<C>` likewise uses place authority;
 it does not inherit a class handle's writable receiver authority.
 
-`pin` qualifies only a `ref<T>` form. It expresses a required pin dependency,
-not acquisition by type normalization or a change to `ptr<T>`.
+`gc` is part of complete type identity and selects GC-backed storage only for
+class handles, `box<T>` and initialized `ref<T>` locators. It is not admitted
+for inline payloads, `ptr<T>`, `own<T>` or arbitrary types. It cannot qualify
+the outer uninitialized reference (`gc ref<init T>`); GC backing on an inner
+stored `T` is a distinct qualification and must independently satisfy its
+backing contract. Thus `ref<init gc C>` may initialize a vacant place
+containing a GC-backed class handle, without rooting the destination itself.
+The canonical combined access form is `write gc T`;
+the GC backing contract is not normalized into normal shared backing.
+`gc ref<T>` denotes an independent root for an exact initialized place. It
+does not establish address stability or grant access to sibling places.
+`ref *root` explicitly reborrows that place as a bounded stable `ref<T>` and
+pins the required backing for the result's lifetime. Type normalization
+acquires no root or pin.
+
 Aliases are expanded before qualification admissibility is checked.
-Substitution may make repeated identical access/pin qualifications redundant;
+Substitution may make repeated identical access qualifications redundant;
 normalization retains one copy of each admitted qualifier. Source grammar
 still rejects a repeated prefix not admitted by its productions.
 
@@ -127,6 +169,83 @@ Generic `write T` requires declared formation/operation guarantees for
 its admissible representations; it is not a universal make-mutable
 transform, inferred authority, or a specialization-time repair.
 
+`ref<init T>` applies to the exact complete `T` after alias expansion and
+substitution. It may designate eligible inline values, class handles,
+pointers, views or nested references; it does not infer `Copy`, default
+construction, pointee initialization or `T : write`. The capability is
+non-Copy and preserves one fixed destination identity. After that
+destination is completely initialized, a state-dependent attenuation to
+ordinary `ref<T>` may strip the completed initialization authority; it does
+not permit reinitialization or live replacement. The resulting ordinary
+reference follows ordinary backing, dependency and lifetime rules.
+
+`write ref<init T>` is admitted as a fixed destination that must be
+initialized before reads and then permits repeated whole-place replacement.
+After its first successful initialization, its flow type attenuates to
+`write ref<T>`; the one-time init authority is consumed while the outer write
+capability remains. This is distinct from `ref<init write T>`, which permits
+one-time whole-place initialization followed by mutation through the inner
+`T`, without replacing that place. `write ref<init write T>` combines both
+only where `T` admits inner mutation. For inline `S`, `write ref<S>` permits
+replacement of the whole referenced place, while `ref<write S>` requires
+an explicitly mutation-capable `S`; these forms are not interchangeable.
+
+`Span<init T>` is an init-aware element view for a whole range, not a general
+`init T` type or a per-element state vector. The range is unavailable for reads
+until it is completely initialized. `write Span<init T>` permits element
+replacement after that transition; `Span<init write T>` retains inner
+mutation only where `T` admits it. Whole-range initialization and failure
+settlement are defined by the Span and initialization-flow contracts.
+
+## Generic formal domains and specialization
+
+An unmarked generic type formal admits the common non-unique, Copy-capable,
+non-null domain. Copy is the default domain, not an explicit `[Copy]`
+constraint. `where T : unique` narrows the domain to unique forms;
+`where T : unique?` admits both the default domain and unique forms.
+`where T : null?` independently admits nullable complete type arguments
+without replacing an optional type with its payload or making a value
+present. These modifiers compose independently, so both are required to
+admit a nullable unique actual such as `UniqueC?`.
+
+Copy-capable ordinary structs/by-value forms satisfy the default domain.
+Unique forms require explicit unique opt-in and may be move-only. A successful
+presence test unwraps only the tested value/place and preserves any unique
+obligation; it does not alter the formal's exact substitution or other values.
+
+Same-signature generic overloads may differ by constraints only when their
+applicability domains are proven pairwise disjoint using closed, exhaustive
+properties. Unknown overlap is treated as possible overlap and rejects the
+overload set. Inside a generic body, overload selection must be valid across
+the formal's declared domain; it is not deferred until a future actual is
+chosen. A broad `unique?` formal therefore needs an explicit property branch
+to select a default-domain or unique-only overload.
+
+`if (T is unique)` tests a type property, not a value's runtime type or
+general reflection. Both arms are checked against the generic declaration's
+constraints and their respective refinements. The true arm carries proof of
+uniqueness; the false arm proves Copy only where the formal's domain is closed
+and exhaustive, as it is for `unique?`. Other false arms establish only that
+the tested property is absent. The same rule applies to other published
+constraint/property identities for which the generic definition has checked
+evidence.
+
+The property may be resolved during Terrum compilation, specialized for a
+closed instance during JIT/AOT compilation, or evaluated in shared or
+canonicalized generic code using compact implementation-provided type
+metadata. Shared execution is not general reflection. In value context the
+test produces an ordinary Boolean; flow may retain the relationship between
+that Boolean and the tested property through saved values and supported joins.
+No proof is inferred from one successful instantiation of an otherwise
+uninstantiated generic body.
+
+This separates two supported mechanisms: constraint-selected method bodies
+over disjoint domains and an explicit property branch within one generic
+body. The branch is the explicit selector when the generic body needs to call
+one of those domain-specific overloads. Resource/termination bounds,
+open-generic witness persistence and consumers without closed-instance
+specialization remain metadata and execution-admission requirements.
+
 ## Generic write requirements
 
 [Thread capabilities](../runtime/sharing-and-handoff.md#explicit-source-opt-in-and-conditional-contracts)
@@ -140,7 +259,7 @@ formation constraints and do not supply a new type identity or implicit sharing.
 to carry immediate write access. It is a type-formal requirement, not an
 interface, attribute, local-binding modifier, or request to qualify a
 readonly argument. It composes with ordinary property and behavioral
-requirements, as in `where T : write, [Copy], IReset<T>`.
+requirements, as in `where T : write, IReset<T>`.
 The constrained name must identify a type formal of that declaration;
 a constant formal cannot carry this requirement.
 
@@ -192,8 +311,11 @@ within its ordinary proof scope, not change a published signature.
 `Forward<write T>` at a call site is an ordinary qualified type argument;
 it does not impose a requirement on an unconstrained generic declaration.
 Qualified formal-declaration shorthand `<write T>` and `where T is write`
-are not admitted. Requirements filter applicability rather than create
-constraint-only overloads or improve a candidate's conversion ranking.
+are not admitted. This write requirement filters applicability and does not
+improve a candidate's conversion ranking. It does not by itself establish
+disjoint overload domains; same-signature generic overloads are valid only
+when their complete applicability domains are proven pairwise disjoint under
+closed, exhaustive properties.
 A published generic contract retains the requirement and its formal identity;
 an independently compiled body or witness cannot replace it with incidental
 private representation facts.
@@ -240,26 +362,61 @@ type or a success-shaped fallback.
 ### Optional normalization
 
 Optional construction is semantically idempotent: applying optional to an
-already-optional substitution retains one presence layer.
-`alias Option<T> = T?;` therefore gives `Option<Option<int32>>` the same
-type as `int32?`. Explicit `int32??` and `T??`, including intervening
-trivia, remain source syntax errors.
-Different nested positions, such as `List<int32?>?`, remain distinct.
+already-optional substitution retains one presence layer. The language
+constructor `option<T>` and suffix `T?` denote the same optional type;
+`option<option<int32>>` therefore has the same type as `int32?`. Explicit
+`int32??` and `T??`, including intervening trivia, remain source syntax
+errors. Different nested positions, such as `List<int32?>?`, remain distinct.
 
 Normalization never invents a live payload or default. Present null in a
 nominal union case remains distinct from another nominal absence case.
-`Option<void>` distinguishes absent from present `()`; there is still only
-one unit value.
-No optional rule commutes `ref`, `ptr`, `own`, or an arbitrary nominal
-container with presence: `ref<T?>` borrows an optional slot, whereas
-`ref<T>?` is an optional reference.
+`option<void>` distinguishes absent from present `()`; there is still only
+one unit value. Unqualified class handles, checked `ref<T>` descriptors and
+raw `ptr<T>` are non-null. Their optional forms use an outer optional layer:
+`C?`, `ref<T>?` and `ptr<T>?`. A caller that needs an empty class value uses
+an explicit sentinel object. The present checked reference still retains its
+complete descriptor, backing, provenance and lifetime obligations;
+optionality does not weaken them.
+
+Optional construction does not commute with indirection: `ref<T?>` borrows
+an optional slot, whereas `ref<T>?` is an optional reference. `ptr<T?>`
+points to an optional slot, whereas `ptr<T>?` is an optional pointer
+descriptor. The same distinction composes with both layers present.
+
+### Postfix type shorthands
+
+Postfix `*` and `?` shorthands compose as a left-folded suffix chain before
+the outer `write` access prefix:
+
+| Shorthand | Explicit complete type |
+|---|---|
+| `T**` | `ptr<ptr<T>>` |
+| `T*?` | `option<ptr<T>>` |
+| `T?*` | `ptr<option<T>>` |
+| `T?*?` | `option<ptr<option<T>>>` |
+| `write C*` | `write ptr<C>` |
+| `write T**` | `write ptr<ptr<T>>` |
+
+The last form grants write access to the outer pointer's immediate referent
+(the inner pointer cell). It is distinct from `ptr<write T*>`, which retains
+a readonly outer pointer with a writable inner pointer's referent. `write`
+remains prefix-only; `T write*` is not a shorthand. Group nested or repeated
+prefix constructors explicitly, for example `ref<ref<T>>`, not `ref ref T`.
+`option<T>`, `ptr<T>` and `ref<T>` remain the clearer explicit forms for
+nested compositions. Shorthand is pure syntax and creates no conversion,
+allocation, root or additional authority. `gc` is a separate prefix
+qualification, not a postfix shorthand.
 
 ### Managed boxing and requested access
 
-For a compatible class-handle type `C`, readonly `box<C>` normalizes to
-readonly `C`. Nested compatible boxing retains one managed representation.
-Its **requested outer access**, not the already-boxed input's access,
-determines that resulting managed form.
+For a compatible normal class-handle type `C`, readonly `box<C>` normalizes
+to readonly `C`. Nested compatible normal boxing retains one shared,
+non-moving managed representation. Its **requested outer access**, not the
+already-boxed input's access, determines that resulting managed form.
+GC-backed forms are not compatible normal-box normalization targets:
+`gc box<C>` and `gc C` retain distinct backing identity. In particular,
+`box<gc C>` (a normal box whose payload is a GC handle) is not
+`gc box<C>` (a GC-backed box of `C`).
 
 | Written type or substitution | Normal form |
 |---|---|
@@ -291,7 +448,10 @@ or redundant box repairs an unavailable capability.
 Obtaining a boxed value remains an explicit checked operation: it may reuse
 a compatible existing box, or allocate/copy/transfer an eligible inline
 payload under its construction, failure, rooting and cleanup contracts.
-The type expression itself allocates nothing.
+The type expression itself allocates nothing. An explicit `box<T>(value)`
+may select GC backing when its expected complete type is `gc box<T>`;
+without an expected type, `gc box<T>(value)` selects that backing explicitly.
+Neither form copies a unique obligation or introduces implicit boxing.
 
 This rule removes only access attached to the compatible managed layer.
 It does not erase qualifications inside a retained inline payload:

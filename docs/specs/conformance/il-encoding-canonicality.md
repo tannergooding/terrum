@@ -1,117 +1,92 @@
-# Encoding-canonicality conformance
+# Register IL encoding-canonicality conformance
 
 These cases apply [encoding canonicality](../representation/encoding-canonicality.md),
-[reader trust](../representation/reader-trust.md), [Body encoding](../il-instruction-set.md)
-and the exact `trrm/1-draft-unified-3` schema. Ordinary acceptance,
-writer conformance and explicit canonicality auditing are separate.
-Assessed fragments include their stated type/signature context; they do not
-claim arbitrary Body truth or a production reader.
+[consumer verification](../representation/reader-trust.md), [Body encoding](../il-instruction-set.md)
+and exact schema `trrm/1-draft-register-il-1`. Ordinary acceptance, writer
+conformance and an explicit canonicality audit are separate claims. The
+fixtures establish only the stated byte/metadata facts, not arbitrary Body
+truth, compiler support or native behavior.
 
-These compact-linear rows both return int32 42 using TypeSpec row 1.
-Only the Body-local fields change width; the instruction and fixed map
-word do not:
-
-```text
-04 01 01 00 00 00 01 02 01 01 2A 83 01
-05 01 00 01 00 00 00 01 00 02 01 01 2A 83 01
-```
-
-Both ordinarily load. The first has canonical local width; an explicit
-canonicality audit rejects the second. A valid general-form encoding of
-the same Body is not rejected merely because compact-linear is eligible.
-
-## 1. Consumer, writer and audit boundaries
+## 1. Instruction forms and boundaries
 
 | Case | Input or observation | Required outcome |
 |---|---|---|
-| ICLD-01 | Canonical supported fixture is ordinarily read and explicitly audited | Both accept their stated scope |
-| ICLD-02 | Equivalent supported fixture has nonminimal used widths | Ordinary reading accepts; canonicality audit rejects |
-| ICLD-03 | Wider code belongs to an unused operand class | Reject as invalid encoding, not noncanonical |
-| ICLD-04 | A noncanonical producer's bytes pass ordinary access | Reader acceptance does not certify writer conformance |
-| ICLD-05 | Trusted indexed reader visits one definition/terminator only | No preliminary canonicality scan of other operations or maps |
-| ICLD-06 | Actual access exposes invalid bits, references, type or index agreement | Reject despite permissive width policy or producer trust |
-| ICLD-07 | A known shape needs an unsupported retained feature/profile | Decline affected use; canonicality does not expand support |
-| ICLD-08 | Required access/audit exhausts its supplied fixture budget | Explicitly decline; no skipped-work certificate |
-| ICLD-09 | Tool checked selected records and offers a whole-artifact canonicality claim | Reject the overbroad claim; report the actual scope |
-| ICLD-10 | Ordinary loading or canonicality is offered as arbitrary source/runtime certification | Requires independent evidence; no such claim |
+| ICF-01 | Tiny `09 00` loads ConstantMap entry 0 to R0 and returns R0 | Accept as two one-byte instructions; each first byte starts one instruction |
+| ICF-02 | An exact tiny operation is encoded using its assigned short or long equivalent | Ordinary reading accepts; an instruction-canonicality audit rejects the longer equivalent |
+| ICF-03 | A short instruction uses a register, HomeMap/TypeMap/MethodMap/ConstantMap or record index within its encoded nibble/byte limit | Decode the exact assigned operand namespace and meaning |
+| ICF-04 | A long family has an assigned primary but an unassigned control or invalid unused field | Reject as malformed required input, not noncanonical |
+| ICF-05 | An operand byte equals an assigned primary opcode | Treat it only as the operand; never recursively decode it |
+| ICF-06 | A producer uses `F0` as a prefix, or supplies an unassigned first byte | Reject; this codec has no width prefix or nested decoder |
+| ICF-07 | Long instruction payload is truncated or has trailing bytes | Reject before affected use |
+| ICF-08 | `R15` appears as an unused field, discard result or source value | Apply only the exact operation-role rule; do not treat an unused field as a read or discard as cleanup |
+| ICF-09 | A source/destination register overlaps in a multi-result operation | Read all sources before publishing results; distinct published results require distinct writable general registers |
 
-## 2. Instruction classes and boundaries
+The first-byte partitions are `00..0F` (one byte), `10..BF` (two bytes)
+and `C0..FF` (four bytes). Unassigned values inside a partition do not
+inherit the range's length as a semantic default.
 
-| Case | Input or observation | Required outcome |
-|---|---|---|
-| ICIW-01 | Local reference crosses 255/256 | Canonical reference width changes from one to two bytes; assigned wider ordinary forms remain equivalent |
-| ICIW-02 | Local reference crosses 65,535/65,536 | Canonical reference width changes from two to four bytes |
-| ICIW-03 | References and counts are encoded wider than their maxima require | Decode the same unsigned operands; explicit audit rejects the wider used classes |
-| ICIW-04 | A used list count is zero and has wider assigned count width | Ordinary reading accepts; zero is still an encoded count |
-| ICIW-05 | Switch has no cases but selects wider data width | Reject the unused data class |
-| ICIW-06 | Signed data straddles -129/-128, 127/128, -32,769/-32,768 and 32,767/32,768 | Minimal signed width follows mathematical range, not unsigned magnitude |
-| ICIW-07 | Unsigned patterns straddle 255/256, 65,535/65,536 and 32-bit maximum/next value | Minimal unsigned data width follows the exact pattern |
-| ICIW-08 | Adjacent operations need different reference/count/data widths | Each instruction selects its own class widths; no Body-wide instruction width |
-| ICIW-09 | Fixed FieldDef row is 256 or 65,536 while local IDs remain small | Four-byte row changes independently; it does not widen the local class |
-| ICIW-10 | Packed Call uses local zero and a large typed MethodDef row | Escape remains fixed four-byte typed row; local zero still needs only one reference byte canonically |
-| ICIW-11 | Prefix has layout zero, reserved bits or reference/count code 3 | Reject; no equivalent-encoding exception |
-| ICIW-12 | Used data class selects code 3 | Eight bytes are assigned; audit compares them to the decoded pattern/value's minimum |
-
-## 3. Body-local fields and omitted inventories
+## 2. Body framing, maps and records
 
 | Case | Input or observation | Required outcome |
 |---|---|---|
-| ICBW-01 | Same supported Body uses general, compact-linear or compact-indexed form | Preserve logical records; no universal smallest-form requirement |
-| ICBW-02 | General or compact Body uses wider assigned local fields, including offsets enlarged by that width | Ordinary reading accepts; audit tests narrower structural re-encoding so self-enlarged offsets cannot justify a nonminimal width |
-| ICBW-03 | General-form fixed offset exceeds 255 while its local fields fit one byte | Fixed u32 offsets do not force wider local fields |
-| ICBW-04 | The one-byte compact-indexed candidate's block-data length crosses 255/256 | Exact 255 fits one-byte offsets; the 256-byte candidate requires a wider local re-encoding |
-| ICBW-05 | The two-byte compact-indexed candidate's block-data length crosses 65,535/65,536 | Exact 65,535 fits; the 65,536-byte candidate requires four-byte local re-encoding |
-| ICBW-06 | Definition offset is an all-ones block-parameter sentinel | Treat it as a marker and regenerate it at the chosen offset width; not a numeric widening trigger |
-| ICBW-07 | Compact-linear signature-derived parameter inventory crosses 255/256 | Include the omitted value inventory; reject too-narrow Body-local width before storage growth |
-| ICBW-08 | Signature-derived inventory crosses 65,535/65,536 | Same rule at the two/four-byte boundary |
-| ICBW-09 | Multi-result operations push compact-derived value count past its selected bound | Include every result in declaration order; do not count only operations |
-| ICBW-10 | Body form/width code, reserved bits or a required field is invalid/truncated | Reject structural invalidity |
-| ICBW-11 | A whole-Body local-width certificate considers only one selected block | Insufficient scope; inspect the complete relevant local inventory |
-| ICBW-12 | General form is eligible where compact would save bytes | Valid form is accepted; width canonicality is within the chosen form |
+| ICB-01 | Body implementation kind is `01` and codec selector is `01` | Read the exact 33-byte prefix, fixed maps, fixed Block table, record index/data and exact code extent |
+| ICB-02 | Implementation kind is `02..05` | Decode only its exact field/forwarder descriptor and validate target kind, signature and contract; do not infer a stream |
+| ICB-03 | A reserved flag, nonzero reserved field, unknown implementation kind or unknown codec selector appears | Reject before affected use |
+| ICB-04 | HomeMap, TypeMap, MethodMap, ConstantMap, Block or record index is `0xFFFF` with count 65,536 | Accept as the final valid zero-based index |
+| ICB-05 | Any indexed inventory has 65,537 entries or an index is outside its count | Reject; no implicit wider local-index encoding exists |
+| ICB-06 | `blockCount` is zero, or `recordCount` is zero | Reject; a stream has at least one Block and each Block needs a BlockEntryState record |
+| ICB-07 | A Block has an empty/overlapping range, a gap in code coverage, or lacks exactly one terminal instruction | Reject |
+| ICB-08 | Branch target is a Block index versus a code byte offset | Resolve only as a zero-based Block index |
+| ICB-09 | `recordOffsets` is truncated, nonmonotonic, out of range, or does not end at the exact record-data extent | Reject |
+| ICB-10 | A record has unknown kind, nonzero flags/reserved fields, malformed list count or trailing payload bytes | Reject before affected use |
+| ICB-11 | A record index or list count is zero or `0xFFFF` | Interpret using its explicit field rule; zero is not absence unless the field says so, and `0xFFFF` is not a sentinel |
+| ICB-12 | Reordered/duplicate/unused TypeMap, MethodMap or ConstantMap entries preserve every resolved reference | Ordinary reading accepts; a complete canonicality audit may reject noncanonical order, duplicates or unused entries |
+| ICB-13 | Two HomeMap rows have equal types/flags, or a rewriter merges their indexes | Equal row fields remain distinct homes; remap only when the complete storage identity/state contract is preserved |
 
-## 4. Type-map ordering and validity
+The stream prefix counts HomeMap, TypeMap, MethodMap, ConstantMap, Block and
+record inventories with `u32`; their zero-based local references are `u16`.
+Global row tokens, code offsets/lengths and instruction ordinals retain
+independent widths.
 
-| Case | Input or observation | Required outcome |
-|---|---|---|
-| ICTM-01 | Map follows first logical descriptor use | Canonical descriptor-first order, not metadata row-number order |
-| ICTM-02 | A type occurs only in explicit instruction operands | Its first stream use follows descriptor and required signature-only uses |
-| ICTM-03 | Omitted-storage form requires signature-only types | Include them in declared order; physical scan order does not replace logical ordering |
-| ICTM-04 | Map order and every local type selection are consistently permuted | Ordinary reading preserves types; audit rejects a non-first-use order |
-| ICTM-05 | Map adds a distinct valid unused entry | Ordinary reading accepts; canonical writer omits it and audit rejects it |
-| ICTM-06 | Required signature/descriptor/operation type is missing | Reject; permissiveness does not fabricate a map entry |
-| ICTM-07 | An entry repeats the same typed TypeSpec reference | Reject duplicate-map invalidity, not merely a canonicality deviation |
-| ICTM-08 | Local type ID or fixed map word is null/out of its actual namespace | Reject on access |
-| ICTM-09 | TypeSpec row 255 becomes 256 while local t1 remains t1 | Keep fixed four-byte map words and independent local widths |
-| ICTM-10 | Equal layout/row numbers are offered as complete nominal/generic identity | Need independent formation/binding evidence; no identity inference |
-
-## 5. Constant domains and exact representations
+## 3. SourceMap locations
 
 | Case | Input or observation | Required outcome |
 |---|---|---|
-| ICCV-01 | int32 ConstBits pattern FFFFFFFF uses four bytes or eight with zero high bytes | Both mean -1; canonical data width is four |
-| ICCV-02 | Boolean patterns 0/1 versus 2 use each assigned width | Ordinary 0/1 forms preserve bool; 2 is invalid at every width |
-| ICCV-03 | void zero versus nonzero uses each assigned width | Zero preserves unit; every nonzero pattern rejects |
-| ICCV-04 | char16 boundaries and surrogate code units use wider fields | Preserve code units through 65,535; reject larger values without Unicode-scalar reinterpretation |
-| ICCV-05 | Signed int32 -1 uses sign-extended one/two/four/eight-byte data | Same mathematical -1; only one byte is canonical |
-| ICCV-06 | ConstSigned negative value targets an unsigned type | Reject even with wider/sign-extended data |
-| ICCV-07 | Decoded signed mathematical value exceeds its declared destination | Reject; storage width is not a conversion |
-| ICCV-08 | binary32 positive zero uses each assigned data width | Exact zero bits; only one byte is canonical |
-| ICCV-09 | binary32 negative zero uses four/eight-byte data | Preserve sign bit; four bytes are canonical |
-| ICCV-10 | Signaling/quiet NaN signs and payloads are carried in wider fields | Preserve every exact declared-format bit; no arithmetic or quieting |
-| ICCV-11 | Nonzero bits above a declared 32-bit pattern are encoded in eight bytes | Reject, not truncate |
-| ICCV-12 | Wider data is offered as a new floating/decimal/vector/nominal codec | Decline unsupported use; no feature allocation from width |
+| ICM-01 | SourceMap slot selector 1 targets a Body instruction | Require section kind zero, one-based Body row, zero-based `u16` Block index and zero-based `u32` instruction ordinal |
+| ICM-02 | SourceMap slot selector 0 targets a SourceFile row | Require a valid SourceFile row and zero Block/ordinal fields |
+| ICM-03 | SourceMap slot reserved field or selector/target-kind pairing is invalid | Reject when the mapping is interpreted or preserved |
+| ICM-04 | A normal instruction mapping uses stepRole 0 | Map the whole instruction |
+| ICM-05 | A recipe mapping uses stepRole 1..5 | Resolve A-negation, B-negation, inner, C-negation or outer at the exact assigned recipe step |
+| ICM-06 | A non-recipe instruction uses stepRole 1..5, or stepRole is unknown | Reject the mapping |
+| ICM-07 | A rewritten recipe changes source/failure steps | Regenerate SourceMap step roles or drop the optional section; do not retain stale locations |
+| ICM-08 | SourceMap rows are not sorted by instruction slot, step role, source slot and span, or exact rows are duplicated | Ordinary readers may accept if structurally valid; a canonicality audit rejects |
 
-## 6. Re-encoding and honest claims
+Reference slots are 16 bytes. SourceMap rows are 20 bytes:
+`instructionSlot, sourceFileSlot, startUtf16, lengthUtf16, stepRole,
+flags=0, reserved=0`. The section length is
+`4 + slotCount*16 + recordCount*20`.
+
+## 4. Complete types and constants
 
 | Case | Input or observation | Required outcome |
 |---|---|---|
-| ICRA-01 | An instruction is shrunk/widened | Repair its definition, terminator, block and containing-row offsets; retain logical ordinals |
-| ICRA-02 | Body-local width changes | Repair structural strides, offsets and sentinel width while preserving decoded records |
-| ICRA-03 | Type map is reordered | Remap every descriptor and explicit local type operand in context |
-| ICRA-04 | Partial inspection is used as a full canonicality certificate | Decline the full claim; report only established scope |
-| ICRA-05 | Required operation/type interpretation for an audit is unknown or unsupported | Reject/decline the requested claim instead of guessing |
-| ICRA-06 | Canonical bytes are offered as proof of dominance, effects, ownership or producer truth | No such proof; retain separate audits/trust |
-| ICRA-07 | A canonical byte digest is offered as selected nominal identity or logical equivalence | No such proof; binding/context still apply |
-| ICRA-08 | Smaller bytes are offered as a measured decoding/throughput improvement | Requires independent measurement |
-| ICRA-09 | Canonicalization is offered as permission to remove observable operations | Requires separate semantic-preservation evidence |
-| ICRA-10 | Fixture accounting is offered as a universal numerical resource envelope | Resource policy remains a separate selected contract |
+| ICTM-01 | TypeMap entry is a TypeSpec row, `0xF2`, `0xF3`, or eligible `0xF0`/`0xF1` pseudo token | Resolve exactly to a complete type; reject invalid token context or cyclic pseudo bases |
+| ICTM-02 | Complete-type field uses inline F2/F3 or an equivalent row reference | Ordinary reading accepts both; canonical writers follow assigned token spelling and whole-artifact size/tie rules |
+| ICTM-03 | `genericTypeSpec` uses an inline token, or a TypeSpecRef appears outside a complete-type field | Reject the wrong field form |
+| ICTM-04 | TypeMap has a repeated token or two spellings resolve to the same complete type | Preserve exact type identity; canonical writers reuse the eligible entry |
+| ICC-01 | ConstantMap entries have equal numeric values but different types, signed zeros, NaN payload/state or decimal cohorts | Preserve distinct exact representations; do not merge by numeric comparison |
+| ICC-02 | Boolean, unit or char16 constant has an invalid value representation | Reject; a valid storage width does not make an invalid value legal |
+| ICC-03 | R14 or R15 is loaded as a special constant | Preserve contextual zero or the exact all-one pattern; do not quiet, canonicalize or reinterpret it as a numeric maximum |
+| ICC-04 | A ConstantMap entry is duplicated or unused but valid | Ordinary reading accepts; canonical writer reuses identical typed values and omits unused entries |
+
+## 5. Rewriting and audit scope
+
+| Case | Input or observation | Required outcome |
+|---|---|---|
+| ICR-01 | Instruction form or length changes | Rebuild affected Block code offsets/lengths, codeByteLength, record offsets and containing Body extent |
+| ICR-02 | TypeMap/MethodMap/ConstantMap is reordered | Remap every instruction and typed-record reference in its actual namespace |
+| ICR-03 | A metadata token's target row or Import binding changes | Rebuild its fixed-width token and revalidate exact identity/contract; do not substitute matching bytes |
+| ICR-04 | Blocks or instruction ordinals change with SourceMap present | Remap all source slots and step roles only when meaning is preserved; otherwise regenerate or drop SourceMap |
+| ICR-05 | Partial inspection is offered as a complete canonicality claim | Decline the complete claim and report the inspected scope |
+| ICR-06 | Canonical bytes are offered as proof of producer truth, dominance, ownership, effects or native correctness | Reject the claim; canonicality is not semantic proof or implementation support |
+| ICR-07 | Required interpretation is unsupported or audit work is exhausted | Decline the requested claim explicitly; do not guess, skip work or return success-shaped evidence |

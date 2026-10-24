@@ -161,8 +161,10 @@ the writer requires revision `8`, while the reader also accepts revisions
 `1..7` with their narrower implementation rules. These are current reader
 behaviors, not compatibility promises or candidate standard allocations.
 Old Param mode `0x02` and retired operation numbers are not the current
-[registry](../specs/representation/registry.md); see the
-[encoding inventory](trrm-encoding-history.md).
+[registry](../specs/representation/registry.md). This prototype-specific
+behavior is part of the migration tracked by
+[CG-001](conformance-gaps.md#cg-001), not a legacy decoder or alternate
+current-schema profile.
 
 | Surface | Current bounded behavior |
 |---|---|
@@ -192,6 +194,6 @@ does not require retaining them when the reviewed contract is implemented.
 `TrRmScalarInitOutputBodyReaderTests` and related executable reader/compiler
 cases exercise this experiment. Their presence is not a claim that they ran
 for this documentation change or use current normative bytes.
-The pending [output/place proposal](../proposals/trrm-output-parameters.md)
-and [joint composition](../proposals/trrm-output-failure-ownership.md) own
-the design work; the [gap inventory](conformance-gaps.md) owns compiler gates.
+The accepted [output-state and dependency contracts](../specs/representation/contract-clauses.md)
+own the design; the [gap inventory](conformance-gaps.md#cg-002)
+owns remaining physical and compiler gates.

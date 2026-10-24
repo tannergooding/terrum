@@ -1,12 +1,13 @@
 # Core scalar checked failures
 
-This chapter owns the initial nominal Core payload catalog for checked scalar
-value failures. Its logical rules are `scalar-failure-catalog/1` and
-`zero-data-scalar-failures/1`. The
+This chapter owns the initial nominal Core exception-object catalog for
+checked scalar value failures. Its logical rule is
+`scalar-failure-catalog/1`. The
 [primitive operator domains](primitive-operators.md),
 [conversion policies](../conversions.md#conversion-policies) and
 [Abs contract](absolute-value.md) determine whether an operation succeeds;
-this catalog fixes the failed operation's payload, not another value algorithm.
+this catalog fixes the exception class for the failed operation, not another
+value algorithm.
 
 The catalog is deliberately smaller than all runtime failures. Postconditions,
 admitted checked indices, initialization and explicitly recoverable allocation
@@ -14,13 +15,13 @@ use the separately selected [standard runtime categories](../runtime/standard-fa
 Optional library preconditions retain their declared contracts.
 Expected Boolean/status/Result
 outcomes, unsupported requirements, invalid source/interchange and unadmitted
-hardware faults are not silently translated to these payloads.
+hardware faults are not silently translated to these exceptions.
 The separately selected [numeric selection contract](numeric-selection.md)
 uses exact InvalidBoundsException for Clamp's explicit ordered-bound
 precondition. That ordinary requirement failure neither adds a fourth
 arithmetic/count mapping here nor turns a clamped value into a failure.
 
-## 1. Exact Core payloads
+## 1. Exact Core exception classes
 
 | Exact public Core identity | Selected scalar domain |
 |---|---|
@@ -28,28 +29,23 @@ arithmetic/count mapping here nor turns a clamped value into a failure.
 | `Terrum.DivideByZeroException` | The divisor of integer division or remainder is zero |
 | `Terrum.ArgumentOutOfRangeException` | A built-in integer shift count is negative or at least the data width |
 
-Each identity is a nongeneric, zero-data nominal struct with the resolved
-[Exception capability](local-failures.md#1-registered-exception-capability),
-ordinary Copy and one public zero-parameter instance constructor. The exact
-constructor establishes the complete zero-data value without authored
-preconditions, postconditions, initialization code or other authored effects.
-It takes no operand, count, parameter name, message, allocator or diagnostic
-context argument.
-
-These are three distinct payload types, not one struct with a kind code,
-derived classes under a universal Exception base or mandatory category
-interfaces. A zero-data payload is a complete value, not void, null, vacancy
-or absence of a failure. Copy duplicates that ordinary value, not its
-propagation event, provenance, causes or responsibility.
+Each identity is a distinct public nongeneric managed class implementing its
+exact self-typed [`IException<TSelf>` contract](local-failures.md#1-the-common-exception-contract).
+The common contract supplies the durable message and creation paths, authored
+`InnerException`, runtime-owned `ParentException`, and `IFormattable` witness.
+These scalar classes add no operand-, count-, or stack-trace-specific fields.
+Their class identity and common factory contract are required; this catalog
+does not select a constructor signature, payload layout, or generic category
+interface.
 
 Exact selected Core declaration identities matter. Transparent aliases
-normalize to the same identity; equal bits, names, constructors, annotations
-or another package's types do not supply a registered Core payload.
-No diagnostic fields, mandatory stack-trace text, equality/hash/formatting
-members or shared/typed capture family are introduced.
-Exception/Copy eligibility does not by itself grant Blittable, a particular
-byte layout, generic constructor evidence, Pure, ConstEval, unconditional
-NoThrow, thread capability or a native failure-packet representation.
+normalize to the same identity; names, constructors, annotations or another
+package's types do not supply a registered Core exception class. The common
+interface contract does not impose a universal stack-trace format, equality
+or hash behavior, or a shared/typed capture family.
+Exception eligibility does not by itself grant `Copy`, `Blittable`, a
+particular byte layout, `Pure`, `ConstEval`, a failure-free contract, thread
+capability or a native failure-packet representation.
 
 ## 2. Scalar operation mapping
 
@@ -57,9 +53,10 @@ The following rows apply only to already admitted built-in operations and
 conversion pairs. They do not add numeric promotions, conversions, optional
 lifting, nominal overloads, SIMD or atomic APIs.
 
-| Operation and failed value domain | Exact payload |
+| Operation and failed value domain | Exact exception class |
 |---|---|
-| Default integer addition, subtraction, multiplication, negation, increment or decrement whose mathematical result is outside the same type's range | `Terrum.OverflowException` |
+| Development/Debug-profile integer addition, subtraction, multiplication, negation, increment or decrement whose mathematical result is outside the same type's range | `Terrum.OverflowException` |
+| An explicitly checked integer operation whose result is outside the same type's range, in any profile | `Terrum.OverflowException` |
 | Signed integer division of the minimum by `-1` | `Terrum.OverflowException` |
 | Signed integer Abs at that type's minimum | `Terrum.OverflowException` |
 | Checked integer-to-integer conversion whose value is outside the destination range | `Terrum.OverflowException` |
@@ -82,8 +79,11 @@ numeric-to-char16 conversion does not fail merely because its result is not
 a Unicode scalar. Rune validation, character-literal decoding, nominal
 validity and text-decoder failures keep their separate contracts.
 
-Default unsigned negation is checked `0 - value`: every nonzero unsigned
-input maps to OverflowException, while unsigned Abs is identity.
+Development/Debug unsigned negation is checked `0 - value`: every nonzero
+unsigned input maps to OverflowException. Release-profile default unsigned
+negation wraps `0 - value` at the declared width. Explicit checked/wrapping
+operations retain their selected policy in either profile; unsigned Abs
+remains identity.
 Integer remainder of a signed minimum by `-1` is zero, not quotient overflow.
 A combined quotient/remainder request that needs the overflowing quotient
 can fail; fusing a remainder-only request must not introduce that failure.
@@ -115,44 +115,47 @@ permission to write and later undo a failed arithmetic attempt.
 Admit the mapped type, exact construction and actual propagation dependencies
 before affected use. Evaluate the operation's operands under their ordinary
 order and transfer rules, once. An operand failure prevents later operands
-and the operation. A successful scalar operation constructs no failure payload
-or event.
+and the operation. A successful scalar operation invokes no exception factory and creates no
+event.
 
-At a failed value check under an admitted checked-exception policy, construct
-the mapped complete zero-data payload once and establish a fresh propagation
-event at the **failed source operation**, retaining its governing rules,
-complete operand/result domain and failure phase. A runtime helper or lowered
-control conversion does not become another source origin.
-No operand is reevaluated to make the payload, and no ambient requirement
-default or user factory participates.
+At a failed value check under an admitted checked-exception policy, invoke the
+selected class's common creation path once to materialize the exception object.
+That object is the fresh propagation event, whose origin is the **failed source
+operation** and whose contract retains the complete operand/result domain and
+failure phase. A runtime helper or lowered control conversion does not become
+another source origin. No operand is reevaluated, and no ambient requirement
+default or unrelated exception selector participates.
 
-The zero-data constructor has no authored failure path; the event transport
-still needs its actual storage, root, code/runtime lifetime and publication
-support. A lack of payload fields is not a guarantee of allocation-free,
-failure-free or resource-unbounded transport. If actual preparation fails
-before publication of a complete mapped event, that preparation failure
-follows its admitted contract; it must not produce a fabricated mapped event,
-normal numeric result, fallback payload or lost responsible holder.
-Missing known support instead declines before affected use.
+Exception creation and transport need their actual allocation, root,
+code/runtime lifetime and publication support. The common message or class
+shape does not guarantee allocation-free, failure-free or resource-unbounded
+transport. If creation or preparation fails before publication of the mapped
+exception object, that actual failure follows its admitted contract; it must
+not produce a fabricated mapped event, normal numeric result, fallback
+exception or lost responsible holder. If no exception object can be
+materialized to represent a failure, execution fails fast. Missing known
+support instead declines before affected use.
 
-Publish one responsible event holder, with no observable lost or duplicated
-responsibility. Different failed operations establish different events even
-when their zero-data payload bits are equal. Complete provenance and causes
-belong to that event, not hidden struct fields. Subsequent active rethrow or
+Publish one responsible exception object, with no observable lost or
+duplicated responsibility. Different failed operations establish different
+events even when their messages are equal. Complete provenance and causes
+belong to the event object, not a detached payload. Subsequent active rethrow or
 consuming [CapturedException propagation](captured-exceptions.md) preserves
-the same event. Freshly throwing an ordinary copied payload establishes
-another event at that authored throw.
+the same object/event. Throwing a distinct exception object establishes its
+own event under the [local exception contract](local-failures.md).
 
 Ordinary [local-failure selection and cleanup](local-failures.md) applies:
-nominal type tests, explicitly borrowed or Copy catch inputs, incremental
-cleanup-before-filter ordering, cause retention on replacement and exactly
-once responsibility settlement. A scalar failure escaping a still-responsible
-handler retains its earlier event as cause. Faulting cleanup replaces the
-pending failure under those same rules, without replay or loss.
-Zero-data payloads do not make the cause graph or event Copy.
+nominal type tests, object-handle catch bindings, source-order handler
+selection, causal replacement and exactly-once responsibility settlement.
+A scalar failure escaping a still-responsible handler replaces the pending
+failure and retains it through `ParentException`. Faulting cleanup replaces
+the pending failure under those same rules, without replay or loss. Exception
+eligibility grants no `Copy` contract; copying a handle where separately
+permitted does not duplicate the event, its propagation history or
+responsibility.
 
 An admitted terminal/fail-fast policy remains terminal. It need not construct
-an unobservable local payload/event before terminating, and it promises
+an unobservable local exception object/event before terminating, and it promises
 neither catchable propagation nor cleanup after termination. A terminal
 value-check policy does not reinterpret a failure while evaluating an
 operand. This catalog does not turn a hardware trap, access violation,
@@ -168,17 +171,17 @@ getter effects, reads and writes remain actual: this is not rollback.
 Atomic failure cannot acquire write/release effects merely because a
 language event will propagate; its actual attempted-read contract remains.
 
-The payload catalog supplies no argument reordering, speculative evaluation,
+The exception catalog supplies no argument reordering, speculative evaluation,
 implicit owner cleanup, cancellation or recovery permission.
 Caller-safety, loan, output, lifetime and thread-affinity rules remain checked.
 Recovery still needs the existing unsafe authorization; finally/defer cleanup
 has its ordinary rules.
 
-A false runtime `require` uses its own explicit/default selector and ordinary
-`new E()` contract. RequireException does not override a numeric failure in
-the predicate. An explicit `require<OverflowException>` may construct the
-same ordinary Core type, but its fresh origin is that require site, not an
-invented arithmetic operation.
+A false runtime `require` uses its own explicit/default selector and the
+selected exception class's common creation path. RequireException does not
+override a numeric failure in the predicate. An explicit
+`require<OverflowException>` uses the same Core class, but its fresh origin is
+that require site, not an invented arithmetic operation.
 
 Static proof or literal-validation failure is a compiler diagnostic, not a
 runtime construction of this catalog. Required constant execution retains
@@ -196,15 +199,15 @@ Resuming on another thread or outlining a helper does not change the source
 operation's mapped type, origin or phase.
 
 Checked arithmetic and construction/transport retain their actual effect
-and dependency bounds. An internally handled failure need not escape a
-NoThrow callable, but a catalog name, zero-data layout or caught payload
-does not prove the whole invocation NoThrow or Pure. Relevant checks may be
+and dependency bounds. Handling an internal failure does not prove that the
+whole invocation cannot fail or is Pure; neither a catalog name nor a caught
+exception object establishes those contracts. Relevant checks may be
 eliminated only with sound supported proofs that preserve all operand,
 result-state, failure and retained-contract observations.
 
 ## 5. Publication and physical completion
 
-Retain exact Core payload and constructor identities, source operation and
+Retain exact Core exception-class and factory identities, source operation and
 normalized scalar types, native width where applicable, mathematical check
 and failed domain, selected policy, event publication/state, effect/phase,
 catch/cleanup/cause obligations and full transport/helper/runtime dependencies.
@@ -214,13 +217,13 @@ encode those contracts.
 Replacement or lowering must preserve the actual mapped outcome, including
 invalid shift versus conversion overflow and remainder-only success.
 An explicitly justified replacement can add unrelated facilities without
-breaking every caller; it cannot substitute a same-shaped payload or rewrite
+breaking every caller; it cannot substitute a same-shaped exception class or rewrite
 a retained failure site. Trusted readers remain access-scoped, not forced
 to scan unrelated Bodies to infer the catalog.
 
 The current physical scalar profile's fail-fast support does not activate
-checked payload construction or handler execution. Complete registration,
-payload/value, source-operation failure, phase, event/handler/cause and
+checked exception creation or handler execution. Complete registration,
+exception-class/value, source-operation failure, phase, event/handler/cause and
 transport/resource records remain unassigned. No Feature ID, Attr tag,
 TypeSpec, intrinsic wire ID, opcode, exception region or native ABI is
 allocated here.

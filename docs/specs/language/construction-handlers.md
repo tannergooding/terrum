@@ -173,6 +173,12 @@ Within one module, equal closed shapes denote the same generated complete
 type, including at different source occurrences. Ordinary complete-type
 normalization applies; equal field layout or formatted output is not a shape
 comparison.
+Capture mode records only whether the evaluated value is copied or ownership-
+transferred into the generated content. The complete type retains reference
+and pointer structure and every access-qualifier placement; ordinary
+dependency/lifetime contracts retain backing and provenance. For example,
+`ref<write T>` and `write ref<T>` remain distinct capture types, not alternate
+spellings normalized by the mode.
 
 Captured values, literal segment contents, alignment and format values are
 instance data, not additional type arguments. Source coordinates, parameter
@@ -303,11 +309,12 @@ An independent consumer needs the complete published construction contract,
 not private imported layout or a caller's accidental access to a builder
 implementation.
 
-Required constant construction separately needs checked ConstEval/program,
-operation/resource and target value-codec admission. An ordinary runtime
-builder may allocate, refuse or have identity-bearing state without being
-an emitted constant. Conversely, a Blittable or frozen Copy target does not
-acquire a builder, literal parser or constant-formal domain through layout.
+Required constant construction separately needs checked `ConstEval`-form,
+`ConstantExecution`/operation/resource and target value-codec admission. An
+ordinary runtime builder may allocate, refuse or have identity-bearing state
+without being an emitted constant. Conversely, a Blittable or frozen Copy
+target does not acquire a builder, literal parser or constant-formal domain
+through layout.
 
 ## Parameterless builder acquisition
 
@@ -318,7 +325,7 @@ logical shape:
 ```terrum
 public interface IBuilderFactory<this TBuilder>
 {
-    public static bool TryCreate(init ref<TBuilder> builder);
+    public static bool TryCreate(ref<init TBuilder> builder);
 }
 ```
 
@@ -335,7 +342,7 @@ Source construction supplies vacant local storage of the complete recipe
 type, then invokes the selected factory after that site's eager captures:
 
 ```terrum
-require TBuilder.TryCreate(init builder);
+require TBuilder.TryCreate(ref init builder);
 ```
 
 There are no ordinary input arguments. In particular, the language supplies
@@ -393,7 +400,7 @@ logical shape:
 ```terrum
 public interface IBuilder<this TBuilder, TResult>
 {
-    public static bool TryBuild(TBuilder builder, init ref<TResult> result);
+    public static bool TryBuild(TBuilder builder, ref<init TResult> result);
 }
 ```
 
@@ -463,7 +470,7 @@ or an independently valid value codec.
 
 ### Explicit reusable builders and adapters
 
-An explicit reusable API can retain `mut bool TryBuild(init ref<TResult>)`
+An explicit reusable API can retain `mut bool TryBuild(ref<init TResult>)`
 and its own post-success/post-refusal state. It is not the source completion
 requirement. A checked nominal adapter can own/wrap that implementation,
 transfer the complete result and clean whatever remains while implementing

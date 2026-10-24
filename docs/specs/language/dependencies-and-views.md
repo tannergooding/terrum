@@ -1,17 +1,20 @@
 # Dependency sources, captures and views
 
 This chapter owns logical `dependencies-and-views/1` and
-`dependency-source-schemas/1`: whole-source relationships, retained borrowed
-state, checked backing-only refinements and their declaration/witness rules.
+`dependency-source-schemas/1`: whole-source relationships, retained
+reference/view dependencies, checked backing-only refinements and their
+declaration/witness rules.
 [References](references.md) owns access and place formation;
 [flow](initialization-and-flow.md) owns availability;
 [lifetimes](../lifetimes.md) owns ordinary ownership and cleanup.
 No source annotation supplies a view representation or acquires an owner.
+The shared [definitions](../language.md#definitions-and-notation) explain
+copying, aliasing, lifetime and the technical borrow/loan/lease terms.
 
 ## Dependency identities and obligations
 
-A dependency relates a particular live value, loan or operation to storage
-and capabilities that must remain valid for its declared extent. It is not
+A dependency relates a particular live value, non-owning access (loan) or
+operation to storage and capabilities that must remain valid for its declared extent. It is not
 just an address or a type argument. Retain the exact source instance and
 storage version, any data and shape-metadata backing, owner/lease/guard,
 root and relocation support, publication, load/code lifetime and affinity.
@@ -37,10 +40,10 @@ without automatically ending its storage lifetime or freezing an old value.
 | Source form | Permitted storage/backing |
 |---|---|
 | Struct receiver or `ref<T>` input | Its selected `T` place and the complete backing/capabilities carried through that place; the source is not the callee's reference-descriptor slot |
-| By-value view or aggregate carrying descriptors | Existing dependencies carried by the staged value; not the callee parameter copy's storage or an invented loan of the caller variable |
+| By-value view or aggregate carrying descriptors | Existing dependencies carried by the staged value; not the callee parameter copy's storage or an invented reference to the caller variable |
 | Class/box handle or receiver | Its declared object storage/backing/root relationships; not the staged or caller handle slot |
 | Transferred owning value | Its actual live value and declared backing after transfer; surviving ownership needs an explicit transfer destination |
-| Independent by-value scalar/unit | No external borrowed source merely because a caller supplied a local |
+| Independent by-value scalar/unit | No external reference dependency merely because a caller supplied a local |
 | Initialization destination | Not a default input source; an explicit inter-output relationship requires its live publication in the same declared outcome |
 
 For a `ref<T>` source, backing-only excludes borrowing that selected `T`
@@ -53,8 +56,17 @@ declared possibilities rather than guessing from one concrete instantiation.
 
 An annotation cannot return a reference to destroyed parameter storage,
 restore a moved caller binding or move an owner into a result implicitly.
-Borrowing an inline field and forwarding an allocation owned by that value
+Referencing an inline field and forwarding an allocation owned by that value
 remain different. A by-value result's physical indirect ABI is not a source loan.
+
+Direct and nested references use the same lifetime/access reasoning. When
+they designate the same actual place/generation with identical supporting
+obligations, nesting alone does not make that resolved dependency different.
+Keep each declared source permission and provenance, every dependent's live
+extent, and all authority/invalidation constraints. A reference to a wrapper's
+descriptor field slot selects different storage from the reference carried
+by that field. Equal numeric addresses do not identify generations, and
+distinct owner or guard tokens retain their own responsibilities.
 
 ## Source schemas and targets
 
@@ -181,7 +193,7 @@ With multiple eligible sources, declare the permitted set; do not guess from
 body branches. With none, establish independent valid result state.
 Independent scalar results need no fabricated borrowed relationship.
 
-Broad permits borrowing the source's own eligible storage or forwarding
+Broad permits referencing the source's own eligible storage or forwarding
 its existing backing. It does not make a by-value parameter copy eligible
 escaping storage. Caller bounds conservatively include every eligible
 permitted source-storage alternative and all its carried obligations.
@@ -315,9 +327,9 @@ An implementation that excludes a selected source satisfies that source's
 refinement without a redundant annotation; one that retains it must publish
 backing-only permission. This is the same contract implication used in witness
 compatibility, not permission to add a source or infer a private body.
-The constraint does not itself create conformance,
-replace a body proof, improve conversion ranking or form a constraint-only
-overload. Definition checking uses the declared condition, and application
+This ForwardsBacking constraint does not itself create conformance,
+replace a body proof, improve conversion ranking or establish disjoint
+overload domains. Definition checking uses the declared condition, and application
 checks it after normal complete-type selection/substitution.
 Unsupported or unestablished required facts diagnose.
 Conditions on arbitrary runtime state or source paths are not this initial form.
@@ -339,8 +351,12 @@ member/witness conditions. Invocation and storage bind that contract to actual
 source/destination instances and versions with their complete dependencies;
 those dynamic identities are not serialized as fixed declaration instances.
 Map the published identities independently of names/rows.
-Body truth requires checked provider evidence or explicit semantic producer/
-audit trust; a structural record or semantic attribute is not its own proof.
+The producer is responsible for the truth of published body contracts;
+consumers validate selected record structure, references and support before
+affected use, then may rely on those contracts without semantic re-proof. A
+structural record or semantic attribute alone supplies no missing contract.
+Optional audits do not prove arbitrary external provider behavior or authored
+unsafe promises.
 
 Compatible replacement cannot add dependencies/capture, drop a required bound,
 replace backing-only with storage borrowing, change a phase/owner or weaken
@@ -362,6 +378,6 @@ not a smaller normative lifetime model.
 
 Physical source/capture/refinement records, root/loan programs, target view
 layouts and codecs remain separately gated by
-[metadata](../representation/logical-records.md#general-dependency-contracts-encoding-pending).
+[metadata](../representation/logical-records.md#general-dependency-contracts-carrier-and-capability-integration-pending).
 [Conformance cases](../conformance/source-dependencies-and-views.md) are logical
 requirements, not compiler or physical ABI conformance.

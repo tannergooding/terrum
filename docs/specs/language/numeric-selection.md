@@ -124,7 +124,7 @@ replace this exact-selection rule.
 Both quiet and signaling NaN inputs produce quiet NaN results. Runtime
 sign/payload and the propagated input choice are unspecified.
 Admitted constant execution chooses positive quiet NaN with zero payload.
-No ambient language status observation or complete NoThrow/Pure guarantee
+No ambient language status observation or complete failure-free/purity guarantee
 follows. A NaN is handled before the numeric
 tie-break: totalOrder must not turn a NaN-propagating Min/Max into a number-only
 selection.
@@ -181,12 +181,14 @@ zero, whereas the composition selects positive zero.
 
 ## 4. Reusable InvalidBoundsException
 
-Exact Core `Terrum.InvalidBoundsException` is a public nongeneric zero-data
-nominal struct with the resolved Exception capability, ordinary Copy and one
-public zero-parameter instance constructor. Construction establishes its
-complete value without authored predicates, initialization code or other
-authored effects. No endpoints, names, message, stack text, allocator or
-diagnostic context are mandatory inputs or fields.
+Exact Core `Terrum.InvalidBoundsException` is a public nongeneric managed
+class implementing its self-typed `IException<InvalidBoundsException>`
+contract. Its common creation paths and message/cause/formatting members come
+from that contract; the class adds no endpoint-, bound-, or stack-trace-specific
+fields. Clamp's `require` path separately resolves an ordinary
+zero-supplied-argument constructor binding under
+[requirement failures](requirement-failures.md); it does not invoke the
+common factory. This chapter selects no payload layout or category interface.
 
 The type describes supplied bounds that do not satisfy an operation's
 required relationship, including an unordered or reversed pair. An operation
@@ -197,7 +199,7 @@ The type is reusable by separately declared interval/range operations but
 adopts no new range, interval or collection API.
 
 InvalidBoundsException and ArgumentOutOfRangeException are nominal siblings,
-not a base/derived pair or one kind-coded payload. Invalid bounds are distinct
+not a base/derived pair or one kind-coded exception. Invalid bounds are distinct
 from a value outside valid bounds, a general unrelated requirement,
 initialization/bounds access failure and a hardware fault. Neither comparison
 syntax nor a `min`/`max` parameter name automatically selects this exception.
@@ -205,26 +207,28 @@ Transparent aliases preserve the selected identity; another provider's
 same-spelled or same-shaped struct does not supply it.
 
 Clamp explicitly uses ordinary `require<InvalidBoundsException>` at its
-published precondition. A caller's RequireException recipe or arithmetic
-policy cannot change that selected payload or remove the bound check.
+published precondition. Its exact constructor binding is resolved before
+execution. A caller's RequireException recipe or arithmetic
+policy cannot change that selected class or remove the bound check.
 The failure has the semantic origin of the selected Clamp precondition,
 even if a compiler checks it at a call boundary or outlines its code.
 It is not a fabricated caller check, generic arithmetic overflow or helper
 failure.
 If evaluating the precondition itself fails under an admitted comparison or
 effect contract, propagate that actual failure without constructing a bounds
-payload. Ordinary false-check construction applies only after the predicate
+exception. The selected constructor binding is executed only after the predicate
 normally produces false; the no-ambient-status contract does not
 authorize replacing an actual comparison failure with InvalidBoundsException.
 
 The [ordinary requirement-failure protocol](requirement-failures.md) governs
-zero-input construction only on false, publication of one fresh event,
+the selected constructor only on false, publication of one fresh event,
 actual preparation/transport failure, source ownership, causal replacement
-and cleanup. No constructor/event runs for valid bounds. Copy duplicates the
-ordinary zero-data payload, not its event, origin, causes or responsibility;
-[active/captured propagation](captured-exceptions.md) preserves those facts.
+and cleanup. No factory/event runs for valid bounds. The exception contract
+grants no event-copying or responsibility-duplication rule; active/captured
+propagation preserves the same object and event, while a distinct replacement
+retains the pending exception through `ParentException`.
 The shape does not grant a native packet/byte layout, shared capture,
-allocation-free transport or a Pure/ConstEval/NoThrow capability.
+allocation-free transport or a Pure/ConstEval/failure-free capability.
 An admitted terminal policy retains its ordinary termination boundary,
 without local catch/cleanup promises or reinterpretation of argument failures.
 
@@ -262,7 +266,7 @@ introduce no suspension or new task/producer protocol.
 
 Min/Max have no selected integer value-domain failure. Clamp's required bound
 relationship is separately provable for an admitted input domain. Neither
-fact proves the complete invocation NoThrow or Pure, including argument,
+fact proves the complete invocation failure-free or Pure, including argument,
 initialization, dependency, construction and transport effects.
 Sound proof can omit a redundant check, but cannot invent generic operation
 evidence, discard argument effects or replace a false precondition with a
@@ -283,13 +287,13 @@ That recipe does not supply a missing admitted program or author opt-in.
 
 Retain exact owning scalar/member and parameter names/modes, complete
 parameter/result identities, native target width, numeric/NaN/zero/cohort
-result observations, Clamp's exact published predicate and Core construction
+result observations, Clamp's exact published predicate and Core factory
 identity, source precondition origin, normal versus failed result state,
 selected policy, actual effects/phases and full helper/runtime/value/transport
 dependencies. Exact scalar layout or a machine compare/select instruction is
 not the complete contract.
 
-Missing actual member, predicate, constructor, target, value/program or
+Missing actual member, predicate, factory, target, value/program or
 propagation support declines before affected use. An unused compiler-only
 dependency need not become a retained runtime dependency. Unrelated valid
 provider additions do not break a complete unchanged expectation.

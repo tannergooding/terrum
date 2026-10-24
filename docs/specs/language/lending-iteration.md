@@ -10,6 +10,12 @@ selection, traversal ownership and close requirements.
 None of these roles is inferred from a reference-valued item, member names
 or private implementation behavior.
 
+Lending publishes a reference to an existing element rather than an
+independent element value. The loop's element binding aliases that place;
+it is not an ordinary local holding a copied reference descriptor. Its
+lifetime and advance/close bounds are the declared ones below. See the
+shared [alias, reference and loan definitions](../language.md#definitions-and-notation).
+
 ## Nominal protocol identities
 
 Core supplies four distinct cursor roles and their corresponding source
@@ -18,7 +24,7 @@ factories. The readonly synchronous requirements are:
 ```terrum
 public interface ILendingCursor<T>
 {
-    public mut bool TryMoveNext(init ref<ref<T>> item);
+    public mut bool TryMoveNext(ref<init ref<T>> item);
     public mut void Close();
 }
 
@@ -34,7 +40,7 @@ The writable synchronous requirements are:
 ```terrum
 public interface IWritableLendingCursor<T>
 {
-    public mut bool TryMoveNext(init ref<write ref<T>> item);
+    public mut bool TryMoveNext(ref<init write ref<T>> item);
     public mut void Close();
 }
 
@@ -50,7 +56,7 @@ The corresponding asynchronous requirements retain synchronous acquisition:
 ```terrum
 public interface IAsyncLendingCursor<T>
 {
-    public mut Task<bool> TryMoveNextAsync(init ref<ref<T>> item);
+    public mut Task<bool> TryMoveNextAsync(ref<init ref<T>> item);
     public mut Task<void> CloseAsync();
 }
 
@@ -62,7 +68,7 @@ public interface IAsyncLendingSequence<T, TCursor>
 
 public interface IAsyncWritableLendingCursor<T>
 {
-    public mut Task<bool> TryMoveNextAsync(init ref<write ref<T>> item);
+    public mut Task<bool> TryMoveNextAsync(ref<init write ref<T>> item);
     public mut Task<void> CloseAsync();
 }
 
@@ -80,7 +86,7 @@ property or `async` modifier supplies neither relationship.
 
 These interfaces do not inherit value iteration or each other. Writable
 descriptor attenuation is an ordinary value operation, not covariance of
-`init ref<write ref<T>>` storage into `init ref<ref<T>>`. Implementing a writable
+`ref<init write ref<T>>` storage into `ref<init ref<T>>`. Implementing a writable
 role does not silently provide a readonly witness. An explicit adapter can
 publish the other role with checked acquisition, output adaptation and backing.
 One underlying traversal implementation may fulfill several exact requirements;
@@ -204,9 +210,9 @@ does not upgrade a readonly handle or acquire pinning/sharing authority.
 ## Reference output and publication
 
 Each advance receives a vacant destination for the exact descriptor type,
-not vacant T storage. `init ref<ref<T>>` initializes a readonly descriptor;
-`init ref<write ref<T>>` initializes a writable descriptor. Its outer init
-reference supplies destination initialization authority, not element authority.
+not vacant T storage. `ref<init ref<T>>` initializes a readonly descriptor;
+`ref<init write ref<T>>` initializes a writable descriptor. Its initialization
+reference supplies destination authority, not element authority.
 Manual use of the initialized descriptor still follows explicit indirection.
 Normal synchronous output lifting may apply under the existing
 [omitted-output rules](calls-and-inference.md#omitted-outputs-and-retained-observations);
@@ -404,8 +410,11 @@ element authority or advance/close invalidation, or publish through an unrelated
 task/output relationship. A stronger compatible implementation does not
 silently upgrade the caller's retained broad contract.
 
-Consumers check supported relationships and producer/audit trust before
-affected use. Linking/remapping preserves semantic role, member, formal,
+Implementations claiming support preserve these relationships. The producer
+is responsible for published body facts; consumers validate selected record
+structure, references and support before affected use, then may rely on those
+facts without semantic re-proof. Linking/remapping preserves semantic role,
+member, formal,
 output, source and condition identities independently of row numbers and
 debug names. [Metadata requirements](../representation/logical-records.md#lending-iteration-encoding-pending)
 specify retained logical obligations, not a new table, reference layout,

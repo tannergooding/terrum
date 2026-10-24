@@ -4,8 +4,8 @@ These cases apply [interface witnesses](../language/interface-witnesses.md),
 [complete qualification](../language.md#types-and-operations), source
 binding, and ordinary call/lifetime contracts. They are specification
 obligations, not executed compiler tests. Assume valid declarations and
-all unrelated constraints/effects; generic examples use `[Copy]` when
-passing named values by value without `move`.
+all unrelated constraints/effects. Unmarked generic type formals use the
+default non-unique, Copy-capable, non-null domain.
 
 ## Nominal identity and associated members
 
@@ -33,13 +33,14 @@ passing named values by value without `move`.
 | WIT-20 | Interface and implementation parameter labels/defaults differ | Interface callers use interface labels/defaults; compiled calls unchanged |
 | WIT-21 | A private interface helper has a body | Not an implementation requirement |
 | WIT-22 | A restricted inherited requirement carries a source-unit/type principal | Retain that principal; no access expansion by inheritance |
-| WIT-23 | Explicit associated binding and replaceable default coexist | Use the explicit binding |
+| WIT-23 | Explicit associated-type binding and replaceable default coexist | Use the explicit binding |
 | WIT-24 | Associated `Item` is selected through two unrelated witnesses | Require explicit witness selection |
 | WIT-25 | `where T.via<I>.Item is U` with `Item=int32` and an alias of `int32` | Succeed after ordinary resolution/normalization |
 | WIT-26 | The same clause uses a nominal wrapper or differing qualification | Reject unequal complete identity |
 | WIT-27 | Associated identity is the only purported evidence for unknown `T` or `U` | Do not invert it to infer an implementer/type |
 | WIT-28 | Binding/default expansion recursively grows generic arguments | Reject nonfinite synonym/projection dependency |
 | WIT-29 | A binding names a finite nominal recursive-data type | Preserve the nominal anchor; do not expand its fields as a synonym |
+| WIT-30 | A complete witness omits an associated-constant binding | Reject; no declaration-default value substitutes for the required typed binding |
 
 ## Qualified self projection
 
@@ -64,7 +65,7 @@ otherwise. `C` is an ordinary Copy class-handle form.
 | WPROJ-13 | Requested self changes representation, ownership, pin, or another capability | Not this outer-access projection |
 | WPROJ-14 | A unit parameter/result occurs in a projected member | Preserve its complete type, position, mode, and logical arity |
 | WPROJ-15 | A member returns a view with a published backing relationship | Forward every source/root/lease obligation; no shortened or invented dependency |
-| WPROJ-16 | Original `init ref<C>` would have to satisfy requested `init ref<write C>` | Reject differing destination types; no covariant output storage |
+| WPROJ-16 | Original `ref<init C>` would have to satisfy requested `ref<init write C>` | Reject differing destination types; no covariant output storage |
 | WPROJ-17 | Original `ref<C>` would have to become `ref<write C>` | Reject changed stored inner type, despite readonly outer access |
 | WPROJ-18 | An eligible unique input is forwarded | Preserve explicit transfer exactly once; no duplicate copy or extra lifetime |
 | WPROJ-19 | A projected contract's unused owning result is ignored by its forwarding operation | Reject implicit discard; result/cleanup obligation must be preserved |
@@ -94,7 +95,7 @@ otherwise. `C` is an ordinary Copy class-handle form.
 | META-WIT-02 | Only the old unqualified interface contract is retained | Do not pretend it encodes the qualified projection |
 | META-WIT-03 | Published records change only nominal/ABI names, not required contracts | Names/layout alone do not establish compatibility |
 | META-WIT-04 | A replacement preserves the original witness but breaks a retained projected obligation | Reject that projected binding |
-| META-WIT-05 | A consumer trusts the producer's checked witness/projection facts | Still validate bounded records, references, supported semantics, and binding compatibility |
+| META-WIT-05 | A consumer uses producer-published witness/projection facts | Validate record structure, references, support and binding compatibility before use; rely on producer-published semantics without re-proof and do not rebind from names or private bodies |
 | META-WIT-06 | A linker/JIT discovers a more favorable private body/default | Do not redo source witness or overload selection |
 | META-WIT-07 | Required witness/projection semantics are unrecognized | Reject before use, not optional metadata skipping |
 | META-WIT-08 | The existing bounded binary schema has no assigned witness encoding | No new table/flag/opcode alias; use requires a separately complete supported encoding |

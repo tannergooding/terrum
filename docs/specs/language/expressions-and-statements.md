@@ -9,6 +9,8 @@ ownership, effect, and lifetime contracts.
 The [built-in scalar matrix](primitive-operators.md) supplies exact
 primitive operand/results, count controls, comparisons and accessor updates;
 it does not make a value getter a borrowable place.
+The shared [definitions](../language.md#definitions-and-notation) distinguish
+copying a value, aliasing existing data and the lifetime of each.
 
 ## Expression categories
 
@@ -45,8 +47,8 @@ indirection, including by-value loop items of ref<T>.
 [Result and capture relationships](dependencies-and-views.md) preserve exact
 source instances, versions and backing through ordinary value use, wrapping,
 copy/transfer and statement retirement. A by-value result's hidden ABI storage
-does not create a loan of a caller source. Ending a descriptor releases its
-own loan, not the referent, owner or surviving copies; no implicit lifetime
+does not create a loan of a caller source. Ending a non-owning descriptor ends
+its own access relationship (loan), not the referent, owner or surviving copies; no implicit lifetime
 extension makes an otherwise invalid return/capture usable.
 
 `ref place`, descriptor indirection, and `->` retain the
@@ -169,7 +171,9 @@ the same dependency, protocol or complete-receiver requirements.
 | `_ = expression;` | Explicitly evaluate and ignore a typed result with its cleanup | Declare a local, assign `()`, or suppress effects/failure |
 | `name = _;` | End that named local's live value and leave its storage vacant | Assign a wildcard/unit/default value or remove the name |
 | `_` in a pattern | Explicitly ignore that pattern position without reading/binding it | Cancel a live ignored owner's cleanup |
-| `_` in an eligible generic argument | Request checked inference for that position | Supply `void`, an existential value, or a runtime wildcard |
+| `_` in a direct generic-call argument | Request checked inference for that position | Supply `void`, an existential value, or a runtime wildcard |
+| `_` in a generic type position such as `G<_>` | Form a per-value existential view of the hidden argument | Infer a type argument at a call site or erase the payload to `void` |
+| `var T` in a generic pattern such as `G<var T>` | Capture the matched type argument under pattern rules | Form a stored existential view or request call-site inference |
 
 `void token = ReadInt();`, `return ReadInt();` from a `void` callable,
 and assigning `_` as an ordinary expression diagnose. Explicit discard is
@@ -329,7 +333,8 @@ pending normal return under ordinary failure/chaining, and discharges any
 still-owned unpublished result without replaying completed cleanup.
 For async declarations, result checking uses the registered completion
 payload, not an implicit conversion of some `Task<T>` to `Task<void>`.
-A no-return guarantee removes a normal edge but does not imply NoThrow,
+A no-return guarantee removes a normal edge but does not imply absence of
+failure,
 weaken source typing, or waive failure cleanup.
 
 ### No-return contracts
@@ -338,7 +343,7 @@ A checked `[DoesNotReturn]` is applicable to a callable with any declared
 logical result type. It promises that the actual invocation cannot complete
 normally: returning its declared value, returning unit or normally falling
 through violates the promise. Escaping failure and structural divergence have
-no normal edge; `[NoThrow]` is an independent bound.
+no normal edge; failure behavior remains independent of the no-return promise.
 
 The declared result remains the call expression's ordinary type. No public
 bottom type, conversion from `void` or implicit non-unit discard is introduced.

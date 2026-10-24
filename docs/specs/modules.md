@@ -26,9 +26,11 @@ and code lifetime. Supporting one mode does not admit another.
 call/ownership/deployment scope. It does not infer a managed heap, task/view
 crossing, startup adapter or exception interchange from module composition.
 
-An admitted semantic consumer can lower verified retained semantics at process
-start or emit a new image before execution. That is distinct from using an
-unchanged precompiled consumer with a compatible native provider.
+An admitted semantic consumer can lower retained semantics after structural
+safe-consumption checks and support admission, relying on producer-published
+semantic truth, at process start or emit a new image before execution. That is
+distinct from using an unchanged precompiled consumer with a compatible
+native provider.
 [Native boundaries](native.md) still require the applicable ABI and published
 contracts; no mode implicitly supplies live patching, hot unload or source
 recompilation.

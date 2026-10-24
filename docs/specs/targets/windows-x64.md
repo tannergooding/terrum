@@ -9,36 +9,39 @@ and ownership boundary. Its canonical chapters are:
 |---|---|
 | [Data layout](windows-x64-data-layout.md) | All core scalar storage, validity, registered layout schemas, aggregate placement, padding, stride and packed access |
 | [Call interface](windows-x64-call-interface.md) | Foreign primitive admission, carrier classification, argument positions, copies/results, borrows, initialization and ownership |
-| [Deployment](windows-x64-deployment.md) | Preservation, non-unwinding default, image/unwind support, selected definitions, origin and retained code lifetime |
+| [Deployment](windows-x64-deployment.md) | Preservation, native exception normalization, reverse-boundary containment, image/unwind support, selected definitions, origin and retained code lifetime |
 
 This profile completes that stated boundary, not every Terrum runtime
 representation. Managed handles/interiors, stored checked-reference
 descriptors, general views, tasks/continuations, erased witnesses, SIMD,
 variadic/unprototyped calls, native C++ member/nontrivial-record conventions,
-callbacks/COM and cross-language exception transport require separate
-complete contracts. Exclusion from this profile does not remove a source
-feature or a mandatory scalar.
+callbacks/COM and producer-language exception-object transport require
+separate complete contracts. Native exception normalization into Terrum
+objects is specified below, but a module must require the separate
+`NativeExceptionUnwind` capability and its runtime support. Exclusion from
+this profile does not remove a source feature or a mandatory scalar.
 
 The separately selected
 [Windows x64 failure bridge](windows-x64-failure-bridge.md)
-supplies paired contained exception transport and its exact synchronous
-callback entry. It does not add general callbacks, COM, async/managed
-closures or a shared native unwinder to this ordinary profile.
+supplies paired normal-return packet transport and its exact synchronous
+callback entry. It does not define native exception unwinding, general
+callbacks, COM or async/managed closures.
 
-The existing target requirement `1` still identifies Windows x64 native.
-The logical revision above introduces no separate layout-profile identity
-or new numeric selector. Exact rule agreement remains necessary; the target
-number alone does not identify every promised layout, runtime or semantic
-revision. In [current interchange](../representation/requirements-and-admission.md#3-before-use-admission),
-required governing rules are agreed out of band, and missing Blittable,
-ownership or borrow codecs remain unsupported before independent use.
-Neither an optional Attr row nor reserved bits activate this profile.
+The existing target requirement `1` continues to identify the broad Windows
+x64 native target. The registry assigns typed `TargetProfile` identity `(1, 1)`
+to this exact `windows-x64-native/1` contract. The profile
+fixes architecture/OS, complete layout, value representation and applicable
+ABI rules; it does not duplicate computed `Layout` results or replace the
+coarse Module target requirement. Persisted target-dependent constant
+evaluation names this concrete profile and retains its layout dependencies.
+Exact rule agreement remains necessary; neither an optional Attr row nor
+reserved bits activates the profile.
 
 This is a normative design contract, not a claim about compiler support.
 The [layout support inventory](../../implementation/layout-profiles.md)
 and [development native guide](../../implementation/native.md) describe current
-support. The [layout integration proposal](../../proposals/public-fixed-layout-profile.md)
-tracks pending physical records and wider qualification.
+support; [CG-005](../../implementation/conformance-gaps.md#cg-005) tracks the
+remaining implementation and qualification work.
 
 ## 2. Standard foreign mapping versus Terrum defaults
 
@@ -103,10 +106,13 @@ initialization outcomes, transfers, failure policy and code/helper lifetime.
 Its consumer establishes [directed contract satisfaction](../representation/binding-and-replacement.md),
 not equality of a name, DLL path, byte count or private package version.
 
-Body truth is separately checked or admitted through the explicit
-semantic/native provider trust policy. A layout calculation, successful OS
-load or integrity digest proves neither a NoThrow claim nor native ownership
-and output behavior. Invocation still satisfies its actual preconditions.
+The provider is responsible for the truth of its published body and native
+contract facts; consumers validate selected record structure and references
+and check binding compatibility before affected use, then rely on published
+facts without semantic re-proof. These checks do not prove arbitrary provider
+behavior or authored unsafe promises. A layout calculation, successful OS load or integrity digest proves neither
+provider truth nor native ownership and output behavior. Invocation still
+satisfies its actual preconditions.
 
 Unknown or missing required mappings, records, rule agreement, helpers,
 lifetimes or value modes decline before affected binding/lowering/execution.
@@ -114,12 +120,43 @@ No hidden boxing, pin, allocation, retain, ownership registry, source rebinding
 or JIT fallback repairs an unsupported crossing. ABI-required by-value
 supporting storage is not such a repair.
 
-Default foreign calls are direct and non-unwinding. Ordinary failures use
-their explicitly matched status/output contracts. Exception interchange is
-specified by the separately selected
-[contained bridge](windows-x64-failure-bridge.md); its adapters bear that
-cost without changing every ordinary call. Windows unwind data alone
-supplies none of that language interchange.
+Native imports are direct ABI calls and use the ordinary target unwind
+contract when the module requires `NativeExceptionUnwind` and the runtime
+supports it. Ordinary status/output failures retain their explicit result
+contracts; they are not native exception objects. The separately selected
+[contained bridge](windows-x64-failure-bridge.md) remains a normal-return
+packet protocol, not the native unwind path. Terrum exceptions never unwind
+outward through native frames; native exports/callbacks contain reverse-
+boundary propagation.
+
+## 6. Native exception unwinding and normalization
+
+An imported call may unwind a native Windows exception into Terrum only when
+the module requires `NativeExceptionUnwind` and the selected runtime provides
+the complete platform exception/unwind support. The target follows Windows
+SEH and x64 unwind rules; no per-import, per-method or function-pointer
+`NoUnwind` opt-in changes those rules. Unwind records recover caller state,
+but do not define the exception object's identity or expose producer-language
+payloads.
+
+Before source catch matching, normalize each admitted ordinary SEH event:
+
+| Windows event | Terrum exception |
+|---|---|
+| `EXCEPTION_ACCESS_VIOLATION` | `AccessViolationException` |
+| `EXCEPTION_STACK_OVERFLOW` | `StackOverflowException`, only after unwind recovery leaves enough stack for construction and handling |
+| `EXCEPTION_INT_OVERFLOW` | `OverflowException` |
+| Integer divide-by-zero | `DivideByZeroException` |
+| Other admitted ordinary SEH event | Opaque `NativeException`; do not decode producer-language payloads |
+
+`NativeException` exposes a stable Terrum-owned snapshot and optional
+caller-unsafe native-context access under the
+[native exception object contract](../native.md#native-exception-objects).
+The common `IException<_>` catch matches the fallback object. If an event
+cannot be normalized/materialized safely, or a native exception is uncaught,
+the runtime fails fast. Process termination, forced unwinds, `longjmp` and
+cancellation are excluded. This contract does not make C++, Rust, Swift,
+Java or .NET exception objects interoperable.
 
 ## 5. Conformance
 

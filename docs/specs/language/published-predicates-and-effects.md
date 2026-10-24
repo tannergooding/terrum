@@ -51,24 +51,25 @@ Ordinary input transfer, result construction and cleanup must retain their
 actual contracts; a purity marker cannot make an observable destructor pure.
 
 Purity does not prove termination. An invalid precondition can still fail at
-its ordinary check. A valid-input failure bound does not imply an unconditional
-`NoThrow` call when that precondition is not established. A false enclosing
+its ordinary check; Pure's exclusion of escaping language exceptions applies
+only when its preconditions hold. A false enclosing
 `require` is also the requirement operation's failure, not a side effect of
 computing its Boolean operand. Preserve these failures and their evaluation
 points unless the applicable proof establishes their absence.
-[Its failed-path `new E()`](requirement-failures.md) retains ordinary
-constructor/default/static-init/cleanup effects and actual construction
-failures. RequireException chooses a source-owned type, not a Pure/NoThrow
+[Its failed-path constructor binding](requirement-failures.md) retains its
+actual constructor/default/static-init/cleanup effects and failures. RequireException
+chooses a source-owned type, not a purity or failure-free
 capability. Proof of Boolean computation alone does not discharge those
 false-path obligations or permit predicate replay/side-effect removal.
 
 [Lexical exception capture](captured-exceptions.md) likewise has an actual
 implicit handler source and ownership publication, despite zero supplied
-arguments. Its registration adds no Pure/ConstEval or unconditional NoThrow
+arguments. Its registration adds no Pure/ConstEval or failure-free
 creation promise. Include creation resources/effects, handler vacancy,
 payload/cause dependencies, transfer and nonthrowing/nonsuspending retirement.
 An internally handled preparation failure need not escape an enclosing
-NoThrow body, but complete path/effect proof remains required.
+Pure operation on its valid domain, but complete path/effect proof remains
+required.
 Opaque storage or unchanged payload bits cannot justify eliminating that
 responsibility transition or treating captured throw as a fresh payload Copy.
 
@@ -163,7 +164,7 @@ mode; this does not change mode midway through either activation.
 | Reached named call | Selected pure evaluation | Terrum required constant evaluation |
 |---|---|---|
 | Checked `Pure` contract | Use its supported pure form | Additionally require constant opt-in/body or an admitted intrinsic |
-| Checked `ConstEval` contract | Pure-form support is implied | Use its admitted constant program/intrinsic and concrete path |
+| Checked `ConstEval` contract | Pure-form support is implied | Use its admitted `ConstantExecution` record or exact intrinsic and concrete path |
 | No published purity contract | Need a sound closed proof of the selected execution's purity/equivalence | Ordinary unmarked call is unsupported; private body availability alone is not opt-in |
 | Missing/incompatible required contract or body | Diagnose a required unsupported selection | Diagnose, never execute a runtime fallback |
 
@@ -432,7 +433,7 @@ an overload discriminator or an inference/ranking preference. After unique
 call selection, discharge it along with other access/dependency obligations.
 Opaque imports can publish its complete checked region/extent contract without
 exposing their bodies. Required constant execution still needs separate
-ConstEval/program/value admission.
+`ConstEval`/`ConstantExecution`/value admission.
 
 Adding a NoAlias entry requirement restricts the valid caller domain and is
 incompatible with a contract that admitted overlapping inputs. Removing or
@@ -447,7 +448,7 @@ It assigns no TypeSpec qualifier, Param flag, Effects bit or clause kind.
 
 ## Initialization destinations are results
 
-`init ref<T>` is a logical result position. It lends a vacant destination,
+`ref<init T>` is a logical result position. It lends a vacant destination,
 not a live input that the callee may overwrite. Initialization/publication is
 the result-return mechanism, including efficient multiple-result ABI lowering.
 The pure outcome includes the ordinary result, each destination's declared
@@ -566,15 +567,18 @@ arithmetic NaN latitude does not extend to the selected deterministic constant
 NaN recipe. Record actual evaluated code/value/target dependencies; preserving
 a purity flag alone does not make an old computed answer the new answer.
 
-An independent consumer validates identities, record shape, substitution,
-required rule versions, dependencies and
-[complete binding compatibility](../representation/binding-and-replacement.md)
-before use. Extra supported forms or narrower effects do not erase exact
-state/phase promises, specified validation failure or stronger facts retained
-by an optimized caller. Producer checking does not waive bounded decoding or
-admission. Missing mandatory
-pure/constant/predicate semantics reject rather than falling back to optional
-attributes, host execution or a weaker effect interpretation.
+An implementation's successful support/binding claim preserves identities,
+substitution, required rule versions, dependencies and
+[complete binding compatibility](../representation/binding-and-replacement.md).
+Consumers validate selected record structure, references and support before
+affected use, then may rely on producer-published facts without semantic
+re-proof or proving arbitrary external implementations.
+Extra supported forms or narrower effects do not erase
+exact state/phase promises, specified validation failure or stronger facts
+retained by an optimized caller. Missing mandatory pure/constant/predicate
+semantics do not establish support; optional attributes, host execution or a
+weaker effect interpretation are not substitutes. Unsupported or malformed
+required metadata is rejected before affected use.
 Physical records, constant programs and value codecs remain separate admission
 work. No pair-selector or broader NoAlias annotation schema is supplied.
 

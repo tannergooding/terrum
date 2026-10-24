@@ -26,8 +26,9 @@ require their preservation in a later draft.
 | [Async execution](source-async-execution.md) | Eager entry, establishment/failure channels, inline/suspended completion, cleanup, effects and responsible observation |
 | [Task responsibility](source-task-responsibility.md) | Affine owner identity/transfer, consuming await, payload/output/terminal observation, every-exit settlement, cancellation and admission |
 | [Ownership and cleanup](source-ownership-and-cleanup.md) | Construction/acquisition, structural partial moves/repair, complete Cleanup receivers, replacement, exact retirement order and retained dependencies |
-| [Local failures](source-local-failures.md) | Nominal Exception schema/categories, exact complete subjects, explicit reference/Copy bindings, fresh versus active propagation, selection and admission |
-| [Requirement failures](source-requirement-failures.md) | Runtime selectors, callable/default/Core identities, ordinary zero-input construction, operand versus constructor failure, output states, phases and admission |
+| [Storage backing and GC](source-storage-and-gc.md) | Normal versus GC backing identity, bounded references, construction, roots and optional-root reborrows, acquisition failure, early support release, raw-pointer extraction, Cleanup and unassigned representation gates |
+| [Local failures](source-local-failures.md) | Self-typed exception classes, exact complete subjects, object-handle bindings, fresh versus active propagation, selection and admission |
+| [Requirement failures](source-requirement-failures.md) | Runtime selectors, callable/default/Core identities, ordinary constructor binding, operand versus construction failure, output states, phases and admission |
 | [Captured exceptions](source-captured-exceptions.md) | Opaque affine Core identity, lexical creation, handler transfer/borrow states, original-event rethrow, causes, retirement/phases and independent admission |
 | [Thread capabilities and sharing](source-sharing-and-handoff.md) | Explicit/local-conditional eligibility, alias and return authority, publication, guard/scalar protocols, captured duties and unsafe/trust boundaries |
 | [Concurrent executions](runtime-concurrent-executions.md) | Exact access/source generations, coherence, matched fence communication, required access order, mixed SC/full boundaries, failed attempts and grounded causality |
@@ -40,21 +41,22 @@ require their preservation in a later draft.
 | [Local declaration spaces](source-local-declarations.md) | Name collisions, points of declaration, loop/catch scopes, and lookup versus availability |
 | [Source name binding](source-name-binding.md) | Namespace/member collisions, type arity, generic formal names, imported groups, accessibility, and type-call precedence |
 | [Initialization and pattern flow](source-initialization-flow.md) | State joins, mutable and negative patterns, retained matches, phase scopes, outcome invalidation, and initialization-loan projections |
+| [Static initialization](source-static-initialization.md) | Closed-type eager groups, partial order, explicit triggers, static places, lazy units, waiting/cycles/failures, imported dependencies, cleanup and unload |
 | [Values and ordinary execution](source-values-and-execution.md) | First-class unit, explicit result handling, expression categories, loops, and return completion |
 | [Interface witnesses](source-interface-witnesses.md) | Nominal and inherited identity, associated bindings, checked qualified-self projection, and publication |
 | [Complete types](source-types-and-normalization.md) | Finite substitution, qualifier/representation identity, actual-write constraints, requested-access boxing, optional normalization, and tuple/callable signatures |
 | [Constant generics](source-constant-generics.md) | Closed domains, checked Transparent primitive wrappers, nominal/carrier value identity, validity/construction, forwarding/defaults and independent compatibility |
-| [Registered queries](source-registered-queries.md) | Exact Core authority/signatures, complete value subjects, runtime/constant target evidence, fixed/coupled retention and replacement |
+| [Registered queries](source-registered-queries.md) | Grammar-owned query forms, complete type/layout/count subjects, runtime/constant target evidence, authorization, fixed/coupled retention and replacement |
 | [Calls and inference](source-calls-and-inference.md) | Argument mapping, finite type/constant and contextual evidence, quality/specificity, hidden-output scopes, ownership-safe extraction and exact retirement traces |
 | [Built-in scalar operators](source-primitive-operators.md) | All scalar signatures, checked integer/count edges, strict floating formats/remainder, comparisons, and place/accessor update timing |
 | [Absolute-value members](source-absolute-value.md) | Same-type numeric identity, exhaustive small integers, signed/native minima, floating classes, call/result states and effect/variant admission |
-| [Numeric selection members](source-numeric-selection.md) | Exact Min/Max/Clamp members, integer/floating selection, signed zeros/cohorts, invalid-bound payload, call/event/state/phase and admission |
+| [Numeric selection members](source-numeric-selection.md) | Exact Min/Max/Clamp members, integer/floating selection, signed zeros/cohorts, InvalidBoundsException class, call/event/state/phase and admission |
 | [Floating environment](source-floating-environment.md) | Sign-only representations, quiet processing-result NaNs, canonical admitted constant recipes and no ambient status |
 | [Numeric capabilities](source-numeric-capabilities.md) | Exact groups, self/Copy/member contracts, all primitive witnesses and independent generic evidence |
 | [Library inventory and scenarios](source-library-contracts.md) | Selected versus candidate roles, exact public declarations, complete admission closure and provider/consumer responsibility |
-| [Standard runtime categories](runtime-standard-failures.md) | Postcondition/index/recoverable-allocation mappings, initializer state and original versus fresh responsible events |
-| [Scalar checked failures](source-scalar-failures.md) | Exact nominal zero-data Core types, arithmetic/conversion/count failure mapping, event/cause ownership, result/effect preservation and admission |
-| [Proof and constant execution](source-proof-and-constant-evaluation.md) | Scalar facts/branches, safety and invalidation, constant path/dependency eligibility, deterministic NaNs and exact resource boundaries |
+| [Standard runtime categories](runtime-standard-failures.md) | Postcondition/index/recoverable-allocation mappings, initializer state and original versus fresh exception objects/events |
+| [Scalar checked failures](source-scalar-failures.md) | Exact nominal Core exception classes, arithmetic/conversion/count failure mapping, event/cause ownership, result/effect preservation and admission |
+| [Proof and constant execution](source-proof-and-constant-evaluation.md) | Scalar facts/branches, invalidation, constant eligibility, deterministic NaNs, resource boundaries and typed record-family admission |
 | [Published predicates and pure evaluation](source-published-predicates-and-effects.md) | Input-state purity, modes/authorization, checked reads/effects, NoAlias parameters, initialization results, predicate phases and compatibility |
 | [IL unit values](il-unit-values.md) | Zero-data typed IDs, logical unit arguments, constant encoding, calls, equality, and state |
 | [Unified IL registry](il-registry.md) | One catalog, allocation/role/shape consistency, scalar/floating admission, complete artifacts and opcode-aware rewrites |
@@ -63,7 +65,8 @@ require their preservation in a later draft.
 | [Module semantic manifests](il-semantic-manifests.md) | Required governing editions, exact capability lists, derived closure, actual framing and finite packing/schema rewrites |
 | [Binding and replacement](il-binding-and-replacement.md) | Selected identities, exact types/modes/states, directed guarantees, complete comparison contexts and retained replacement dependencies |
 | [Contract clauses](il-contract-clauses.md) | Assigned extents/owners/keys, explicit zero-mask equivalence, output/cleanup subjects, no-return signatures and reserved-use gates |
-| [Reader trust](il-reader-trust.md) | Trusted selective access, natural decoding/ABI/authorization checks, scoped audits and table-implied references |
+| [Native boundaries](native-boundaries.md) | Native declaration roles, callable identity, target-derived layout/ABI, pointer and provider lifetime, exception boundaries, and required TRRM validation |
+| [Consumer verification](il-reader-trust.md) | Mandatory structural safe-consumption checks before affected use, producer truth obligations and optional semantic-audit scope |
 | [Encoding canonicality](il-encoding-canonicality.md) | Equivalent noncanonical ordinary admission, strict writers/audits, width/map/value validity and re-encoding |
 | [Resource accounting](il-resource-accounting.md) | Declared scoped capacity, checked inventories/expansion, deterministic work/state, explicit exhaustion and deferred portable minima |
 | [Interchange and private persistence](interchange-persistence.md) | Normative versus private serialized claims, actual schema identity, native contract/lifetime gates, tooling scope and documentation ownership |

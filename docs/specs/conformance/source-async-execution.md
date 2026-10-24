@@ -60,10 +60,10 @@ arbitrary source proofs or scheduler/concurrency tests.
 
 | ID | Scenario | Required outcome |
 |---|---|---|
-| AEFAIL-01 | Async NoThrow declaration can escape a valid-domain body failure through task completion | Reject NoThrow promise; task transport does not erase exception effect |
-| AEFAIL-02 | Async NoThrow declaration can fail callee establishment/check/cleanup on its valid domain | Its promise covers those callee phases too |
-| AEFAIL-03 | NoThrow non-async factory returns an admitted faulted task without throwing | Invocation promise alone says nothing about later success |
-| AEFAIL-04 | Caller argument fails before an otherwise NoThrow call | Failure retains caller attribution |
+| AEFAIL-01 | Async operation fails during body execution after establishment | Preserve the failure through task completion; task transport does not erase its effect |
+| AEFAIL-02 | Async operation fails during establishment, checks or cleanup | Attribute the failure to the phase that failed |
+| AEFAIL-03 | Non-async factory returns a Task that later fails | Distinguish normal factory completion from the later task-operation failure |
+| AEFAIL-04 | Caller argument fails before invocation | Retain caller attribution; callee establishment has not begun |
 | AEFAIL-05 | NoAlias is placed on an async/producer source input | Do not infer a post-invocation separation extent |
 | AEFAIL-06 | A pending operation handle or wait is discarded | Responsible completion/error/cleanup owner remains |
 | AEFAIL-07 | Cancellation is requested while work is pending | Request is not terminal completion or backing release |
@@ -80,5 +80,5 @@ arbitrary source proofs or scheduler/concurrency tests.
 | AERET-03 | Replacement publishes success before completion cleanup/ensure | Incompatible contract; no late success retraction |
 | AERET-04 | Consumer lacks required async-execution rule/capture support | Reject before affected use |
 | AERET-05 | Consumer remaps operation/formal/phase/failure references | Preserve semantic relationships independently of rows/debug names |
-| AERET-06 | A task/frame/awaiter/failure flag is treated as a proof of implementation truth | Explicit semantic producer/audit trust, not structural flag proof |
+| AERET-06 | A task/frame/awaiter/failure flag is treated as proof beyond its declared contract | Producer remains responsible for truth; consumers validate record structure, references and support but are not required to re-prove contract facts. Optional audits do not prove arbitrary provider behavior |
 | AERET-07 | Logical phase model passes | Not task representation, arbitrary body proof or scheduler/concurrent execution conformance |

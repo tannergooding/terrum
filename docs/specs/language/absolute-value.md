@@ -93,10 +93,10 @@ value -128 and reaches the same overflow boundary. Widening the result
 afterward cannot make either call succeed. An explicitly wider argument
 and owning operation is a different call.
 
-The [Core scalar catalog](scalar-failures.md) selects exact zero-data
+The [Core scalar catalog](scalar-failures.md) selects exact
 Terrum.OverflowException for this checked magnitude failure. Actual failure
-policy, construction, propagation and runtime support remain separately
-admitted; this selects no payload ABI or failure allocation strategy. A `RequireException`
+policy, factory creation, propagation and runtime support remain separately
+admitted; this selects no exception-object ABI or allocation strategy. A `RequireException`
 recipe selects runtime `require` failures; it does not replace this member's
 overflow with the callable's requirement default. A terminal policy promises
 neither a local catch nor cleanup after termination.
@@ -127,7 +127,7 @@ The [floating-environment boundary](floating-environment.md) supplies no
 ambient language status-flag facility and retains actual native control duties.
 [Representation operations](../conversions.md#conversion-policies) retain
 their separate bit contracts. A mathematical result domain alone does not
-publish an unconditional `NoThrow` contract for an arbitrary provider or its
+publish an unconditional failure-free contract for an arbitrary provider or its
 required execution substrate.
 
 ## 4. Evaluation, failure and result state
@@ -162,7 +162,7 @@ Integer `Abs` has the stated value-domain boundary. A caller needing failure
 freedom must use an admitted guarantee or sound supported proof of the
 applicable input domain and all other actual effects. This chapter does not
 add private-body inference to the mandatory proof floor or an unconditional
-`NoThrow` declaration.
+failure-free declaration.
 
 The [Pure and ConstEval rules](published-predicates-and-effects.md) remain
 separate. Mathematical computability, a static signature or constant

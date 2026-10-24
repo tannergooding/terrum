@@ -9,6 +9,12 @@ syntax, scopes and transfers. [Lifetimes](../lifetimes.md) and
 nominal conformance. No iterator keyword, per-method role attribute, implicit
 adapter or physical operation assignment is added.
 
+“By value” describes the published item, not a deep copy of everything it
+references. A checked-reference item is itself a descriptor with its supporting
+dependencies; it does not select the separate
+[reference-output lending protocol](lending-iteration.md). See the shared
+[copying and aliasing definitions](../language.md#definitions-and-notation).
+
 ## Nominal protocol identities
 
 Core's resolved Terrum.ICursor and Terrum.ISequence requirements have these
@@ -17,7 +23,7 @@ logical signatures:
 ```terrum
 public interface ICursor<T>
 {
-    public mut bool TryMoveNext(init ref<T> item);
+    public mut bool TryMoveNext(ref<init T> item);
     public mut void Close();
 }
 
@@ -52,7 +58,7 @@ A class/descriptor cursor retains its exact required handle/backing authority;
 an unsupported readonly carrier is not silently upgraded.
 Likewise each output needs eligible vacant T storage and ordinary validity,
 initialization and lifetime support. The interfaces do not create these
-representation capabilities from a name or arbitrary size.
+representation capabilities from a nominal name or a claimed byte extent.
 
 Ordinary public APIs named MoveNext or Current can remain useful, including
 inside an explicit adapter. They are not operations synthesized by standard
@@ -307,10 +313,10 @@ generated lending producers by itself.
 | Traversal | Actual cursor state, end/close obligations and effects; no Current lookup, inferred restart or recovery |
 | Dependencies | Source/receiver/backing, cursor/item roots, leases, guards, retained loans and lifetime/refinement promises |
 | Schedule | Once-only source evaluation/acquisition, body/item retirement before advance/close, eager direct-capture close and spread order |
-| Admission | Supported operations/forms/rules, complete references and compatible published contracts under explicit producer/audit trust |
+| Admission | Supported operations/forms/rules, complete references and compatible published contracts; producer is responsible for their semantic truth |
 
-Independent consumers validate these requirements before affected use.
-Linking/remapping preserves semantic source/cursor/item and operation
+Implementations claiming support preserve these requirements; reader
+validation is implementation-defined. Linking/remapping preserves semantic source/cursor/item and operation
 identities rather than reselecting by names or physical row order.
 Changing acquisition/ownership, the output relation, close timing or published
 backing invalidation is incompatible with retained callers.

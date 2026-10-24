@@ -1,2389 +1,2644 @@
-# Terrum coded instruction set
+# Terrum register instruction set
 
-> [!IMPORTANT]
-> Approved current design for the specified Body encoding and bounded
-> executable subset, not the current semantic-module writer or a released
-> interchange format. Unsupported operations and unencoded contracts do not
-> become executable by appearing in the opcode registry.
-> The [unified registry](representation/registry.md) owns opcode allocation
-> and operand shapes. `(1, 0)` is the metadata format pair, not a separate
-> on-wire profile selector; exact development-schema agreement is required.
+This chapter defines the current draft register-based Body encoding and its
+operation contracts. It replaces the earlier evaluation-stack/SSA-value-ID
+instruction envelope; unpublished earlier Body assignments are not aliases
+or compatibility targets. The format pair remains `(1, 0)` under the
+[pre-release versioning rules](representation/format-versioning.md); exchange
+still requires exact out-of-band agreement on this complete draft schema.
 
-The [approved current metadata design](il-metadata.md) defines the Body table,
-TypeSpec, MethodDef, contracts and artifact framing. This document specifies
-the Body payload and operation stream separately, following only the
-*organizational* distinction between ECMA-335 Partitions II and III. It does
-not adopt CIL opcodes, its evaluation stack, branch displacement formats,
-metadata tokens or runtime ABI.
-Displayed opcode tables project [the registry](representation/trrm-1.registry.json);
-they do not preserve a second generic or floating-draft allocation.
-The [requirement and admission contract](representation/requirements-and-admission.md)
-keeps one artifact-wide decoder and each Module's exact governing semantics.
-The [reader-trust contract](representation/reader-trust.md) permits selective
-access without a preliminary Body scan while retaining natural bounds,
-shape/reference and caller-use checks. Feature support does not supply
-missing operation/contract encodings.
+The [allocation registry](representation/registry.md) is the sole authority
+for opcode, family, record-kind and enum numbers. This chapter defines their
+operand layouts and semantics. [IL metadata](il-metadata.md) owns the Body
+row, maps, typed records and SourceMap section framing. An allocation does
+not establish compiler/runtime support or complete a separately required
+logical contract.
 
-## Model and canonical form
+The instruction stream is register-based but does not promise machine
+register allocation, purity, effect ordering beyond the operation rules,
+or a register/stack ABI. A consumer may construct internal SSA identities
+while importing; those identities are not serialized per-expression IDs.
+Registers, method homes and places remain distinct logical carriers.
 
-A Body encodes an implementation owned by exactly one MethodDef in its
-module. A **block** has typed parameters, ordered operations and one
-terminator; each normal edge supplies its successor's
-parameters. Checked operations and potentially failing calls do not end a
-block merely because they can fail. They define their result at their
-operation site on success; failure terminates or unwinds under the selected
-runtime policy, without a normal edge or a normal successor. Normal block
-boundaries are the method entry and explicit normal branch or transfer
-targets, including merge and backedge targets; branch, return, failure and
-region-exit terminators end their current block. A value definition or
-liveness change does not create a block. An optional unsafe catch requires
-separately specified exceptional state and handler rules.
-A **value ID** denotes an immutable typed definition. A **place** denotes
-addressable storage with separate initialization, mutability and ownership
-state; loading a value is distinct from borrowing or moving its place. A
-**region** groups blocks for loop structure or lexical lifetime. Only the
-function region (ID 0) is implicit. Optional SourceMap spans do not affect
-execution.
+## Semantic owners
 
-Explicit blocks and regions avoid recovering control flow from branch
-displacements or backedges, and local lifetimes from source names. This is
-not an optimizer's canonical SSA: block parameters replace implicit stack
-merges, but place writes, calls and failures remain ordered effects.
-Interpreters, JITs and AOT compilers may lower verified blocks independently.
-Untrusted loop/region facts require validation; trusted producers may supply
-them to a fast consumer, with semantic audit as an explicit option.
-
-Value IDs and block parameters form an SSA-like value graph, while mutable
-places and ordered effects remain explicit rather than pretending all storage
-is in SSA. The Body records value types and cross-block liveness for ordinary
-values; consumers need not infer those solely from instruction uses. It
-also indexes each value's defining operation and its final operand use in
-each using block, but not every intermediate use. It does not yet encode
-per-safepoint logical roots or the native locations required by a GC.
-Those are separate concerns: a future producer-recorded root inventory
-can identify logical roots, ownership and interior-reference dependencies,
-but only the backend knows which registers or stack slots hold them after
-lowering. Do not treat source-local counts or ordinary SSA last-use as a
-complete GC root map.
-
-Numeric policy (checked, wrapping, saturating, bit reinterpretation) is
-explicit; converting one into another is not a space-saving normalization.
-A discarded result does not discard an effectful call. Typed source binding
-selects one MethodDef before encoding; no reader reruns overload resolution.
-Operations absent from the assigned tables reject rather than being guessed
-from CIL or CLR behavior.
-
-### Architecture-critical indexes and contracts
-
-The worked examples are part of the design explanation, not
-replaceable opcode trivia. The intended fast path crosses two documents:
-
-| Input | What a consumer can learn without rediscovering it from instructions |
+| Contract | Owner |
 |---|---|
-| [Approved metadata tables](il-metadata.md#section-kinds-and-row-layouts) | Selected declaration and complete type/signature; retained imports bind against published contracts without re-proving dependency bodies |
-| [Contract clauses](il-metadata.md#semantic-contracts-and-stable-binding) | Assigned effects such as `NoThrow`/`DoesNotReturn` and reserved output, transfer, dependency and cleanup shapes; only Effects is executable in this narrow Body subset, so readers must not assume the other contracts are already usable |
-| [Body index](#body-record-direct-block-index-and-regions) | Type/value/place inventories, exact definition locations, direct block/terminator addresses, normal boundary liveness and per-block final uses |
-| [Compact Body forms](#compact-body-forms) | One-block linear encoding derives indexes on a scan; compact indexed retains direct seeks for small CFGs; neither omits required semantics or enables unassigned roots |
-| [Conditional add](#adding-a-conditional-to-the-sum), [merge and loop](#conditional-merge-and-loop-informative-shapes) | How a single checked block grows normal branches and a backedge; which values merely transit a block, which ones are actually used there, and how pruning a dead arm updates surviving use-block counts |
-| [Checked-add bytes](#checked-add-end-to-end-informative) and [place example](#value-and-place-state-through-checked-arithmetic) | Ordered failures without artificial CFG edges; separate immutable values, addressable storage and their last-use/state transitions |
+| Complete types and normalization | [Complete types](language/types-and-normalization.md) |
+| Scalar domains, shifts and comparisons | [Primitive operators](language/primitive-operators.md) |
+| Conversion pairs and policies | [Conversions](conversions.md) |
+| NaNs, sign operations and floating observations | [Floating environment](language/floating-environment.md) |
+| Abs/Min/Max/Clamp | [Abs](language/absolute-value.md), [numeric selection](language/numeric-selection.md) |
+| Values, places and zero-data unit | [Values and execution](language/expressions-and-statements.md) |
+| Initialization and joins | [Structural flow](language/initialization-and-flow.md) |
+| Transfer, replacement and retirement | [Ownership and cleanup](language/ownership-and-cleanup.md) |
+| References and backing | [References](language/references.md), [dependencies](language/dependencies-and-views.md), [lifetimes](lifetimes.md) |
+| Call staging and publication | [Call contracts](language-contracts.md), [calls and inference](language/calls-and-inference.md) |
+| Exact-schema access and admission | [Reader trust](representation/reader-trust.md), [format versioning](representation/format-versioning.md) |
 
-A specializing inliner can seek a predicate's definition, inspect the
-relevant dependency instructions, follow indexed terminators and discard
-unreachable blocks using their use inventories. It still decodes retained
-operations and respects effects, ownership and selected contracts;
-indexes are producer facts under the specified trust/audit policy, not
-an independent proof of safety. Method-level effect/call summaries
-and per-safepoint logical roots remain
-[future work](#tool-roles-and-future-executable-contracts), not capabilities this
-bounded subset has already encoded. If these informative examples move to a
-companion document, retain this contract map and links from the
-normative rules; splitting the examples must not orphan the fast-import
-story or silently promote unsupported Body shapes to executable status.
-The existing [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)
-use explicit development-schema bytes, as distinguished in the
-[encoding inventory](../implementation/trrm-encoding-history.md).
-They illustrate independent fixture checking, not current-registry
-conformance or an executable standard Body reader. The
-[registry conformance vectors](conformance/il-registry.md) supply the current
-independent normative examples.
+IEEE exception handling remains disabled by default. This does not suppress
+checked integer failures, runtime requirements or ordinary language throws.
+Future opt-in IEEE status handling is outside this codec.
 
-The examples progress from a checked scalar sum in one block to a
-conditional sum and repeated additions around a loop header. A separate
-merge example supplies exact bytes for edge arguments, and an addressable
-local illustrates why place state differs from values. A later
-[exception sketch](#why-a-catch-is-not-another-normal-edge) describes a
-missing contract, not a usable handler encoding. The source snippets are
-illustrative; the recorded Body facts, not the spelling of a source local,
-define the bounded Body design.
+Operation inclusion does not register a source primitive or authorize
+recognition by method spelling. Source overload selection remains owned by
+the language and library contracts. Native calls retain their declared ABI
+and caller-unsafety obligations. Current executable support is recorded in
+[the implementation reference](../implementation.md), separately from this
+target contract.
 
-## Instruction encoding structure
+## Names, values and storage
 
-The stream is byte-addressed, not a bitfield ISA. Every multi-byte integer
-is little-endian. The opcode selects **one** operand schema; no operand
-encodes an addressing mode, a hidden evaluation stack or a type-specific
-opcode variant. There are two instruction envelopes:
-
-| Envelope | Bytes in decoding order | Use |
-|---|---|---|
-| Common | `opcode operands` | Reference, count and data operands each occupy one byte |
-| Wide | `F0 layout opcode operands` | `layout` selects the widths for this instruction alone; its `opcode` has exactly the common form's meaning |
-
-As in the approved metadata design, every cross-table reference in Body
-is a fixed little-endian `u32` word with the column's typed or explicit
-kind rule. The Body header's type map holds TypeSpec references once;
-instructions and descriptors use compact one-based **Body-local type IDs**
-into that map.
-FieldDef row operands use fixed `u32` references directly. Neither a
-local type ID nor an instruction's `ref` width changes a metadata row
-number, bypasses its TypeSpec or changes its typed-reference rules.
-
-The [metadata reference rules](il-metadata.md#metadata-logical-tables-and-row-semantics)
-distinguish typed `u32` row indexes with reserved-zero high byte from
-polymorphic DefIds with an 8-bit kind and 24-bit row. No separate `uint24`
-storage type is required. The present `typeMap` holds typed TypeSpec row
-references, not DefIds. The separately described
-[inline built-in extension](../proposals/il-extensions.md#inline-built-in-type-reference)
-would assign kind `0xFE` to complete built-in type words and requires an
-explicit schema amendment and reader/writer support, not necessarily a new
-pre-release format pair. Current fixed-word layouts do not adopt that kind. Body-local `t` IDs
-remain one/two/four bytes and are distinct from artifact-wide references.
-
-The `layout` byte selects widths independently by operand class; bits
-6–7 must be zero:
-
-| Bits | Operand class | Codes `0`, `1`, `2`, `3` |
-|---|---|---|
-| 0–1 | Body-local reference (`r`, `p`, `t`, `m`, block, region) | 1, 2, 4 bytes; `3` invalid |
-| 2–3 | Count (argument, case, exit count) | 1, 2, 4 bytes; `3` invalid |
-| 4–5 | Data (signed literal or unsigned bit pattern) | 1, 2, 4, 8 bytes |
-
-All operands of one class in an instruction share its selected width;
-instructions select widths independently. An unused class must use code 0;
-a nonzero code for it rejects.
-Enumerations (`kind`, `policy`, `reason`) are fixed `u8`, not width classes.
-The opcode defines which operands occur and their order; `layout` changes
-widths only. References and counts are unsigned; `bits`/`Switch` data is
-unsigned and `ConstSigned` data is two's-complement signed. Writers must
-choose the smallest width that represents all operands of each class.
-Decoding zero-extends unsigned data and sign-extends signed data to 64 bits.
-An `F0` prefix with `layout=0` or reserved bits rejects. Nonminimal widths
-for used classes are noncanonical but accepted by ordinary readers;
-an explicit canonicality audit rejects them under the
-[canonicality contract](representation/encoding-canonicality.md).
-
-The prefix keeps common instructions to direct opcode dispatch without
-multiplying the opcode catalog by width combinations. It adds two bytes to a
-wide instruction and avoids continuation decoding per operand; no read or
-validation cost is implied.
-
-For eligible trivial methods, compact linear is the recommended
-space-saving representation: one entry block, the root region, by-value
-parameters and empty place/liveness inventories need no stored records
-when their state follows from the signature and bounded instruction
-stream. A writer may still choose a valid general form; compact is not
-required and consumers must accept either. `bodyLayout=0` selects
-one-byte local fields in the general form, whereas compact form tags
-select different **storage for the same logical Body**.
-The general form is not a suitable space-first default for trivial methods:
-the one-block checked-add section is 105 bytes for 16 instruction bytes,
-and `return 42` is 57 bytes for 6 instruction bytes. The section
-index accounts for 8 bytes in each; the rest is mostly repeated type,
-definition and use metadata. Those are measured *encoded sizes* of
-these single-row examples, not evidence that removing indexes always
-makes JIT import faster. In a multi-row Body section the offset index
-uses `4 * (rowCount + 1)` bytes, not a separate eight-byte index for
-each row; compare row payloads and shared index overhead separately.
-
-### Compact Body forms
-
-The Body row begins with `bodyLayout` (`u8`), not a MethodDef
-owner. Exactly one MethodDef selects each Body row, as required by the
-approved metadata ownership rule.
-Bits 0–1 choose the Body-local width as in the general form;
-bits 2–3 choose the form, with `0` general, `1` compact linear
-(`bodyLayout=0x04` at one-byte width), `2` compact indexed
-(`bodyLayout=0x08` at one-byte width), and `3` invalid. Bits 4–7
-must be zero. Codes `3` in bits 0–1 still reject. The Body-section
-row-offset index and instruction envelopes are unchanged. There is
-no second implicit width for instruction operands: each instruction
-keeps its own common or `F0` wide layout. Every form must reconstruct
-the same Body-local IDs, types, ordered effects, boundaries and uses;
-decoding a different form never licenses weaker safety checks.
-
-Every Body row must be referenced by exactly one locally authored
-MethodDef. Its MethodSig supplies entry parameters and result types;
-its module supplies the context for local `m` call operands and
-contextual TypeSpec/import references. A reader builds the Body-to-owner
-mapping while validating MethodDef references, without scanning for
-an owner on every Body lookup. Each declaration retains its identity,
-contracts and checks. Any future Body-sharing feature must define
-signature, contract, SourceMap and module-relative-reference rules
-before changing this ownership invariant.
-
-**Compact linear** is for exactly one root-region block with only
-by-value parameters and results, no places and no normal successor.
-Its row after `bodyLayout` is `local typeCount`,
-`u32 typeMap[typeCount]`, `local operationCount`, exactly that many
-operations and one `Return` or `Fail` terminator, consuming the row
-exactly. No other index or block header is stored. Block ID 1 and its
-region 0 are implicit; absent places, other regions, normal edges and
-boundary liveness are not empty arrays to serialize. Entry parameter IDs,
-types and modes come from MethodSig in order; every value type, including a parameter or returned
-value not named by an instruction, must occur exactly once in `typeMap`.
-The mapped complete type must match each MethodSig type. Results such as
-comparison `bool` need their own mapped type even when no instruction
-has an explicit `t` operand. Result IDs follow in operation order without
-gaps; multi-result operations use their declared result-operand order.
-Reject a signature-derived parameter inventory exceeding the selected
-Body-local width before constructing its entry descriptors.
-Only preceding definitions may be read. Derive `valueCount` from the
-by-value parameter count plus instruction result counts as they are
-decoded; reject a result that exceeds the selected Body-local width
-**before** growing descriptor storage or continuing the scan. Counted
-fields and all operands remain bounded by the row extent. Operation
-result types and kinds come from mapped type IDs, validated opcode schemas and
-selected metadata contracts. Derive descriptors, definition locations,
-use-block counts (0 or 1), and last-use ordinals by a bounded
-instruction scan. An independent consumer or a repeated uncached
-import scans again; this form does not claim direct definition seeks.
-There are no stored empty place/region/live arrays, sentinel offsets
-or per-value pairs. Only opcodes whose complete result types and effects
-can be recovered from their schema and selected declarations are eligible.
-The executable compact-linear subset is restricted to the existing
-root-free, Copy scalar/optional forms and policy 0; by-value alone does
-not prove an operand is root-free or has no cleanup obligation.
-Place-producing and place-using operations, non-value parameter modes
-and region exits use the general form for structural inspection.
-Operations requiring an unassigned root or exceptional contract are
-not executable in **any** form.
-
-**Compact indexed** supports multiple normal blocks, including valid
-loop regions, when all parameters and results are root-free Copy values
-and no place inventory is required. Here, root-free is a property of the
-complete value type and its contract; by-value and `Copy` alone do not
-prove it. This shape constraint does not supply method-level effects or
-per-safepoint roots for operations that can call or safepoint.
-It retains the direct definition, boundary and final-use information needed
-to prune an inlinable arm.
-Its row after `bodyLayout` has, in order:
-
-| Field | Compact indexed encoding |
+| Concept | Meaning in this instruction model |
 |---|---|
-| Counts and types | `local blockCount`, `local valueCount`, `local regionCount`, `local typeCount`, then `u32 typeMap[typeCount]`; positive blockCount |
-| Regions | `regionCount` entries with the general form's `u8 kind, local parent/entry/exit/cleanup` schema |
-| Value descriptors | For each ID, `local typeId, local useBlockCount`; kind 0 (by-value) is implicit |
-| Definitions | `local valueDefStarts[blockCount+1]` and `local valueDefinitionOffsets[valueCount]`; all-ones at the local width marks a block parameter, otherwise the offset seeks the defining operation within its block |
-| Direct addresses | `local blockOffsets[blockCount+1]` from block-data start and `local terminatorOffsets[blockCount]` relative to each block start |
-| Block data | Exactly `blockOffsets[last]` bytes of compact block extents in ID order |
+| Computed value | A typed result at a computation site. A consumer may give it an immutable SSA identity. |
+| `R0..R15` | Sixteen encoded operand slots: fourteen general value bindings plus the selected zero and all-bits-set/discard roles described below. |
+| Argument | A logical parameter binding described by the selected signature and parameter mode, not a permanent machine-register assignment. |
+| Local | Typed logical storage with initialization, access, backing and lifetime state. Promotion does not change its source contract. |
+| Place | Selected storage that can be read, initialized, replaced, borrowed or transferred under its own permissions. Not every place exposes a data address. |
+| Immediate | A literal value encoded by an instruction form, not a read of a register or place. |
+| Physical register/stack slot | A backend choice. One logical value may need several machine registers or backing storage. |
+| SSA definition | A consumer's logical identity. Its numbering need not occupy the wire operand namespace. |
 
-A compact block begins with `u8 presence`: bit 0 means a nonzero
-`local regionId` follows; bits 1, 2, 3 and 4 mean respectively a
-nonempty parameter list, live-in list, live-out list and value-last-use
-inventory follows; bits 5–7 reject. Each present list has a `local`
-count and the same ordered `local` ID or `(valueId,lastUseOrdinal)`
-entries as the general block; an absent list is empty. Then come
-`local operationCount`, its operations and one indexed terminator.
-There are no place fields. B1's parameter list still matches
-MethodSig; other block parameters match incoming edges. The
-general-form definition and liveness audits apply to these decoded
-logical records. The compact indexed offsets are one/two/four bytes
-according to `bodyLayout`, instead of always four. The all-ones
-definition sentinel cannot be an operation offset; choose a wider
-Body-local width or the general form when any count, ordinal or offset
-cannot fit. All block offsets, terminator offsets and the final
-block-data length must fit the selected width. Validate each bounded
-offset and list before use, even when semantic indexes are trusted.
+A class handle, a checked reference descriptor and a raw pointer are distinct
+types with different authority and dependencies. Value types include all
+primitives and aggregates; they are not restricted to machine-word payloads.
+One large or generic value still occupies one logical register name.
 
-#### Compact-form information accounting
+Every ordinary operation reads its sources before publishing its destination
+bindings. Rebinding a name does not itself write a local, retire a value,
+release backing, or duplicate ownership.
 
-> [!IMPORTANT]
-> **Compact encodings omit storage only where the form defines how to
-> reconstruct it.** They never infer control flow from natural
-> fallthrough: operation counts and instructions remain encoded, and
-> every block has an explicit terminator.
->
-> - **Compact linear (form bits 1; `bodyLayout=0x04` at one-byte
->   width):** one block (B1), region 0,
->   no places, no normal edges, and the corresponding block/region/place
->   counts and boundary/use lists are implicit. Entry parameter types
->   and modes and the declared result come from the selected
->   MethodSig/Param rows; only by-value parameters are eligible, and
->   Body-local entry IDs follow parameter order. Result IDs follow
->   operation result order. `valueCount` (by-value parameter count plus
->   scanned result counts), value kinds/types/descriptors, definition
->   locations, use-block counts and last-use ordinals are reconstructed
->   by scanning encoded operations in order, using their schemas and
->   selected contracts. Still encoded are `typeCount`, the fixed-`u32`
->   TypeSpec `typeMap`, `operationCount`, every operation and the
->   terminator. The terminator is not inferred from the row end.
-> - **Compact indexed (form bits 2; `bodyLayout=0x08` at one-byte
->   width):** `placeCount=0` and place
->   fields are absent; descriptor kind is implicitly by-value (kind 0).
->   A missing `presence` bit means its list is empty; a missing region
->   bit means `regionId=0`. Nonzero region IDs and nonempty lists are
->   encoded. Block IDs follow `blockOffsets` order; each descriptor slot
->   `i` describes value ID `i+1`. Counts, type map, region entries,
->   descriptors, definition indexes, block/terminator offsets,
->   operation counts, operations and explicit terminators remain
->   encoded. Edges and liveness are not inferred from fallthrough.
-> - **Cross-section and section data (both forms):** `MethodDef.bodyRow`
->   selects the Body row; `MethodDef.signature` selects MethodSig, whose
->   parameter range selects Param rows. The Body `typeMap` contains
->   encoded fixed-`u32` references to artifact-wide TypeSpec rows; local
->   `t` IDs index that map, not metadata rows. The owning module supplies
->   contextual resolution for method/import operands. Directory entries
->   and the Body-section row-offset index are also encoded outside the
->   Body row; they are not omitted or reconstructed from the row.
+All computations have ordered program positions. A consumer can immediately
+create ordered value/operation nodes instead of deferring effectful trees.
+Register selection does not authorize reordering a call, failing check or
+memory observation. A stack format could also be imported this way; the
+choice of register encoding is not a claim that stacks inherently require
+effectful expression trees.
 
-The general form remains the structural fallback for places, non-value
-parameters and other rich bodies; **neither form yet encodes** complete
-ownership/loan/cleanup, safepoint roots or exceptional regions. A
-compact form may structurally contain assigned opcode
-shapes only when its derived records are complete; it does not make
-calls outside the executable subset, fields or exceptional operations executable.
-Future root and method/block effect inventories must be represented
-in *every* eligible form before adding features requiring them to its
-executable subset. `NoThrow` is neither purity nor a no-safepoint
-promise. In particular, a scalar-only compact example is not evidence
-that an arbitrary managed forwarder or auto-property getter is already
-representable. The common one-block target includes such methods when
-their selected calls, access paths, roots and effects have a complete
-compact contract, not by dropping any of those facts.
+### Selected special operand slots
 
-These two approved encodings are alternatives; no exact canonical writer
-policy is selected. **Accepted direction:** compact representations should
-match the information a method needs and common method shapes, with persisted
-byte reduction as a design goal. Omit information only when it is derivable
-from the body or fixed by a defined default; required semantics such as
-effects, lifetimes, ownership, cleanup, roots and exceptions must remain
-represented. The representation set may grow, including forms that explicitly
-encode section presence or defaults instead of deriving them by scanning.
-This direction does not choose an encoding order or claim that decoding is
-cheaper. Compact-linear's scan-derived facts are one encoding mechanism, not
-the reason to select it.
+The two high-numbered special slots preserve R0/R1 for common compact
+tuples. These are wire operand assignments, not reservations of physical
+hardware registers.
 
-An unassigned **boundary-only** candidate for small CFGs would encode direct
-block/terminator extents and typed edge parameters, while omitting definition,
-use and liveness indexes only if consumers can reconstruct or otherwise obtain
-the required information. Other encodings, such as a presence bitvector for
-omitted/defaulted sections, are also possible. Neither the boundary-only form
-nor a bitvector layout is assigned. Selection should follow the method's
-required information rather than a block-count cutoff. Widening
-compact-indexed offsets past 255 bytes currently widens **all** its local
-fields; independently sized offsets remain a future format option. All forms
-use minimal field widths where selected, and a reader can accept a valid
-general form for a compact-eligible body. The size-oriented direction does
-not require a decoder-cost benchmark; specific performance claims remain
-separate. Declaration pre/postconditions can eliminate authored guard blocks
-from a method Body, but their checks and failure/effect facts still belong to
-the declaration's contract execution and import cost; this does not claim
-pre/postcondition encoding is already executable or free.
-
-| Method shape | Representation characteristics | Present status |
+| Encoding | Source role | Destination/unused role |
 |---|---|---|
-| Root-free one block, no normal edges | Compact linear omits flowgraph state absent from this shape; value facts are derivable from its operations | Assigned bytes: checked add 31, `return 42` 21, `return x` 17 section bytes |
-| Small root-free normal CFG | Compact indexed retains direct definition/use and terminator indexes; alternate omission/default encoding is unassigned | Compact indexed is assigned; lighter alternative remains open |
-| More blocks, loops or many uses | Required direct indexes depend on the method information consumers need; local-width offsets and index inventories affect encoded size | Four-block indexed merge 100 versus general 165 section bytes; no general performance claim |
-| Places, owners, handlers, roots | Required state, effects, cleanup and safepoint facts dominate; choose sparse sidecars or compact headers by actual density without changing meaning | General structural form for current decode shapes; executable root/exception contract unassigned |
+| R0..R13 | Currently available computed value | General result binding |
+| R14 | Context-typed zero under the selected contract below | Not a writable general destination |
+| R15 | All bits set in the admitted value representation; Boolean true as below | Discard/no destination where allowed; ordinary unused register field, with the recipe combined-token exception below |
 
-Accelerator sidecars (for example, precomputed definitions or last uses)
-can be optional only if readers have a specified, bounded reconstruction
-path and rewrites discard or rebuild stale facts. Logical roots,
-owner/interior dependencies and exceptional cleanup are **required**
-semantics, not optional hints: a future sidecar containing them must
-be required and feature-negotiated for executable users, with validated
-Body ownership and reference remapping. The approved optional-section
-skip policy does not make required Body semantics dispensable. Native
-post-allocation GC maps remain JIT/AOT products, not reusable Body
-metadata. Shape interning across bodies likewise requires a separate
-validated template reference: storing separate Body rows with *identical*
-bytes for compatible MethodDefs does not make `return 42` and `return x` the
-same implementation. Compare template binding, remapping and lookup
-cost against storing short rows plus the amortized section index before
-introducing a shared-shape table.
+The same R15 encoding has different meanings in different operand roles;
+it does not hold mutable storage. A used source field means the constant.
+An unused field is not read, and an admitted discard field does not publish
+a register binding.
 
-Opcodes `0x01..0x7F` are operations; `0x80..0xEF` are terminators.
-`0xF0` introduces a width layout and is not standalone; `0x00` and
-`0xF1..0xFF` reject. A wide prefix, layout and registered opcode must fit
-within one block. Operands follow the opcode schema; there is no
-per-instruction length. Unknown opcodes reject semantic loading and cannot
-be skipped using an apparent length or prefix. Bound every operand and
-counted field to the remaining block extent before use. Before allocating or
-traversing repeated items, prove their minimum encoded bytes fit that extent.
-After exactly `operationCount` operations, the terminator must be
-one registered instruction that ends the block. General and compact
-indexed forms also verify their stored terminator offset.
+R14 is contextual zero. R15 is representation-oriented all bits set, not a
+per-type maximum-value constructor. For an admitted same-width bit view,
+its pattern is the one obtained by bitcasting an all-one integer into that
+type. Floating-point is included, especially for masking and other
+bit-oriented uses. Boolean retains its selected valid true contract.
 
-Only opcode values with an assigned operand schema in the unified registry are
-registered; explicitly reserved entries also reject. This stream has
-no opaque-instruction extension form. The metadata design's optional-section
-policy does not make Body opcodes optional: a present Body section carries
-required semantic content.
-Future allocations follow the [family-capacity policy](representation/registry.md#2-allocation-policy-and-growth).
-Extended instruction envelopes remain unassigned; the
-[Module manifest](representation/semantic-manifests.md) encodes exact governing
-edition and capability requirements, while [logical admission](representation/requirements-and-admission.md)
-requires exact semantic support or an explicit compatible mapping, not numeric
-revision roll-forward.
-A producer validates every emitted block's opcode membership. A trusted
-consumer checks the registered schema of each instruction it actually
-decodes, without a preliminary scan of unvisited blocks. A whole-scope
-structural validator instead checks all streams in its stated scope.
-Required declared feature support remains a before-use obligation under
-the [reader-trust partition](representation/reader-trust.md).
-
-An interpreter may dispatch on `(opcode, layout)` or decode native-width
-operands; either choice needs measured cost evidence. Body-local IDs `1..255` use the common form, `256..65535` use two bytes,
-and larger IDs use four. Fixed metadata `u32` operands do not widen with
-the instruction layout.
-This favors predictable dispatch and direct indexes for small methods over
-minimizing every large literal or body. Explicit edges, place-state joins and
-loop headers expose dataflow to consumers; no throughput or total-size win
-is asserted.
-
-The general and compact-indexed forms' upfront type/value inventories,
-block/terminator offsets, direct value-definition locations, and
-per-block use/last-use inventories are intended as **shared importer
-inputs**. The general form also carries place state. For these forms,
-each consumer can obtain typed ID bounds, normal CFG targets and boundary
-liveness without rediscovering them by scanning the operation stream;
-compact linear deliberately derives its omitted one-block facts by
-decoding the stream instead.
-Inlining profitability, register allocation and whether a particular
-result-producing instruction is dead remain consumer decisions. A direct
-terminator index does not by itself reveal calls or failures inside a block;
-tools still need to inspect its operations for those facts. A compact,
-mandatory method-level operation/effect summary is needed to avoid repeated
-full-body scans for common inlining and policy decisions, but its exact
-counts, effect taxonomy, consistency checks and location in the Body header
-remain to be specified before claiming that fast path. Unvalidated summaries
-must not authorize omitting safety checks or dropping operations.
-
-### Direct-index requirements for pruning and inlining
-
-For general or compact-indexed multi-block bodies, block/terminator
-offsets, typed value descriptors and boundary liveness alone are
-**not sufficient** for a fast inliner. The definition index and
-per-block use inventories below additionally identify where a branch
-predicate was defined, which block owns each result, and which blocks
-use a value or place. An inliner specializing
-an argument should be able to find the predicate definition from its
-value ID, inspect only the predicate's needed dependencies, select a
-known branch, and discard its unreachable block subtree without decoding
-unvisited operation streams. That does not imply that arbitrary predicates
-are constant: effects, calls and unsupported expressions require the
-normal importer path.
-
-Each `valueDefStarts` range gives the defining block, and
-`valueDefinitionOffsets` seeks directly to its defining operation (or marks
-a block parameter). Per-value/place use-block counts and sorted per-block
-last-use inventories let an inliner decrement surviving use-block counts
-when pruning blocks without decoding their operations. A use includes
-instruction operands and terminator operands, including edge arguments;
-mere transit through `liveIns`/`liveOuts` does not count. Place activation,
-inherited state and end transitions count as place uses, even without an
-explicit `PlaceLocal`. A definition with zero remaining uses is not itself
-proof that its defining instruction can be discarded.
-Effectful instructions must not disappear just because their result is
-unused. Block and value identity stays stable during import; native register
-allocation and target-dependent profitability are not wire facts.
-
-The direct indexes do **not** yet summarize a block's precise effect classes,
-call count, or normal successors without inspecting its terminator, nor
-does a sorted final-use position encode every intermediate read. A method
-effect synopsis and any finer per-block instruction inventory still need
-defined bounds, cost and consistency rules; retained blocks are decoded
-when imported. In particular, an inliner can prune a trivially dead arm
-quickly, but cannot claim arbitrary conditional predicates are constant
-or drop operations in a retained arm without examining their semantics.
-
-Ordinary value liveness, place/ownership state and logical GC-root
-continuity are distinct but related summaries. The producer should record
-root identity and required owner/interior-reference dependencies at
-indexed safepoints, including roots needed by cleanup or exceptional
-continuations. An inliner can then remove a dead block's root obligations
-without scanning its instructions, but must preserve roots at retained
-safepoints and let its backend build the final physical GC maps. The
-binary placement, compression, worst-case cost and audit rules for the
-logical-root/safepoint inventory remain a stabilization decision; the
-currently encoded Body examples **do not yet contain** GC roots.
-
-### Checked add end to end (informative)
-
-Consider `int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }`
-under the fail-fast policy. The example uses
-the compact-linear encoding appropriate to this root-free, one-block
-method. The [compact-form accounting](#compact-form-information-accounting)
-summarizes what this representation stores versus reconstructs. The
-field listing is a readable projection of the stored rows, not an
-additional wire syntax. The byte sequence below encodes the Body section
-only.
-Throughout the examples, artifact-wide metadata context is separate from
-Body-local type IDs and CFG/index facts; shape listings are projections,
-and explicitly labeled byte listings contain complete Body sections.
-Inline byte examples are instruction or operand fragments, not full
-artifacts.
-
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(int32)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[1]
-            receiverTypeSpec: 0
-            paramFirst: 1
-            paramCount: 2
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018):
-        row[1]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 0
-            typeSpec: TypeSpec[1]
-            mode: 0
-        row[2]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 1
-            typeSpec: TypeSpec[1]
-            mode: 0
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
-
-```text
-Body (0x0020): // Body section; directory recordCount=1
-    // Candidate compact linear; 31 encoded bytes
-    rowOffsets: [0, 23] // 8-byte section index; bounds Body row 1
-    row[1]: // 23-byte Body row
-        bodyLayout: 0x04
-        typeCount: 1
-        typeMap:
-            t1: TypeSpec[1] // fixed-u32 reference to the TypeSpec row
-        operationCount: 3
-        operations:
-            r3 = CheckedBinary add r1, r2
-            r4 = ConstSigned t1, 3
-            r5 = CheckedBinary add r3, r4
-        terminator: Return r5
-```
-
-```text
-Body shape (inferred projection; not additional compact-linear bytes):
-    counts:
-        blockCount: 1
-        valueCount: 5
-        placeCount: 0
-        regionCount: 0
-    valueDescriptors:
-        r1: t1 // x; by-value parameter
-        r2: t1 // y; by-value parameter
-        r3: t1 // first checked add
-        r4: t1 // constant 3
-        r5: t1 // second checked add, returned
-    blocks:
-        B1(r1 <- x, r2 <- y):
-            r3 = CheckedBinary add r1, r2
-            r4 = ConstSigned t1, 3
-            r5 = CheckedBinary add r3, r4
-            Return r5
-```
-
-```text
-Body index (inferred projection; not stored in compact linear):
-    valueDefStarts: [0, 5]
-    definitions:
-        r1, r2: entry parameter sentinels
-        r3..r5: B1 operations 0..2
-    useBlockCounts: [1, 1, 1, 1, 1] // r1..r5
-    last uses:
-        B1: [(r1,0),(r2,0),(r3,2),(r4,2),(r5,3)]
-```
-
-The header's `directoryOffset` locates the artifact directory. Each
-directory entry stores its section kind, policy flags, record count,
-artifact-relative section offset and section byte length; the directory
-is not included in the Body section bytes shown below. Table row numbers
-such as `TypeSpec[1]` and `MethodSig[1]` are one-based and artifact-wide;
-they are not byte offsets, Body-local IDs or per-method subtables.
-The displayed fields contain references to those separate rows, not
-copies of their contents.
-`MethodDef[1].signature` selects the separate MethodSig row, whose
-`paramFirst` and `paramCount` select the two Param rows; its `bodyRow`
-selects Body row 1. The Body section's offset index is separate from its
-row: offsets `0,23` bound that one 23-byte row. TypeSpec and MethodSig
-(with its Param rows) are structural data available to other
-declarations; contracts, names and visibility belong to each MethodDef,
-not to the Body. A distinct MethodDef may reuse the MethodSig, but
-must own a distinct Body row even if its instruction bytes are identical.
-
-The encoded Body section is 31 bytes: an 8-byte shared row index, a
-7-byte row header and 16 instruction bytes. The sequence below encodes
-the section index followed by Body row 1:
-
-```text
-00 00 00 00  17 00 00 00
-04 01 01 00 00 00 03
-13 03 01 01 02  02 04 01 03  13 05 01 03 04  83 05
-```
-
-Here MethodSig supplies
-by-value `r1` and `r2` (source `x` and `y`), and the three ordered
-operations define `r3`–`r5`. The descriptor and block shape above are
-inferred from that signature and instruction stream, not encoded as
-separate rows in the compact-linear Body. The expected `int32` context selects
-checked primitive addition, not a numeric fallback or user witness.
-A bounded scan derives their types,
-definitions and last-use ordinals `(0,0,2,2,3)`, as well as the
-checked failure order and return. The `typeMap` still supplies complete
-`int32` identity. Those omitted records are either inapplicable here
-or derivable, not permissions to discard an effect or weaken validation.
-The tradeoff is no direct definition seek: a later uncached consumer
-must scan again. This is a size recommendation, not a mandate for every
-writer or a measured cold-import win.
-
-On first-add overflow the later operations do not run; on second-add
-overflow Return does not run. Each failure follows the module policy
-at its operation site without a normal CFG edge or an artificial block.
-`ConstSigned` types the literal `3`; its bytes are not an add immediate.
-The `typeMap` entry is the fixed `u32` reference to TypeSpec row 1;
-the `t1` operand is a Body-local ID, not a shortened metadata reference.
-By-value parameters need no place; an addressable mutable local needs
-`PlaceLocal` then `Load`, with
-`Assign` through that place on success. See the
-[local-place shape](#value-and-place-state-through-checked-arithmetic),
-which is decode-only in this revision.
-
-For example, if a checked add instead defines `r256`, it uses
-`F0 01 13 00 01 01 01 00 02 00`: two-byte references widen
-the destination and both operands. That instruction prefix does not set
-the Body's structural widths; a real Body with 256 values also needs
-a two-byte local width for its `valueCount`.
-For a separate instruction fragment (not a complete Body section), let
-Body-local `t1` map to an `int32` TypeSpec. `ConstSigned r3, t1, 200` uses
-`F0 10 02 03 01 C8 00` (one-byte references, two-byte signed data); if
-its result ID were 256, it would use
-`F0 11 02 00 01 01 00 C8 00`. The prefix changes encoded widths, not
-the opcode's semantic identity. Conformance should independently verify
-the bytes, decoded records and audited CFG/types/states; a same-writer
-round trip alone is insufficient.
-
-### Adding a conditional to the sum
-
-Now make the first add conditional:
-`int32 MaybeAdd(bool flag, int32 x, int32 y) {
-if (flag) { return x + y; } return x; }`.
-The following separates artifact-wide metadata context from the Body's
-local type IDs and logical block shape; it is not a byte listing:
-
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(bool)
-        row[2]: Builtin(int32)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[2]
-            receiverTypeSpec: 0
-            paramFirst: 1
-            paramCount: 3
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018):
-        row[1]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 0
-            typeSpec: TypeSpec[1]
-            mode: 0
-        row[2]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 1
-            typeSpec: TypeSpec[2]
-            mode: 0
-        row[3]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 2
-            typeSpec: TypeSpec[2]
-            mode: 0
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
-
-```text
-Body shape (logical projection; not wire syntax):
-    counts:
-        blockCount: 3
-        valueCount: 4
-        placeCount: 0
-        regionCount: 0
-        typeCount: 2
-    typeMap:
-        t1: TypeSpec[1]
-        t2: TypeSpec[2]
-    valueDescriptors:
-        r1: t1 // flag
-        r2: t2 // x
-        r3: t2 // y
-        r4: t2 // checked sum
-    blocks:
-        B1(r1 <- flag, r2 <- x, r3 <- y): // liveOut=[r2,r3]
-            BranchIf r1, B2(), B3()
-        B2(): // liveIn=[r2,r3]
-            r4 = CheckedBinary add r2, r3
-            Return r4
-        B3(): // liveIn=[r2]
-            Return r2
-```
-
-The Body has four by-value descriptors and three normal blocks; the add
-remains an operation within its block. Its Body index projection (logical
-fields encoded by compact indexed, not a byte listing) is:
-
-```text
-Body index (logical projection; not wire syntax):
-valueDefStarts: [0, 3, 4, 4]
-definition offsets:
-    r1..r3: parameter sentinels in B1
-    r4: B2 checked operation
-useBlockCounts: [1, 2, 1, 1] // r1..r4
-last uses:
-    B1: [(r1,0)]
-    B2: [(r2,0),(r3,0),(r4,1)]
-    B3: [(r2,0)]
-```
-
-B1 uses `r1` at its terminator, B2 uses `r2` and `r3` at its add
-and `r4` at Return, and B3 uses `r2` at Return. `r2` and `r3`
-cross B1 without an operand use there. The use-block counts count B2
-and B3 as distinct use blocks for `r2`, even though only one arm executes.
-
-If the flag is known false after specialization, B2 and its checked add
-are unreachable and may be pruned; if known true, B3 is unreachable.
-An unknown flag requires both branches and the checked failure in B2
-remains observable. An overflow in B2 fails at the add; it neither
-returns from B3 nor requires a fourth normal block. This shape is
-executable in the approved fail-fast scalar subset, though this
-sketch does not require the general form. It introduces normal branching;
-the next example introduces a merge argument, and then a loop backedge.
-
-#### Compact indexed conditional sum
-
-See [compact-form information accounting](#compact-form-information-accounting)
-for the implicit-versus-encoded fields in this form.
-
-This fixture uses the same artifact-wide metadata context and Body-local
-type map shown above. Its exact bytes encode only the bounded
-compact-indexed Body (0x0020) section: 90 bytes (8-byte offset index plus an
-82-byte row). The three-block `MaybeAdd` row has
-`valueDefStarts=[0,3,4,4]`: the first three definition offsets are
-parameter sentinels and the fourth seeks B2's checked add at offset 12.
-Its value descriptors' use-block counts are `(1,2,1,1)`.
-Compact block offsets are `[0,18,37,46]`; terminator offsets are
-`[12,17,7]`:
-
-```text
-00 00 00 00  52 00 00 00
-08 03 04 00 02  01 00 00 00  02 00 00 00
-01 01  02 02  02 01  02 01
-00 03 04 04  FF FF FF 0C
-00 12 25 2E  0C 11 07
-1A 03 01 02 03 02 02 03 01 01 00 00  81 01 02 00 03 00
-14 02 02 03 03 02 00 03 00 04 01 01  13 04 01 02 03  83 04
-14 01 02 01 02 00 00  83 02
-```
-
-B2's one checked instruction remains ordered before its Return. B3
-contains no operations; its `r2` Return is independent of B2's failure.
-The direct B2 operation offset and all three branch/return offsets
-make indexed import possible without scanning other blocks, subject
-to the producer-trust and unknown-opcode policies noted above.
-
-### Conditional merge and loop (informative shapes)
-
-The following sketches use the same type-map, value-descriptor,
-block-header and edge **rules**, with their own MethodSigs. They show
-composition rather than a required source lowering or complete byte
-listing; a writer must still encode exact block and terminator offsets.
-Artifact-wide TypeSpec and MethodSig/Param context is shown separately
-from Body-local IDs. Only listings explicitly labeled as encoded bytes
-give a wire listing.
-
-For `int32 TwiceSum(int32 x, int32 y) { int32 tmp = x + y;
-return tmp + tmp; }`, its artifact-wide metadata context is:
-
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(int32)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[1]
-            receiverTypeSpec: 0
-            paramFirst: 1
-            paramCount: 2
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018):
-        row[1]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 0
-            typeSpec: TypeSpec[1]
-            mode: 0
-        row[2]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 1
-            typeSpec: TypeSpec[1]
-            mode: 0
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
-
-Its Body shape is:
-
-```text
-Body shape (logical projection; no bytes assigned):
-    counts:
-        blockCount: 1
-        valueCount: 4
-        placeCount: 0
-        regionCount: 0
-        typeCount: 1
-    typeMap:
-        t1: TypeSpec[1] // int32
-    valueDescriptors:
-        r1..r4:
-            typeId: t1
-            kind: value
-            useBlockCount: 1
-    blocks:
-        B1(r1 <- x, r2 <- y):
-            r3 = CheckedBinary add r1, r2
-            r4 = CheckedBinary add r3, r3
-            Return r4
-```
-
-```text
-Body index (logical projection; not wire syntax):
-    valueDefStarts: [0, 4]
-    definitions:
-        r1, r2: parameter sentinels
-        r3: B1 operation 0
-        r4: B1 operation 1
-    last uses:
-        B1: [(r1,0),(r2,0),(r3,1),(r4,2)]
-```
-
-Reuse needs no duplicate descriptor or `Copy` operation for this Copy
-scalar; a unique value could not be duplicated the same way. Ordinal 2
-denotes Return. `r3` is read *twice* by operation 1 but appears once
-in the per-block inventory, so its `useBlockCount` is 1, not 2.
-
-For `int32 Choose(bool flag, int32 x, int32 y) { mut int32 chosen = x;
-if (flag) { chosen = y; } return chosen; }`, the artifact-wide metadata
-context is separate from the Body:
-
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(bool)
-        row[2]: Builtin(int32)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[2]
-            receiverTypeSpec: 0
-            paramFirst: 1
-            paramCount: 3
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018):
-        row[1]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 0
-            typeSpec: TypeSpec[1]
-            mode: 0
-        row[2]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 1
-            typeSpec: TypeSpec[2]
-            mode: 0
-        row[3]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 2
-            typeSpec: TypeSpec[2]
-            mode: 0
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
-
-The Body-local type map and logical CFG are:
-
-```text
-Body shape (logical projection; not wire syntax):
-    counts:
-        blockCount: 4
-        valueCount: 4
-        placeCount: 0
-        regionCount: 0
-        typeCount: 2
-    typeMap:
-        t1: TypeSpec[1] // bool
-        t2: TypeSpec[2] // int32
-    valueDescriptors:
-        r1: t1 // flag
-        r2: t2 // x
-        r3: t2 // y
-        r4: t2 // selected value
-    blocks: // all in region 0; no places or operations
-        B1(r1 <- flag, r2 <- x, r3 <- y): // liveOut=[r2,r3]
-            BranchIf r1, B2(), B3()
-        B2(): // liveIn=[r3], liveOut=[r3]
-            Branch B4(r3)
-        B3(): // liveIn=[r2], liveOut=[r2]
-            Branch B4(r2)
-        B4(r4 <- selected value): // no liveIn
-            Return r4
-```
-
-The two explicit incoming arguments to B4 have the same complete type,
-but `r4` is defined once by B4's parameter, not by either predecessor.
-The branch copies only Copy values; `liveOut` is the union of the
-successors' live-ins and explicit edge arguments. Source variable names
-and the apparent assignment are not stored in the Body. An SSA lowering
-needs no place for the unaddressed source local.
-
-The method-wide Body index projection (not encoded bytes) is:
-
-```text
-Body index (logical projection; not wire syntax):
-valueDefStarts: [0, 3, 3, 3, 4]
-definitions:
-    r1..r3: parameter sentinels in B1
-    r4: parameter sentinel in B4
-valueDescriptors:
-    r1:
-        typeId: t1
-        kind: value
-        useBlockCount: 1
-    r2..r4:
-        typeId: t2
-        kind: value
-        useBlockCount: 1
-```
-
-The intervening empty definition intervals mean B2 and B3 define no
-values. All four blocks have `operationCount=0`, so ordinal 0 means
-their terminator:
-
-| Block | `valueLastUses` | Boundary facts |
+| Admitted type | R14 source value | R15 source value |
 |---|---|---|
-| B1 | `(r1,0)` | `r2` and `r3` are live-out transit values, not uses in B1 |
-| B2 | `(r3,0)` | `r3` is live-in and supplied as B4's edge argument |
-| B3 | `(r2,0)` | `r2` is live-in and supplied as B4's edge argument |
-| B4 | `(r4,0)` | `r4` is defined at entry and used by Return |
+| Signed integer | Zero in that complete integer type | All bits set, therefore -1 |
+| Unsigned integer | Zero in that complete integer type | All bits set, therefore the maximum value |
+| Bit-vector/mask domain | All zero | All one |
+| Boolean | False in the valid Boolean representation | True in the valid Boolean representation |
+| Binary floating-point | Positive zero | Negative quiet NaN with every payload bit set; the complete binary pattern is all ones |
+| Decimal floating-point | Positive zero, coefficient 0 and exponent 0 | All bits set; under BID this is a negative signaling NaN with noncanonical raw payload |
+| Eligible vector | The corresponding zero in every lane | The corresponding integer/mask/Boolean/floating constant in every lane |
 
-#### Compact indexed conditional merge
+Other types require their own admitted constant contracts; R14 does not
+implicitly construct a null reference or default aggregate. Negative
+floating zero and alternate decimal zero cohorts use their exact typed
+ConstantMap entries. R15 is an explicit bit-pattern constant, not a
+NaN-processing arithmetic result. Loading/copying it preserves its exact
+sign, quiet/signaling state and raw payload; it does not quiet the value,
+normalize a noncanonical decimal payload or substitute the positive
+zero-payload constant-arithmetic recipe. An operation consuming it still
+follows that operation's own result contract; admitting a constant does not
+admit every operation on its type.
 
-See [compact-form information accounting](#compact-form-information-accounting)
-for the implicit-versus-encoded fields in this form.
+Under the current
+[Windows x64 BID layout](targets/windows-x64-data-layout.md#3-ieee-decimal-bid),
+the signaling bit has the opposite sense to the binary quiet bit. An all-one
+decimal container is a negative signaling NaN. Its all-one raw payload also
+exceeds the canonical decimal payload range and decodes to numeric payload
+zero, without making the raw NaN container invalid.
 
-The four-block `Choose` example qualifies for compact indexed despite
-having more than three blocks: it has only Copy values and normal
-edges, and its direct definitions/uses and branch addresses remain
-available. The local-width (one-byte) definition-offset sentinels,
-block offsets `[0,18,31,44,53]` and terminator offsets
-`[12,9,9,7]` directly index the definitions and terminators. Each block's
-presence byte omits zero counts and lists; the four value descriptor
-kinds are implicitly by-value. Its Body (0x0020) section is 100 bytes
-(8-byte index, 92-byte row). The following
-exact byte listing contains only that Body (0x0020) section; the artifact-wide
-TypeSpec and signature context is separate:
+For decimal32 BID the selected constant is exactly `0xFFFFFFFF`, as from
+bitcasting signed integer -1. Decimal64/128 likewise use all one bits in their
+complete containers. Do not clear the signaling bit or replace the pattern
+with a largest canonical payload. Classification follows the selected value
+representation, not host floating arithmetic.
 
-```text
-00 00 00 00  5C 00 00 00
-08 04 04 00 02  01 00 00 00  02 00 00 00
-01 01  02 01  02 01  02 01
-00 03 03 03 04  FF FF FF FF
-00 12 1F 2C 35  0C 09 09 07
-1A 03 01 02 03 02 02 03 01 01 00 00  81 01 02 00 03 00
-1C 01 03 01 03 01 03 00 00  80 04 01 03
-1C 01 02 01 02 01 02 00 00  80 04 01 02
-12 01 04 01 04 00 00  83 04
-```
+These cannot be arbitrary typed storage registers containing universal
+valid bit patterns:
 
-The indexed compact header still says that B1 uses `r1`, B2 uses
-`r3`, B3 uses `r2`, and B4 uses `r4` at their terminators. B1's
-`r2`/`r3` live-outs remain transit-only. An inliner may follow the
-four terminator offsets and decrement B3's `r2` use-block count when
-discarding that arm. The section's eight-byte row index is not
-compressed by this Body layout.
+- Integer zero and all-bits-set can mean zero and signed -1/unsigned maximum.
+  A Boolean true is a Boolean value, not permission to create an invalid
+  Boolean storage representation.
+- The selected floating zero is a value/representation contract, not
+  permission to substitute arbitrary numerically equal decimal cohorts.
+  Reference and aggregate constants still need explicit admissibility
+  and type information.
+- If every input is a special constant, an untyped destination may not
+  establish the result type. A typed constant entry or explicit typed form
+  supplies that information; there is no default integer type.
+  A previous destination binding does not permanently type that register.
+  An RMW operation can obtain the type from its actual ordinary source.
+- A discard destination does not cancel checks or effects, and cannot
+  abandon an affine cleanup responsibility. Nontrivial results need their
+  explicit retirement/transfer contract.
+- An unused register field is not a value read. Its canonical encoding can
+  reuse a constant slot without implying that the operation consumes that
+  constant. Arithmetic recipes instead use their selected combined
+  register/negation absent tokens.
 
-B1's terminator selects B2 or B3, each with zero edge arguments.
-B2 and B3 each send one typed argument to B4; the sent `r3` or `r2`
-is an operand *use* at the terminator, while B4's `r4` is a new
-parameter definition. The row's use-block counts do not count B1's
-transit-only live-outs as reads.
+Register-field parsing remains four bits. A writable general result must
+name R0..R13. R15 is valid only when that result can be discarded under its
+actual responsibility/effect contract. Pair loads/staging require general
+destinations; an operation with independently discardable scalar results
+can use R15 for those results. Distinct published general results must use
+distinct bindings; repeated discard fields do not publish the same binding.
+Other indices are not register encodings: local or method-map index 15
+remains an ordinary valid index, not a discard sentinel.
 
-If an inliner knows `flag` is true, B1's indexed terminator identifies
-B2 as the only normal successor. B3 can be removed; its use inventory
-lists `r2`, so removing B3 decrements `r2`'s remaining use-block count
-to zero without decoding B3's operations. B1's resulting live-out no
-longer includes `r2`. B2 still supplies `r3` to B4, whose `r4`
-parameter remains a valid merge definition unless the inliner chooses
-to substitute it. This is a Copy-scalar example; dropping a unique
-argument or cleanup obligation requires its separate ownership/exit
-contract, not just a zero ordinary-use count.
+### Cross-block values and phi-equivalent merges
 
-To repeat the preceding addition, consider
-`int32 RepeatAdd(int32 x, int32 y, int32 n) {
-mut int32 sum = x; mut int32 i = 0;
-while (i < n) { sum = sum + y; i = i + 1; } return sum; }`.
-The artifact-wide metadata context is:
+A block declares its available incoming general-register bindings
+(R0..R13), with their complete types and required state. General registers
+not admitted by that entry state cannot be read merely because a predecessor
+happened to leave bits in the corresponding location.
 
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(int32)
-        row[2]: Builtin(bool)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[1]
-            receiverTypeSpec: 0
-            paramFirst: 1
-            paramCount: 3
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018):
-        row[1]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 0
-            typeSpec: TypeSpec[1]
-            mode: 0
-        row[2]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 1
-            typeSpec: TypeSpec[1]
-            mode: 0
-        row[3]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 2
-            typeSpec: TypeSpec[1]
-            mode: 0
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
+R14/R15 source constants are not incoming bindings or phi inputs. Their
+admissibility follows their typed operand contracts at each use; they do not
+need a predecessor to establish a mutable register value.
 
-The Body shape is a logical projection, not an assigned byte listing:
+If `R0` is live into a join, an `int32` definition on one incoming edge and
+a `float32` definition on another do not form one typed value. The producer
+must convert both to an agreed type or explicitly construct a common
+representation. Equal widths, nominal similarities and implicit boxing
+do not supply that agreement.
 
-```text
-Body shape (logical projection; byte offsets are not assigned):
-    counts:
-        blockCount: 4
-        valueCount: 11
-        placeCount: 0
-        regionCount: 1
-        typeCount: 2
-    typeMap:
-        t1: TypeSpec[1] // int32
-        t2: TypeSpec[2] // bool
-    valueDescriptors: // all kind: value
-        r1..r6: t1
-        r7: t2
-        r8..r11: t1
-    region 1:
-        kind: loop
-        parent: 0
-        entry: B2
-        exit: B4
-        cleanup: 0
-    region membership:
-        B1, B4: region 0
-        B2, B3: region 1
-    blocks:
-        B1(r1 <- x, r2 <- y, r3 <- n): // liveOut=[r1,r2,r3,r4]
-            r4 = ConstSigned t1, 0
-            Branch B2(r1,r4)
-        B2(r5 <- sum, r6 <- i): // liveIn=[r2,r3], liveOut=[r2,r3,r5,r6]
-            r7 = Binary Less r6, r3 // t2 bool
-            BranchIf r7, B3(), B4(r5)
-        B3(): // liveIn=[r2,r3,r5,r6], liveOut=[r2,r3,r8,r10]
-            r8 = CheckedBinary add r5, r2
-            r9 = ConstSigned t1, 1
-            r10 = CheckedBinary add r6, r9
-            Branch B2(r8,r10)
-        B4(r11 <- final sum): // no liveIn; outside loop
-            Return r11
-```
+If the join overwrites `R0` before any subsequent use, its incoming binding
+is dead and the incoming types need not agree. A use in a later successor
+before overwrite also makes the incoming binding live; this is not only
+about the first instruction in the join.
 
-The loop's changing `sum` and `i` are block parameters, not addressable
-places; their source names are not stored in the Body.
-The initial edge supplies `(x,0)` and the backedge supplies the next
-`(sum,i)` to the same two header parameters. The false edge supplies
-the current sum to B4. `r2` and `r3` are dominating values, not
-additional header parameters: `r2` is read in B3 and `r3` in B2,
-and both transit other blocks so they remain available on the backedge.
-In particular, B3's `liveIn` and `liveOut` include `r3` although no
-B3 instruction reads it. Both additions may fail at their operation
-sites under the fail-fast policy. The region and its backedge do not
-create implicit exceptional successors.
+The merge is phi-equivalent. Its result is an ordinary typed value and may
+flow across further blocks. A consumer wanting SSA constructs the merge;
+the wire need not serialize its version number. A definition counter handles
+straight-line renaming, but joins and loop backedges still require merge
+construction.
 
-The Body index projection (logical fields of the general form, not
-assigned bytes) is:
+Type agreement does not erase distinct incoming roots, loans, ownership
+responsibilities, reservations or place states. Their guarded relationships
+must survive the merge. Promotable locals may require SSA merges too, even
+if register flow were prohibited.
 
-```text
-Body index (logical projection; not wire syntax):
-    useBlockCounts:
-        r1..r4: 1
-        r5..r6: 2
-        r7..r11: 1
-    valueDefStarts: [0, 4, 7, 10, 11]
-    definitions:
-        r1..r3, r5..r6, r11: parameter sentinels
-        r4: B1 operation 0
-        r7: B2 operation 0
-        r8..r10: B3 operations 0..2
-```
+## Method implementation forms
 
-These descriptor counts are `useBlockCount`, **not** the number of
-traversals of a loop edge. The actual row stores byte offsets, not the
-operation labels above; this sketch does not assign bytes.
+Every Body row begins with an `implementationKind:u8`. Kinds `01..05` are
+assigned. Their exact descriptors and eligibility rules appear in
+[Body row layout and compact implementations](#body-row-layout-and-compact-implementations).
+A bodyless import, abstract declaration or other declaration that has no
+implementation has no Body row; it does not use an empty stream.
 
-| Block | `operationCount` | `valueLastUses` | Important distinction |
-|---|---:|---|---|
-| B1 | 1 | `(r1,1),(r4,1)` | `r2` and `r3` merely transit B1 |
-| B2 | 1 | `(r3,0),(r5,1),(r6,0),(r7,1)` | `r5` is supplied on the false edge; `r6` is read by the comparison |
-| B3 | 3 | `(r2,0),(r5,0),(r6,2),(r8,3),(r9,2),(r10,3)` | `r3` transits the backedge without a B3 operand use |
-| B4 | 0 | `(r11,0)` | The exit parameter is a new definition read by Return |
+The compact forms are exact implementations of their own MethodDef, not
+method or field aliases. They retain the method's identity, visibility,
+complete signature, effects, requirements, cleanup, initialization and
+output obligations. Producer truth is required; consumers validate target
+kind, type/signature, access and contract compatibility before use. A member
+name, attribute or matching signature alone does not establish eligibility.
+Imported targets, constructed-owner adaptations, selected dispatch and
+other non-identity mappings use an instruction stream unless an exact
+bound-reference form is assigned.
 
-`r5` and `r6` each have two use blocks; their backedge replacements
-`r8` and `r10` each have one. Pruning B3 after proving the condition
-false removes its uses, but a consumer still must respect the checked
-operations whenever B3 is reachable. There are no places, so every
-block has `placeUseCount=0`. Ordinary last uses alone do not prove
-that a managed root or cleanup obligation may expire.
+### Body row layout and compact implementations
 
-The following are operand *kinds*, not additional on-wire tags. `ref`
-means the selected reference width, `count` the selected count width,
-`data` the selected data width, and `u8` exactly one byte:
+The Body section remains the offset-indexed variable table selected by
+[metadata](il-metadata.md#body-table-and-coded-instruction-boundary).
+Its row is either one of the compact descriptors above or an instruction
+stream. The implementation-kind byte makes the distinction explicit; no
+reader infers a body form from its length or contents.
 
-| Operand notation | Decode | Namespace and zero rule |
-|---|---|---|
-| `r`, `rNew`, `rPlace` | `ref` | Body-local value ID `1..valueCount`; `rNew` defines the next ID, `r` uses one, and `rPlace` must denote a place-valued ID |
-| `r?` | `ref` | Value ID or zero only when the declared result is void |
-| `rNew?` | `ref` | New value ID; zero is permitted only for a selected void result and defines nothing. A nonzero void result defines the unit value |
-| `p` | `ref` | Body-local place descriptor ID `1..placeCount` |
-| `t` | `ref` | Body-local type ID `1..typeCount`; `typeMap[t - 1]` is currently a fixed `u32` typed reference to a TypeSpec row, interpreted in this body's module context; an inline built-in word needs an explicitly adopted schema amendment |
-| `m` | `ref`, then typed `u32` only when `m=0` | Nonzero: one-based MethodDef row within the body module's MethodDef range, resolved by checked `methodDefStart + m - 1`; retained imports use its bound expected MethodDef. Zero: resolved direct call to an authored MethodDef in another packed module, with an exact little-endian artifact-wide MethodDef row index, high byte zero. No table-kind selector; invalid in a single-module artifact |
-| `fieldDefRow` | fixed `u32` | Typed FieldDef reference, high byte zero, row `1..FieldDef.recordCount` owned by the selected type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
-| `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
-| `args` | `count`, then `ref[count]` | Ordered value IDs; zero is not an argument |
-| `edge` | `ref targetBlock`, then `args` | Target's typed parameter list consumes the arguments |
-| `data(bits)`, `signedData(value)` | `data` | Unsigned bit pattern or signed two's-complement literal, respectively |
-| `kind`, `policy`, `reason` | `u8` | Numeric discriminant from the assigned tables below; zero and unassigned values reject |
+The compact descriptor encodings are exact:
 
-At one-byte reference width, a resolved direct call to packed MethodDef
-row 1 encodes its `m` operand as `00 01 00 00 00`: one zero reference
-followed by the little-endian typed row index `1`. At two- or four-byte
-reference width, the selected-width zero precedes the same four-byte
-row index. This conditional operand has a known length; it does not make
-unknown opcodes skippable.
-
-`rNew` and an edge target are the same-width *class*, but different ID
-namespaces. Prefixes affect width, not namespace. A decoder selects a
-registered opcode, reads its listed operands **left to right**, and uses
-each decoded count to read the following repeated items in the specified
-order. For `Switch`, this is selector, case count, that many `(pattern,
-edge)` pairs, then default edge. For `Call`, it is result ID, method
-row, argument count, then argument IDs. Validate each read against its
-block extent before advancing; a count is not an allocation size until
-its minimum encoded byte requirement fits that extent. After exactly
-`operationCount` operations, the stored terminator offset must point to
-the beginning of exactly one registered terminator that ends the block.
-The last condition is a writer obligation and an optional semantic audit;
-even a trusted decoder bounds its direct terminator access. The reader
-never scans for marker bytes or guesses an unregistered opcode's length.
-
-The approved metadata design first bounds the artifact and Body-section row.
-Body decoding then uses checked arithmetic and bounds every field, index,
-operand and repeated item before lookup, allocation or traversal; a trusted
-input does not waive these checks. A consumer may omit body semantic audit
-only under its trust policy; this does not waive metadata reference or
-contract checks. Malformed forms reject decoding. Assigned but
-non-executable forms may be structurally inspected, but an executable
-consumer rejects them before execution. Diagnostic codes, error
-ordering/recovery codecs remain unassigned. [Resource accounting](representation/resource-accounting.md)
-defines selected capacity and separate deterministic work/state recipes;
-portable numerical minima remain unassigned.
-
-The [introductory checked-add example](#checked-add-end-to-end-informative)
-traces compact-linear Body storage and its unprefixed instruction
-operands from source through structure to bytes. The adjacent wider
-operand variants show that an instruction prefix and the enclosing
-`bodyLayout` select widths independently.
-
-## Body record, direct block index and regions
-
-A Body table row is the bytes between adjacent Body-section offsets, with
-no further row-length prefix. The following table gives the **general
-form** (`bodyLayout` form bits zero); compact forms have the common
-layout prefix but the distinct field sequences specified
-[above](#compact-body-forms). Its fields, in order, are:
-
-| Field | Encoding | Constraint |
-|---|---|---|
-| `bodyLayout` | `u8` | Bits 0–1 Body-local width; bits 2–3 zero for this form, bits 4–7 zero for every form |
-| `blockCount`, `valueCount`, `placeCount`, `regionCount`, `typeCount` | five local-width unsigned integers | Body-local counts; blockCount is positive; typeCount is zero iff no local type ID is used |
-| `typeMap` | `u32[typeCount]` little-endian | Distinct nonzero typed TypeSpec references, indexed by one-based Body-local type ID |
-| `places` | `placeCount` entries | local-width `typeId`, local-width `regionId`, `u8 flags`, local-width `useBlockCount` each |
-| `regions` | `regionCount` entries | Described below, IDs `1..regionCount` |
-| `valueDescriptors` | `valueCount` entries | local-width `typeId`, `u8 kind`, local-width `useBlockCount` each, indexed by `valueId - 1` |
-| `valueDefStarts` | local-width `[blockCount + 1]` | Zero-based descriptor indexes: starts at 0, nondecreasing by the number of definitions in each block, ends at `valueCount`; blocks without definitions may have empty intervals |
-| `valueDefinitionOffsets` | fixed `u32[valueCount]` little-endian | Relative to the defining block's start; `0xFFFF_FFFF` for a block parameter, otherwise points directly to its defining operation opcode or width prefix |
-| `blockOffsets` | `u32[blockCount + 1]` little-endian | Relative to the following block-data start |
-| `terminatorOffsets` | `u32[blockCount]` little-endian | Each relative to its own block start; points directly to its terminator opcode or width prefix |
-| `blockData` | `blockOffsets[last]` bytes | One block per consecutive offset extent |
-
-The upfront value/place counts and descriptors are a pre-scan inventory of
-logical value IDs and declared places, with their Body types and place
-metadata; they do not allocate native stack slots or assign JIT locations.
-A backend chooses physical locations during lowering.
-
-Body-layout width codes 0, 1 and 2 mean local widths of 1, 2 and 4 bytes;
-code 3 rejects. In the general form this width sizes all five counts,
-structural block/region/value/
-place/type IDs, block parameters, place-state and operation counts, region
-fields, per-descriptor use-block counts, definition starts, last-use
-ordinals and place-region references. Choose the smallest width that
-represents every field in this class throughout the **whole body**.
-Type-map entries, definition offsets and both block
-offset arrays remain fixed `u32` typed references or offsets. Each
-instruction independently selects its
-Body-local operand width via its prefix; FieldDef and direct-call MethodDef row
-operands remain fixed `u32`. Under the approved indexed-only rule,
-bound `typeCount` by the TypeSpec table count and the remaining row
-bytes before reading its four-byte entries. If inline built-ins are
-adopted, use the Body-local ID range and remaining bytes as the bound
-instead; a Body can have built-in types with no TypeSpec rows. Every
-entry must be distinct and resolve to a complete type valid in the
-referencing module's context; duplicates reject. Writers order entries by
-first logical use across descriptors, required signature-only types of
-omitted-storage forms, then instruction streams, without unused entries,
-under the [canonicality contract](representation/encoding-canonicality.md#4-type-maps).
-Ordinary readers accept consistently referenced different orderings and
-distinct valid unused entries; an explicit canonicality audit rejects them.
-Readers bound accessed fields and validate selected map entries before
-dereferencing local type IDs; out-of-range IDs reject. Writers use minimal
-Body-local width for the complete selected form's local inventory, including
-compact-linear's signature/result-derived values. Ordinary readers accept
-assigned wider widths, not unsupported codes, reserved bits or truncated fields.
-
-For value ID `r`, locate its descriptor at `r - 1` and the unique
-`valueDefStarts` interval containing that index; the interval identifies
-its defining block without decoding preceding blocks. The first
-`parameterCount` IDs of a block's interval are its listed block parameters
-and have sentinel definition offsets. Each later ID has an in-range offset
-to the result-producing operation in that block. Multiple results from
-one operation may share its offset but have distinct IDs; the verifier
-matches operand/result order and the descriptor. Every definition is
-accounted for once, and no offset may point into a header, operand or
-terminator. A direct reader bounds the target and checks the selected
-operation's exposed result ID/kind/type before using it; the producer
-guarantees the index agrees with the complete instruction stream.
-`useBlockCount` counts distinct blocks with a corresponding use entry
-below, not occurrences or transit-only liveness. It is at most
-`blockCount`. A semantic audit checks all definition and use indexes,
-including zero-use values, against the decoded operations and edges.
-An untrusted executable reader must perform that audit before relying
-on the indexes to discard code; only an explicit producer trust policy
-can permit their use without the semantic audit. Bounded offsets alone
-do not make asserted deadness true.
-
-Block offsets start at 0, increase strictly, and end at the exact remaining
-body length; empty blocks are invalid. Block data is under 4 GiB, though
-selected capacity may be lower under [resource accounting](representation/resource-accounting.md).
-Its numerical portable minima are unassigned. Direct indexes do not replace bounds checks:
-each decoded block must consume its full extent. Reject accessed invalid
-indexes, arithmetic overflow, overlap, trailing bytes and Body rows without
-compatible local MethodDef references. Trusted access need not scan other
-offsets or instruction streams. A terminator
-offset follows exactly the counted operations and points to one complete
-terminator ending the block. Trusted readers may seek there after bounding
-the selected index/extent and require the decoded terminator to end the block.
-They need not scan preceding operations. A full block traversal compares
-its exposed boundaries; a structural audit compares all indexed locations
-with the stream in its declared scope. MethodDefs
-select Body rows through `bodyRow`; relocating metadata requires rewriting
-references and revalidating every affected use.
-
-Places are numbered `1..placeCount`. Their `typeId` resolves through the
-type map to the referent's complete TypeSpec. Flags `0x01`, `0x02` and `0x04` mean
-rebindable, unique storage and initially vacant (including `init` destinations),
-respectively; other bits reject. The complete TypeSpec determines referent
-access and representation; flags cannot grant `write` through a readonly
-handle. Non-value parameters map to places in parameter order, followed by
-local places; by-value parameters are entry-block values. Place descriptors
-name storage, not an exposed address or native stack slot.
-
-Descriptor kind `0x00` is a by-value result of its mapped complete TypeSpec;
-`0x01` is a place handle whose mapped TypeSpec is its **referent**, not a loaded
-value or native pointer. All other descriptor kinds reject. A handle's
-access, owner and region come from its defining
-place operation; the descriptor grants no authority. The array indexes
-types directly by value ID minus one. Writers must match descriptors to
-parameters and definitions; semantic audits may verify them. A kind-0 `void`
-descriptor denotes the zero-data unit value, not an absent definition.
-A kind-1 unit place is logical state/storage, not an exposed payload address.
-Ordinary `r` operands require kind 0; `rPlace`/`rBasePlace`
-require kind 1. `PlaceLocal`, `PlaceField` and reserved `CheckedIndex`
-produce kind 1; `Load` defines a distinct kind-0 value. Copying a Copy
-referent does not duplicate place authority or extend its loan. Future
-parameter modes need explicit reference/loan operands, not a reinterpretation
-of kind 0.
-
-A region entry is `u8 kind, local(parentRegion), local(entryBlock),
-local(exitBlock), local(cleanupBlock)`. Parent is 0 (function) or a
-preceding region ID, so parent chains are acyclic. Kind `0x01` is a loop
-with a nonzero entry header, one designated exit outside its subtree and
-zero cleanupBlock. Kind `0x02`
-lexical scope is reserved until lifetime and exit rules are assigned.
-Kinds `0x03` handler, `0x04` finally, `0x05` loan,
-and `0x07` root reserve their identities but are **not executable** until
-exit/cleanup/exception rules and feature requirements are assigned.
-
-Kind `0x06` is an indexed-Body lexical unsafe region in the bounded fail-fast
-profile. Its Body uses root-free Copy-scalar shapes. Caller-unsafe
-declarations are limited to top-level functions, and calls are limited to
-local definitions. The region requires parent 0 or a preceding parent region ID, an entry
-block within its subtree, a designated exit outside its subtree but within its
-parent, and a zero cleanup block.
-Every incoming control-flow edge from outside the region targets its entry;
-every normal edge leaving the region targets its designated exit. Nested
-regions are permitted, and loop backedges remain within their loop region.
-Returns and fail-fast terminators may end a path inside the region; other
-transfers leaving it use the designated exit. A call's caller-unsafe
-authorization follows its recorded enclosing-region membership and the
-selected callee contract. Importing that call checks the accessed region
-chain and declared obligation. Producers establish the complete membership
-and edge discipline; trusted readers need not scan every Body or rebuild
-the CFG. Known violations on accessed entries/edges reject, and an adequate
-untrusted semantic audit establishes the relied-on scope facts.
-Compact-linear Bodies, imported calls, `unsafe(expr)`, unsafe members, cleanup,
-exception unwind and lifetime authority are not supported by this region.
-Kind `0x06` does not change `bodyLayout` or prove borrow safety or release an
-owner.
-
-A block extent contains these fields in order:
-
-| Field | Encoding | Meaning |
-|---|---|---|
-| `regionId` | `local` | Innermost containing region; zero for the function root |
-| `parameterCount`, `parameters` | `local`, then `local valueId[parameterCount]` | Values defined at this block's entry, in incoming-edge order; types come from `valueDescriptors` |
-| `liveInCount`, `liveIns` | `local`, then `local valueId[liveInCount]` | Prior definitions live at entry, excluding block parameters |
-| `liveOutCount`, `liveOuts` | `local`, then `local valueId[liveOutCount]` | Definitions available at block exit and needed on at least one outgoing normal edge, including values defined in this block |
-| `inheritedPlaceCount`, `inheritedPlaces` | `local`, then `(local placeId, u8 state)[inheritedPlaceCount]` | Places continuing from predecessors; state 0 vacant, 1 initialized |
-| `startPlaceCount`, `startPlaces` | `local`, then `local placeId[startPlaceCount]` | Places becoming active at entry with the descriptor's initial state |
-| `endPlaceCount`, `endPlaces` | `local`, then `local placeId[endPlaceCount]` | Places ending after this block's operations, before normal successor transfer or return |
-| `valueUseCount`, `valueLastUses` | `local`, then `(local valueId, local lastUseOrdinal)[valueUseCount]` | Distinct used values in strictly increasing ID order; last occurrence in this block |
-| `placeUseCount`, `placeLastUses` | `local`, then `(local placeId, local lastUseOrdinal)[placeUseCount]` | Distinct places mentioned in the block's state lists or operations, in increasing ID order |
-| `operationCount`, `operations` | `local`, then `operationCount` coded instructions | Definitions and state transitions in source order |
-| `terminator` | One coded terminator | Explicit normal successor/return/failure; no fall-through |
-
-Block ID is its one-based index in `blockOffsets`; region 0 is the function
-root, and entry block ID is 1. Its by-value parameters match MethodSig
-order and types. Receivers and non-value parameters use their declared
-place/receiver contracts, not fabricated values. Other blocks match all
-incoming-edge arities and types. Entry starts each non-value parameter
-place in the state selected by its mode and descriptor; it has no
-inherited places.
-
-`liveIns` and `liveOuts` are strictly increasing IDs; `liveIns` exclude
-block parameters. Each ID must identify a value with a type from its
-definition.
-`liveIns` refer to prior definitions available on every incoming normal
-edge; `liveOuts` are the union of successor `liveIns` and explicit edge
-arguments. Returns and failures have no live-outs. Account for every
-cross-block use and transit in these lists; definitions in the block need
-no `liveIn`.
-Optional audit checks definitions, transfers, dominance and exact lists.
-This permits ordinary dominating values while typing merge values as
-block parameters; checked operations define results within their block.
-These block-boundary lists are not a per-instruction live-range table and
-cannot determine when a reference ceases to be a logical GC root. The
-per-block last-use inventories give ordinary operand last uses without
-making an SSA last use into a GC root end. The first operation has ordinal
-0, the terminator has ordinal `operationCount`, and an end-place transition
-also has ordinal `operationCount`. Every listed last-use ordinal must
-refer to an actual use of that value or place at that position; absence
-means no use in this block. The maximum ordinal must fit the Body-local
-width, and the total number of distinct blocks listing an ID equals
-its descriptor's `useBlockCount`. Bound `valueUseCount` and
-`placeUseCount` by the respective descriptor counts before allocating
-or traversing entries. Root
-lifetime can extend beyond the last ordinary use, especially for owning
-storage, interior references, cleanup and exceptional continuations.
-
-Place lists are strictly increasing, duplicate-free; inherited and starting
-places are disjoint. Each place has one declaration and lexical start block,
-which may execute repeatedly in a loop. Only active places may be addressed.
-For each normal edge, apply operations and end-place transitions to the
-inherited and started sets; the result must equal the successor's inherited
-set. Successor starts are not inherited, and all predecessors must agree.
-An initialized place may end only if its type is Copy and needs no cleanup;
-otherwise explicitly `Move` or `Drop` it. `Return` requires an empty set.
-These records expose local state at block boundaries. Failure still needs
-separate cleanup/root rules, including the exact failure site within a block;
-place metadata cannot create an unwind edge or enable unsupported operations.
-
-Value IDs are gapless unique definitions in `1..valueCount`, assigned in
-block/operation order: block parameters first, then result-producing
-operations. Checked results are ordinary operation definitions. Direct
-cross-block uses require dominance and liveness on every crossed normal edge.
-Distinct incoming definitions become typed parameters with explicit edge
-arguments; edge arguments are live at the terminator. These facts do not
-certify Copy, cleanup or aliasing; trusted consumers may use them, while an
-opt-in verifier may recompute them. Conditional edges are mutually exclusive,
-but duplicating a live unique value on one edge, using it after move or
-implicitly copying a non-Copy value rejects.
-
-Executable indexed-Body regions are loops (`0x01`) and the bounded lexical
-unsafe regions (`0x06`) defined above. A block belongs to its innermost region
-and its ancestors. The following loop rules apply to kind `0x01`, not to
-unsafe-region entry blocks: each loop header is assigned to that loop and dominates
-its members. Outside edges enter only at the header, internal backedges
-target it, and leaving edges target its designated exit in the parent or an
-ancestor. Every block is entry-reachable, every loop has a reachable
-backedge, and every CFG cycle lies in a valid loop; nested loops admit entry
-only at their header. Multi-exit loops and multi-level breaks have no
-encoding. An audit checks dominance, reachability and region nesting within
-its work budget; trusted consumers may use recorded regions, not as a
-cryptographic certificate. Irreducible cycles are unsupported.
-
-### Logical decoder records
-
-An implementation can materialize these records directly from the
-preceding fields. Names are descriptive, not a mandated host-language ABI:
-
-| Record | Required data | Index/identity invariant |
-|---|---|---|
-| `BodyIndex` | Body layout, five counts, fixed-`u32` TypeSpec map, place/value descriptors, value-definition starts/offsets, block/terminator offsets | Local IDs and offsets remain relative to this one body; MethodDefs select its artifact-wide row via `bodyRow` |
-| `ValueDescriptor` | Body-local type ID and value/place kind | Entry `i` describes `r(i+1)`; resolve its type through the validated map without decoding the defining operation |
-| `BlockLocation` | Block-data start + `blockOffsets[i-1]`, next block offset, relative terminator offset | Entry `i-1` addresses block ID `i`; terminator lies inside this block's extent |
-| `BlockHeader` | Region, parameter IDs, live-in/out IDs, inherited/starting/ending place states, sorted last uses, operation count | Parameters define values; live sets refer to cross-block transfers, not native registers |
-| `Instruction` | Registered opcode, three resolved widths and the opcode-specific typed operands | The wide prefix changes the byte widths only; do not store raw bytes as if they were an addressing mode |
-| `Terminator` | Registered opcode and its typed edge/return/failure payload | Directly indexed; each normal edge targets a block ID and transmits the listed arguments |
-
-Bound the Body row, descriptors and indexes before lookup. Materialize
-the same logical records for all three forms, deriving the omitted
-one-block facts on a compact-linear scan and expanding compact-indexed
-presence lists and local offsets with checked arithmetic. Decode each
-operation by its registered schema when importing its block; semantic audit
-compares the stream with the terminator index and checks type/flow. A
-consumer explicitly trusting the producer's semantic indexes may start at
-an indexed terminator and follow edges without decoding unrelated blocks.
-The format does not prescribe an object graph, register assignment,
-optimization tier or cache.
-
-## Type and definition model for operands
-
-`t` indexes a Body-local type-map entry holding a fixed `u32` reference
-to a complete row in the metadata design's
-[TypeSpec table](il-metadata.md#metadata-logical-tables-and-row-semantics),
-not to a byte-sized primitive code embedded in an instruction. Entry
-types and instruction type operands use the same map; their IDs have
-Body-local scope, while the referenced TypeSpec retains its approved
-artifact-wide identity and qualification.
-The narrow executable profile uses the metadata registry codes `0x00 void`,
-`0x01 bool`, `0x03 char16`, `0x08 int32`, `0x0D uint32`, `0x09 int64`,
-`0x0E uint64`, `0x14 float32` and `0x15 float64`. Their logical payload
-bit widths are respectively 0, 1, 16, 32, 32, 64, 64, 32 and 64;
-`bool` has only values 0 and 1. Other assigned atomic
-types can be decoded as metadata but are not executable in this profile.
-`void` may define a typed zero-data `r` or block parameter; neither requires
-a machine payload carrier. Unit formals still occupy their logical entry/
-argument positions. The four integer codes alone
-participate in integer arithmetic; `char16` is not implicitly an integer.
-
-| TypeSpec form | Body-facing interpretation |
-|---|---|
-| `0x01` built-in | Assigned atomic type has its exact width; high-bit family codes with an inline atomic argument are structurally decoded but are not executable in this subset |
-| `0x02` local nominal, `0x03` imported nominal | Resolve the referenced TypeDef or expected import and its complete layout/contracts; equal representation does not make two nominal types interchangeable |
-| `0x04` formal, `0x05` constructed | Preserve the formal or its ordered nominal type substitutions; a body cannot assume numeric operations on an unconstrained formal |
-| `0x06` optional | Separate presence on the fully qualified inner type; `None` cannot fabricate its payload |
-| `0x07..0x0B` ref/ptr/box/val/own, `0x0C` indexed built-in | Indexed family argument when inline atomic encoding does not apply; preserve distinct representation/capability and reject unsupported executable use |
-
-Qualifiers remain part of type equality across edges. Each `r` has one
-indexed descriptor; a block parameter's type comes from its ID, and every
-operation result must match its descriptor. Place descriptors supply
-referent TypeSpecs; field results resolve FieldDefs against the owner's
-nominal type. Entry values derive from MethodSig, with declared and inferred
-forms agreeing. Declared types and call contracts determine Copy, ownership
-and effects. Nominal operators remain selected MethodDefs, not primitive
-`Binary`/`CheckedBinary` kinds. Transparent layout changes ABI
-classification, not numeric identity.
-
-| Definition form | Type/state of the new value |
-|---|---|
-| `ConstBits`, `ConstSigned`, `None`, `Aggregate` | Exact referenced `t`; the operation's restrictions still apply |
-| `Copy`, `Load`, `Move` | Complete source or place-referent type; a place handle itself is not copied by `Load` |
-| `Unary`, integer/bitwise/wrapping `Binary` | Operand's complete type, subject to the kind's type rule |
-| Comparison `Binary`, `IsPresent` | A TypeSpec of primitive `bool`, not an untyped machine flag |
-| `Convert` | Exact `tDest`, independent of source representation width |
-| `Select` | Identical complete type of its two eager alternatives |
-| `MakeOptional` | Exact `tOptional`, whose inner type equals the payload's complete type |
-| `PlaceLocal`, `PlaceField` | Place-valued ID with referent, access, owner and region from the place/field declaration |
-| `Call` | Selected MethodSig result type, or no definition when `rNew?=0` |
-| `Extract` | Selected field's complete type, requiring a Copy-by-value field |
-| `CheckedBinary`, `CheckedNegate`, `CheckedDivRem` | Result ID(s) defined in the same block on success; their failure is an ordered effect, not a normal edge |
-| `CheckedConvert` | Exact `tDest` at its result ID on success |
-| `FloatCompare` | Primitive `bool`; same-format floating operands, not bit equality |
-| `FloatConvert`, `IntToFloat`, `Char16ToFloat` | Exact supported floating `tDest` |
-| `FloatNegate`, `FloatBinary` | Exact source floating format; no implicit promotion |
-| `FloatToInteger` | Exact supported integer `tDest` on success |
-
-The scalar executable profile accepts supported primitives and optional
-forms, but rejects place-valued results. Other rows define decode
-relationships only; they do not make future profiles executable.
-
-## Operation encoding and normalized effects
-
-Operands follow the notation above. These tables assign decode shapes;
-the executable subset is narrower, as specified below. Assigned but
-unsupported shapes may be inspected, not emitted as executable `(1, 0)`
-bodies.
-
-[Logical sharing/handoff protocols](runtime/sharing-and-handoff.md) likewise
-assign no opcode or broaden an existing operation profile. Actual authority,
-generation, publication, ordering, root and return/cleanup contracts need
-their independently admitted records and runtime/target support.
-
-[Logical concurrent executions](runtime/concurrent-executions.md) likewise
-allocate no atomic/fence opcode or widen the executable subset. Future
-operations retain exact port, order, source, full-boundary and read-only
-failure effects, including when results are unused. Actual location
-generations and causal guards are not supplied by SSA ID/value liveness;
-their physical contracts and target mappings require independent admission.
-
-[Logical owning-field transitions](language/ownership-and-cleanup.md) retain
-complete versus partial storage, exact move/repair and retirement order.
-These rules do not broaden the executable Move/Drop/Assign profiles or encode
-an acquisition journal/partial-state cleanup program. General ownership
-records and affected target support require independent admission.
-
-| Opcode | Operation; operands in byte order | Semantics and writer/audit requirement |
+| Kind | Payload after the common kind byte | Eligibility |
 |---:|---|---|
-| `01` | `ConstBits rNew, t, data(bits)` | Canonical pattern for supported scalar; `void` requires all encoded data bits zero and defines `()`, `bool` 0/1, `char16` 16 bits, integers use declared-width bits, and supported floats use exact IEEE bits after zero-extension. |
-| `02` | `ConstSigned rNew, t, signedData(value)` | Sign-extended signed integer literal; range checked in `t`, no default numeric type. |
-| `03` | `Copy rNew, r` | Source's complete type has checked `Copy`; does not duplicate a unique obligation. |
-| `04` | `Select rNew, rCondition, rTrue, rFalse` | Both source values already exist; eager selection of equal complete Copy types, never conditional evaluation or owner transfer. |
-| `05` | `MakeOptional rNew, tOptional, rValue` | Wrap one fully initialized value; payload type and qualification match. |
-| `06` | `None rNew, tOptional` | Absent optional; no fabricated payload or extra optional layer. |
-| `07` | `IsPresent rNew, rOptional` | Boolean presence test, not a value load. |
-| `08` | `Aggregate rNew, t, args` | Inspectable only: fully constructs ordered fields in declaration order, with checked Copy/unique transfer and validity; no implicit zero-fill or padding observation. |
-| `09` | `Extract rNew, rAggregate, fieldDefRow` | Inspectable only: Copy-only by-value field; unique fields require an authorized place and Move. |
-| `10` | `Unary rNew, u8(kind), r` | Kind 1 bool NOT, 2 integer bitwise NOT, 3 integer unary plus. Checked negation has its own operation. |
-| `11` | `Binary rNew, u8(kind), rLeft, rRight` | Kinds 1/2/3 bitwise AND/OR/XOR, 4/5 equality/inequality, 6/7/8/9 ordered `<`/`<=`/`>`/`>=`, 10/11/12 explicit wrapping add/subtract/multiply. Only the stated nonfloating built-in scalar operations; no invented user witness. |
-| `12` | `Convert rNew, tDest, u8(policy), rSource` | Policy 1 integer wrapping, 2 integer saturation, 3 checked bit-preserving reinterpretation of eligible equal-size representations. Checked range conversion has its own operation. |
-| `13` | `CheckedBinary rNew, u8(kind), rLeft, rRight` | Kinds 1..5 checked add/subtract/multiply/divide/remainder; 6/7 checked-count left/right shift. Failure at this operation follows the selected policy; no result is defined on failure. |
-| `14` | `CheckedConvert rNew, tDest, rSource` | Checked numeric range conversion; `rNew` has `tDest` on success. |
-| `15` | `CheckedNegate rNew, rOperand` | Checked signed negation; fails at the minimum. |
-| `16` | `CheckedDivRem rQuotient, rRemainder, rLeft, rRight` | Single checked failure decision; two distinct same-typed results on success. |
-| `20` | `PlaceLocal rNew, p` | Inspectable only: defines a place-valued result scoped to the place's region. |
-| `21` | `PlaceField rNew, rBasePlace, fieldDefRow` | Inspectable only: checked field identity, access, layout and retained owner lifetime; produces a place, not a field copy. |
-| `22` | `Load rNew, rPlace` | Inspectable only: reads initialized Copy value; a unique value instead requires Move. |
-| `23` | `Initialize rPlace, rValue` | Inspectable only: writes vacant authorized storage, consumes a unique source; fully publishes or fails before publication. |
-| `24` | `Assign rPlace, rValue` | Inspectable only: requires writable initialized storage; old owning value needs its explicit cleanup path before replacement. |
-| `25` | `Move rNew, rPlace` | Inspectable only: consumes an initialized unique place into a unique value and leaves it vacant. |
-| `26` | `Drop rPlace` | Inspectable only: drops one initialized unique place using its declared NoThrow cleanup; leaves it vacant. |
-| `27` | `CheckedIndex rNew, rBase, rIndex` | Inspectable only: checked indexed place result; backing and authority rules are not executable yet. |
-| `28` | `CheckedRange rNew, rBase, rStart, rCount` | Inspectable only: checked bounded view; backing, access and loan rules are not executable yet. |
-| `29` | `CheckedReadIndex rNew, rBase, rIndex` | Inspectable only: checked Copy element read without an intermediate place. |
-| `30` | `Call rNew?, m, args` | Exact selected callable; accepts matching signature, modes and contracts, regardless of whether it declares `NoThrow`. Zero result ID is legal only for `void`; a nonzero unit result defines `()`. Every logical by-value argument, including unit, supplies its typed value ID. A failure follows the selected runtime policy or a supported authored handler; it is not a normal CFG edge. There is no separate throwing-call opcode. |
-| `40` | `FloatCompare rNew, u8(kind), rLeft, rRight` | Same-format `float32`/`float64`; kinds 1..6 numeric equality, inequality, `<`, `<=`, `>` and `>=`; result is `bool`. |
-| `41` | `FloatConvert rNew, tDest, rSource` | Distinct `float32`/`float64` formats; total nearest/ties-to-even conversion, not bit reinterpretation. |
-| `42` | `IntToFloat rNew, tDest, rSource` | One of the four supported integer types to `float32`/`float64`; total nearest/ties-to-even conversion. |
-| `43` | `FloatNegate rNew, rSource` | Same floating format; toggle exactly the sign bit, preserving all other bits. |
-| `44` | `FloatBinary rNew, u8(kind), rLeft, rRight` | Same-format `float32`/`float64`; kinds 1..4 add, subtract, multiply and divide; total target-format arithmetic. |
-| `45` | `Char16ToFloat rNew, tDest, rSource` | `char16` unsigned code-unit value to `float32`/`float64`; total, no surrogate decoding. |
-| `46` | `FloatToInteger rNew, tDest, rSource` | `float32`/`float64` to one of the four supported integers; truncate toward zero, then check range; nonfinite/out-of-range fails without a result. |
+| `02` field read | `flags:u8=0, reserved:u16=0, fieldToken:u32` | The MethodDef receiver/static shape matches the FieldDef; it has no explicit value inputs and returns the exact readable field value. Non-Copy values require an independently admitted reference/transfer contract and cannot be copied by this form. |
+| `03` field write | `flags:u8=0, reserved:u16=0, fieldToken:u32, formalOrdinal:u16, sourceUse:u8, reserved:u8=0` | Exactly one selected value formal maps to the field's complete type; the method returns unit. `sourceUse` is `1=copy`, `2=transfer`, or `3=borrow`. The source contract must support the selected access/retention and state transition. |
+| `04` field reference | `flags:u8=0, reserved:u16=0, fieldToken:u32, dependencyContractRow:u32` | The MethodDef result is the exact checked reference to the field, and the referenced MethodDef Dependency clause supplies its result/backing relationship. It is not a pin or lifetime extension. |
+| `05` identity forwarder | `flags:u8=0, reserved:u16=0, methodToken:u32` | Receiver, formal order/modes and complete result identity match the selected target after ordinary substitution. No conversion, argument reordering, added operation, or hidden destination adaptation is permitted. |
 
-The `u8(kind)` following `Unary`, `Binary` or `CheckedBinary` is one
-of these **exact** assignments. Every other value, including zero,
-rejects for that opcode. Both `Binary` and `CheckedBinary` produce an
-`rNew` in the same block:
+For kinds `02..04`, `fieldToken` is a fixed `u32` token with kind FieldDef
+or Import; an Import's retained expected definition must be a FieldDef.
+For kind `05`, `methodToken` has kind MethodDef or Import, and an Import's
+expected definition must be a MethodDef. Token resolution and exact binding
+validation remain mandatory. A direct descriptor applies in the owning
+MethodDef's generic declaration context; any additional constructed-owner,
+dispatch or witness adaptation requires an ordinary stream.
 
-| Opcode | Kind byte | Name | Valid sources | Result and failure |
-|---:|---:|---|---|---|
-| `10` | `01` | BoolNot | `bool` | `bool`, logical complement |
-| `10` | `02` | BitNot | One integer primitive | Same type, width-limited bitwise complement |
-| `10` | `03` | Plus | One integer primitive | Same value and type |
-| `11` | `01` | BitAnd | Equal integer types | Same type, width-limited AND |
-| `11` | `02` | BitOr | Equal integer types | Same type, width-limited OR |
-| `11` | `03` | BitXor | Equal integer types | Same type, width-limited XOR |
-| `11` | `04` | Equal | Equal supported nonfloating primitive types | `bool`, exact value equality |
-| `11` | `05` | NotEqual | Equal supported nonfloating primitive types | `bool`, negated exact value equality |
-| `11` | `06` | LessThan | Equal integer types | `bool`, order in declared signedness |
-| `11` | `07` | LessThanOrEqual | Equal integer types | `bool`, order in declared signedness |
-| `11` | `08` | GreaterThan | Equal integer types | `bool`, order in declared signedness |
-| `11` | `09` | GreaterThanOrEqual | Equal integer types | `bool`, order in declared signedness |
-| `11` | `0A` | WrappingAdd | Equal integer types | Same type, sum modulo its bit width |
-| `11` | `0B` | WrappingSubtract | Equal integer types | Same type, difference modulo its bit width |
-| `11` | `0C` | WrappingMultiply | Equal integer types | Same type, product modulo its bit width |
-| `13` | `01` | CheckedAdd | Equal integer types | Same type on success; failure if mathematical sum is out of range |
-| `13` | `02` | CheckedSubtract | Equal integer types | Same type on success; failure if mathematical difference is out of range |
-| `13` | `03` | CheckedMultiply | Equal integer types | Same type on success; failure if mathematical product is out of range |
-| `13` | `04` | CheckedDivide | Equal integer types | Same type on success; zero divisor or signed minimum / `-1` fails |
-| `13` | `05` | CheckedRemainder | Equal integer types | Same type on success; zero divisor fails, signed minimum % `-1` is zero |
-| `13` | `06` | CheckedShiftLeft | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, bits shifted out are discarded |
-| `13` | `07` | CheckedShiftRight | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, sign-fill for signed, zero-fill for unsigned |
+These forms retain the wrapper MethodDef's identity, signature, effects,
+requirements, visibility, caller-unsafety and output/cleanup contracts.
+Unsupported required descriptors reject; they are not treated as empty
+methods or aliases.
 
-The opcode/kind pair selects behavior; operand types supply width and
-signedness, and the result descriptor must match the result type.
-`CheckedBinary` is a provisional **integer primitive** mnemonic, not a
-polymorphic call to an operator named `+` or a promise that every type
-with a numeric witness accepts the opcode. There are three distinct
-cases: this exact built-in primitive operation; an arbitrary nominal
-`operator +` selected as a MethodDef call; and a type explicitly opting
-into a **semantic numeric contract** whose selected witness commits
-to specified numeric rules. The third case need not be opaque to an
-optimizer merely because the implementation is user-defined. It still
-must retain the exact selected witness/MethodDef for fallback and separate
-compilation, rather than treating the interface name or a matching
-machine representation as a primitive operation.
+An instruction-stream row is laid out in this exact order:
 
-A generic operator witness currently establishes only its declared
-signature/effects, not algebraic laws. A stronger `INumber`-style
-contract could specify value domain, exact arithmetic and overflow
-policy, failure order, observable effects, result validity/ownership
-and which identities or transformations are observationally sound.
-Different contracts may promise different subsets: mathematical
-associativity alone cannot erase an intermediate checked failure,
-allocation failure or cleanup. A contract that explicitly permits
-folding still needs deterministic constant evaluation and a validated
-serialization of the resulting value. The producer's checked witness
-and published contract would be trusted under the metadata trust policy,
-or audited where required; neither a type name nor a convenient
-implementation body creates these promises.
+| Field | Width | Rule |
+|---|---:|---|
+| `implementationKind` | `u8` | `01` |
+| `instructionEncoding` | `u8` | `01` selects this register codec |
+| `flags` | `u8` | Zero |
+| `reserved` | `u16` | Zero |
+| `homeCount` | `u32` | Count of eight-byte HomeMap entries |
+| `typeMapCount` | `u32` | Count of fixed four-byte type tokens |
+| `methodMapCount` | `u32` | Count of fixed four-byte method tokens |
+| `constantMapCount` | `u32` | Count of eight-byte constant references |
+| `blockCount` | `u32` | Count of fixed 12-byte Block entries; 1..65,536 |
+| `recordCount` | `u32` | Count of typed operand records; 1..65,536 |
+| `codeByteLength` | `u32` | Exact final instruction-stream extent |
 
-Before admitting the third case to executable Body, choose a wire form
-such as a semantic numeric operation carrying the selected witness and
-fallback MethodDef, or a selected call with a registered semantic
-profile. Define its binding, version/compatibility and exact optimizer
-permissions together; the present `CheckedBinary` operand schema
-cannot carry those identities. Until then, encode the selected call
-and do not silently substitute a primitive opcode. This is an open
-encoding choice, **not** a claim that opt-in numeric types must remain
-opaque or can never participate in constant folding.
+After the 33-byte prefix, the row contains `HomeMap`, `TypeMap`, `MethodMap`,
+`ConstantMap`, the fixed Block table, the typed-record offset index and record
+data, and finally exactly `codeByteLength` instruction bytes. No padding is
+inserted between instructions or tables. A Body row has no unclaimed trailing
+bytes.
 
-The symbolic spellings `Binary`, `CheckedBinary` and `ConstSigned` name
-these **opcode schemas**, not source-language operations or
-mandated display mnemonics. `CheckedIntegerAdd` and
-`ConstSignedInteger` would describe this narrow subset more precisely;
-the naming and family split should be resolved together with later
-floating, aggregate and registered numeric forms rather than silently
-extending the current integer kinds to them. Renaming these schemas
-need not change their assigned opcode bytes.
+All Body-local map, home, block and typed-record indexes are zero-based
+`u16` values; `0xFFFF` is an ordinary usable index. Each corresponding
+inventory count is `u32` and ranges from zero through 65,536. An absent
+reference is represented by its explicit kind/presence field, never by
+stealing a valid index. Global table references remain their schema-owned
+fixed-width references and do not inherit this local bound. Code offsets,
+byte lengths and instruction ordinals are separate `u32` domains.
 
-The other discriminants are `Convert.policy`: `01` integer wrap,
-`02` integer saturate, `03` equal-width integer bit reinterpretation;
-and `Fail.reason`: `01` requirement, `02` overflow, `03` division by
-zero, `04` invalid shift count. These are separate enum domains even
-when the same byte value occurs. `CheckedConvert` has **no policy
-byte**: it performs a checked range conversion with `tDest` before its
-source `r` and defines `rNew` on success. Wrapping converts
-the mathematical integer modulo the destination bit width; saturation
-clamps to its range. Neither is an alternate decoding of `CheckedConvert`.
+| Map | Entry format | Meaning |
+|---|---|---|
+| HomeMap | `u8 role, u8 flags, u16 typeMapIndex, u16 formalOrdinal, u16 reserved=0` | `role`: 1 receiver, 2 formal, 3 local. `formalOrdinal` is zero-based for role 2 and zero otherwise. Only role 3 may set `flags` bit 0 (`rebindable`); other bits reject. Locals begin vacant; receiver/formal storage begins according to the MethodSig and parameter mode. |
+| TypeMap | `u32 token` | Fixed four-byte type token resolving a complete type under the owning module context. |
+| MethodMap | `u32 token` | Fixed four-byte MethodDef or Import token retaining the exact selected signature/contract. |
+| ConstantMap | `u32 TypeSpecRef, u32 ConstantSource row` | One complete type and one exact frozen/target-constant source; the source's complete type must match. |
 
-`Binary` kinds `01..05`, `0A`, `0C` and `CheckedBinary` kinds `01`, `03`
-are commutative over already computed values; swapping operands does not
-reorder their producing instructions. `NoThrow` is not purity:
-unused results do not permit dropping or commoning calls, writes, failure
-or cleanup. Constant folding must preserve a checked operation's success
-value or ordered failure. No generic numeric opcode changes meaning when
-a primitive or SIMD type is added.
+HomeMap entries are distinct storage identities and are never deduplicated.
+At most one entry has role `1` and it is valid only when the MethodSig has a
+receiver. A role-`2` entry names an existing formal ordinal, occurs at most
+once for that ordinal and has the complete substituted formal type. Role-`3`
+entries have ordinal zero and represent distinct locals; they begin vacant.
+Role-`1`/`2` entries have flags zero, and only role `3` may set the
+`rebindable` flag.
 
-Canonical `ConstBits` uses the smallest unsigned width holding the declared-width
-bit pattern, not a sign-extended 64-bit container: `int32(-1)` is
-`FF FF FF FF` and `int64(-1)` is eight `FF` bytes. The reader decodes
-unsigned data, checks that its pattern fits the declared width, and then
-interprets signedness. Its nonfloating `t` is `bool`, `char16` or an integer primitive.
-It additionally accepts `void` with encoded data exactly zero, defining
-the unit value without payload bits. The selected data width still consumes
-its ordinary 1, 2, 4, or 8 on-wire bytes; these zero bytes encode the
-singleton, not a numeric conversion or a payload storage requirement.
-For example, `01 01 01 00` defines unit `r1` with Body-local `t1`
-resolving to `void`, under the default one-byte operand widths.
-Canonical `ConstSigned` instead uses the smallest signed width holding the
-mathematical value (for example `-1` is `FF`, `200` is `C8 00`).
-Its `t` is one of the four integer primitives, signed or unsigned, and
-the signed mathematical value must fit that destination. Use `ConstBits`
-for unsigned values above `int64.MaxValue`. The complete TypeSpec
-selects the admitted value domain; unrepresentable or invalid declared-type
-patterns reject. An ordinarily accepted wider data field preserves the same
-decoded pattern or mathematical value; width alone is not a value error.
-For example, `02 04 01 03` defines `r4` as value 3 of Body-local `t1`,
-which resolves to `int32`: `03` is the **one-byte encoded signedData**
-chosen because 3 fits in one byte, not a one-byte result or an untyped
-source literal. The result has the `int32` width and value range from
-its type descriptor. `ConstBits` instead supplies a declared-width
-bit pattern, so an `int32` based literal `0xFFFF_FFFF` has four
-`FF` data bytes and means `-1`; its interpretation is not inferred
-from the number of encoded bytes.
+Every TypeMap, MethodMap and ConstantMap index uses its own zero-based
+namespace, regardless of equal numeric values. Map entries may be repeated;
+ordinary readers preserve meaning, while canonical writers order by first
+logical use, reuse identical tokens/values and omit unused entries.
+HomeMap entries are distinct storage identities; their order is preserved
+unless a transformation remaps every Home reference. This schema does not
+claim one canonical ordering for HomeMap locals.
 
-`ConstSigned` does not accept floating, aggregate or arbitrary nominal
-TypeSpecs. `ConstBits` additionally accepts unqualified `float32`/`float64`
-as the exact declared-width IEEE representation described below; it performs
-no numeric parsing or rounding. A constructed aggregate must preserve its
-typed field/initialization rules rather than reinterpret one scalar immediate.
-A registered user literal is parsed at compile time against its selected
-target; its eventual Body encoding must represent the validated value
-under that type's constant and ABI contracts. This design does not
-assign such a constant encoding. The literal does not make raw source
-spelling an IL numeric operand or grant a generic primitive opcode to
-the user type.
+The Block table contains exactly `blockCount` fixed 12-byte entries in
+zero-based Block-index order. Each entry is:
 
-The executable scalar value set is `void`, `bool`, `char16`, `int32`, `uint32`,
-`int64`, `uint64`, `float32` and `float64`; integer arithmetic uses the
-declared width. `Binary` comparisons require equal supported nonfloating
-complete operand types and return `bool`; their
-kind does not imply a user equality witness. Unit accepts only equality/
-inequality, yielding true/false respectively, not ordering or arithmetic.
-`ConstBits` and `ConstSigned`
-carry explicit Body-local type IDs resolving to TypeSpec; arithmetic reads types from value
-descriptors and must match the result descriptor. No instruction assumes
-a default integer type or implicitly narrows, promotes, loads, updates or
-swaps operands. `Load` produces a typed Copy value; `Assign` writes through
-a place only after a preceding checked operation succeeds. Other floating,
-vector, atomic, raw-pointer and text operations remain unassigned; type
-recognition cannot manufacture an operation.
+```text
+u32 codeOffset, u32 codeLength, u16 entryStateRecord, u16 flags=0
+```
 
-`Convert` policy 1 wraps the mathematical value modulo the destination
-width and interprets those bits in the destination's signedness; policy 2
-clamps to its range. Policy 3 preserves bits only between equal-width
-integer primitives; it cannot fabricate `bool`, `char16`, optional or
-nominal values. `Unary` NOT and `Binary` bitwise/wrapping kinds apply only
-to integers; Boolean NOT, equality and comparisons have separate rules.
-`Switch` patterns must be canonical `ConstBits` patterns of the selector
-type, without truncated high bits or duplicates. Other effectful or
-potentially failing operations require a specified operation or future
-feature, not an invented call target.
+`codeOffset` and `codeLength` select one nonempty instruction range within
+the final code byte array. Block ranges are disjoint and in block-index order;
+together they cover every instruction byte exactly once. The block index is
+the branch target namespace. Each block ends with exactly one terminal
+instruction; fallthrough is never inferred from adjacent byte ranges.
+`entryStateRecord` names a typed `BlockEntryState` record.
 
-`Call` does not encode a no-throw assertion. The selected declaration's
-optional `NoThrow` guarantee is a separate published effect, not part of
-ordinary call identity; it still requires proof and compatible binding
-when declared. A call without that guarantee may fail, including through
-native interop. A later exceptional-region contract can direct such a
-failure to an explicitly authored unsafe `try`/`catch`; this initial
-scalar executable subset does not yet encode handlers. Failure cannot
-be erased or silently converted into a normal return.
+A `BlockEntryState` payload is `u32 registerCount` followed by that many
+five-byte rows `u8 register, u8 carrierKind, u16 typeMapIndex,
+u8 accessKind`. Rows are sorted by register and name only available general
+bindings R0..R13. R14/R15 are constant/discard roles, not incoming bindings.
+`carrierKind=0` identifies an ordinary typed value and requires
+`accessKind=0`; `typeMapIndex` names its complete value type.
+`carrierKind=1` identifies an internal typed place handle and requires
+`accessKind=1..5`, using the PlaceSelection access domain; `typeMapIndex`
+then names its complete referent type. A checked reference remains an
+ordinary typed value, not a place handle.
 
-`Initialize`, `Assign`, `Move`, `Drop` and `Aggregate` require complete
-flow-sensitive vacancy, ownership and cleanup verification over every
-normal edge. Explicit Drop records the point of cleanup; a region marker
-alone does not execute it. In this revision any implicit failure departure
-with a live owner, loan, or required root rejects unless its cleanup and
-unwind representation is specified. No additional private representation
-implicitly extends this revision's accepted Body forms.
+The row declares the carrier, referent/value type and place authority class.
+Dynamic selected-target identity, backing dependencies, loans, roots and
+guarded state are reconstructed from the defining operations and incoming
+edges by the mandatory per-function verifier. A merge must preserve those
+facts; if it cannot represent a required relationship, the consumer rejects
+affected use rather than treating a place handle as a value or reference.
+Home initialization, replacement, owner and cleanup states are likewise
+verified from typed Homes, operations and declared contracts; these facts
+are not assigned per-expression IDs. A consumer does not rescan a callee's
+body at each call: it consumes the verified published contract.
 
-### Floating operations
+`recordOffsets` is `u32[recordCount+1]`, relative to record data. It begins
+at zero, is strictly increasing for each present record and ends at the exact
+record-data extent. A record starts with
+`u8 recordKind, u8 flags=0, u16 reserved=0`; the record index addresses that
+typed extent and its kind fixes the payload. The assigned record kinds and
+payloads are listed in [Typed operand records](#typed-operand-records).
+Unknown kinds, flags, reserved values, truncated extents and trailing row
+bytes reject before affected use.
 
-The floating band integrates the previously separate draft semantics into
-the one registry. It admits only unqualified `float32` and `float64`, with
-their IEEE binary32/binary64 values and complete type identity. Equal storage
-size, a nominal numeric witness, another floating format or an optional
-floating payload is not an eligible substitute.
+`instructionEncoding=0x01` selects the mixed codec above. Every other selector
+is unassigned. It does not select source arithmetic policy, runtime/target
+requirements or semantic features. A future codec needs a new exact draft
+schema and never receives guessed decoding from equal format bytes.
 
-`ConstBits` decodes unsigned data and preserves the exact declared 32- or
-64-bit representation, including signed zero,
-infinities, signaling/quiet NaNs and payload bits. Nonzero bits beyond the
-format width reject; zero high bytes from a wider assigned field are
-permitted during ordinary reading. The canonical data width is the smallest supported
-unsigned width holding the pattern; it is not necessarily the format's
-storage width. For example, binary32 positive zero uses one zero data byte,
-whereas its negative zero pattern needs four. Constant formation does not
-execute floating arithmetic, quiet a NaN or depend on host byte order.
-`Copy` and eager `Select` likewise preserve the chosen value's bits.
+### Typed operand records
 
-`FloatCompare` kinds are exactly `01` equality, `02` inequality, `03` less
-than, `04` less than or equal, `05` greater than and `06` greater than or
-equal. Both operands have the same supported format, and the result is
-primitive `bool`, which must have its own mapped TypeSpec. NaNs are unordered:
-equality and all ordered comparisons are false, while inequality is true.
-Both signs of zero compare equal. Integer `Binary` comparison kinds are
-not floating aliases or IEEE total-order operations.
+Typed-record references are zero-based `u16` indexes into the owning Body's
+record map. The count is `u32`, at most 65,536. Each record has the four-byte
+header described above; its kind fixes the exact payload and extent. A
+`ValueSelector` is `kind:u8,index:u16`: kind `0=None` requires index zero,
+kind `1=Register` selects R0..R15, and kind `2=Home` selects a HomeMap entry.
+None is an explicit absent selector, not an implicit default, discard
+register, or missing-index sentinel. In a CallSite input position it is valid
+only for an exact unit formal. In a result position it is valid for an exact
+unit result or a target verified to have `DoesNotReturn`; the latter has no
+normal result even when the declared result type is non-unit. In a place
+record it marks an unused base/index field. Special register roles remain
+governed by the operation's source or destination position.
 
-`FloatConvert` accepts the two distinct-format pairs. It rounds directly to
-the destination under nearest, ties-to-even; finite overflow may become
-infinity, and underflow may become a subnormal or signed zero. It is total.
-Infinities retain their class; a NaN result is quiet with unspecified runtime
-sign/payload. The [constant/environment rules](language/floating-environment.md)
-apply to admitted constant execution. Same-format identity
-conversion is `Copy`, not this operation.
+| Record kind | Payload |
+|---:|---|
+| `01` BlockEntryState | `u32 registerCount`, then `registerCount` rows `u8 register, u8 carrierKind, u16 typeMapIndex, u8 accessKind`; at most 14 unique sorted general registers |
+| `02` CallSite | `u8 targetKind, u8 resultKind, u16 flags=0, u16 targetIndex, u16 resultIndex, u32 inputCount, u32 preparationCount`, then 4-byte input rows and `u16` preparation-record indexes |
+| `03` DestinationPreparation | `u8 destinationKind, u8 priorState, u8 transition, u8 sourceUse, u16 destinationIndex, u8 hasFormal, u8 flags=0, u16 formalOrdinal, u16 reserved=0, u32 dependencyContractRow` |
+| `04` PlaceSelection | `u8 targetKind, u8 accessKind, u8 destinationKind, u8 baseKind, u16 destinationIndex, u16 baseIndex, u8 indexKind, u8 targetRefKind, u16 indexIndex, u32 targetRef, u16 referentTypeMapIndex, u16 flags=0` |
+| `05` SemanticStore | `u8 placeKind, u8 sourceKind, u8 transition, u8 sourceUse, u16 placeIndex, u16 sourceIndex, u32 dependencyContractRow, u8 hasFormal, u8 flags=0, u16 formalOrdinal` |
+| `06` ConditionalEdge | `u16 trueBlock, u16 falseBlock` |
+| `07` Switch | `u8 selectorKind, u8 flags=0, u16 selectorIndex, u16 typeMapIndex, u16 defaultBlock, u32 caseCount`, then `caseCount` rows `u16 constantMapIndex, u16 targetBlock` |
+| `08` RequirementFailure | `u16 exceptionTypeMapIndex, u16 constructorBindingRecordIndex, u8 conditionKind, u8 conditionRegister, u8 predicateMask, u8 flags=0` |
+| `09` Throw | `u8 payloadKind, u8 selectorKind, u16 selectorIndex, u16 lexicalRegionIndex, u16 flags=0` |
+| `0A` RegionExit | `u8 exitKind, u8 hasTarget, u16 targetBlock, u32 regionCount`, then `regionCount` `u16` region indexes from inner to outer |
+| `0B` ConstructorBinding | `u16 methodMapIndex, u16 exceptionTypeMapIndex, u32 suppliedCount=0, u32 formalCount, u32 bindingCount`, then `bindingCount` rows `u32 formalOrdinal, u8 bindingKind, u8 sourceUse, u16 constantMapIndex` |
 
-`IntToFloat` accepts exactly the eight pairs from `int32`, `uint32`, `int64`
-and `uint64` to either floating format. It converts the mathematical integer
-directly with destination nearest/ties-to-even rounding. `Char16ToFloat`
-separately accepts the two code-unit pairs, interpreting `char16` as an
-unsigned value in `0..65535`; it does not decode a surrogate pair or require
-that an individual code unit be a Unicode scalar. Both operations are total.
+`CallSite.targetKind` is `1=MethodMap`, `2=Register`, or `3=Home`;
+`resultKind` is `0=None`, `1=Register`, or `2=Home`. A non-None target or
+result uses the corresponding zero-based index; a None result requires
+`resultIndex=0`. Each input row is
+`u8 selectorKind, u8 sourceUse, u16 selectorIndex`; selector kinds are
+`0=None`, `1=Register`, and `2=Home`. None is valid only for an exact `void`
+formal and then `sourceUse`/`selectorIndex` are zero. Other `sourceUse` values
+are `1=copy/read`, `2=ownership transfer`, `3=borrow read`,
+`4=borrow write`, or `5=initialization destination`; the complete signature
+and type determine which mode is valid. A special register constant is
+selected through Register R14/R15, not an untyped constant selector. Inputs
+are already evaluated and appear in formal order. The record does not
+evaluate source expressions or reorder them.
+`preparationCount` entries name DestinationPreparation records in the
+dependency-valid order selected for that invocation.
 
-`FloatNegate` toggles **only** the format's sign bit. It is an explicitly
-bit-preserving operation, including for every NaN representation; it is not
-subtraction from zero or arithmetic NaN canonicalization.
+When the bound target has a verified `DoesNotReturn` effect, the call is
+terminal: it must use a general CallSite form, end its Block, have no normal
+successor, and use the None result selector even if its complete signature
+declares a non-unit result. The target retains that full signature. Compact
+window forms encode normal-returning calls only; they do not encode a
+DoesNotReturn call. A normal unit-returning CallSite also uses None but
+continues normally; the resolved target contract distinguishes these cases.
+A normal non-unit call requires a register or Home result selector.
 
-`FloatBinary` kinds are exactly `01` addition, `02` subtraction, `03`
-multiplication and `04` division. Operands and result have the same format.
-Each operation follows the [source floating arithmetic rules](language/primitive-operators.md#floating-arithmetic-and-comparisons):
-direct nearest/ties-to-even rounding, retained subnormals, no implicit wider
-intermediate, FMA, reassociation, ambient rounding or flush-to-zero. It is
-total; floating division by zero, infinity and NaN do not become integer
-failure effects. An arithmetic NaN result is quiet with unspecified runtime
-sign/payload; admitted constant execution uses the canonical positive
-zero-payload result. This is not the sign-only FloatNegate contract.
-Remainder, decimal arithmetic and other formats remain unassigned here.
+`DestinationPreparation.destinationKind` is `1=Register` or `2=Home`;
+`priorState` is `1=Vacant`, `2=Live`, `3=MaybeLive`, `4=Partial`,
+or `5=Reserved`; `transition` is `1=Initialize`, `2=Replace`,
+or `3=Publish`; and `sourceUse` has the CallSite source-use meanings above,
+with zero allowed only for a result-only destination. `hasFormal` is zero or
+one; when zero, `formalOrdinal` and `dependencyContractRow` are zero. A
+nonzero dependency row is a typed Contract-row reference whose kind must be
+applicable to that formal and transition. These records do not authorize
+cleanup-before-evaluation, ignore failed preparation, or weaken reentrancy
+confinement.
 
-`FloatToInteger` accepts exactly the eight reverse pairs. For a finite source,
-truncate its mathematical value toward zero **before** testing the exact
-destination range. Thus a finite value strictly between `-1` and zero can
-produce unsigned zero. NaN, infinity or an out-of-range truncated integer
-fails with the module's overflow policy, defines no result and does not
-perform a later store. It has a possible failure effect, not an unconditional
-NoThrow promise. Lowering preserves the actual target-required control-state
-and ABI obligations, not incidental volatile status flags as a language
-promise. ISA rounding modes or conversion sentinels cannot replace this
+For `BlockEntryState`, `carrierKind` is `0=Value` or `1=PlaceHandle`.
+Value rows require `accessKind=0`; place rows use `accessKind=1=Read`,
+`2=Write`, `3=Initialize`, `4=Transfer`, or `5=Reference`. The TypeMap
+entry is the complete value type for a value row and the complete referent
+type for a place row. The access class does not encode dynamic target,
+backing or loan identity; mandatory verification carries those facts across
+edges and rejects an unsupported merge before use.
+
+`RequirementFailure.conditionKind` is `1=Boolean` or `2=UInt8PredicateMask`.
+The record selects the current condition value through `conditionRegister`
+(R0..R15). Kind 1 requires a complete `bool` value and `predicateMask=0`;
+kind 2 requires `uint8` and tests `(value & predicateMask) != 0`, with
+`predicateMask` in `0..15`. R14/R15 are valid condition sources only with
+their selected, type-correct constant meanings. Both B3 and E7 read this
+condition from the referenced record; their instruction bytes do not omit or
+implicitly select a condition. Reserved flags must be zero, and other
+condition kinds or type/mask combinations reject before affected use.
+
+`PlaceSelection.targetKind` is `1=Home`, `2=Field`, `3=Element`,
+or `4=StaticField`. `accessKind` is `1=Read`, `2=Write`, `3=Initialize`,
+`4=Transfer`, or `5=Reference`. Selector kinds for destination/base/index
+are `0=None`, `1=Register`, and `2=Home`; unused selectors use None with
+index zero. `targetRefKind` is `0=None`, `1=FieldDef row`, or
+`2=MethodMap index`; the selected target kind fixes which is required.
+Home targets use the HomeMap index in `targetRef` and zero `targetRefKind`;
+field targets use an exact FieldDef row; element targets use a bound MethodMap
+entry for the admitted index operation, with upper `targetRef` bits zero.
+The complete referent type is
+`referentTypeMapIndex`. Place handles capture their selected inputs and
+checks; they are not source references, pointers, pins or owner extensions.
+
+`SemanticStore.placeKind` and `sourceKind` use the ValueSelector kinds, with
+the destination required to designate a typed writable place: an internal
+PlaceHandle or a checked writable reference whose own type/access contract
+governs the referent. These carriers remain distinct; the selector does not
+convert a reference to a PlaceHandle or expose a native address.
+`transition` and `sourceUse` use the DestinationPreparation domains.
+`hasFormal` is zero or one. When zero, `formalOrdinal` and
+`dependencyContractRow` are zero; when one, `formalOrdinal` identifies the
+correlated formal and a nonzero dependency row must apply to that formal and
+MethodDef. This record performs one typed semantic store, not an arbitrary
+instruction program.
+
+`Switch` keys are exact typed ConstantMap values of the selected scalar type,
+unique under that type's switch equality contract. `selectorKind` is
+`1=Register` or `2=Home`; None is invalid. Targets are absolute Block
+indexes. A default target is always present. `Throw.payloadKind` is
+`1=FreshExceptionValue`, `2=ActiveHandlerEvent`, or `3=CapturedExceptionOwner`.
+Fresh and captured payloads use a register/home selector; active-handler
+rethrow uses `selectorKind=0, selectorIndex=0` and the exact lexical
+`lexicalRegionIndex`. Fresh and captured payloads use `lexicalRegionIndex=0`.
+No route synthesizes a copied event or thread-global current exception.
+`RegionExit.hasTarget` is zero or one; absent targets use targetBlock zero,
+while present targets may use any valid Block index. Region indexes are
+ordered innermost to outermost.
+
+The `Throw` and `RegionExit` record shapes do not assign the ExceptionRegion
+inventory, handler/filter/finally rows or runtime event carrier. Consequently
+`Throw.payloadKind=2` and all `RegionExit` records require that separately
+assigned region carrier; they cannot be admitted or executed in its absence.
+The same capability boundary applies to handler dispatch and cleanup for an
+executed `unreachable`. These instruction/record encodings do not create a
+hidden region table or establish support for exception handling.
+
+`ConstructorBinding` identifies the exact ordinary zero-supplied-argument
+constructor binding selected for `require`. Its method target's result is
+the selected exception type. `formalCount` matches its signature;
+`suppliedCount` is zero. Each supplied-to-formal binding row covers one formal: kind `1` selects an
+optional default through ConstantMap, and kind
+`2` selects an admitted empty params expansion through ConstantMap. Binding
+rows are in formal order and `bindingCount` equals `formalCount`.
+`sourceUse` uses the CallSite source-use domain; zero is valid only for an
+exact unit formal, and the selected use must satisfy that formal's mode and
+ownership contract. A
+zero-parameter constructor has zero rows. Other construction recipes are
+not implicit in this record; lower them to ordinary conditional control
+flow or reject affected use. `RequirementFailure` binds that plan to the
+exact exception type. A false predicate constructs once and creates the
+selected fresh failure event; condition or construction failures propagate
+unchanged.
+
+Unknown record kinds, unsupported record/source-use/transition combinations,
+unowned records that carry required semantics, malformed extents and
+inconsistent references reject before affected use. Canonical writers omit
+unused records and use first logical-use order; ordinary readers accept
+consistent reordered or duplicate records where all references preserve
+meaning.
+
+## Width and operation-family allocation
+
+The assigned codec uses sixteen one-byte tiny tuples, two-byte short
+operations/restricted forms, and four-byte long families. It has no
+two-windows-for-every-operation scheme.
+
+The size study measured that earlier implied-window scheme, which consumed
+128 first-byte values. Its results explain the potential benefit and the
+concentration in a small subset; they are not a definition of the active
+allocation or an optimized measurement of the new layout.
+
+### Format-pressure study
+
+A static study inspected 29 selected methods from the installed .NET 11
+RC2 CoreLib and LINQ assemblies, including actual
+`System.Numerics.Decimal32` methods and their generic IEEE-decimal helpers.
+Both assemblies identify revision
+`11.0.0-rc.2.26504.105+820230c386db5b0106c5430b3e5aee92a7826bf5`.
+
+The study maps CLR evaluation-stack positions mechanically to registers,
+without register allocation, inlining, local promotion or SSA optimization.
+All models use the same resulting operation sequence. Consecutive argument
+loads can form one load-pair operation. A stack pop emits no operation;
+a duplicate emits a register transfer. This tends to favor low-register
+windows and retains CIL local traffic that an optimized register lowering
+might remove. It is not an optimal register allocation or a completed
+Terrum instruction selection.
+
+The following figures are **modeled instruction-stream bytes**, not actual
+Terrum encodings, complete artifact sizes, native code sizes or runtime
+measurements:
+
+| Selected group | Methods | All operations four bytes | Mixed 2/4 | Current implied-window 1/2/4 | Entire block either two or four bytes |
+|---|---:|---:|---:|---:|---:|
+| Collection methods | 4 | 548 | 328 | 261 | 520 |
+| LINQ selection/iteration | 3 | 612 | 364 | 301 | 550 |
+| Scalar methods and wrappers | 15 | 496 | 284 | 202 | 386 |
+| Generic IEEE-decimal helpers | 4 | 2,872 | 1,880 | 1,744 | 2,694 |
+| CLR Decimal software helpers | 3 | 5,752 | 3,512 | 3,215 | 5,358 |
+| Total of this selection | 29 | 10,280 | 6,368 | 5,723 | 9,508 |
+
+Mixed 2/4 forms save about 34-43% against the same operations all using
+four bytes in these groups. The implied one-byte windows save a further
+7.2% in the generic IEEE-decimal helpers, 20.4% in the collection methods
+and 10.1% across this selection. Tiny wrappers benefit more than the large
+helpers. The total is not a representative frequency distribution of
+CoreLib execution or of all applications.
+
+#### Instruction counts and percentage bases
+
+The modeled instruction sequence is held fixed. Supporting shorter forms
+changes its encoded byte count, not its instruction count. Argument-pair
+combining has already been applied equally to every model. These are not
+counts of native instructions or unchanged original CIL instructions.
+
+| Method | Modeled instructions in every format | All four-byte bytes | Mixed 2/4 bytes | Implied-window 1/2/4 bytes |
+|---|---:|---:|---:|---:|
+| `List<int>.get_Item` | 10 | 40 | 24 | 18 |
+| `List<int>.Add` | 30 | 120 | 70 | 50 |
+| `List<int>.Insert` | 52 | 208 | 124 | 101 |
+| `List<int>.RemoveAt` | 45 | 180 | 110 | 92 |
+| Collection subtotal | 137 | 548 | 328 | 261 |
+| `Number.CompareDecimalIeee754` | 79 | 316 | 188 | 161 |
+| `Number.AddDecimalIeee754` | 335 | 1,340 | 912 | 865 |
+| `Number.MultiplyDecimalIeee754` | 98 | 392 | 244 | 222 |
+| `Number.DivideDecimalIeee754` | 206 | 824 | 536 | 496 |
+| Generic IEEE-decimal subtotal | 718 | 2,872 | 1,880 | 1,744 |
+
+The width distributions are:
+
+| Group | Encoding | One-byte instructions | Two-byte instructions | Four-byte instructions | Total instructions | Bytes |
+|---|---|---:|---:|---:|---:|---:|
+| Collections | All four | 0 | 0 | 137 | 137 | 548 |
+| Collections | Mixed 2/4 | 0 | 110 | 27 | 137 | 328 |
+| Collections | With 1/2/4 | 61 | 52 | 24 | 137 | 261 |
+| Generic IEEE-decimal | All four | 0 | 0 | 718 | 718 | 2,872 |
+| Generic IEEE-decimal | Mixed 2/4 | 0 | 496 | 222 | 718 | 1,880 |
+| Generic IEEE-decimal | With 1/2/4 | 136 | 360 | 222 | 718 | 1,744 |
+
+Collections save 220 bytes when two-byte forms become available, then another
+67 bytes when one-byte windows become available. The 20.4% is that additional
+67-byte reduction relative to the 328-byte mixed stream. Some implied
+one-byte forms replace a four-byte form directly, not a two-byte form.
+
+The IEEE-decimal group saves 992 bytes when two-byte forms become available,
+then another 136 bytes with one-byte windows. The 7.2% is that additional
+136-byte reduction relative to 1,880 bytes, not an increase in size and not
+7.2 percentage points relative to the all-four-byte baseline.
+
+The 1/2/4 stream is smaller in every comparison here. The separate concern
+is primary opcode-space cost. The model does not spend the opcode space freed
+by removing one-byte forms on making more operations short, so it does not
+compare two independently optimized final encoders. The sixteen tiny tuples are assigned below after accounting for compact
+method bodies; this study does not certify their optimality.
+
+In the same model, the sixteen most useful potential one-byte forms account
+for 519 of the 645 saved bytes: 80.5% of the one-byte benefit and 8.2% of
+the mixed 2/4 stream. Thus one-byte forms need not be all-or-nothing.
+A smaller set may retain much of the benefit without allocating both
+windows for every one of 64 common operations. The study does not establish
+an optimal final set.
+
+The assigned sixteen tiny tuples are a bounded initial allocation, not a
+claim of a complete .NET 11 CoreLib frequency study or a permanently optimal
+ranking. Changing the allocation requires a reviewed draft-schema revision.
+
+The ranking is for instruction-stream bodies. Field-backed and forwarding
+implementation descriptors could remove argument loads, field accesses,
+calls and returns from that population entirely. The sample contains fifteen
+methods in its scalar/wrapper group, not fifteen certified forwarders.
+`List<int>.get_Item` has bounds/access behavior and is not a plain automatic
+field getter. Classify eligible compact implementations before extrapolating
+the ranking; the change could be material rather than a small adjustment.
+
+The study excludes compact method bodies, condition-consumer families,
+arithmetic recipes, typed records and maps. Its figures remain explanatory
+evidence only; they do not measure complete artifact size or runtime cost.
+
+Important limitations:
+
+- Maps, constants, operand/call/switch records, block-entry state, indexes,
+  mode tags, source data and padding are excluded.
+- The two width models share the same short-form eligibility; the study
+  does not use newly available opcode space to compress more families.
+- Its eligibility predates the full-only checked/saturating policy and
+  any special-register reservation. It is not a measurement of the
+  completed updated encoder or a development/release runtime comparison.
+- Metadata indices use an explicitly chosen small-index policy and maps
+  ordered by first appearance. A final codec or allocator can differ.
+- Comparisons producing values use a general four-byte form; comparison
+  branches are modeled as fused four-byte operations.
+- Memory/address and prefixed operations conservatively use full forms.
+  This is not a complete type-aware lowering or a proof that the
+  mechanical transcription is executable Terrum.
+- CLR shift, Boolean, initialization and ownership semantics are not
+  silently adopted. The sample does not qualify Terrum's affine or
+  first-class-unit contracts.
+
+Detailed method, assembly-hash, model and form-frequency evidence is retained
+as session research data. These figures contextualize the allocation; they
+do not establish an optimal encoding or a performance claim.
+
+### Long-family byte layout
+
+A long instruction is exactly four bytes:
+
+```text
+primary:u8 | control:u8 | payload:u16 little-endian
+```
+
+The primary byte both selects the four-byte length and identifies its
+registered family. The payload is not recursively decoded. For register
+families `C0..CC`, its nibbles are result0/result1/source0/source1 from
+least-significant to most-significant. `D0..D3` instead use source/
+destination register nibbles and a TypeMap index; `D4..DD` and `E0..EB`
+use the exact register, record or map layouts in the assigned long-family
+table. Unused fields and unsupported controls reject.
+
+The fixed sixteen-tuple tiny allocation and the assigned short/long
+families above form the complete current codec. No other family, width
+prefix, escape or vector/memory/atomic instruction follows from remaining
+byte values.
+
+### Ternary logic controls
+
+For one bit from each of A, B and C, index the truth table as
+`(A << 2) | (B << 1) | C`:
+
+```text
+index  A B C
+  0    0 0 0
+  1    0 0 1
+  2    0 1 0
+  3    0 1 1
+  4    1 0 0
+  5    1 0 1
+  6    1 1 0
+  7    1 1 1
+```
+
+Reading each input down the rows as an eight-bit column gives:
+
+```text
+A = F0
+B = CC
+C = AA
+```
+
+Apply a Boolean expression to those columns, restricting complement/results
+to eight bits, to obtain its control byte. These values are truth-table
+data, not instruction opcode assignments.
+
+| Function | Control |
+|---|---|
+| Constant false | `00` |
+| Constant true | `FF` |
+| A, B, C | `F0`, `CC`, `AA` |
+| `not A` | `0F` |
+| `A and B` | `C0` |
+| `A or B` | `FC` |
+| `A xor B` | `3C` |
+| `nand(A,B)` | `3F` |
+| `nor(A,B)` | `03` |
+| `xnor(A,B)` | `C3` |
+| `(A and B) or ((not A) and C)` | `CA` |
+| Majority: at least two inputs are one | `E8` |
+| Minority: at most one input is one | `17` |
+| `((not A) or B) xor C` | `65` |
+
+Majority is `(A and B) or (A and C) or (B and C)`. Minority is its
+complement. For the last example:
+
+```text
+((not F0) or CC) xor AA
+= (0F or CC) xor AA
+= CF xor AA
+= 65
+```
+
+An immediate can therefore select every Boolean function of three inputs,
+not merely a permutation of the inputs. The same construction extends to
+more inputs, but requires one truth bit per input combination: three inputs
+fit exactly into eight bits; four need sixteen bits.
+
+On an admitted integer/bit-vector type, apply that function independently
+at each bit position and preserve the declared width. Constant true then
+means all bits set, not integer one. Scalar Boolean and vector-mask result
+representations need their own admitted contracts. This does not make raw
+bitwise operations valid on arbitrary owners, reference descriptors or
+invalid value encodings.
+
+The `CA` function is per-bit selection by A's mask. It is not the same as
+whole-value conditional movement on one Boolean/condition result unless
+the required full-width mask relationship has been established.
+
+Named register operands must still be valid typed inputs. A control byte
+that ignores one input does not erase a preceding effectful computation,
+check or required cleanup. The instruction has no implicit memory operands,
+short-circuit argument evaluation, or permission to reinterpret a reference
+as bits.
+
+### Arithmetic recipe controls
+
+An analogous `ternarith` family can use the full control byte for selected
+recipes built from `neg`, `add`, `sub` and `mul`. Unlike Boolean truth
+tables, eight bits cannot describe every arithmetic function over arbitrary
+numeric values. They select a finite, explicitly defined recipe catalog.
+
+All four operations are eligible even when they can overflow. A recipe
+compactly expresses the operations to perform; encoding it does not require
+a proof that they succeed. JIT/AOT import reconstructs their typed, ordered
+AST/IR nodes and then performs its normal canonicalization and optimization.
+The recipe is not restricted to mathematical functions known to be total.
+
+Failure/rounding distinctions below constrain semantics-preserving rewrites,
+not whether a potentially failing operation can be represented. An importer
+can normalize the tree or retain individual checked nodes as appropriate;
+the wire need not serialize those intermediate node identities.
+
+Both operation slots select all four operations, not only the binary three.
+The recipe control byte uses this layout:
+
+| Field | Bit positions | Meaning |
+|---|---:|---|
+| Inner operation | 0..1 | `0` neg, `1` add, `2` sub, `3` mul |
+| Outer operation | 2..3 | The same operation-code convention |
+| Outer operand order | 4 | Zero: inner result first; one: remaining input C first |
+| A negation/modifier | 5 | Negate A, unless part of the absent token |
+| B negation/modifier | 6 | Negate B, unless part of the absent token |
+| C negation/modifier | 7 | Negate C, unless part of the absent token |
+
+These are recipe-control data, not primary opcode assignments. The four
+register nibbles remain destination plus A/B/C. Unary slots have explicit
+roles:
+
+```text
+inner = innerOp(A, B)      // inner neg uses A; B is unused
+result = outerOp(inner, C) // outer neg uses inner; C is unused
+```
+
+Absent operands use domain-specific combined source-selector/modifier
+patterns:
+
+| Recipe domain | Absent source pattern | Meaning |
+|---|---|---|
+| Integer | R14 with its negation/modifier bit one | Absent, not an evaluated negative zero |
+| Floating | R15 with its negation/modifier bit one | Absent, not an evaluated negated NaN |
+
+Recognize the combined token before reading or negating a value. Every
+unused unary source must have that domain's token; a required source must
+not have it. Inner negation therefore puts the token in B, and outer
+negation puts it in C. Unmodified R14/R15 keep their constant meanings.
+The integer encoding gives up no distinct zero value; an actual floating
+negated all-one pattern remains expressible through a normal register or
+typed ConstantMap.
+
+This is a recipe-specific combined operand code, not the ordinary bare-R15
+unused-field convention. It requires no extra bit or operand byte.
+
+The order bit can instead make a binary outer operation
+`outerOp(C, inner)`. Renaming the input registers then expresses right-nested
+forms without a separate permutation selector. Outer `neg` ignores neither
+the inner operation nor its failures; it negates the inner result.
+
+Input-negation steps belong at their selected tree positions. For the
+inner-first form, negate participating A/B, compute the inner operation,
+then negate C if requested and perform the outer operation. For the
+C-first form, perform its requested negation before the inner subtree.
+The modifier bit belonging to an absent token is one, but causes no
+negation step. Outer negation requires the irrelevant outer-order bit to
+be zero. These unary rules admit 182 of the 256 raw control patterns;
+equivalent recipes remain valid, so this is not a claim of 182 distinct
+arithmetic functions.
+
+The binary-only examples remain:
+
+```text
+(A op0 B) op1 C
+A op0 (B op1 C)
+```
+
+Operand permutations can already be expressed by the three register input
+fields. No on-wire local or SSA ID is required for the inner result.
+
+Normalization is separate from encodability. In wrapping fixed-width
+arithmetic, `x + (-y)` and `x - y` agree modulo the width. In checked
+arithmetic they need not have the same failure behavior: for `int8`
+`x = -1, y = -128`, `neg(y)` overflows, while `x - y` is the representable
+value 127. Both recipes are valid to encode; the importer must preserve
+the check or prove the rewrite valid rather than prohibit the recipe.
+
+| Candidate recipe | Required distinction |
+|---|---|
+| `(A * B) + C` | Strict multiply followed by add is not single-rounding FMA. |
+| `(A + B) * C` | Preserve its grouping, intermediate result and failure site. |
+| `A - (B * C)` | Preserve noncommutative operand order. |
+| `(neg A) + (B * C)` | Negation and the product have their own ordered semantics. |
+| Input/result negation variants | Float sign-only behavior, signed zero, NaN state and checked minimum/unsigned failure cannot be replaced by algebra alone. |
+
+Each selected control must define its operation tree, ordered steps, admitted
+types, intermediate precision/rounding, overflow policy, floating signaling
+effects, result publication and source/failure identities. A code meaning
+negate C before the inner multiply is not generally interchangeable with a
+source expression that multiplies first and only then negates C.
+
+The primary selects one wrapping, checked, saturating or strict-floating
+policy for the recipe's active nodes; the control byte does not silently
+choose it. Mixed policies use separate recipe instructions. Fused operations
+remain distinct, not another interpretation of a strict mul/add tree.
+Recipe source/failure locations use their assigned SourceMap step roles.
+
+Identity padding is not required. It is not universally equivalent even
+without signaling NaNs: checked unsigned negation of all-ones fails rather
+than supplying one; floating negation of all-ones supplies NaN rather than
+one; adding negative decimal zero at quantum 0 can change a supplied
+cohort. Producers may use actual identity operations where their complete
+value/effect/representation contract permits, not as an implicit codec rule.
+
+Fusion must also respect computations outside the recipe. In
+`(a * b) + F()`, moving a checked multiply until after F's result exists
+could execute F before an overflow that originally prevented it. Use a
+compound form only when its complete ordering/effect contract matches,
+or retain the ordinary sequence.
+
+A fused multiply-add needs its own single-rounding contract. A compound
+strict recipe must not contract to hardware FMA merely because the target
+has that instruction. Future IEEE status and trap observations make the
+intermediate steps significant even where ordinary numeric values coincide.
+
+### Integer source profiles and explicit IL semantics
+
+The standard source arithmetic profile selects the default policy for
+ordinary integer add/subtract/multiply/negate and their compound/update
+forms:
+
+| Source compilation profile | Ordinary operation policy |
+|---|---|
+| Development or Debug | Checked |
+| Release | Wrapping modulo the exact destination width |
+| Explicit checked or wrapping operation | Its explicitly selected policy in every profile |
+
+The compiler selects the profile before body checking and required constant
+evaluation. A checked
+Development/Debug operation can fail with the exact scalar failure; the
+corresponding Release operation wraps. Division/remainder, shifts, conversions,
+explicit API policies and floating operations keep their separate contracts.
+The source profile does not create an ambient runtime arithmetic mode.
+
+The wire distinguishes the selected arithmetic semantics and never defers
+them to the consumer's build configuration. A JIT/AOT compiler importing a
+checked artifact cannot reinterpret it as wrapping because it is optimizing
+a Release build, or vice versa. Profile selection is compiled into the
+explicit operation opcode/control; no ambient profile bit changes execution.
+The Body does not need to retain a source-profile selector after this choice
+has been resolved.
+
+The IL supports both policies. Wrapping forms can use compact opcodes;
+checked and saturating variants use full four-byte representations and
+do not require matching one-/two-byte forms. Checked recipes remain valid
+even when they may overflow. Internally, an
+optimizer can use unchecked arithmetic with explicit required checks,
+eliminate checks under valid proofs, or retain checked nodes. It must
+preserve the selected failure and observation contract.
+
+A proven-equivalent lowering can use a compact wrapping operation when a
+checked result cannot overflow. This does not create a compact checked
+opcode or let optimization discard a required failure.
+
+Wrapping is not C-style undefined signed overflow or permission to mark a
+potentially overflowing operation as impossible. Any separately proposed
+assume/proven-no-overflow operation would need its own explicit contract.
+
+An overflow analyzer remains useful, especially for unintended Release
+wrapping, but it is not a substitute for checked semantics in
+Development/Debug. A warning for every unknown-input operation that could
+possibly overflow would be extremely noisy. Definite failures, suspicious
+size/index calculations, arithmetic before widening and relevant flow facts
+are better diagnostic candidates. Exact warning rules are not selected here.
+
+Rust's [Cargo profile defaults](https://doc.rust-lang.org/cargo/reference/profiles.html)
+enable overflow checks for development and disable them for release;
+they are configurable. Its [overflow reference](https://doc.rust-lang.org/reference/expressions/operator-expr.html#overflow)
+also retains checks for signed minimum division/remainder by -1 even when
+overflow checks are disabled. The [overflow RFC](https://rust-lang.github.io/rfcs/0560-integer-overflow.html)
+explicitly discusses the difficulty of static detection and runtime cost.
+These sources explain the tradeoff; they are not measurements of Terrum's
+performance.
+
+Division by zero, signed-minimum division by -1, remainder, shift counts,
+literal construction, numeric conversions and floating exception handling
+remain separate contracts. Selecting Release wrapping for add/subtract/
+multiply/negate does not change those behaviors. The static format-pressure
+study measured encoded-size choices, not runtime costs of checking or
+vectorization.
+Runtime `require` and explicit throws do not become debug-only checks.
+
+### Comparison conditions and consumers
+
+The selected scalar comparison model produces ordinary `uint8` outcome
+bits, with consumers for Boolean values, branches and conditional movement:
+
+| Family | Intent |
+|---|---|
+| `cmp` | Compare admitted values and produce exactly one uint8 outcome bit under the selected comparison/signaling policy. |
+| `setcc` | Materialize a uint8 predicate-mask test as ordinary `bool` or an admitted mask result. |
+| `jcc` | Transfer control according to the uint8 predicate-mask test. |
+| `movcc` | Conditionally replace a register binding; the nonselected path retains the old destination. |
+| `selectcc` | Select one of two already available complete values into a destination. This can be a distinct form of the conditional-move family. |
+| Floating classification | Test properties such as NaN, signaling NaN, finite, zero or sign without assuming the effects of an IEEE comparison. |
+
+For a binary ordered numeric comparison, the natural condition information
+is less/equal/greater/unordered. Integer/character comparisons do not produce
+unordered; equality-only domains do not acquire ordering.
+
+Condition-test mask bits 0..3 mean less, equal, greater and unordered,
+respectively. Every subset is valid:
+
+| Mask | Matching outcomes | Meaning for a single cmp outcome |
+|---|---|---|
+| `0` | None | Always false |
+| `1` | Less | Ordered less than |
+| `2` | Equal | Equal |
+| `3` | Less/equal | Ordered less than or equal |
+| `4` | Greater | Ordered greater than |
+| `5` | Less/greater | Ordered not equal |
+| `6` | Equal/greater | Ordered greater than or equal |
+| `7` | Less/equal/greater | Ordered |
+| `8` | Unordered | Unordered |
+| `9` | Less/unordered | Less than or unordered |
+| `A` | Equal/unordered | Equal or unordered |
+| `B` | Less/equal/unordered | Less than or equal, or unordered |
+| `C` | Greater/unordered | Greater than or unordered |
+| `D` | Less/greater/unordered | Ordinary not equal |
+| `E` | Equal/greater/unordered | Greater than or equal, or unordered |
+| `F` | Every outcome | Always true for a cmp result |
+
+These are predicate data values, not opcode allocations. In an admitted
+domain that never produces unordered, the U bit simply never matches;
+it is not an invalid control. Predicate 0/F does not erase effects of an
+already executed comparison or its operand producers.
+
+The `cmp` result is exactly `uint8(1)`, `uint8(2)`, `uint8(4)` or
+`uint8(8)`. Consumers accept every uint8 value, not only values with
+comparison provenance, and use the test `(value & predicate) != 0`.
+High uint8 bits do not match a four-bit predicate. Thus predicate F is
+not unconditionally true for arbitrary masks: zero or high-bits-only masks
+test false. Predicate 0 always tests false. This is a defined bit test,
+not validation of a hidden enum or permission to infer a comparison.
+
+These are four bits of predicate selection, not four independent possible
+outcomes at once: a binary numeric relation has one of four outcomes.
+Adding an independent signaling-policy flag gives five control bits and
+32 truth/policy combinations, as distinct from a fifth relation state.
+With IEEE exception handling disabled, the current predicate needs no such
+in-band policy bit. Two four-bit predicates fit one control byte.
+
+The outcome is an ordinary typed value, not a hidden architectural FLAGS/NZCV
+register or a new opaque Body type. It uses existing uint8 storage, calls,
+SSA construction, block-entry types, merges and liveness. A backend may use
+native flags while their lifetime fits and the integer bits are not
+observed; when observed, it must supply the promised uint8 value, not a
+target-specific flags image. Scalar compound predicate chains instead use
+the existing Boolean type.
+
+```text
+cmp   R3, R0, R1
+setcc R4, R3, lt.ordered
+jcc   R3, lt.ordered, Btrue, Bfalse
+movcc R5, R3, eq, R6
+```
+
+These semantic forms use the assigned `C2..C5`, `A0..AF` and `C6` families.
+The first comparison may supply a stored/returned Boolean through `setcc`, a
+branch through `jcc`, or a whole-value selection. This addresses value
+comparisons without requiring every relation to own an independent semantic
+opcode.
+
+`movcc` is register movement, not a conditional memory store. Its retaining
+form requires a valid old destination on the nonselected path. Selection
+does not execute deferred input expressions, implicitly drop a nonselected
+owner, or replace checked reference/value semantics with bitwise masking.
+Affine selection still needs its explicit responsibility-transfer contract.
+
+The full control byte need not be in the same stage for every family.
+A binary compare can carry signaling/evaluation controls while its consumer
+carries the relation mask. `selectcc` fits a predicate byte and four register
+nibbles. `setcc` needs fewer register fields and may have a compact form.
+`jcc` also needs successors: arbitrary predicate/register/target combinations
+cannot all be promised in four bytes. Use an explicit fallthrough contract,
+target record, restricted form or bounded extension where necessary.
+
+Compact relation spellings or fused compare/set/branch forms remain possible
+physical encodings. They need not be available at every width. Their code
+size and instruction-count effects require a new study; the published
+format-pressure figures hold a different operation sequence fixed.
+
+### Three-input comparisons
+
+Three-input comparison families cover expressions such as `a < b && b < c`.
+The selected control byte stores the A/B predicate in its low nibble and the
+B/C predicate in its high nibble. AND versus OR belongs to the selected
+family, not another bit stolen from those predicates.
+
+Two ordered-less predicates give control `11`; ordered A<=B and B<C gives
+`13`. This is not an arbitrary truth table over two four-way relations;
+that would need sixteen result bits.
+
+The three inputs need the same admitted complete comparison domain, or an
+explicitly selected richer contract. The family does not invent numeric
+promotions or replace arbitrary nominal comparison calls.
+
+Scalar predicate chains produce an ordinary Boolean result:
+apply the two selected predicates and combine them by the family's AND/OR
+rule. Do not return a pair of raw relations or introduce another condition
+kind. The result uses ordinary Boolean branching and selection; an extra
+`setcc` is not required.
+
+The semantic family labels `cmp3.and` and `cmp3.or` describe the two combining
+rules without assigning primary opcode values. Producing Boolean IL does
+not require a native Boolean register or `setcc`: a backend may retain the
+result in flags and fuse its consumer when the operation/effect contract
+permits. This is representation freedom, not a current support claim.
+
+Signaling and evaluation order constrain this design:
+
+- An eager predicate chain performs both primitive comparisons. It is not
+  automatically a source short-circuit conjunction.
+- A short-circuit chain must evaluate the first comparison, test it, and
+  skip the second when required, including its invalid-operation effects.
+- Producing C can itself have effects or fail. A three-input instruction
+  consuming existing values cannot justify evaluating C's producer on a
+  source path that never evaluated it.
+
+With the default exception-disabled profile, the byte can be dedicated to
+the two four-bit predicates. Conjunction/disjunction and eager/short-circuit
+selection must still be specified by the family. Future exception-observable
+operations can use an explicit helper/extended form rather than squeeze two
+five-bit controls into eight bits.
+
+### IEEE signaling and classification
+
+IEEE exception handling is disabled by default. Ordinary floating operations
+and comparisons do not produce language-visible NaN signals for either quiet
+or signaling NaN inputs. Their specified values, quieting/sign-preserving
+boundaries and representation rules still apply.
+
+An implementation may incidentally set hardware flags under the selected
+ABI, but those are not a portable default observation and software need not
+emulate them. This does not disable checked integer failures, runtime
+requirements or explicit language throws.
+
+Future opt-in IEEE handling may be software-provided only. It need not
+unmask native hardware traps or match the target's condition/status-register
+representation. A special comparison/handling helper or explicit extended
+operation can carry that policy without spending a fifth bit in each of
+the default predicate nibbles. The helper API and activation mechanism are
+not selected.
+
+Keep three axes separate:
+
+| Axis | Question |
+|---|---|
+| Predicate | Which comparison outcomes make the selected condition true? |
+| NaN signaling | Does invalid arise for sNaN only, for any NaN, or under a separately defined value-only/classification operation? |
+| Handling/observation | How is invalid represented, observed, masked or trapped under the selected floating environment? |
+
+When IEEE exception-observable behavior is enabled, a quiet comparison
+signals invalid for an sNaN; a qNaN
+does not. A signaling comparison signals invalid for either kind of NaN.
+The Boolean relation/unordered outcome is separate from that effect.
+The SoftFloat [comparison functions](https://www.jhauser.us/arithmetic/SoftFloat-3/doc/SoftFloat.html#8.8)
+describe both forms; AArch64
+[FCMP](https://www.scs.stanford.edu/~zyedidia/arm64/fcmp_float.html) and
+[FCMPE](https://www.scs.stanford.edu/~zyedidia/arm64/fcmpe_float.html)
+provide a concrete quiet/signaling pair.
+
+In that opt-in setting, signaling does not itself prescribe a Terrum
+language exception or an unmasked hardware trap. The current accepted
+[floating-environment chapter](language/floating-environment.md)
+is value-oriented and exposes no ambient status/trap API. The intended
+extension needs an explicit status/handling contract, mode availability,
+effects and source/metadata/target requirements. A v1 implementation can
+decline a declared unsupported mode; it cannot silently execute it quietly.
+Encoding capacity alone does not establish full IEEE conformance.
+
+If opt-in handling makes such effects observable, they occur at the selected
+comparison/helper, not when `setcc`, `jcc` or `movcc` reads its condition.
+Consumers do not repeat the original invalid event. Conversely, CSE or
+fusion cannot discard, merge or move signaling comparisons merely because
+their relation values are equal. Different signaling policies, intervening
+status observations/clears, traps and required event origins matter.
+
+A consumer selecting a less-than predicate does not change the signaling
+policy of an earlier quiet compare. If the required operation has another
+policy, produce that comparison or establish the exact effect equivalence;
+relation equality alone is not sufficient.
+
+Classification needs special care once exception behavior is observable.
+In the default value-only profile, the unordered result of self-compare can
+supply `is.nan` where the complete value contract agrees. In an IEEE
+exception-observable profile, an sNaN would signal invalid for a quiet
+self-compare but not for a non-signaling classification. The earlier warning
+is about that effect distinction, not a prohibition on default no-signal
+comparisons. A classification family remains useful for direct NaN/finite/
+signaling-NaN/other tests. The RISC-V [FCLASS contract](https://docs.riscv.org/reference/isa/v20260120/unpriv/f-st-ext.html#20-1-9-single-precision-floating-point-classify-instruction)
+is an example of classification without floating exception flags, not a
+selection of its representation for Terrum.
+
+The comparison condition must retain unordered as distinct from greater
+or equal. `.NET CompareTo` can deliberately order/equate NaNs and therefore
+is not a substitute for this raw relation contract.
+
+### Per-block codec choices
+
+Two proposals should not be conflated:
+
+| Choice | Assessment |
+|---|---|
+| Pure two-byte blocks versus pure four-byte blocks | One operation that cannot use the narrow form widens the whole block. |
+| Compact mixed 2/4 blocks versus full-word blocks | Avoids that narrow-block restriction, but introduces another decode/encoding table. Full-word mode must earn its benefit through capacity, fewer records/operations or measured import cost. |
+
+For example, twenty narrow operations plus one full operation occupy 44
+instruction bytes in a mixed stream, versus 84 when the entire block becomes
+four-byte instructions. The study's fixed-by-block policy costs 49.3% more
+stream bytes than mixed 2/4 across the selection, before mode tags or padding.
+That does not measure possible reductions from a differently designed
+full-word instruction repertoire.
+
+This schema uses one mixed codec for every instruction stream. It has no
+per-block width mode, and no block is split to manufacture a width boundary.
+A future explicitly selected codec could define another scheme; no mode is
+inferred from block contents.
+
+### Semantic breadth and unassigned members
+
+| Area | Representation pressure |
+|---|---|
+| Scalar arithmetic | Type-derived width/signedness/format, explicit checked/wrapping/fused policy; not one opcode per scalar identity. |
+| Comparisons/consumers | Typed condition results, `setcc` Boolean/mask materialization, `jcc`, conditional movement, unordered and signaling behavior. |
+| Classification | Non-signaling NaN/sign/finite tests or class results, distinct from comparison side effects. |
+| Bit operations | Shifts/rotates, counts and bit selection; arbitrary ternary logic genuinely needs all eight truth-table bits. |
+| Conversions | Source/destination identities and selected rounding/overflow/bit-preserving policy. |
+| Storage and references | Locals, fields, indexed places, views, access authority and retained backing. Hardware addressing modes need not be copied wholesale. |
+| Aggregates and calls | Multiple values, selected targets, larger lists and non-word-sized values; records remain legitimate. |
+| Atomics | Operation, ordering and result contract. Some useful operations have more than four logical operands/results and need another form or aggregate result. |
+| SIMD | Lane/mask semantics, shuffles, widening/narrowing and controls; constant tables or records handle controls that are not eight-bit immediates. |
+| Lifetime/control | Transfers, cleanup, handlers, suspension and required state facts, without a register-class purity promise. |
+| Cold target-specific functionality | Explicit registered intrinsics or calls; not every native mnemonic needs a primary portable opcode. |
+
+.NET exposes much of its hardware breadth through callable intrinsics rather
+than dedicated CIL instructions.
+[FloatComparisonMode](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.intrinsics.x86.floatcomparisonmode)
+includes ordered/unordered and signaling/non-signaling choices.
+[VPTERNLOG](https://www.felixcloutier.com/x86/vpternlogd:vpternlogq)
+uses all 256 truth-table values.
+[VCMPPS](https://www.felixcloutier.com/x86/cmpps) has an immediate predicate
+field. These facts motivate full selector fields and deliberate portable
+signaling semantics, not a requirement to reproduce every native encoding
+or make native condition/status registers part of the wire model.
+
+AArch64
+[FCMP](https://www.scs.stanford.edu/~zyedidia/arm64/fcmp_float.html)
+records a four-way floating relation in NZCV, including an unordered flag
+pattern. A portable IL can retain explicit values while a backend chooses
+native condition flags. The
+[RISC-V compressed extension](https://docs.riscv.org/reference/isa/v20260120/unpriv/c-st-ext.html)
+provides a relevant precedent for intermixing 16/32-bit forms with operand
+restrictions; its published compression results are not Terrum measurements.
+
+The assigned schema uses family-specific four-byte forms and the exact
+sixteen tiny tuples listed above. Other operation members do not acquire
+assignments merely because a family or reserved range has capacity. A pure
+fixed-width-per-block split and the old 128-value one-byte allocation are
+not part of this codec.
+
+## Active mixed instruction encoding
+
+The current codec is `instructionEncoding=0x01`. It uses the first byte to
+determine the complete instruction length; there are no prefixes, recursive
+width selectors, variable-length integers or implicit per-expression IDs.
+All multibyte fields are little-endian.
+
+| First byte | Length | Capacity | Interpretation |
+|---|---:|---:|---|
+| `00..0F` | 1 byte | 16 | Assigned tiny tuples with all operands implied |
+| `10..BF` | 2 bytes | 176 | Assigned short forms followed by one operand byte |
+| `C0..FF` | 4 bytes | 64 | Assigned long families followed by a 24-bit payload |
+
+Every unassigned primary value is invalid. A reader never guesses a family,
+falls back to another codec, or recursively decodes a payload byte as an
+instruction start.
+
+```text
+tiny:  opcode:u8
+short: opcode:u8, operand:u8
+long:  opcode:u8, control:u8, payload:u16
+```
+
+For short forms the operand byte is `y:x`, with `x` in the low nibble and
+`y` in the high nibble. For ordinary long forms, the payload is
+`nibble0 | nibble1<<4 | nibble2<<8 | nibble3<<12`; the named operation fixes
+the role of each nibble. Long forms that carry a map/record index use its
+complete little-endian `u16` payload and reserve all unrelated control bits
+as zero.
+
+### Assigned tiny tuples
+
+The sixteen tiny encodings are the selected shortlist after accounting for
+compact field-accessor and identity-forwarder bodies. These assignments are
+not claimed to be a measured global optimum.
+
+| Opcode | Exact tuple |
+|---:|---|
+| `00` | Signature-aware `ret R0`; for exact `void`, return the signature's unit value without reading R0 |
+| `01` | `R0 = load.arg 0` |
+| `02` | `R1 = load.arg 1` |
+| `03` | `R2 = load.arg 2` |
+| `04` | `R0:R1 = load.arg.pair 0:1` |
+| `05` | `R0 = load.home 0` |
+| `06` | `R1 = load.home 1` |
+| `07` | `store.home 0, R0` |
+| `08` | `store.home 1, R1` |
+| `09` | `R0 = load.constant 0` |
+| `0A` | `R0 = add.wrap(R0, R1)` |
+| `0B` | `R0 = sub.wrap(R0, R1)` |
+| `0C` | `R0 = mul.wrap(R0, R1)` |
+| `0D` | `R1 = mul.wrap(R1, R2)` |
+| `0E` | `R0 = and(R0, R1)` |
+| `0F` | `R0 = xor(R0, R1)` |
+
+Each tuple obeys the same type, access, source-use, failure and cleanup
+rules as its full form. Tiny stores `07` and `08` use `sourceUse=1`
+(copy/read) only. They are valid only when the source type is Copy-eligible
+and the selected Home's actual state and authority permit the required
+initialization or replacement. They never transfer or borrow the source.
+Other Home source-use modes use the assigned full-width D6 form; modes or
+destinations not represented by D6 require SemanticStore or an applicable
+typed record. A tiny call is not inferred from a name.
+
+### Assigned short forms
+
+Short instructions have one operand byte. Unless a row says `byte:u8`, it
+is split into `x=low nibble` and `y=high nibble`. `R0..R13` are writable
+general destinations. R14 is not writable. R15 is a discard only in result
+roles that explicitly admit discard; a source-role R15 is the selected
+all-bits-set constant, and an unused field is not read.
+
+| Opcode | Operand-byte layout | Meaning and constraints |
+|---:|---|---|
+| `10` | `x=destination register, y=source register` | `mov`; create a value alias, not a copy, transfer or cleanup |
+| `11` | `x=destination register, y=formal ordinal 0..15` | Read/alias one eligible input formal; ownership and parameter mode still apply |
+| `12` | `x=destination base register, y=first formal ordinal 0..14` | Load two adjacent formals into `Rx:R(x+1)`; `x<=12`, both formals exist |
+| `13` | `x=destination register, y=HomeMap index 0..15` | Copy/read an eligible Home |
+| `14` | `x=HomeMap index 0..15, y=source register` | Copy/read store (`sourceUse=1`) to an eligible Home; source must be Copy-eligible and the Home state/authority must admit initialization or replacement |
+| `15` | `x=destination register, y=HomeMap index 0..15` | Transfer from an eligible Home, leaving it vacant |
+| `16` | `x=destination register, y=ConstantMap index 0..15` | Load the exact typed constant entry |
+| `17` | `x=result register, y=0` | Return the already computed non-unit result |
+| `18` | `x=0, y=0` | Return exact unit |
+| `19` | `x=destination register, y=source register` | Load through an admitted checked reference value |
+| `1A` | `x=reference register, y=source register` | Copy/read store (`sourceUse=1`) through an admitted writable reference; source must be Copy-eligible |
+| `20` | `x=destination register, y=source register` | Integer wrapping negate |
+| `21` | `x=destination/left register, y=right register` | Integer wrapping add |
+| `22` | `x=destination/left register, y=right register` | Integer wrapping subtract |
+| `23` | `x=destination/left register, y=right register` | Integer wrapping multiply |
+| `24` | `x=destination/left register, y=right register` | Integer divide with ordinary zero and quotient-overflow failures |
+| `25` | `x=destination/left register, y=right register` | Integer remainder with its distinct min/-1 rule |
+| `26` | `x=destination register, y=source register` | Strict floating sign negation |
+| `27` | `x=destination/left register, y=right register` | Strict floating add |
+| `28` | `x=destination/left register, y=right register` | Strict floating subtract |
+| `29` | `x=destination/left register, y=right register` | Strict floating multiply |
+| `2A` | `x=destination/left register, y=right register` | Strict floating divide |
+| `2B` | `x=destination/left register, y=right register` | Strict floating remainder |
+| `30` | `x=destination/left register, y=right register` | Integer/Boolean AND |
+| `31` | `x=destination/left register, y=right register` | Integer/Boolean OR |
+| `32` | `x=destination/left register, y=right register` | Integer/Boolean XOR |
+| `33` | `x=destination register, y=source register` | Type-directed integer bitwise or Boolean logical NOT |
+| `34` | `x=destination/data register, y=count register` | Integer shift left |
+| `35` | `x=destination/data register, y=count register` | Integer signed arithmetic right shift |
+| `36` | `x=destination/data register, y=count register` | Integer logical right shift |
+| `40` | `x=destination/left register, y=right register` | Compare in place; output is the selected uint8 relation |
+| `41` | `x=condition/result register, y=predicate mask 0..15` | Test a uint8 relation mask and replace it with ordinary bool |
+| `50` | `x=in-place register, y=TypeMap index 0..15` | Total admitted ordinary conversion only |
+| `51` | `x=in-place register, y=TypeMap index 0..15` | Explicit wrapping integer conversion |
+| `52` | `x=in-place register, y=TypeMap index 0..15` | Admitted same-width bit reinterpretation |
+| `60` | `x=destination place register, y=HomeMap index 0..15` | Form a typed place for a Home |
+| `61` | `x=base/destination register, y=PlaceSelection record index 0..15` | Form an exact field place from the captured base |
+| `62` | `x=base/destination register, y=index register` | Form an admitted element place from the captured base/index |
+| `63` | `x=destination register, y=place register` | Read an admitted place |
+| `64` | `x=place register, y=source register` | Copy/read store (`sourceUse=1`) to a selected place whose authority/state admits initialization or replacement; source must be Copy-eligible |
+| `65` | `x=destination register, y=place register` | Take the value from an eligible place |
+| `66` | `x=place register, y=0` | Retire the selected live value under its exact cleanup contract |
+| `67` | `x=destination register, y=place register` | Form an explicit checked reference from an admitted place |
+| `70..7F` | `x=destination register, y=aggregate register` | Extract field ordinal `opcode-70`; only complete Copy-eligible fields |
+| `80` | `x=argument-window base, y=MethodMap index 0..15` | Bound call; non-unit result replaces the base register |
+| `81` | `x=callable register, y=argument-window base` | Callable-value call; non-unit result replaces the target register |
+| `82` | `x=argument-window base, y=MethodMap index 0..15` | Bound call with exact unit result |
+| `83` | `x=callable register, y=argument-window base` | Callable-value call with exact unit result |
+| `90` | `byte:u8=CallSite record index 0..255` | Execute the complete general call-site record |
+| `91` | `x=destination register, y=PlaceSelection record index 0..15` | Apply a typed place-selection record |
+| `92` | `byte:u8=SemanticStore record index 0..255` | Apply a typed state-aware store record |
+| `A0..AF` | `x=condition register, y=ConditionalEdge record index 0..15` | `jcc`; primary low nibble is the four-bit predicate mask |
+| `B0` | `byte:u8=absolute Block index 0..255` | Unconditional branch |
+| `B1` | `x=Boolean register, y=ConditionalEdge record index 0..15` | Branch on ordinary Boolean truth |
+| `B2` | `byte:u8=Switch record index 0..255` | Typed switch |
+| `B3` | `byte:u8=RequirementFailure record index 0..255` | Runtime `require`; success continues, failure follows its record |
+| `B4` | `byte:u8=Throw record index 0..255` | Throw the selected fresh/active/captured payload |
+| `B5` | `byte:u8=0` | `failfast`; no ordinary unwind or cleanup promise |
+| `B6` | `byte:u8=RegionExit record index 0..255` | Recognized shape only; no current exit-kind or region carrier is assigned |
+| `B7` | `byte:u8=0` | `unreachable`; raises the selected ordinary Core failure |
+| `B8` | `byte:u8=HomeMap index 0..255` | Return a non-unit Home value |
+
+Short `14`, `1A`, and `64` are only compact CopyRead stores. A Home store
+using Transfer or BorrowRead uses the explicit full-width `D6` mode. Other
+Home source-use modes, and non-CopyRead reference/place stores, require the
+full SemanticStore form (`92` or `D9`) with its explicit source-use and
+transition fields. No form bypasses the destination's state or authority.
+
+Every other primary value in the short band is unassigned. Short arithmetic
+has fixed policy: the wrapping operations are modular, division/remainder
+retain their source failure rules, and strict floating forms use the selected
+format without implicit FMA. Checked and saturating arithmetic have no
+one- or two-byte form.
+
+### Assigned long families
+
+The long payload is `control:u8, payload:u16`. The payload is little-endian.
+For register-family forms the `u16` contains four nibbles, least significant
+first: result0, result1, source0, source1. R15 in a role designated unused is
+not read; in an admitted result role it discards only the result value and
+does not abandon effects or cleanup responsibility.
+
+| Opcode | Family | Control and payload |
+|---:|---|---|
+| `C0` | Scalar arithmetic | Control selects a registered operation; payload nibbles are result0/result1/source0/source1 |
+| `C1` | Bit operation | Control selects the operation; same four-register payload |
+| `C2` | Compare | Control selects raw relation, equality or inequality; same four-register payload |
+| `C3` | Set condition | Control is a four-bit predicate; destination/condition/unused/unused |
+| `C4` | Select condition | Control is a four-bit predicate; destination/condition/true/false |
+| `C5` | Conditional move | Control is a four-bit predicate; destination/condition/value/unused |
+| `C6` | Ternary logic | Control is the exact truth-table byte; destination/A/B/C |
+| `C7` | Integer wrapping arithmetic recipe | Recipe control byte; destination/A/B/C |
+| `C8` | Integer checked arithmetic recipe | Recipe control byte; destination/A/B/C |
+| `C9` | Integer saturating arithmetic recipe | Recipe control byte; destination/A/B/C |
+| `CA` | Strict floating arithmetic recipe | Recipe control byte; destination/A/B/C |
+| `CB` | Three-input comparison AND | Low/high four-bit predicates; bool destination/A/B/C |
+| `CC` | Three-input comparison OR | Low/high four-bit predicates; bool destination/A/B/C |
+| `D0` | Numeric conversion | Control carries destination/source; payload is destination TypeMap index |
+| `D1` | Wrapping integer conversion | Same layout; only admitted integer pairs |
+| `D2` | Saturating conversion | Same layout; only admitted pairs |
+| `D3` | Bit reinterpretation | Same layout; exact representation-valid pair |
+| `D4` | Constant load | Control has destination register; payload is ConstantMap index |
+| `D5` | Home load | Control has destination register; payload is Home index |
+| `D6` | Home store | Control has source register/use mode; payload is Home index |
+| `D7` | Home take | Control has destination register; payload is Home index |
+| `D8` | Place selection | Control has destination register; payload is PlaceSelection record index |
+| `D9` | Semantic store | Payload is SemanticStore record index; control is zero |
+| `DA` | Place load | Control has destination register; payload is PlaceSelection record index |
+| `DB` | Place take | Control has destination register; payload is PlaceSelection record index |
+| `DC` | Place retirement | Payload is PlaceSelection record index; control is zero |
+| `DD` | Reference formation | Control has destination register; payload is PlaceSelection record index |
+| `E0` | General call | Payload is CallSite record index; control is zero |
+| `E1` | Bound method-window call | Payload is MethodMap index; control is argument-base/result register pair |
+| `E2` | Callable-value window call | Control is target/argument-base pair; payload low nibble is result register |
+| `E3` | Unconditional branch | Payload is absolute Block index; control is zero |
+| `E4` | Boolean conditional branch | Payload is ConditionalEdge record; control low nibble is condition register |
+| `E5` | Predicate conditional branch | Payload is ConditionalEdge record; control is condition register/predicate |
+| `E6` | Switch | Payload is Switch record; control is zero |
+| `E7` | Runtime requirement | Payload is RequirementFailure record; control is zero |
+| `E8` | Throw | Payload is Throw record; control is zero |
+| `EA` | Region exit | Recognized shape only; RegionExit record and zero control; no current exit-kind or region carrier is assigned |
+| `EB` | Return home | Payload is Home index; control is zero |
+
+All unlisted long-primary values are invalid. The registry fixes every
+control selector, unused field and type matrix. A field combination that
+fits these bits but is not assigned is invalid required input.
+
+The `C0` ScalarArithmetic control byte is:
+
+| Control | Operation and policy |
+|---:|---|
+| `01..04` | Checked integer add, subtract, multiply, negate |
+| `05..08` | Wrapping integer add, subtract, multiply, negate |
+| `09..0B` | Saturating integer add, subtract, multiply |
+| `0C` | Integer divide |
+| `0D` | Integer remainder |
+| `0E` | Integer DivRem, publishing both results only on success |
+| `0F` | Integer `mul.full` |
+| `20..25` | Strict floating add, subtract, multiply, divide, remainder, negate |
+
+The `C1` BitOperation control byte is `01=and`, `02=or`, `03=xor`,
+`04=not`, `05=shift-left`, `06=signed-arithmetic-right`,
+`07=logical-right`. Other controls reject. In `C2 Compare`,
+`00=ordered relation result`, `01=Boolean equality`, and
+`02=Boolean inequality`. The relation result is uint8 with exactly one of
+Less=1, Equal=2, Greater=4, Unordered=8; equality/inequality results are
+ordinary bool and do not manufacture an ordering for equality-only types.
+
+For `D0..D3`, the control byte is `sourceRegister:4 | destinationRegister:4`
+(low nibble first) and the payload is a zero-based TypeMap index. For `D4`
+and `D5`, the control low nibble is the destination register and the high
+nibble is zero. For `D6`, the control low nibble is the source register and
+the high nibble selects `1=CopyRead`, `2=Transfer`, or `3=BorrowRead`; other
+source-use modes reject. The source type, Home state, authority and retained
+dependencies must admit the selected transition. If a per-store formal or
+dependency contract cannot be derived from those existing facts, use
+SemanticStore instead. For `D7`, `D8`, `DA`, `DB` and `DD`, the control low
+nibble is the destination register and the high nibble is zero. `D9` and
+`DC` require a zero control byte.
+
+For `E1`, the control low nibble is argument-window base and the high nibble
+is result register; R15 is allowed only for an exact unit result. For `E2`,
+the control low nibble is callable register and the high nibble is argument
+base; the payload low nibble is result register and its high twelve bits are
+zero. For `E4`, control low nibble is condition register and high nibble is
+zero. For `E5`, control low nibble is condition register and high nibble is
+the selected four-bit predicate. Other record/control forms require zero
+control unless their record kind assigns the field.
+
+For the common register family, payload nibbles occupy bytes 2 and 3:
+
+```text
+byte 2: result0:4 | result1:4
+byte 3: source0:4 | source1:4
+```
+
+This is the exact little-endian representation of the logical payload word
+`result0 | result1<<4 | source0<<8 | source1<<12`. Operations with one
+result require result1=R15; operations with one input require source1=R15.
+Operations with different roles, such as conversion and `mul.full`, use
+their separately registered payload layout above.
+
+### Instruction codec selector
+
+Every instruction-stream Body begins with the 32-byte stream header specified
+under [Body row layout](#body-row-layout-and-compact-implementations).
+`instructionEncoding=0x01` selects this mixed codec. All other selector
+values are unassigned and reject before affected use. The selector is not a
+source arithmetic profile, semantic Feature, target ABI or compatibility
+fallback.
+
+### Maps, size and alignment
+
+#### Explicit typed ConstantMap
+
+The Body has a ConstantMap alongside its TypeMap and MethodMap. Loading a
+constant names an existing typed entry; it does not require the decoder
+to rediscover CSE or execute construction code.
+
+| Property | Assigned rule |
+|---|---|
+| Identity | Complete type and exact admitted constant value/representation, not numerical equality alone. |
+| Payload | A selected typed constant record or reference to one, with all required literal/data dependencies. Large values live in that record, not the instruction bytes. |
+| Index | Selected unsigned sixteen-bit Body-local index, independently of register numbering. |
+| Duplicates | Valid. Producer interning/deduplication is optional, not a consumer rescan or uniqueness requirement. |
+| Construction | Compile-time/frozen construction must already satisfy its selected contract; loading does not invoke arbitrary constructors or factories. |
+| Nonliteral identities | References, addresses, callable/data relocations or aggregates require their own admitted constant contract. Arbitrary bits do not manufacture an owner, checked reference or valid object. |
+
+Same bits with different complete integer types remain different typed
+values. Opposite signed zeros, distinguishable NaN payload/state, and
+equal-valued decimal cohorts must not be merged by numerical comparison.
+The map can contain both equivalent and identical entries without changing
+operation typing or canonicality.
+
+This supports deciding representation and reuse at the producing tool's
+appropriate stage, rather than requiring one upfront global CSE or
+constructor-normalization strategy. The selected register special constants
+are only short operand forms; they do not replace the general ConstantMap.
+
+#### Selected method-local index limits
+
+Body-local map, home, block and record indexes are unsigned sixteen-bit
+values. A zero-based index can select 0..65,535, so the corresponding
+maximum count is 65,536, not 65,535.
+
+| Item | Selected width/scope |
+|---|---|
+| Local and argument slots | Sixteen-bit method-local indices; flattened receiver/parameter inventory must fit. |
+| ConstantMap, TypeMap, MethodMap, HomeMap, Block and typed-record references | Zero-based sixteen-bit Body-local indexes; metadata tokens retain their fixed global width. |
+| Operand/call/failure/edge records | Sixteen-bit Body-local indexes; RegionExit indexes are not usable until the region carrier is assigned. |
+| Inventory counts | Unsigned thirty-two-bit fields; the selected local-index codec admits counts 0..65,536 without an ambiguous sentinel. |
+| Global/module references inside map records | Keep their selected global width; a local map does not cap global table identities to sixteen bits. |
+| Code extents, offsets, instruction counts and internal SSA definitions | Separate namespaces and widths; not automatically limited to sixteen bits. |
+
+More than 65,536 computed values does not imply more than that many locals.
+Internal SSA, optimization and inlining need not use sixteen-bit counters.
+Reserializing an oversized result must diagnose the codec's limit or use
+an explicitly supported future codec, not wrap an index, silently truncate
+the inventory or reinterpret this encoding.
+
+Every index value remains usable, including `0xFFFF`. Where a schema permits
+absence, its kind/presence contract represents that absence without stealing
+a valid table index. An empty inventory has count zero, not a wrapped or
+sentinel count for 65,536.
+
+The header has no wider local-index variant. A future width requires a
+separately assigned codec and cannot be inferred from an out-of-range value.
+These limits apply to this Body schema, not to every source implementation
+or native ABI.
+
+Register capacity is independent of argument/local counts, map counts,
+instruction counts and offsets. Ten thousand definitions using `R0` do not
+widen its selector.
+
+Instructions are not individually padded. A Body row may be aligned to
+four bytes, with padding outside its instruction extent; this does not imply
+that every four-byte instruction starts at a four-byte boundary.
+
+No per-result type array is required solely to decode the common stream.
+Types come from incoming bindings, selected metadata and operation schemas.
+Selective block decoding still needs its entry types/state. Direct lookup
+of every historical definition is not free: an optional index or prefix
+decode may be needed.
+
+## Semantic family inventory
+
+This inventory summarizes the assigned codec. The 176-byte short range
+contains common operations or restricted forms, while a long primary selects a
+family whose control byte selects its registered members. There is no
+global operation byte or logical-ID-to-primary-byte correspondence.
+
+| Family | Members or scope | Assigned encoding |
+|---|---|---|
+| Scalar arithmetic | Add/subtract/multiply/divide/remainder/negate and full low/high integer products; explicit policies | Tiny wrapping tuples; short common forms; long `C0` controls and `C7..CA` recipes |
+| Bit operations | AND/OR/XOR/NOT and shifts | Short `30..36` forms and long `C1` controls |
+| Ternary logic | All 256 three-input Boolean functions | `C6` with the complete truth-table byte |
+| Arithmetic recipes | Explicit three-input operation trees and policies | `C7..CA`; no silent FMA contraction |
+| Comparisons and consumers | `cmp`, `setcc`, `jcc`, `movcc`/`selectcc`, compound comparisons | `40..41`, `A0..AF`, `C2..C5`, `CB..CC` |
+| Classification | NaN/signaling-NaN/finite/infinite/sign queries | Unassigned; no comparison-effect substitution |
+| Register transport | `mov` | Short `10` and the assigned tiny tuples |
+| Arguments/homes/constants | Loads, stores, takes and typed constants | Tiny and short forms; larger indexes in long forms or records |
+| Fields/references/indexing | Place selection/access, stores, takes and reference formation | `60..67`, `D8..DD` with typed records; no implicit native pointer or lifetime extension |
+| Conversions | Ordinary, wrapping, saturating and bit-preserving policies | `50..52`, `D0..D3`; checked/saturating forms use long encodings |
+| Optional/aggregate values | Present/absent tests and construction, aggregate/field operations | Aggregate construction and non-Copy extraction are unassigned |
+| Calls | Bound targets, callable values and argument staging | `80..83`, `90`, `E0..E2` and CallSite records |
+| Control flow | Branches, switches, returns, throws, failfast, unreachable and require | Assigned forms `A0..AF`, `B0..B5`, `B7..B8`, `E3..E8`, `EB`; `B6`/`EA` require the unassigned region carrier |
+| Lifetimes | Retirement, loans, backing, owners and required state transitions | Explicit assigned place/store operations; region/cleanup operations require their separately assigned carrier |
+| Atomics and SIMD | Memory, atomic, lane, mask, shuffle and vector operations | Unassigned; reserved bytes do not assign semantics |
+| Extension | Additional operation/operand records and future Body codecs | No extension or escape is assigned by this schema |
+
+The registry fixes assigned members, controls and type domains. No operation
+gains an executable contract merely because this inventory names it.
+Unassigned members stay invalid; no legacy alias preserves a previous
+draft's numbers.
+
+## Operation identity, encoding and presentation
+
+The selected source declaration, complete operand/result types, effects and
+failure policy determine the semantic operation. A display name is a
+human-readable projection of that bound operation; it is not an opcode,
+overload-selection rule or permission to recognize a nominal method by name.
+The registry and the instruction forms above remain the authority for wire
+encoding.
+
+| Bound operation | Display distinction |
+|---|---|
+| Checked versus wrapping integer addition | `add.checked` and `add.wrap` retain distinct overflow behavior and result obligations |
+| Integer versus floating addition | Both may display as `add`, while their complete types and distinct arithmetic/rounding/failure contracts remain explicit |
+| Source-selected nominal operator | Display the selected call and declaration identity; do not infer a primitive operation from its spelling |
+| Required evaluation versus optional folding | Display the value; retain required `ConstantExecution` inputs/dependencies separately, with no optimizer-history record for optional folding |
+| JIT/AOT or target lowering | Preserve the bound operation and dependencies; display does not prescribe a machine instruction, helper or runtime API |
+
+The presentation does not change source selection, checked defaults,
+ownership, effects or canonical wire bytes. A canonical writer uses the
+registered instruction form and operands even when another display spelling
+would be more familiar.
+
+## Operation meanings
+
+<a id="terminators-and-cfg"></a>
+### Scalar arithmetic, logic and selection
+
+Let `I` be the twelve source integer identities and `F` the eight binary
+and IEEE decimal floating identities. Character identities, `bool` and
+`void` retain their separate domains. Nominal operations use selected calls,
+not a numeric instruction chosen by representation size or method spelling.
+
+| Operation | Inputs and result | Intent and important behavior |
+|---|---|---|
+| `add`, `sub`, `mul` | Two identical complete `T` in `I` or `F`; result `T` | Explicitly selected checked/wrapping integer policy or selected-format floating arithmetic. The wire does not inherit a JIT build's source default. No promotion or implicit FMA. |
+| `div` | Two identical numeric `T`; result `T` | Integers retain zero-divisor and signed-minimum/-1 failures. Floating inputs retain IEEE outcomes. |
+| `rem` | Two identical numeric `T`; result `T` | Integer remainder and truncating-quotient floating remainder retain their distinct exact contracts. Signed minimum modulo -1 is zero, not quotient overflow. |
+| `neg` | One numeric `T`; result `T` | Integer negation uses its selected checked/wrapping policy; unsigned checked negation is zero-minus-value. Floating negation changes only the sign component. |
+| Saturating integer recipe | `C9` active `neg`, `add`, `sub` and `mul` nodes over one identical integer `T` | Clamp each mathematical intermediate to `T`'s value range. Saturating negation maps signed minimum to signed maximum; unsigned `0-x` saturates to zero. This is an IL recipe policy, not a source-level operator or ambient mode. |
+| Wrapping arithmetic | Admitted identical integer `T`; result `T` | Modular declared-width arithmetic. No ambient unchecked mode or floating policy change. |
+| `abs` | One admitted numeric `T`; result `T` | Signed minimum can fail. Floating Abs clears the sign only; it does not quiet or normalize the input. |
+| `and`, `or`, `xor` | Same integer `T`, or two `bool`; same result type | Eager bitwise/Boolean value operations. Not source short-circuit evaluation. |
+| `not` | Integer `T` or `bool`; same result type | Integer: complement exactly the declared-width bits. Boolean: logical complement of the Boolean value. |
+| Shifts | Integer data and integer count; result has data type | Validate the exact source count before representation bridging. `shr.logical` zero-fills even signed data. |
+| `select` | Existing `bool`, existing `T`, existing `T`; result `T` | Choose an already computed value. Does not suppress effects that produced either input. |
+| `min`, `max`, `clamp` | Same admitted numeric `T`; result `T` | Retain NaN, signed-zero, decimal representation and invalid-bound rules. Not arbitrary hardware min/max. |
+| `copysign` | Two same-format floating values; result that format | Sign-component transfer; no numeric conversion or permission to normalize payload bits. |
+| `length` | Admitted indexed/view family; family-defined count result | Placeholder for an explicitly registered length contract, not any member named Length. |
+| `divrem` | Two same integer values; two same-type results | Checks required for the quotient remain even if only the remainder is later used. |
+
+For the two-result `divrem`, a general payload can hold result0, result1,
+left and right in its four nibbles. Published general destinations must be
+distinct; independently discarded integer results may use R15. Both inputs
+refer to their old bindings and both results publish only on success.
+Discarding the quotient does not erase its required checks.
+This is a different registered operand schema from a one-result
+ternary operation, not a claim that every four-nibble payload has the
+same roles.
+
+Unifying IL `not` does not add source `~bool` or `!int32`. Source operator
+spelling and eligibility remain in the language owner. A Boolean result is
+still a valid `bool`; implementing it by complementing every byte of its
+physical representation would generally be wrong.
+
+`select` on affine values needs an explicit selected-input transfer and
+remaining-responsibility contract. A nonselected owner does not disappear.
+Until that contract is selected, such cases can use normal control flow;
+the opcode table alone does not authorize ownership duplication.
+
+### Full-product multiplication
+
+The selected full low/high integer-product operation is spelled `mul.full`:
+
+```text
+mul.full Rlo, Rhi, Ra, Rb
+```
+
+For admitted W-bit integer inputs, compute the exact 2W-bit product and
+publish its W-bit low/high parts. This covers the largest input width
+without inventing an int256 primitive or allocating arbitrary precision.
+For two inputs of the same complete primitive integer type `T`, the assigned
+result types are unsigned low and input-typed high:
+
+| Input T | Low result | High result |
+|---|---|---|
+| int8 | uint8 | int8 |
+| uint8 | uint8 | uint8 |
+| int16 | uint16 | int16 |
+| uint16 | uint16 | uint16 |
+| int32 | uint32 | int32 |
+| uint32 | uint32 | uint32 |
+| int64 | uint64 | int64 |
+| uint64 | uint64 | uint64 |
+| int128 | uint128 | int128 |
+| uint128 | uint128 | uint128 |
+| nint | nuint | nint |
+| nuint | nuint | nuint |
+
+Low is the unsigned low limb. High is the arithmetic upper part for signed
+inputs and the unsigned upper part for unsigned inputs. Reconstructing the
+mathematical product uses high times two to the W plus low. The complete
+product always fits these two parts; no checked/wrapping/saturating variant
+is required. Native width comes from the selected target; nint/nuint keep
+their distinct identities even when a fixed-width type has the same size.
+Mixed input types are not selected by this equal-type rule.
+
+Two output selectors plus two input selectors fit the sixteen register bits
+of a full four-byte form. Read both inputs before publishing outputs.
+The independently unused integer halves may use discard R15; distinct
+non-discard outputs must name distinct general bindings. Keeping only a
+high or low half does not require another semantic multiply operation.
+
+There is no separate widening-result IL multiply in the selected design.
+Construct a wider primitive or aggregate from the halves where needed.
+A backend may recognize that construction and select a natural whole-result
+machine operation without changing the wire contract.
+
+`MultiplyWidening` remains a possible library-level family name for a
+constructed wider result, not another IL opcode. This instruction contract
+does not select a Core library member.
+
+SIMD full-product multiplication is unassigned. No vector operand/result
+contract is admitted by this scalar definition.
+
+Possible library Lower/Upper/Even/Odd spellings describe selected input
+elements, not product bits. These remain context for a future SIMD review,
+not selected vector IL operations or a widening-result multiply.
+
+### Floating predicates
+
+The ordinary source predicate truth values are:
+
+| Predicate | Less | Equal | Greater | Unordered: either input NaN |
+|---|---|---|---|---|
+| `eq` | false | true | false | false |
+| `ne` | true | false | true | true |
+| `lt` | true | false | false | false |
+| `le` | true | true | false | false |
+| `gt` | false | false | true | false |
+| `ge` | false | true | true | false |
+| `cmp.unordered` | false | false | false | true |
+
+An ordered test is the Boolean complement of `cmp.unordered`. Numeric
+equality equates opposite signed zeros and equal-valued decimal cohorts;
+it is not representation equality or IEEE totalOrder.
+
+The selected predicate masks also express the alternate unordered outcomes.
+Descriptive spellings are aliases for these tests, not a requirement for
+independent comparison opcodes:
+
+| Spelling | Mask | NaN result |
+|---|---|---|
+| `eq.ordered` | `2` | false; ordinary `eq` |
+| `eq.unordered` | `A` | true |
+| `ne.ordered` | `5` | false |
+| `ne.unordered` | `D` | true; ordinary `ne` |
+| `lt/le/gt/ge.ordered` | `1/3/4/6` | false; ordinary relations |
+| `lt/le/gt/ge.unordered` | `9/B/C/E` | true |
+
+These names can denote tests of a comparison condition rather than separate
+comparison instructions. The suffix specifies the unordered outcome, not
+a total-order relation.
+In particular, `not lt` is not ordinary floating `ge`: it is also true for
+unordered inputs.
+
+A NaN-truth toggle alone is not a signaling design. Predicate controls
+belong to the condition-consumer design, while signaling and invalid handling
+need the separate contracts described above. Comparison does not mutate the
+input value to quiet it; status/trap effects remain separate.
+
+### Register transfer versus value copying
+
+The codec assigns one register value-alias operation:
+
+```text
+mov Rd, Rs
+```
+
+This binds `Rd` to the already computed value named by `Rs`. It does not:
+
+- Invoke a user copy/clone operation.
+- Construct another owner or another cleanup responsibility.
+- Vacate a local or parameter.
+- Destroy the previous value merely because its destination name is reused.
+
+Register `mov` creates another name for the same logical value, including
+its resource/dependency identity. A consuming use updates availability for
+all aliases; it cannot consume that identity twice through different names:
+
+```text
+mov R1, R0
+consume R0
+consume R1       // invalid if the first consumption transferred this identity
+```
+
+`consume` above is explanatory notation for a consuming operation, not a
+new instruction assignment. Rebinding cannot lose an unretired owner
+responsibility. Another valid alias or explicitly tracked storage/cleanup
+holder must retain it, or the responsibility must be discharged before the
+last available name is lost.
+
+The importer reconstructs identity from definitions, alias edges and typed
+control flow; it does not need serialized per-expression SSA numbers.
+Independently formed loans/views keep their own backing/access contracts;
+register aliases do not create those contracts or extend them.
+
+A source-level Copy, transfer or clone is a different contract. A read
+from storage, a store, a parameter binding or a selected callable must state
+whether it copies, transfers or borrows. Register movement is not evidence
+that any of those actions are legal.
+
+### Storage reads, stores, takes and retirement
+
+The names should describe what happens to storage, not copy familiar
+source-language assignment terminology into the opcode list.
+
+| Family | Intended meaning |
+|---|---|
+| `load.*` | Obtain an eligible nonconsuming value read from a live typed source. Copy eligibility and dependencies still apply. |
+| `store.*` | Write a complete typed value to the selected destination under its actual initialization/replacement authority. |
+| `take.*` | Transfer a live value out of eligible storage, leaving that source vacant, without cleaning the transferred value. |
+| `retire.*` | End the selected live value under its ordinary cleanup/responsibility contract; not a byte clear or register pop. |
+| Reference formation | Produce an admitted descriptor/loan for a place, not a copy of the pointee. |
+
+Thus the working names replace `assign.local/ref/field/index` with
+`store.local/ref/field/index`, and `move.local/ref/field/index` with
+`take.local/ref/field/index`. A `take` still has a source-storage effect;
+it is not register `mov`.
+
+A non-Copy source does not become copyable because a load targets a
+register. Appropriate take/reference operations or a selected copying
+contract are required. The argument model must also distinguish reading
+an incoming binding from taking or addressing a mutable parameter home.
+
+The codec assigns one typed semantic store for initialization and
+replacement, with explicit destination state/authority and source-use
+contracts:
+
+| Destination state | Transition | Obligation |
+|---|---|---|
+| Vacant | Initialize | No old live value exists to retire; require the actual initialization authority. |
+| Live | Replace | Preserve required retirement, checks, commitment and confinement. |
+| Maybe-live | Follow the admitted guarded transition | Do not assume vacant or unconditionally retire an absent value. |
+| Partial | Preserve actual subobject state | Do not treat a partially initialized aggregate as vacant whole storage. |
+
+An initialization-only loan does not grant replacement authority. The
+source-use contract must also state whether a value is copied, transferred
+or borrowed; the name `store` grants none of those permissions by itself.
+
+Retain the semantic transition through verification and lowering. It may
+become multiple machine operations, without promising a raw, nonthrowing,
+no-call or physically atomic store.
+
+Source replacement evaluates the destination once and the new value once,
+then checks actual state/dependencies before commitment. Failed new-value
+construction does not first destroy the old value. Retirement and
+installation cannot expose an incomplete receiver to callbacks, reentrancy
+or escaping failure. A naive unconstrained `drop old; store new` does not
+establish that invariant.
+
+Automatic authored Cleanup is checked NoThrow and nonsuspending, but may
+have observable effects and reentrancy. Its complete/partial retirement
+order and the surrounding checks still matter. Ending a reference
+descriptor does not destroy its referent.
+
+No dedicated `init.*` or hot `drop.*` allocation is selected here. Their
+required semantic facts cannot disappear merely because the earlier names
+were confusing.
+
+### Fields, elements and ranges
+
+| Operation | Intent |
+|---|---|
+| `load.field` | Read a selected stored field under its type/access contract. |
+| `extract.field` | Obtain one field's value from an already computed aggregate value, without forming a storage address. |
+| Field-place formation | Select a field's place without reading its payload. |
+| `read.index` | Check the selected indexed access and read its value. |
+| `store.index` | Perform the selected indexed write; source lowering must preserve when target formation/checks occur. |
+| Element-place formation | Select and validate one element target without reading or initializing its payload. |
+| Unassigned slice | No dedicated slice instruction or record is assigned. |
+
+Element-place formation selects one element's target without reading its
+value. For an update, the abstract sequence can be:
+
+```text
+target = form_element_place(base, index)
+old    = read(target)
+rhs    = invoke F()
+new    = add(old, rhs)
+write(target, new)
+```
+
+The assigned PlaceSelection record preserves this target and check order.
+Base and index are evaluated once. Required bounds/place checks are not
+silently delayed past `F`, and rereading a rebound source variable does not
+select a different target.
+
+An internal typed place handle retains the selected
+target and captured inputs, target type, backing dependencies, access/
+initialization authority and required check timing for load/store/take.
+It is not a public source type, checked reference, raw pointer, native
+address or pin.
+
+A handle can occupy a logical register and participate in typed flow.
+Register aliases refer to the same selected place and authority; they
+cannot duplicate an exclusive right or conceal a storage-state transition
+performed through another alias. The representation need not be a single
+hardware address or register.
+
+Reference/address formation is explicit and must establish its actual
+descriptor, loan, access, backing and stability obligations. Selecting a
+place does not silently promise those stronger capabilities. Rebinding a
+source name does not retarget the captured place, and retaining its backing
+dependency does not create ownership or an arbitrary lifetime extension.
+
+A value-returning property/indexer does not become a borrowable backing
+place. Accessor updates use their selected getter/setter contracts.
+Actual reference formation retains access, roots, backing and invalidation
+dependencies; it neither pins storage nor extends an owner's lifetime.
+Not every logical place exposes an address, including zero-data `void`.
+
+The former `checked.range` also combined two possible intents:
+
+1. Check a range without producing a view.
+2. Construct a bounded view after validating a range.
+
+Those should not have an ambiguous shared name. The working recommendation
+is `slice(base, start, count)` for view construction, if it warrants an
+opcode at all. Validate nonnegative start/count where applicable and the
+mathematical conditions:
+
+```text
+start <= length
+count <= length - start
+```
+
+Do not overflow an unchecked `start + count` or truncate a wider source
+index before checking. The empty range at the end remains a possible
+valid case under the selected family contract.
+
+A slice does not copy elements, allocate an owner, pin backing or extend
+its lifetime. Its complete result type/access/index domains must be supplied
+by an explicitly selected view contract. An ordinary selected library call
+may be sufficient; a dedicated opcode and result carrier are not approved.
+
+### Optional values, aggregates and queries
+
+| Operation | Inputs/result and intent |
+|---|---|
+| `some` | Construct a present optional from an admitted complete payload, preserving its ownership and dependencies; it does not clone an affine payload. |
+| `none` | Construct absence for an explicitly identified complete optional type. No payload is read or fabricated. |
+| `is.present` | Inspect an optional discriminator and return `bool`, without reading an absent payload or implicitly consuming the optional. |
+| Aggregate construction | Build the selected complete aggregate from already computed field values under its actual validity, construction and transfer rules. |
+| `extract.field` | Obtain one field's value from an existing aggregate value; copying or transferring a non-Copy field cannot be inferred from its bits or field number. |
+| Registered query | Evaluate an exact admitted query contract with its declared type/effect/layout requirements; do not recognize arbitrary methods by name. |
+| Loan/region events | Preserve specific logical access, backing and lifetime transitions; they are not automatically machine instructions or destruction of a referent. |
+
+A present optional with a unit payload is distinct from absence. A presence
+test is not itself an unwrap. Accessing an optional payload needs the
+selected present-state or checked extraction contract.
+
+Aggregate construction does not bypass authored constructors, required
+validation, partial-value restrictions or publication rules. Moving a field
+out of an owning aggregate requires its exact structural contract; selecting
+a field value does not expose the aggregate's hidden ABI address.
+
+Here "extract" simply means selecting the stored field value, for example
+the second component of a computed tuple. It is not pointer arithmetic,
+reference formation or a write to the original aggregate. A storage-field
+read and a value-field extraction can have different access/effect rules
+even if a backend implements both as loads.
+
+The Body record schemas carry the selected place, store, call-preparation and
+transfer facts. Other logical records remain independently gated; spare
+instruction/record capacity does not establish their encoding or execution.
+
+### Conversions
+
+| Operation | Intent |
+|---|---|
+| `convert` | The ordinary selected conversion for the complete source/destination pair. Integer narrowing and floating-to-integer checks are not interchangeable with floating-format rounding. |
+| `convert.wrap` | An admitted explicit wrapping conversion, not an implicit change to the source operand. |
+| `convert.saturate` | An admitted explicit saturating conversion under that pair's rules. |
+| `bitcast` | An admitted representation-preserving conversion; size equality alone does not prove validity, authority or backing. |
+
+The source type comes from the value. The destination type is named where
+needed. A two-byte in-place form can hold a register and small type index.
+A four-byte conversion-policy opcode can hold a sixteen-bit type index and
+independent four-bit destination/source registers. A typed record handles
+larger or other forms; no global width prefix is required.
+
+Nominal conversion operators remain selected calls. The table does not
+adopt conversion pairs absent from the chosen language/representation
 contract.
 
-All seven families have one operand shape regardless of the selected format.
-Result descriptors, compact-form inference, indexed definitions and selected
-call signatures must agree on the same complete types and effects.
-Unknown kinds, mixed formats, qualified/nominal substitutes, unsupported
-destination pairs and missing required mapped types reject before execution.
-No metadata feature number, foreign ABI or optional-float representation is
-assigned by this integration.
+## Calls
 
-## Terminators and CFG
+### Bound target versus callable value
 
-An **edge** is reference-width `targetBlock` followed by `args`. Every
-target exists, and supplied values match its parameters in order. There
-are no fall-through or byte-relative branches. Here `r?` is zero only for
-void, representing its unit result without a value ID. A nonzero returned
-unit value must have the declared `void` type. Failure uses the module's
-fail-fast or checked-exception policy.
+`call.method` and `call.value` are distinct target carriers, not different
+evaluation or ownership models:
 
-| Opcode | Terminator; operands in byte order | Contract |
-|---:|---|---|
-| `80` | `Branch edge` | Unconditional transfer. |
-| `81` | `BranchIf rBool, edgeTrue, edgeFalse` | Evaluates an already computed Boolean once. |
-| `82` | `Switch rScalar, count(caseCount), (data(bits), edge)[caseCount], edgeDefault` | Exact type-width patterns sorted strictly by unsigned bits; one selected edge, no repeated selector evaluation. |
-| `83` | `Return r?` | Matches declared result; moved owner transfers, remaining obligations must be discharged. |
-| `87` | `Fail u8(reason)` | Declared requirement failure (`1`), overflow (`2`), division by zero (`3`), invalid shift count (`4`); no successor. |
-| `8A` | `Leave count(exitCount), regionId[exitCount], edge` | Inspectable scope/cleanup exit shape; not executable until its unwind contract is assigned. |
-
-Failure never becomes an unchecked result or `None`. A potentially failing
-operation or `Fail` terminator is forbidden in a declared `NoThrow` method
-unless a specified static proof rules out failure. In `(1, 0)`, a terminal
-call to an admitted checked `DoesNotReturn` method supplies that proof only
-for the otherwise unreachable `Fail` fallback after the call; it does not
-excuse any other failure. The
-[no-return contract](representation/contract-clauses.md#4-doesnotreturn-and-actual-completion)
-permits any declared result type, but preserves the ordinary Call result operand:
-zero is legal only for void, and a non-unit target has its typed result
-definition even though no normal result is published. Applicability does not
-expand the supported signature matrix or waive retained-record validation.
-`Call` checks the selected signature, declared effects,
-argument modes and return ownership. Without a declared `NoThrow`
-guarantee, failure policy does not create a normal CFG edge or automatic
-cleanup, so a caller needing cleanup on failure is unsupported by this
-initial executable subset.
-`CheckedIndex` and `Leave` are inspectable only and reject execution in the
-bounded profile.
-
-`CheckedBinary` kinds 1..5 use equal integer types; kinds 6/7 take a
-`uint32` right operand as the shift count. Signed negation fails at the
-minimum. Checked conversion preserves the exact value or fails, with no
-numeric fallback. Explicit edges and loop
-regions define the CFG; block and terminator offsets provide direct access.
-Trusted consumers may use those indexes and live sets; an optional audit
-decodes operations and recomputes predecessors, dominance and liveness.
-Neither may assign new meaning to an unknown opcode.
-
-The [source primitive contract](language/primitive-operators.md#source-counts-and-the-scalar-il-bridge)
-admits typed fixed/native integer shift counts independently of this physical
-operand type. Validate the exact source count against the data width before
-successful-path conversion to `uint32`; wrapping a wide count or replacing
-invalid-count failure with conversion overflow is not a valid lowering.
-Unsigned source negation can use supported typed-zero checked subtraction,
-not reinterpret signed `CheckedNegate`. Signed logical right shift likewise
-needs a complete supported bit-preserving lowering. Wider integers,
-floating remainder, other floating formats and accessor
-updates do not become executable merely because their source signatures are
-closed; only the registry's explicitly admitted type/operation combinations
-are executable.
-
-`CheckedDivRem` takes equal complete integer types. It checks a zero
-divisor or signed minimum divided by `-1` once, then defines distinct
-same-typed quotient and remainder results. Quotient truncates
-toward zero; remainder follows the dividend. `CheckedBinary` remainder does not
-fail for signed minimum `% -1` (the result is zero), so it cannot be
-rewritten as combined division/remainder. A consumer may fuse distinct
-operations only when failure order, uses and effects permit it.
-
-`CheckedRange` would check
-`start <= length && count <= length - start`, allowing the empty range at
-the end; later accesses still need a proof or check. `CheckedReadIndex`
-would combine a bounds check and Copy read without exposing an invalid
-intermediate place. Both remain non-executable pending backing,
-provenance, access and failure-order rules. Future intrinsics need explicit
-identities and contracts; callable names alone do not establish them.
-
-### Why a catch is not another normal edge
-
-A source extension of `MaybeAdd` could wrap its checked sum in
-`try { return x + y; } catch { return x; }` under a checked-exception
-policy. Its successful path still has the same B2 add and Return as
-above; overflow departs **at the add**, before the Return, and the
-handler returns `x`. It does not redirect B1's earlier choice to B3
-or imply a normal successor after every checked operation.
-The source `catch` is special/unsafe, not a fallback expression that
-turns an overflowing primitive operation into a wrapping sum.
-
-This is **not an encodable or executable Body example** in the present
-subset: only fail-fast policy 0 executes, and handler regions are
-reserved. A future representation must identify protected operation
-sites and their handler/cleanup order, the failure payload and policy,
-place/owner state and logical roots at exceptional departure, and how
-control enters the handler. Normal CFG indexes remain useful for
-branches, loop backedges and returns, but cannot stand in for those
-exceptional facts. Merely changing the runtime-policy byte on the
-previous exact-byte fixture would not supply them.
-
-## Value and place state through checked arithmetic
-
-The introductory [checked-add example](#checked-add-end-to-end-informative)
-shows the executable by-value case in the narrow fail-fast `(1, 0)`
-profile: `r1` and `r2` are its parameters and `r3` is defined by the first checked
-operation in B1. The alternative below adds an addressable local place
-and is decode-only in this revision.
-
-For `int32 IncrementLocal() { mut int32 local = 10;
-local = local + 5; return local; }`, instead declare a mutable, initially vacant
-`int32` place `p1` in the Body place table. Its artifact-wide type context
-is separate from the Body:
-
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(int32)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[1]
-            receiverTypeSpec: 0
-            paramFirst: 0
-            paramCount: 0
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018): no rows selected
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
-
-The following Body projection is decode-only and not a wire listing:
-
-```text
-Body shape (logical projection; not wire syntax):
-    counts:
-        blockCount: 1
-        valueCount: 5
-        placeCount: 1
-        regionCount: 0
-        typeCount: 1
-    typeMap:
-        t1: TypeSpec[1]
-    placeDescriptors:
-        p1:
-            typeId: t1
-            regionId: 0
-            flags: 0x05
-            useBlockCount: 1
-    valueDescriptors:
-        r1:
-            typeId: t1
-            kind: place-handle
-            useBlockCount: 1
-        r2..r5:
-            typeId: t1
-            kind: value
-            useBlockCount: 1
-    blocks:
-        B1:
-            parameters: []
-            liveIn, liveOut: [], []
-            inheritedPlaces: []
-            startPlaces: [p1 vacant]
-            operations:
-                r1 = PlaceLocal p1
-                r2 = ConstSigned t1, 10
-                Initialize r1, r2
-                r3 = Load r1
-                r4 = ConstSigned t1, 5
-                r5 = CheckedBinary add r3, r4
-                Assign r1, r5
-            endPlaces: [p1]
-            terminator: Return r5
-```
-
-`r5` is assigned and returned only after the check succeeds. `PlaceLocal`,
-`Initialize`, `Load` and
-`Assign` lack complete place and failure-path rules, so this shape is not
-executable. `PlaceField` produces a place; `Extract` reads a Copy field
-from a by-value aggregate.
-
-`r1` has the place's *referent* type, not a raw pointer type. No value
-is a block parameter; the Body index projection (not encoded bytes) is:
-
-```text
-Body index (logical projection; not wire syntax):
-valueDefStarts: [0, 5]
-valueDefinitionOffsets: [24, 27, 34, 37, 41] // B1-relative bytes
-placeLastUses: [(p1, 7)] // end-place transition
-valueLastUses:
-    r1: Assign (6)
-    r2: Initialize (2)
-    r3, r4: CheckedBinary (5)
-    r5: Return (7)
-```
-
-All five definition offsets point to B1 operations. `p1` becomes active
-vacant at entry and ends after the operations; its last-use ordinal 7
-includes the end-place transition. `r1` first becomes available at
-`PlaceLocal` (operation 0) and is last read by `Assign` (6). Ordinary
-`r2` is last read by `Initialize` (2), `r3` and `r4` by the checked add
-(5), and `r5` by Return (7). `r5` is also read by `Assign` (6), but the
-last-use inventory stores only its *final* use. Dropping this block would also
-remove its place-state transitions; dropping individual effects from
-a retained block requires their full ownership and failure contract.
-
-The following exact bytes encode only the 122-byte Body (0x0020) section
-(8-byte offset index and 114-byte row). Its `05` place flags mean mutable
-and initially vacant; block offsets are `[0,51]`, and the terminator
-offset is `[49]`. `p1` occurs in one block; B1's last-use inventory records
-its end transition at ordinal 7. The five value definitions occur at
-B1 byte offsets `[24,27,34,37,41]`:
-
-```text
-00 00 00 00  72 00 00 00
-00  01 05 01 00 01  01 00 00 00  01 00 05 01
-01 01 01  01 00 01  01 00 01  01 00 01  01 00 01
-00 05
-18 00 00 00  1B 00 00 00  22 00 00 00  25 00 00 00  29 00 00 00
-00 00 00 00  33 00 00 00  31 00 00 00
-00 00 00 00 00 01 01 01 01
-05 01 06 02 02 03 05 04 05 05 07  01 01 07  07
-20 01 01  02 02 01 0A  23 01 02  22 03 01  02 04 01 05
-13 05 01 03 04  24 01 05  83 05
-```
-
-B1 starts vacant `p1`, ends `p1` after seven operations, and has no
-cross-block live values or inherited places. Its use entries give
-`r1` last use at Assign (ordinal 6), `r2` at Initialize (2), `r3`
-and `r4` at the checked add (5), and `r5` at Return (7).
-Its header and the terminator
-index are directly readable; they do not authorize executing
-the unsupported place operations. An interpreter may use value slots and
-verified place storage; JIT/AOT may choose registers or memory. The format
-does not prescribe native stack slots or separate add opcodes by operand
-source.
-
-## Worked bytes and illustrative size
-
-For [metadata example](il-metadata.md#row-assignment-example),
-the artifact-wide metadata context, separate from the Body section, is:
-
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(int32)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[1]
-            receiverTypeSpec: 0
-            paramFirst: 0
-            paramCount: 0
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018): no rows selected
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
-
-The `return 42` Body has one value, one implicit entry block, no places
-and no explicit regions. Compact linear is the natural space-saving
-illustration; the general form remains valid but is not repeated here.
-
-### Compact linear constant return
-
-See [compact-form information accounting](#compact-form-information-accounting)
-for the implicit-versus-encoded fields in this form.
-
-The `return 42` method uses a compact-linear Body section of 21 bytes
-(8-byte row index and 13-byte row). `ConstBits` and Return are unchanged;
-the separate MethodSig and mapped TypeSpec supply the complete result
-type. Its Body row projection and exact bytes are:
-
-```text
-Body row (compact linear; 13 encoded bytes):
-    bodyLayout: 0x04
-    typeCount: 1
-    typeMap:
-        t1: TypeSpec[1] // int32
-    operationCount: 1
-    operations:
-        r1 = ConstBits t1, 42
-    terminator: Return r1
-```
-
-```text
-Body shape (inferred projection; not additional compact-linear bytes):
-    counts:
-        blockCount: 1
-        valueCount: 1
-        placeCount: 0
-        regionCount: 0
-    valueDescriptors:
-        r1: t1 // constant 42, defined by operation 0
-    blocks:
-        B1():
-            r1 = ConstBits t1, 42
-            Return r1
-```
-
-```text
-Body index (inferred projection; not stored in compact linear):
-    valueDefStarts: [0, 1]
-    definitions:
-        r1: B1 operation 0
-    useBlockCounts: [1]
-    last uses:
-        B1: [(r1,1)]
-```
-
-The absent block header, place/region records, descriptor and
-definition/last-use indexes need no empty placeholders. The following
-sequence contains only the Body (0x0020) section bytes:
-
-```text
-00 00 00 00  0D 00 00 00
-04 01 01 00 00 00 01
-01 01 01 2A 83 01
-```
-
-#### Compact linear parameter return
-
-See [compact-form information accounting](#compact-form-information-accounting)
-for the implicit-versus-encoded fields in this form.
-
-For a separate `Identity` fixture,
-`int32 Identity(int32 x) { return x; }`, the artifact-wide context is:
-
-```text
-Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011):
-        row[1]: Builtin(int32)
-    MethodSig (0x0017):
-        row[1]:
-            resultTypeSpec: TypeSpec[1]
-            receiverTypeSpec: 0
-            paramFirst: 1
-            paramCount: 1
-            genericFirst: 0
-            genericCount: 0
-    Param (0x0018):
-        row[1]:
-            ownerMethodSig: MethodSig[1]
-            ordinal: 0
-            typeSpec: TypeSpec[1]
-            mode: 0
-    MethodDef (0x0016):
-        row[1]:
-            signature: MethodSig[1]
-            bodyRow: Body[1]
-```
-
-The entry parameter is Body-local `r1`; its row shape and exact Body
-(0x0020) section bytes are:
-
-```text
-Body row (compact linear; 9 encoded bytes):
-    bodyLayout: 0x04
-    typeCount: 1
-    typeMap:
-        t1: TypeSpec[1] // int32
-    operationCount: 0
-    terminator: Return r1
-```
-
-```text
-Body shape (inferred projection; not additional compact-linear bytes):
-    counts:
-        blockCount: 1
-        valueCount: 1
-        placeCount: 0
-        regionCount: 0
-    valueDescriptors:
-        r1: t1 // x; by-value parameter
-    blocks:
-        B1(r1 <- x):
-            Return r1
-```
-
-```text
-Body index (inferred projection; not stored in compact linear):
-    valueDefStarts: [0, 1]
-    definitions:
-        r1: entry parameter sentinel
-    useBlockCounts: [1]
-    last uses:
-        B1: [(r1,0)]
-```
-
-This is a 17-byte Body section (8-byte row index and 9-byte row):
-
-```text
-00 00 00 00  09 00 00 00
-04 01 01 00 00 00 00 83 01
-```
-
-`Identity` has the same one-block *shape* as `return 42` but a different
-definition/use graph. There is no second type-independent opcode or
-license to share an executable Body across MethodDefs under the current
-unique-owner rule, regardless of signature.
-Interning a reusable shape across methods would require a new
-bounded template/reference contract with type, operand, effect and
-binding substitutions; cross-body template lookup could cost more
-than these short rows and is not assigned in this design. Exact Body
-sharing among compatible MethodDefs also requires a future metadata
-ownership revision; it is not an implicit optimization.
-
-## Tool roles and future executable contracts
-
-A structural reader bounds tables and Body rows, indexes strings and blocks,
-preserves unknown **registered nonsemantic** sections when rewriting, and
-reports unsupported opcodes without executing them. A semantic audit checks
-operations and flow; interpreters, JITs and AOT implement only supported
-features. Linkers rewrite row references, body IDs and affected indexes/
-liveness facts, then revalidate. Trimmers retain transitive type, signature,
-contract, selected-call, witness and cleanup dependencies. Removing
-SourceMap cannot change execution.
-
-| Consumer question | Direct format input | Remaining consumer freedom |
-|---|---|---|
-| Where is a block and its branch? | Block and terminator offsets, explicit target IDs | Choose hot/cold layout and machine branch forms without bytecode displacement fixups. |
-| What crosses a block boundary? | Typed merge parameters, sorted live-in/out value IDs, active place/state joins; indexed definitions and last uses identify in-block lifetimes | Fast tier can avoid rebuilding ordinary boundary and last-use facts; optimizing tier may rebuild SSA/liveness or choose a different register allocation. Native stack slots are not prescribed. |
-| What must be rooted at a safepoint? | Typed values, place descriptors and boundary liveness identify candidates, but no per-safepoint root/lifetime index is assigned | A backend must currently establish logical root continuity and emit its own register/stack GC maps; boundary liveness alone cannot supply them. |
-| Which loops and failures are present? | Region headers/exits; checked operations carry ordered failure effects; explicit `Fail` terminators | Lower failure/cleanup and optimize loops without treating hints as a prescribed machine CFG. Locating failures inside blocks still needs an operation scan until an effect summary is assigned. |
-| Which calls are intrinsic candidates? | Exact selected method identities and declared contracts; future registered intrinsics require explicit semantics | Inline or lower only compatible recognized identities, never guess from names or rewrite effectful calls as pure arithmetic. |
-| Which numeric/vector operations exist? | Stable opcode semantics plus TypeSpec and required feature identity | Extend primitives and SIMD via new registered types/operations; do not silently reinterpret old scalar opcodes or assume every lane has the scalar's failure behavior. |
-
-These indexes support importer/JIT work without prescribing an optimization
-schedule or preventing deeper alias, memory-SSA or range analysis. They may
-reduce repeated traversal; no throughput ratio is asserted.
-
-### Executable subset versus assigned decode shapes
-
-The unified schema's bounded `scalar-copy-failfast` profile uses only scalar
-TypeSpecs (`void`, `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`,
-`float32`, `float64`) and Body-local optional values over the six supported
-non-unit, nonfloating scalars. Parameters are by-value primitive scalars;
-there is no receiver, place, generic or external call. Indexed Bodies can
-contain loop and bounded unsafe regions as constrained above. Operations
-`01..07`, `10..16`, module-local scalar `30`, `40..46` and terminators
-`80..83`, `87` are executable with their stated
-type, state and failure checks. `CheckedBinary` kinds 4 and 5 require
-an integer divisor and use the selected module fail-fast policy on failure;
-`CheckedConvert` accepts the assigned integer types and `char16` as a
-non-arithmetic 16-bit code unit with range `0..65535`; it preserves
-the mathematical value when in range. `Fail` terminates
-under that policy. Only `runtimePolicy=0` is executable in the current beta
-subset: checked-exception dispatch requires a specified exceptional edge,
-payload and cleanup protocol. This is not the final TRRM 1.0 contract; core
-checked-exception semantics are required for TRRM 1.0 GA. Their serialized
-representation and conformance rules remain open in the
-[checked-exception proposal](../proposals/checked-exception-trrm.md). All
-live values in this subset are Copy values, so a failure cannot strand a
-unique cleanup obligation.
-
-Executable `Call` (`30`) selects a locally authored, module-level MethodDef
-using nonzero `m`, with no receiver or generic parameters. Its parameters are
-by-value primitive scalars and its result is a primitive scalar or `void`;
-every argument and result must match the selected signature exactly. A unit
-call may use result ID zero (no value definition) or the next nonzero
-typed unit ID, without dropping its operation ordinal or ordered effects.
-Every producer-emitted Body, including uncalled targets, must satisfy the
-profile's complete executable rules. A trusted consumer performs natural
-checks on accessed Bodies/calls, not a preliminary all-Body executable audit;
-an adequate untrusted audit or whole-profile conformance claim checks its
-stated scope. A `NoThrow`
-caller requires the selected callee's checked `NoThrow` declaration; other
-calls may fail under the module's fail-fast policy. Forward and recursive
-references do not require declaration order or recursive inlining.
-Imported, packed cross-module (`m=0`), nominal/instance, generic/witness,
-non-value-mode and owning calls remain outside this executable subset.
-Core source-level output-mode semantics are nevertheless required in
-source-free TRRM artifacts by 1.0 GA. This requirement does not change the
-current beta subset or accept the provisional `ScalarInitOutput` feature ID,
-rule revisions or place/publication rules. The complete output profile must
-specify failure and cleanup behavior, including its interaction with checked
-exceptions; its encoding and conformance rules remain open.
-
-`08..09`, `20..29`, `8A`, and nonzero place counts are **assigned decode
-shapes, not executable forms**. All unassigned primary bytes, including
-`17..1F`, reject; the retired floating/indexing numbers are not aliases.
-The assigned shapes require place authority,
-ownership, cleanup, richer call failure, backing or region rules that this revision
-does not encode completely. The `02` lexical and `03..05`, `07` region kinds
-are likewise reserved for execution. A structural inspector can identify each
-known opcode's operands and report unsupported semantics; a semantic editor
-cannot safely relocate or rewrite it without those rules. An executable
-reader rejects such forms rather than treating them as pure scalar
-operations. This classification overrides any broader description in the
-decode table; it is not a promise that an unsupported program will execute.
-
-This is not yet enough for a Cecil-like semantic editor over all Terrum
-programs. Required design work before claiming a complete interchange
-contract:
-
-| Surface | Missing binary and verification contract |
+| Name | Target |
 |---|---|
-| Exception and cleanup | Authored catch/finally, cleanup on normal/exceptional exit, fault replacement, operation-site failure state (including calls) and required roots through cleanup. Root-free fail-fast calls do not establish these broader contracts. |
-| Fast method facts | The Body now assigns direct value definitions, per-block last-use inventories and per-value/place use-block counts. Still define the mandatory method-level operation/effect summary, finer per-block effects and safepoint/root inventory, with bounds and consistency audits. Specialized branch reachability and per-consumer profitability are computed at the call site, not serialized as authoritative facts. |
-| Loans and views | Place provenance, region escape/alias checks, retained backing and owner dependencies, interior references, `mut` versus `write`, suspension/capture and explicit begin/end loan forms. |
-| Managed values | Root maps at safepoints, stable descriptors, write barriers, allocation/collection, optional handles and per-image heap boundaries. Root lifetime cannot be inferred solely from SSA uses. |
-| Logical root inventory | Specify producer-recorded, directly indexed safepoint locations and live logical root/owner/interior-place dependencies (including exceptional continuation and cleanup), with precise lifetime and verification rules. The format should avoid making each interpreter/JIT reconstruct logical GC liveness from every use; it must not prescribe post-allocation native register/stack maps or assume that ordinary value liveness covers roots. |
-| Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
-| Operations | Checked indexing/backing, raw/unaligned and atomic memory order, wider floating/decimal/remainder and SIMD/tensor operations, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
-| Revision and reader policy | The [Module manifest](representation/semantic-manifests.md) supplies exact edition/Feature admission; broader capability definitions and diagnostic/recovery codecs remain open, not that selected protocol. [Resource accounting](representation/resource-accounting.md) defines scoped capacity and deterministic structural/audit recipes; numerical portable minima remain unassigned. [Encoding canonicality](representation/encoding-canonicality.md) admits equivalent nonminimal encodings during ordinary reading while keeping writers and explicit audits strict. [Reader trust](representation/reader-trust.md) permits selective access without a preliminary all-block scan; accessed unknown/unsupported forms reject. |
-| Type-map conformance | Producers supply valid, distinct fixed-`u32` TypeSpec map entries and complete agreement with MethodSig and selected definitions. Readers check accessed map/local IDs and exposed type agreement; whole-map validation is a separate scoped claim. The separate inline built-in extension requires an explicit selected-schema amendment and identity checks across indexed and inline forms, not necessarily a new pre-release format pair; no Body-local ID may be mistaken for an artifact-wide metadata reference. |
+| `call.method` | A selected bound callable/declaration reference, normally through MethodMap. |
+| `call.value` | A captured, fully typed callable value in a register or argument home. |
 
-These are requirements for future broader executable profiles and complete
-interchange, not permissions to invent semantics or serialize the current
-private bound tree. The bounded subset specified above is approved; forms
-missing the stated contracts remain non-executable.
-See [implementation](../implementation.md) for what the repository actually
-executes. The source-language [portable proof floor](language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation)
-is distinct from decoder and verifier work budgets.
+The selected design uses one logical invocation protocol, with compact
+windows and a general record form. These names do not expose native
+instruction selection.
 
-The compact tags and their bytes are approved for the bounded subset;
-writer-selection policy and other unapproved performance extensions remain
-in the [IL extension proposal](../proposals/il-extensions.md#compact-profile-selection-and-follow-up).
+A bound call can still use virtual/interface/witness dispatch described by
+its selected target. A callable value can be a function pointer with an
+explicit foreign ABI. These are not respectively synonyms for one native
+direct call and one native indirect call.
+
+Overload resolution and source argument adaptation have already occurred.
+No consumer selects a method from a matching name.
+
+### Compact call forms
+
+Logical inputs are the receiver, if present, then formal parameters in
+declaration order. The signature supplies their complete types and modes.
+
+| Call form | Assigned encoding | Target, inputs and result |
+|---|---|---|
+| Bound method, compact non-unit result | Short `80`, long `E1` | MethodMap target; consecutive input window; result replaces argument-window base |
+| Bound method, exact unit result | Short `82` | MethodMap target and consecutive input window; no result register |
+| Callable value, compact non-unit result | Short `81`, long `E2` | Captured callable register; consecutive input window; short result replaces target, long result uses the payload result nibble |
+| Callable value, exact unit result | Short `83` | Captured callable register and consecutive input window; no result register |
+| General call site | Short `90` for record indexes `0..255`; long `E0` for `u16` | CallSite record specifies captured target, formal-order inputs, result and restricted preparation |
+
+Compact staging windows must fit R0..R13; they cannot stage arbitrary
+arguments into the two special slots. General call records can name special
+constants only where the selected formal provides a valid type/domain.
+This does not limit callable arity: other completed inputs use argument
+homes. The logical count includes unit parameters even when the ABI passes
+no payload for them.
+
+All sources and the target are captured before result publication. Calls
+change their result binding and any consumed inputs according to the
+signature; other logical register bindings remain intact. Physical ABI
+clobbers and hidden return buffers are backend concerns.
+
+### General call-site record
+
+Record kind `02` (`CallSite`) has this assigned payload:
+
+| Field | Required meaning |
+|---|---|
+| Selected target | Exact bound method/dispatch/witness target or captured callable value, including its complete signature/ABI obligations. |
+| Input sources | Formal-order register values or completed argument homes, with any prepared initialization-destination entries identified. |
+| Result destination | Register or proven-vacant result home; an exact unit result may use a unit-only sink. |
+| Destination preparation | Restricted typed list of required dependency-valid retirement/vacancy preparation for reusable hidden observation/output homes. |
+
+An argument home stores a completed argument value/descriptor. It is not a
+recipe to reevaluate an argument expression or silently reread a changed
+source variable. It can be an ordinary compiler-generated typed local;
+this does not introduce an expression evaluation stack.
+
+For `F(A(), B())`, selected calls can produce results directly into `R4`
+and `R5`, followed by a call-site record mapping those inputs to F's formals.
+More than fourteen simultaneously needed argument values can use argument
+homes. Nonconsecutive register inputs need not be shuffled solely to fit
+the compact form.
+
+The ordinary signature has one complete result, including `void`. A tuple
+result is one aggregate value. Initialization outputs follow their separate
+state contracts; they are not arbitrary extra ordinary result registers.
+
+### Invocation phases
+
+| Phase | Obligation |
+|---|---|
+| Capture | Evaluate callable/receiver once at its source position, before arguments. |
+| Stage | Evaluate written arguments in source order, including reference/place formation and actual copy/transfer effects. |
+| Check | Perform invocation-only receiver/target checks at their required point. |
+| Prepare | Retire previous hidden observation/destination values in a dependency-valid order and establish the required vacant destinations. |
+| Invoke | Transfer ownership at the ordinary invocation boundary and enter the selected callable. |
+| Publish | On normal completion, publish the result and declared result-correlated output states. |
+
+Named arguments do not change source evaluation order. The record maps
+already staged values into formal order.
+
+The preparation phase is required by the
+[hidden-destination contract](language/calls-and-inference.md#hidden-destination-instances-and-retirement).
+It cannot simply be moved before receiver checks or argument staging.
+The CallSite record carries a restricted typed preparation list in the general
+call-site record. Each entry identifies its actual destination/place,
+required transition and dependency ordering. It contains only the selected
+invocation protocol's preparation actions, not arbitrary helper calls or
+argument-expression recipes.
+
+Capture and Stage are explicit earlier operations. At the call instruction,
+the record's selectors name already completed values/descriptors in their
+current register bindings or homes. The instruction performs Check, Prepare,
+Invoke and normal Publish in that order; it does not recapture a changed
+source variable or reevaluate an argument expression.
+
+Compact forms are eligible only when their target/window/result and known
+signature represent the complete protocol without an extra per-site list.
+Otherwise use the general record, not an unchecked call plus guessed
+preparation helpers.
+
+If later argument evaluation fails, the caller cleans staged owners; moved
+sources do not revive. Once hidden old values have been retired, later
+failure does not roll them back. Borrowed materializations remain caller-owned
+under their supporting scopes.
+
+A by-reference argument is a descriptor, not a pointee snapshot. If permitted
+aliasing lets a later argument mutate that pointee, the callee can observe
+the mutation. An initialization destination's vacancy/authority and normal
+outcome relationship remain explicit. Mode and state are not inferred from
+an address or method spelling.
+
+Exceptional completion has no normally published result. Handler entry
+state does not automatically promise the old destination register or rollback
+of mutated places/captures. Nonreturning calls have no normal result or
+continuation; their terminal encoding is distinct from a normal unit result.
+
+Caller-unsafety, required dependencies and foreign data/ABI admissibility
+survive every call form. No form grants marshalling, pinning, rooting or
+lifetime extension. Preserving a logical register across a call does not
+promise a machine register survives it.
+
+## Return and abnormal completion
+
+### One return operation
+
+One signature-aware `ret` is assigned; there is no separate `return.unit`:
+
+| Method result | Required meaning |
+|---|---|
+| Non-unit `T` | Return an initialized complete `T` from the selected value operand. |
+| Exact `void` | Return its known unit value without requiring a payload register. |
+| No normal completion | A normal `ret` is not permitted by that callable's contract. |
+
+For exact unit return, unused register/operand bits must have a defined
+canonical value, rather than reading whichever unrelated value occupies R0.
+The ordinary method signature is already available to establish this case.
+
+This does not erase required effects or make an uninitialized unit-local
+read valid. Other zero-data nominal types still require their own initialized
+value and are not implicitly unit.
+
+### Explicit failfast and unreachable
+
+Use `failfast`, not a generic `fail` or `trap` mnemonic. It terminates normal
+execution under the selected fail-fast target/runtime policy, without the
+ordinary language unwind/cleanup promise. The assigned failfast forms carry
+no reason payload; optional diagnostic presentation comes from SourceMap or
+tooling data and is not part of its operation semantics.
+It is not a false value, a checked numeric exception or an IEEE invalid event.
+
+`unreachable` is an explicit abnormal terminal instruction with no normal
+continuation. Execution raises the selected ordinary language failure:
+prepare a fresh event at the instruction's origin, dispatch handlers and
+perform cleanup under the normal event/unwinding rules. It is not failfast
+or undefined behavior.
+
+This is not a NoThrow operation merely because of its mnemonic. An optimizer
+cannot use the instruction itself as proof that its incoming paths never
+execute and erase their defined failure. Ordinary reachability/effect facts
+still govern optimization and declared NoThrow guarantees.
+
+The exact Core `Terrum.UnreachableException` payload is defined by the
+[standard runtime failure contract](runtime/standard-failures.md#6-executed-unreachable):
+a public nongeneric zero-data Exception/Copy struct with a public
+zero-parameter constructor and no authored construction checks/effects.
+The runtime event carries origin and diagnostic context, not fields invented
+on that payload. This fixed mapping does not inherit a callable's
+`RequireException` default and does not select a similarly spelled provider
+type.
+
+Actual event-preparation/transport failure retains its own admitted outcome;
+do not fabricate an UnreachableException event if its preparation failed.
+The zero-data payload is a `Copy` value but does not implement the ordinary
+class-only `IException<TSelf>` contract. Its exact catch behavior and captured
+event ownership are defined separately; this does not generalize value
+exceptions.
+
+Typed checked operations retain their own failures and source origins.
+They do not need normal CFG edges after every check and cannot silently
+be replaced with `failfast`.
+
+### One throw family, explicit payload kinds
+
+Rethrowing need not consume another primary opcode. One `throw` family can
+select the propagation route from a payload kind, the normalized operand
+type or an explicit typed record:
+
+| Payload kind | Meaning |
+|---|---|
+| Fresh Exception value | Stage a complete eligible value and establish a fresh event/origin at this throw site. |
+| Active lexical handler event | Continue that exact event while the selected handler activation still owns it. |
+| Captured event owner | Consume exact Core CapturedException and transfer its existing event, origin, causes and dependencies. |
+
+Source bare rethrow can use the active-handler payload. Source
+`throw move saved` with exact CapturedException can use the captured-owner
+payload. The existing [captured-exception contract](language/captured-exceptions.md)
+supplies those eligibility and ownership rules; this is not a new public
+handler-token API or thread-global current-exception lookup.
+
+An ordinary copied payload is not the old event. Throwing a payload value
+does not preserve provenance merely because its bytes or identity match
+something caught earlier. Conversely, captured propagation does not invoke
+a constructor, clone the payload, replay cleanup or manufacture a new
+top-level origin. The distinction must remain explicit even with one opcode.
+
+All routes retain their actual cleanup, causal replacement and delivery
+contracts. Operand construction/evaluation failure propagates its real
+failure without fabricating the requested throw. Consumed event owners and
+handler responsibility cannot be revived through another register alias.
+
+### Runtime require instruction
+
+Represent `require<E> condition` explicitly instead of requiring an encoded
+conditional block and constructor/throw sequence at every site.
+The operand is a Boolean or an admitted comparison-condition test; a
+failure-selector record identifies the complete E and its selected ordinary
+zero-supplied-argument construction plan.
+
+| Outcome | Behavior |
+|---|---|
+| Condition succeeds | Continue with the ordinary unit/output result; do not construct E or create a failure event. |
+| Condition evaluation fails | Propagate that actual failure; do not construct E. |
+| Condition is false | Execute the selected ordinary construction once, then propagate the complete result with this requirement's fresh event/origin. |
+| Construction fails | Preserve the actual constructor/initialization/cleanup failure and cause rules, not a fabricated E result. |
+
+The existing [requirement-failure owner](language/requirement-failures.md)
+fixes selection: explicit E, otherwise the semantic owning callable's
+resolved default, otherwise exact Core RequirementException. Resolve this
+before serialization; an inlined or called helper does not acquire its
+caller's default.
+
+Zero supplied arguments does not mean exactly zero formal parameters.
+Ordinary constructor lookup, accessibility, optional defaults or an admitted
+empty params expansion apply. The failure selector retains that binding.
+It is not a failure factory, invented diagnostic argument or guessed
+default value. Generic Exception evidence alone does not prove constructor
+availability.
+
+The assigned short `B3` and long `E7` forms reference a
+`RequirementFailure` record. That record selects an exact exception TypeMap
+entry, `ConstructorBinding` record, condition kind, current register and
+optional uint8 predicate mask. The condition is already computed; no
+predicate expression is reevaluated by the requirement instruction.
+
+Value-producing requirements over omitted initialization outputs must also
+retain the selected availability checks before owning extraction. They may
+use a richer typed requirement record or already lowered checks, but cannot
+read a vacant payload while testing success. Completed outputs, mutations
+and staged owners are not rolled back on a false requirement.
+
+Runtime `require` is not debug-only `assert`, an optimizer assumption or
+`static require`. It may be removed only under a valid semantics-preserving
+proof, retaining effects that produced its condition. Runtime postconditions
+keep their separate selected failure contract.
+
+## Control-flow instructions and large operands
+
+The assigned branch, conditional branch, predicate branch and switch forms
+are `B0..B2` and `E3..E7`; they use absolute zero-based Block indexes, with
+`ConditionalEdge`, `Switch`, `RequirementFailure` and `Throw` records where
+the short form cannot carry the complete contract. `EB` returns a Home
+value. `B6`/`EA` have registered instruction/record shapes but no usable
+exit-kind or region inventory; they reject until that carrier is assigned.
+The small forms and exact operands are listed in the opcode tables.
+
+Every normal control-transfer target is a block index, not a machine
+address, bytecode address or byte displacement. Region identifiers name
+regions, not code addresses. Each Block's `codeOffset` and `codeLength` locate its bytes for decoding;
+those offsets are not branch operands.
+Native lowering can later choose native addresses/displacements.
+
+The `ConditionalEdge` record explicitly holds both successors. No
+fallthrough is implied by adjacent byte ranges. Transfers must satisfy the
+target's entry types, state, regions and lifetime obligations without
+reinterpreting register bits.
+
+Every indexed record reference uses a zero-based `u16` Body-local index and
+the operation-specific fields assigned to its family:
+
+```text
+primary:u8 | control:u8 | payload:u16
+```
+
+Records can hold full-width global references and bounded operand lists.
+There is no wider index form in this codec; an out-of-range operand rejects.
+
+Unknown operations, unsupported required contracts and invalid
+operation/control/record combinations reject at their applicable
+access/admission boundary. Exact codec selection is not a substitute for
+these checks. Equal version bytes do not authorize guessing between this
+draft and another schema.
+
+## Worked expression and realistic workloads
+
+For five by-value `int32` inputs under explicit wrapping/release policy, a sequence for
+`(a * b * c) + (d * e)` is:
+
+| Operation | Bytes with ordinary short forms | Bytes if its indicated tiny form is selected |
+|---|---:|---:|
+| Load `a0:a1` into `R0:R1` | 2 | 1 |
+| `R0 = mul.wrap(R0, R1)` | 2 | 1 |
+| Load `a2` into `R1` | 2 | 2 |
+| `R0 = mul.wrap(R0, R1)` | 2 | 1 |
+| Load `a3:a4` into `R1:R2` | 2 | 2 |
+| `R1 = mul.wrap(R1, R2)` | 2 | 1 |
+| `R0 = add.wrap(R0, R1)` | 2 | 1 |
+| Return `R0` | 2 | 1 |
+| Total | 16 | 10 |
+
+Both columns have eight operations and three working registers, without a
+per-intermediate local or encoded SSA ID. The ten-byte case uses five
+assigned tiny tuples: the first argument pair, the two multiply tuples, the
+add tuple and the return.
+
+The operation bytes are assigned by the codec tables above. Counts exclude
+the Body stream header, maps, indexes and padding. These are field-budget
+examples, not compiler emission or runtime performance results.
+
+The corresponding checked/development sequence uses four bytes for each
+of its three multiplies and one add. With the ordinary two-byte loads and
+return, that is 24 bytes for the same eight operations. Selecting tiny forms
+for the first argument pair and return reduces it to 22 bytes; checked
+arithmetic itself remains four bytes. Compound full-form recipes can have
+different operation counts, so this is not a claim of an optimal encoding.
+
+The workload comparison must include more than that expression:
+
+| Workload | Relevant pressure |
+|---|---|
+| `List<T>.Add`, indexing and insertion | Retained array/size snapshots, field accesses, ordered checks/stores, cold calls and several call inputs. |
+| `Enumerable.Select` and iterator advancement | Captured callable/receiver, generic values, state-machine branches, field-stored enumerators and explicit by-reference access to struct state. |
+| `Int32` operations and DivRem | Tiny operations, noncommutative ordering, multiple uses of a quotient, aggregate/multi-result alternatives. |
+| `Single` | Ordered/unordered predicates, NaNs, sign operations and type-changing comparison results. |
+| .NET 11 `System.Numerics.Decimal32` | Actual IEEE decimal32 arithmetic/helper usage, not a substitution of CLR `System.Decimal`. |
+| Larger software arithmetic | Buffers, addressable temporaries, repeated local updates, long streams with small transient working sets. |
+| Reference/owner/generic code | Root/backing retention, actual storage identities, cleanup, calls and non-word-sized values. |
+
+A stack can be a source/compiler implementation choice, but this schema
+selects register instructions; it assigns no stack-body codec. The register
+format does not claim that every stack representation requires deferred
+effectful expression trees or that the current byte study proves an
+application-wide size or runtime advantage.
+
+## Allocation crosswalk and implementation boundaries
+
+The following crosswalk summarizes the assigned codec and its unassigned
+capacity. The opcode and record tables above are normative projections of the
+[registry](representation/trrm-1.registry.json); this crosswalk does not
+create a second allocation authority. The accepted design remains separate
+from compiler/runtime support.
+
+### Header and implementation envelope
+
+| Item | Assigned rule |
+|---|---|
+| Method implementation kind | `01` stream, `02` field read, `03` field write, `04` field reference, `05` identity forwarder. |
+| Stream codec | Separate `instructionEncoding:u8`; `01` is the mixed 1/2/4 register codec. |
+| Compact implementation | Exact bound field/method token and required binding/use contract; no empty stream or stream codec. |
+| Local inventories | Unsigned `u32` counts; each `u16`-indexed inventory contains at most 65,536 entries. |
+| Global references | Retain their typed full-width references; compact descriptors do not truncate FieldDef/MethodDef identities to `u16`. |
+| Code and source extents | `u32` byte lengths/offsets and instruction ordinals; independent of `u16` local indexes. |
+| Unknown kind/codec | Reject affected use; no guessed decoding, legacy alias or empty-body fallback. |
+| Arithmetic/IEEE policy | Encoded in the operation/family contract; never inferred from codec selector or consumer build configuration. |
+
+The stream's first-byte partition remains 16 tiny, 176 short and 64 long
+primary positions. Compact method bodies are another implementation kind,
+not another instruction-width mode.
+
+### Allocated tiny tuples
+
+Worksheet positions T0..T15 map directly to opcodes `00..0F`. Their exact
+semantics and signature/state constraints are normative.
+
+| Position | Opcode | Implied operation and operands |
+|---|---:|---|
+| T0 | `00` | Signature-aware `ret R0`; exact void uses its known unit result |
+| T1 | `01` | `R0 = load.arg 0` |
+| T2 | `02` | `R1 = load.arg 1` |
+| T3 | `03` | `R2 = load.arg 2` |
+| T4 | `04` | `R0:R1 = load.arg.pair 0:1` |
+| T5 | `05` | `R0 = load.home 0` |
+| T6 | `06` | `R1 = load.home 1` |
+| T7 | `07` | `store.home 0, R0` |
+| T8 | `08` | `store.home 1, R1` |
+| T9 | `09` | `R0 = load.constant 0` |
+| T10 | `0A` | `R0 = add.wrap(R0, R1)` |
+| T11 | `0B` | `R0 = sub.wrap(R0, R1)` |
+| T12 | `0C` | `R0 = mul.wrap(R0, R1)` |
+| T13 | `0D` | `R1 = mul.wrap(R1, R2)` |
+| T14 | `0E` | `R0 = and(R0, R1)` |
+| T15 | `0F` | `R0 = xor(R0, R1)` |
+
+Loads/stores retain their full eligibility, state and source-use contracts.
+Constant 0 means typed ConstantMap entry 0, not an untyped numeric zero.
+Checked and saturating arithmetic are absent from this shortlist.
+No call/field tiny tuple is assumed necessary after compact method bodies.
+
+The measured 80.5% figure belongs to the earlier study, not this set. The
+assigned tuples are a concrete initial codec allocation, not a measured
+optimum or a complete CoreLib frequency ranking.
+
+### Short-code allocation crosswalk
+
+The first-byte bands group related semantics. Only the listed members are
+assigned; every other value in the band is invalid.
+
+| Assigned band | Assigned members | Operand rule |
+|---|---|---|
+| `10..1F` | `10..18`, `19..1A` | Register/formal/home/constant nibbles as specified above |
+| `20..2F` | `20..2B` | Integer wrapping/divide/remainder and strict floating arithmetic |
+| `30..3F` | `30..36` | Integer/Boolean bit operations and integer shifts |
+| `40..4F` | `40..41` | In-place compare relation and `setcc` |
+| `50..5F` | `50..52` | Total conversion, explicit wrapping conversion and bitcast only |
+| `60..6F` | `60..67` | Home/field/element place selection, access and explicit reference formation |
+| `70..7F` | `70..7F` | Field extraction ordinals 0..15 |
+| `80..8F` | `80..83` | Compact bound/value calls with the selected argument window |
+| `90..9F` | `90..92` | CallSite, PlaceSelection and SemanticStore record references |
+| `A0..AF` | `A0..AF` | Predicate-specific short `jcc` forms |
+| `B0..BF` | `B0..B5`, `B7..B8`; `B6` shape only | Small branches/control records, failfast, unreachable and Home return; region exit awaits its carrier |
+
+This groups related semantics without dedicating a one-byte island to every
+operation or pretending that every family has all three widths. A compact
+operation can have inherent checks, such as ordinary division or a place
+access; the full-only rule concerns the selected checked/saturating policy
+variants, not every operation that can fail.
+
+### Long-family allocation crosswalk
+
+| Assigned band | Assigned members | Payload rule |
+|---|---|---|
+| `C0..C6` | Scalar arithmetic, bit operations, compare/setcc, conditional select/move, ternary logic | Registered selector/control byte and four typed register nibbles |
+| `C7..CC` | Integer wrapping/checked/saturating recipes, strict floating recipes, scalar `cmp3.and/or` | Recipe/predicate control byte and destination/A/B/C nibbles |
+| `CD..CF` | Unassigned | No higher-math or classification operation is implied |
+| `D0..D3` | Numeric conversion policies and bit reinterpretation | TypeMap index `u16` plus source/destination registers |
+| `D4..D7` | Constant and Home load/store/take | ConstantMap/Home index `u16` plus registered register/control fields |
+| `D8..DD` | Place selection, semantic store, place load/take/retire and reference formation | Typed PlaceSelection/SemanticStore record indexes |
+| `DE..DF` | Unassigned | No additional place/view family is implied |
+| `E0..E8`, `EB`; `EA` shape only | CallSite, call windows, branches, switch, require, throw and Home return; region exit awaits its carrier | Typed record/Body-local indexes or exact register fields |
+| `E9`, `EC..FF` | Unassigned | No hidden escape, native-memory, atomic or SIMD operation is implied |
+
+For example, full product and DivRem are arithmetic function members whose
+four nibbles mean two results and two inputs. They are not ternary
+one-result operations. General source loads, stores, reference formation
+and native boundaries retain their actual contracts regardless of band.
+
+There are no eight-byte instructions or recursively decoded width prefixes
+in this codec. Larger operand lists live in indexed records.
+
+### Common record fields
+
+The record header and common value-selector layouts are assigned above.
+These records are separate from instruction payload bytes; their indexes use
+the Body's `u16` record namespace and never steal a valid record index for
+absence.
+
+| Field | Assigned shape and meaning |
+|---|---|
+| Value/location selector | `kind:u8,index:u16`; kinds None, Register and Home |
+| Register selector | Index 0..15; operation role determines general, R14, R15 or discard validity |
+| Home selector | Full zero-based `u16` HomeMap index, including `0xFFFF` |
+| None selector | Explicit absent selector with index zero; use is fixed by its containing field |
+| Typed record table | `u32` count and offsets, zero-based `u16` references, four-byte record headers and exact kind-specific payloads |
+| Variable list | `u32` count followed by its fixed-width entries; no variable-length instruction |
+| Optional record reference | Explicit kind/presence field; no reserved-index sentinel |
+
+Selectors capture the current completed binding when their semantic
+operation executes. They are not source-variable reevaluation recipes or
+references to whichever value later occupies a reused register.
+The registry assigns record-kind numbers. The Body row and offset-indexed
+record extents are specified above and in [IL metadata](il-metadata.md).
+No decoder guesses a record kind or Body layout from plausible payload bytes.
+
+| Record | Required logical fields |
+|---|---|
+| Call site | Exact bound/value target, formal-order completed register/home inputs, result destination and restricted ordered preparation references |
+| Destination preparation | Destination, prior state, transition, source-use mode, formal identity and applicable dependency contract |
+| Place selection | Local/field/element/static kind, captured base/index, target identity, referent type and access |
+| Semantic store | Typed place, source value, explicit source-use and initialization/replacement transition |
+| Conditional edge | Absolute true/false block indexes; register/home state is checked against each block entry |
+| Switch | Typed ConstantMap keys, default and absolute target blocks |
+| Requirement failure | Exact exception type and zero-supplied-argument constructor binding |
+| Throw | Fresh payload, active handler event or captured-owner propagation |
+| Region exit | Exact exit kind, optional target and ordered cleanup region indexes |
+| SourceMap site | Body implementation/instruction location plus optional arithmetic-recipe step role |
+
+A kind-specific schema can omit fields that its kind makes implicit.
+It cannot omit an obligation. Generic record execution accepts only known
+operations with selected contracts; it is not a provider-defined helper
+language or permission to execute an unassigned family.
+
+Recipe step roles identify failure/source sites without serializing a
+growing per-expression value namespace. Consumers reconstruct the ordered
+nodes and retain the actual active steps; absent tokens have no step.
+
+### Compact body descriptors
+
+The implementation-kind tag selects the descriptor rather than a code
+stream. Kinds `02..05` and their exact bound field or method token layouts
+are defined in [Body row layout and compact implementations](#body-row-layout-and-compact-implementations).
+The declaration and binding determine receiver/input/result modes,
+authority, entry/exit contracts and invocation requirements.
+
+An identity forwarder stages the wrapper's existing bindings under the
+ordinary call protocol; it does not reevaluate its caller's expressions.
+If additional mapping, preparation, adaptation or body operations cannot
+be represented by that exact descriptor, use a stream. A reference getter
+requires its real declared reference/dependency contract; a value getter
+does not become one.
+
+### Unassigned semantics
+
+SIMD full products, future opt-in IEEE handling/helpers, a dedicated slice
+operation, mixed-input full products, the ExceptionRegion/handler carrier
+and unselected higher-math/atomic/vector members have no assigned usable
+decoding. The `B6`/`EA` RegionExit shapes have no assigned exit-kind or
+region inventory and reject; `Throw` active-handler rethrow likewise
+requires the missing region carrier. The `CD..CF`, `DE..DF`, `E9` and
+`EC..FF` long-primary cells are invalid, not future meanings or automatic
+escapes. Reserved space does not approve an operation, source API, runtime
+profile or native intrinsic. Missing required semantics reject; there is no
+quiet fallback or invented marshalling.
+
+## Selected contracts and bounds
+
+| Area | Rule |
+|---|---|
+| Arithmetic recipes | Encode all four operations even when overflow is possible; reconstruct their ordered nodes and preserve checks/source sites. The control byte assigns inner bits 0..1, outer 2..3, order 4 and A/B/C negation 5..7; operation values are neg/add/sub/mul = 0/1/2/3. |
+| Recipe absence | Integer absence is the modified R14 token; floating absence is the modified R15 token. Recognize combined tokens before reading or negating; absent inputs create no operation step. |
+| Integer profiles | Development/Debug defaults to checked and Release defaults to wrapping for integer add/subtract/multiply/negate and updates; explicit IL policy is fixed and independent of consumer configuration. |
+| Special registers | R0..R13 are general, R14 is context-typed zero, and R15 is all-bits-set or a role-specific discard/unused field. Decimal BID R15 is the raw negative signaling-NaN pattern. |
+| Local limits | Body-local indexes are `u16`; corresponding inventory counts are `u32` and at most 65,536. Global references, code offsets, byte lengths and instruction ordinals use independent widths. |
+| Comparisons | `cmp` produces uint8 L=1/E=2/G=4/U=8. Consumers test any uint8 mask by nonzero intersection. Scalar `cmp3.and/or` uses low A/B and high B/C predicates and returns bool. |
+| Register movement | `mov` aliases the same value identity. It does not copy, transfer, clean up or create another owner; aliases share consumption state. |
+| Storage and places | Typed semantic stores encode initialization/replacement under explicit state, authority and source-use rules. A place is an internal typed location, not a reference or address; reference formation is explicit. |
+| Calls | Use compact windows when their invocation phases fit; otherwise use a CallSite record with captured target, formal-order completed inputs, result and restricted ordered preparation. |
+| Compact bodies | Exact field read/write/reference and identity-forwarder descriptors retain MethodDef identity/contracts. Other adaptations use ordinary instruction streams. |
+| Full product | Scalar `mul.full` publishes low/high halves for all twelve primitive integer identities; low is unsigned, high retains the input type. SIMD and mixed-input forms are unassigned. |
+| Unreachable | The instruction raises a fresh ordinary failure with exact Core `Terrum.UnreachableException`, normal handler dispatch and cleanup; it is not failfast or undefined behavior. Handler/cleanup execution remains capability-gated by the unassigned ExceptionRegion carrier. |
+| IEEE and other extensions | IEEE status handling remains disabled by default. SIMD full products, mixed-input full products, slices and unselected higher-math/atomic/vector operations are unassigned. |
+
+## Conformance and acceptance cases
+
+Conformance exercises the complete assigned schema and explicitly unassigned
+forms:
+
+- Exercise the first-byte size boundaries at `0F/10` and `BF/C0`, every
+  assigned tiny tuple and all short-form register selectors.
+  Operand bytes that resemble opcodes must not be decoded recursively.
+- Verify exactly sixteen primary values are budgeted for one-byte forms,
+  with no implicit second-window allocation for every operation.
+- Reject unknown header codec selectors, unassigned primary values and
+  unsupported family controls. Do not infer another codec from the stream.
+- Check explicit source/destination overlap and multi-result publication;
+  no source reads a newly rebound destination accidentally.
+- Verify Boolean `not` produces a valid Boolean without treating it as a
+  raw complement of all storage bits.
+- Cover every floating comparison outcome, both NaN placements, signed zeros
+  and decimal cohorts.
+  Exercise all sixteen predicate masks and all 256 cmp3 predicate bytes,
+  including low/high-nibble order and the two family combining rules.
+- Cover quiet/signaling policies with both qNaN and sNaN, and distinguish
+  invalid status from trap/language-failure handling. Classification must
+  not acquire unwanted invalid effects through a self-compare lowering.
+- Confirm the default profile produces no language-visible IEEE signals.
+  Future opt-in software handling must not silently become enabled by
+  a predicate or codec bit.
+- Verify one compare condition can feed `setcc`, `jcc` and conditional
+  movement without repeating the comparison or its signaling event.
+  Check one-hot uint8 cmp outputs and arbitrary consumer masks, including
+  zero, high-bits-only, multi-bit and all-one values. Predicate F is true
+  for every cmp output, not for every possible uint8 value.
+- Check three-input comparison chains with eager and short-circuit behavior;
+  an unexecuted second comparison must not signal or evaluate its producer.
+  Scalar predicate chains produce bool usable by ordinary branch/selection,
+  not a raw relation pair or mandatory additional setcc.
+- Exercise all 256 ternary-logic controls, operand permutations, constant
+  controls, bit-width preservation, majority/minority and bit-mask versus
+  whole-value selection.
+- For arithmetic recipes, preserve association, ordered intermediate checks,
+  source/failure sites and strict/fused rounding. Do not move an inner
+  operation past an effectful producer of the third input.
+  Check the 182 unary-canonical controls, both domain-specific absent tokens,
+  rejection of absent tokens in required positions, and no dummy evaluation.
+  Preserve real integer all-one and floating negative-zero source forms.
+- Check full multiplication's exact low/high reconstruction and result types
+  for signed/unsigned/native widths, zero, signed minima, both-negative inputs
+  and unsigned maxima. Cover 128-bit inputs without a wider primitive, one
+  or both discarded halves, and overlapping input/output selectors with
+  distinct published result bindings.
+- Check development/debug checked arithmetic and release wrapping, including
+  relevant constant evaluation. Explicit policies remain fixed, including
+  when a consumer imports an artifact under a different build profile.
+  Checked and saturating forms must use full four-byte representations.
+- Compare stream bodies with field/forwarding implementation forms before
+  choosing the one-byte set. Preserve method identity, contracts and access/
+  initialization obligations in the compact forms.
+- Test same-type joins, incompatible live-in joins, dead incoming slots,
+  transiting values and loop backedges.
+- Preserve value identity through register aliases; reject double transfer
+  or retirement through aliases of one affine responsibility and loss of its
+  last available name without another valid holder or explicit retirement.
+- Distinguish vacant, live, maybe-live, partial and pending-reservation
+  storage; forbid replacement through initialization-only authority.
+- Preserve complete-receiver confinement during replacement; no callback
+  observes a deliberately exposed invalid interval.
+- Preserve element target/check timing around calls and rebinding; do not
+  create a reference through a value-returning accessor. Check internal
+  place aliases/state changes without duplicated authority, implicit pinning
+  or treating their representation as a public native address.
+- Keep range index domains, overflow-safe checks, empty ranges and exact
+  view/backing results explicit; no slice operation is assigned here.
+- Cover direct/value/dispatch calls, nonconsecutive inputs, the 14/15-input
+  register-window boundary and larger signatures, unit parameters/results,
+  aggregates, staged-owner failure, hidden destination preparation and
+  abnormal output/capture state.
+- Cover typed ConstantMap duplicates, distinct zero/NaN/decimal representations,
+  the selected 65,536-entry boundary and independent wider global references.
+  Index `0xFFFF` is valid; absence must not steal it. Reject 65,537-entry
+  inventories without treating count zero as a wrapped/full inventory.
+- Validate special constant domains and type inference, disallowed writes,
+  legitimate discard and unused-field roles without creating invalid
+  references, implicit owners or abandoned cleanup responsibilities.
+- Check R14's valid Boolean false, positive floating zero, decimal zero
+  exponent 0 and per-lane vector zeros. Reject missing type witnesses and
+  implicit reference/default-aggregate construction; preserve negative zero
+  and alternate decimal cohorts in ConstantMap.
+- Check R15's all-one patterns at every admitted width, valid Boolean true,
+  binary negative quiet NaNs, decimal BID negative signaling NaNs and
+  corresponding vector lanes. Preserve every raw decimal bit despite its
+  decoded numeric payload zero; do not quiet/canonicalize the constant read
+  or substitute a numeric maximum.
+- Check require's true path, false-path construction, zero-supplied-argument
+  binding, constructor failure, omitted outputs and source-owner defaults.
+- Check all throw payload routes and preservation of event identity/causes,
+  with no double propagation through aliases or after handler capture.
+- Check executed unreachable's ordinary event origin, handler dispatch and
+  required cleanup and exact Core UnreachableException identity; do not lower
+  it to failfast or undefined behavior, inherit a RequireException default or
+  fabricate the event after preparation failure. Preserve the independent
+  terminal behavior of explicit failfast.
+- Keep native callable typing, caller-unsafety and target ABI checks
+  independent of register packing.
+- Bound method-local record/map/block indices; reject overflow rather than
+  treating an index as a code address or selecting a wider codec implicitly.
+- Rebuild code indexes, block/terminator locations, operand references and
+  SourceMap references on re-encoding.
+
+The assigned register codec and Body layouts are the current `(1, 0)` draft
+schema under exact out-of-band agreement. This specification does not claim
+compiler/runtime support, released-schema stability or native qualification.
+Implementation and independent-consumer conformance remain tracked in the
+[conformance-gap inventory](../implementation/conformance-gaps.md#cg-001).

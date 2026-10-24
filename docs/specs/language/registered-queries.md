@@ -1,234 +1,198 @@
 # Registered queries
 
-This chapter owns the selected Core value-layout queries and the shared
-identity/admission boundary for compiler-known queries. Logical
-`registered-queries/1` adds no source keyword, query attribute, intrinsic wire
-ID or opcode. [Complete types](types-and-normalization.md), the
-[target layout contract](../data-layout-and-abi.md), and
+This chapter owns the selected source query family and the shared identity,
+authorization and admission boundary for compiler-known queries. The dedicated
+`typeof`, `sizeof`, `alignof`, `offsetof` and `countof` forms are not Core
+method calls or general reflection. [Complete types](types-and-normalization.md),
+[target layout](../data-layout-and-abi.md), and
 [constant execution](proof-and-constant-evaluation.md) retain their separate
 responsibilities.
 
-## Selected identities and authority
+## Selected query forms
 
-Compiler recognition follows the resolved declaration identity and its
-admitted contract, never a member's spelling. Ordinary library lookup,
-accessibility, generic argument binding and signature checking still apply.
-Aliases or repeated imports of one declaration preserve that identity;
-unrelated declarations with equal names/signatures do not acquire it.
-
-| Selected operation | Subject and result | Canonical contract |
+| Query | Subject | Result and meaning |
 |---|---|---|
-| Reserved `typeof(Type)` syntax | Complete bound type-identity evidence, not an ordinary reflection-object constant | [Source vocabulary](../grammar-spec.md#source-vocabulary) and [structural flow](initialization-and-flow.md#binding-pattern-declarations-and-scopes) |
-| Core `RuntimeHelpers.IsPureEval` | Selected activation's immutable evaluation form; readonly Boolean result | [Evaluation modes](published-predicates-and-effects.md#evaluation-modes) |
-| Core `RuntimeHelpers.IsConstEval` | Selected activation's immutable evaluation form; readonly Boolean result, implying pure mode when true | [Evaluation modes](published-predicates-and-effects.md#evaluation-modes) |
-| Core `RuntimeHelpers.SizeOf<T>()` | Complete normalized value representation of T; `nuint` byte extent | [Value-layout queries](#value-layout-queries) |
-| Core `RuntimeHelpers.AlignmentOf<T>()` | The same complete representation of T; `nuint` alignment in bytes | [Value-layout queries](#value-layout-queries) |
+| `typeof(Type)` or `typeof(Place)` | Complete type, or a Place's statically bound complete type | Type-identity evidence; never a runtime reflection object |
+| `sizeof(Type)` or `sizeof(Place)` | Complete value/handle representation under the selected target | Nonnegative `nint` byte extent |
+| `alignof(Type)` or `alignof(Place)` | The same complete selected-target representation | Nonnegative `nint` placement alignment; `alignof(void)` is `0`, meaning no placement requirement |
+| `offsetof(Type, FieldPath)` | Complete type and inline field path | Nonnegative `nint` cumulative field offset from the supplied type |
+| `offsetof(Place)` | A bound field Place and its exact static path | Nonnegative `nint` terminal field offset in its immediate containing type |
+| `countof(Type)` | Complete type whose shape carries an explicit fixed-cardinality fact, such as an admitted fixed inline-array/buffer extent | Nonnegative `nint` fixed cardinality |
+| `countof(KnownShapeExpression)` | A literal or collection expression with statically known logical element count | Nonnegative `nint` syntactic shape count, without evaluating values or materializing/enumerating a collection |
+| `countof(Place)` | A live value with a selected nominal Count witness | The current nonnegative `nint` count, observed through that synchronous contract |
 
-The designated compiler/Core profile publishes the exact intrinsic type/member
-identities, signatures, supported forms and recipes. This is different from
-target-owned literal or builder registration: another package cannot attach
-compiler query semantics to a member it defines or to a foreign target.
-There is no general source `[Query]` registration schema. A Core dependency
-does not admit every candidate query or automatically make its facilities
-part of the minimum `language` profile.
+The expression-form operands of `typeof`, `sizeof`, `alignof` and
+`offsetof(Place)` must bind as existing Terrum Places, not arbitrary
+Expressions. These queries inspect type/layout facts and do not read or
+evaluate the stored value, invoke a getter/indexer/call, or perform arithmetic.
+An `init` Place may be named by `offsetof(Place)` because it observes no value.
+Explicit dereference remains subject to ordinary access and unsafe rules.
+`countof(Place)` is different: it observes the live value through its Count
+witness and therefore requires ordinary readable-place and call authorization.
+`typeof(Place)` reports the Place's statically bound type. For a `G<_>` Place,
+it reports the existential view; it does not recover the hidden argument or
+witness. That recovery requires a successful checked `G<var T>` pattern; no
+general runtime type/witness-inspection query is selected.
 
-One selected identity has one compatible contract. Duplicate claims with
-incompatible owners, signatures, rules or recipes reject; import order,
-same-spelled namespaces and competing implementations cannot select a winner.
-Two imports of the same compatible claim deduplicate. A source call bound to
-an unrelated helper remains an ordinary call, including its actual effects
-and constant eligibility; it is not silently rebound to Core.
+## Identity and authority
 
-Declaration selectors such as the `nameof(parameter)` arguments of admitted
-dependency/capture schemas keep their [declaration-binding rules](names-and-binding.md#generic-formal-names-and-scope).
-They do not evaluate a parameter or read a vacant output. This chapter does
-not select a general string-producing `nameof` API, object-payload query,
-reflection root, policy-state query or runtime capability-query catalog.
-Each additional query needs its own exact subject, result domain, authority,
-forms, dependencies and compatibility contract before use.
+`typeof`, `sizeof`, `alignof` and `offsetof` are grammar-owned queries with
+their own complete subject and target contracts. A same-named user method or
+attribute does not replace them. A user call such as
+`RuntimeHelpers.SizeOf<T>()`, if declared, remains an ordinary call with its
+own effects and constant eligibility; it does not acquire query semantics.
+There is no general source `[Query]` registration schema.
+The [semantic IL display map](../il-instruction-set.md#operation-identity-encoding-and-presentation)
+reuses these selected query identities when displaying typed operations; it
+does not add a Core method, opcode or alternate query contract.
 
-## Value-layout queries
+`countof(Type)` and `countof(KnownShapeExpression)` use only fixed-cardinality
+evidence. They do not infer count from fields/layout or invoke a live Count
+getter. `countof(Place)` selects the shared nominal Core `ICountable` requirement
+and reads its instance `Count : nint` property; an unrelated interface's
+same-shaped property does not satisfy it. The property is readable and returns
+a nonnegative value; its getter is synchronous and `Pure`. `Pure`
+permits observing the
+collection's current mutable state; it promises neither caching nor
+constant-time access. A collection such as a linked list may traverse its own
+representation. `ConstEval` is optional and separately admitted. Capacity is
+not Count.
 
-The selected Core `RuntimeHelpers` members have these reference signatures:
+The single shared Core requirement is `ICountable.Count : nint`. Its witness
+codec and built-in dynamic implementations remain separate Core/schema
+decisions. In particular, literal `countof` counts logical code units in the
+selected encoding, not Unicode scalars or bytes. `TextSpan<void>` must retain
+or safely recover its selected-encoding evidence before a live Count
+observation; it cannot invent an encoding.
 
-| Member | Complete requirement |
-|---|---|
-| `public static nuint SizeOf<T>() where T : [Sized]` | One type formal, no receiver/value parameters, by-value `nuint` result |
-| `public static nuint AlignmentOf<T>() where T : [Sized]` | The same formal/input/result shape, observing alignment instead of extent |
+`IsPureEval` and `IsConstEval` remain exact selected Core identities observing
+the selected activation's immutable evaluation form. `IsConstEval` implies
+pure mode when true. No duplicate claim with an incompatible owner, signature,
+rule or recipe may select a winner through import order or spelling.
+Declaration selectors such as `nameof(parameter)` in admitted dependency
+schemas retain their existing binding rules and do not read parameters or
+vacant outputs. This chapter does not select general object-payload,
+reflection-root, policy-state or runtime-capability queries.
 
-These are ordinary generic method calls, not `sizeof`/`alignof` syntax.
-The signatures describe admitted intrinsic implementations; they do not
-permit bodyless concrete methods in runnable source.
-Their exact constant intrinsic contracts supply checked pure and required
-constant forms. No mutable static field, static initialization group,
-constructor, formatter, allocation, reflection object or source T value is
-created or observed by either query.
+## Layout observation and authorization
 
-`[Sized]` is the existing checked property of the complete qualified form,
-not a same-named user attribute. T must first satisfy ordinary type formation
-and evidence requirements. In a generic body, a declared `[Sized]` guarantee
-supports runtime queries:
+Each type or Place query observes the complete normalized static type and its
+selected representation. It never implicitly selects a pointee, inline
+payload, runtime-derived type, object graph, or convenient ABI carrier.
+`sizeof(C)` for a class handle measures the handle representation, not the
+allocated object's payload/header; `sizeof(val<C>)` measures the admitted
+inline representation. A reference, pointer, owner or view query measures
+its complete descriptor/handle representation, not reachable storage or
+backing length.
 
-```terrum
-public nuint ElementSize<T>() where T : [Sized]
-{
-    return RuntimeHelpers.SizeOf<T>();
-}
-```
+Every supported complete representation has a size under the selected target;
+size exists independently of query authorization. `Blittable` commits the
+relevant layout facts for a selected target and permits safe layout
+observation. A non-Blittable layout query requires explicit unsafe
+authorization because its observed size, alignment or offset depends on
+version-sensitive private representation, even when the query performs no
+direct memory access. Such an observation is not a compatibility promise.
+Querying layout does not imply Copy, foreign equivalence, field access,
+atomicity, reinterpretation permission, or a constant-value codec.
+`typeof` reports complete type identity and does not itself inspect layout or
+require unsafe. Scalable SIMD is not excluded merely because its extent is
+not fixed for AOT: it is Blittable for its C ABI role, and its layout query
+uses the selected target's vector-length model.
 
-The runtime can supply admitted layout evidence for the actual complete T;
-machine-code sharing does not require a universal compile-time number.
-A body lacking the required guarantee cannot rely on later specializations
-to repair its source contract. Nor can `SizeOf()` infer T from its `nuint`
-result: T occurs in no value parameter or result-type shape supplying such
-evidence. Ordinary explicit type arguments, forward substitution and checked
-captured type evidence remain available.
+`offsetof(Type, FieldPath)` follows only inline fields and returns their
+cumulative displacement from the supplied complete type. It does not cross
+reference/pointer indirections. `offsetof(Place)` binds the exact field/layout
+path and returns the terminal field displacement in its immediate containing
+type; it never accumulates across a runtime indirection. Neither form accepts
+properties, indexers, arbitrary calls or field names inferred from layout.
+Ordinary field accessibility and unsafe rules still apply.
 
-Normalize aliases, constructed arguments, optionals and requested
-representations before selecting layout. Preserve complete nominal identity,
-access and representation; do not implicitly select a pointee, inline
-payload, runtime derived type or convenient carrier.
+Size may be zero for any admitted complete representation with zero extent;
+this does not collapse nominal identity. `sizeof(void)` is zero.
+`alignof(void)` is also zero to mean that unit data has no placement
+requirement; zero is not a valid alignment for an actual stored type. Other
+stored types require their target's positive alignment rule. Every size,
+alignment and count result must fit `0..nint.MaxValue`. An unrepresentable
+layout is unsupported; queries never wrap, saturate, or return a success-shaped
+sentinel.
 
-| Complete subject | Measured representation |
-|---|---|
-| Scalar, enum, inline struct or `val<C>` | Its selected target value storage, including any layout padding |
-| Class handle C or a normalized compatible managed box | The handle value, not the allocated object's payload/header |
-| `ref<T>`, `ptr<T>`, `own<T>` or a registered view | That complete descriptor/handle representation, not reachable storage or backing length |
-| Optional or tuple | The actual complete optional/tuple representation, including admitted tag/layout rules |
-| Checked Transparent wrapper | Its admitted carrier-equivalent representation, retaining its nominal identity |
-| `void` | Zero payload extent; alignment follows the target's explicit zero-data value rule |
+## Target evaluation and required constants
 
-Thus `SizeOf<MyClass>()` does not sum class fields, and `SizeOf<Span<int32>>()`
-does not multiply an instance's Length by four. A `ref<T>` need not occupy
-one pointer, and no universal handle/reference width is invented here.
-`SizeOf<val<MyClass>>()` instead selects the independently eligible inline
-representation. Querying an owning/non-Copy form does not copy or transfer
-an owner; subject eligibility does not require a T constant-value codec.
+One coherent layout is selected from the target ABI/profile and complete
+representation dependencies. The evaluator host, build configuration,
+register allocation and instruction selection do not supply query results.
+Fixed target layouts may resolve during source compilation or closed-instance
+JIT/AOT specialization and may be folded. Source binding does not pre-fold
+target layout into an ABI-independent value. For example, `sizeof(int32)`
+may fold during Terrum compilation when its selected representation is fixed,
+while `sizeof(nint)` must resolve against the selected target during JIT/AOT
+compilation. A required constant using a target-dependent query is resolved
+before runtime; it is not a runtime query merely because Terrum compilation
+could not yet know the result. If the selected layout remains
+execution-dependent—for example, scalable vector length supplied by the
+running process—the same semantic query remains a runtime operation.
+Required-constant contexts reject such execution-dependent results unless the
+selected target settings make them fixed.
 
-A bare interface, unapplied generic constructor, missing type witness,
-unsupported representation or genuinely sizeless scalable value is not an
-admitted sized subject. Equal size/alignment results prove neither type
-identity, Copy, Blittable, atomicity, source conversion nor reinterpretation
-permission. Reading a type's size does not expose its private field identities,
-offsets, mutable state or construction/validity implementation.
+`countof(Type)` uses only an explicit fixed-cardinality fact carried by the
+complete type shape or a fixed constant type argument. It does not derive a
+count from byte size or infer cardinality from unrelated fields. A statically
+countable literal/collection shape is counted syntactically, without
+evaluating elements, materializing storage, or enumerating an unknown
+spread/source. A shape requiring runtime source
+length has no shape count. `countof(Place)` observes the current live value
+through the Count witness; mutable counts may differ between observations,
+including through readonly aliases. It is not a fixed-shape query.
 
-## Target values and intrinsic execution
+Required constant evaluation follows the ordinary
+[constant-execution contract](proof-and-constant-evaluation.md). It needs
+exact subject, target, selected operation and resource evidence; unavailable
+or exhausted required evaluation diagnoses without a runtime/default fallback.
+An optional backend fold of an ordinary query preserves the exact query,
+subject, target and surviving layout dependencies.
+An already source-evaluated structured constant retains recursive typed
+values and complete field identities, not host bytes or its source expression.
+Target-aware materialization derives ordinary field placement from validated
+`Layout` records; explicit fixups are only for genuine address relocations.
+JIT/AOT resolves only the query work that was still target-dependent and does
+not replay completed source evaluation.
 
-Both queries use one coherent admitted layout for T under the selected
-target ABI/profile and representation dependencies. The evaluator's host,
-debug/release setting, register allocation and current machine instruction
-selection do not supply their values.
-Size is the byte extent of one value's storage representation, including
-its target-prescribed interior/tail padding. It is not a procedure-call
-register slot, serialized length, allocation header or total reachable size.
-Array/element stride and zero-data storage retain their profile rules;
-the query does not invent a positive-size unit object.
-
-`SizeOf<int32>()` is four under the mandatory primitive storage contract.
-Native-sized values and handles use the selected target representation.
-Alignment is that value representation's placement requirement in bytes,
-not a cache-line size, allocation capacity, member packing limit or guessed
-pointer width. Aggregate packing/over-alignment and Transparent carrier
-rules determine the actual layout before it is queried.
-The complete target table must explicitly cover admitted zero-data alignment
-and descriptor/aggregate representations; an absent rule is unsupported,
-not an implicit zero/one/default or host-layout answer.
-
-Results are exact target-width `nuint` values. Size may be zero; alignment
-must be positive. Both must fit the target's `nuint` range. An overflowing,
-negative, contradictory or incomplete layout record cannot justify `[Sized]`
-or a successful query. Admission diagnoses it before affected execution;
-the APIs do not wrap, saturate or return an unsupported sentinel.
-Once its complete subject/target evidence is admitted, a query is total and
-has no observable mutation, language failure or escaping temporary backing.
-Other arithmetic on its result retains ordinary checked arithmetic.
-
-The intrinsic program enters the selected method, reads the chosen immutable
-size/alignment fact, saves/publishes its `nuint` result, and retires the
-activation. Apply the ordinary
-[semantic action and storage accounting](proof-and-constant-evaluation.md#semantic-actions-and-normalization):
-call entry, one scalar fact read, save/publication and logical result/frame
-state. T itself is not allocated or traversed; a large hypothetical T does
-not consume its size in evaluator storage.
-Repeated authored queries retain those logical charges without a cache
-discount. Physical lowering can load a runtime descriptor or fold an
-available fact, provided it preserves the selected contracts/dependencies.
-Evaluation-mode queries retain their separate Boolean getter recipes.
-
-## Required constants and layout dependencies
-
-Runtime query support is not a promise that every generic definition has a
-constant size/alignment number. A reached required query needs exact admitted
-layout evidence for its complete subject and selected target, in addition
-to the intrinsic/rule/result-codec support and ordinary resource envelope.
-`[Sized]` alone does not make an unresolved formal a definition-time constant.
-Required failure, unavailable evidence or exhaustion diagnoses; no runtime,
-default-value or different-overload fallback is permitted.
-Executed-path eligibility follows [constant execution](proof-and-constant-evaluation.md#executed-path-eligibility-and-calls):
-an unselected otherwise valid runtime query need not execute its constant
-recipe, but ordinary type/binding/structural checks still apply.
-
-The emitted number is a Blittable scalar. That freezes its own value
-representation, not the queried type's layout. A retained layout-dependent
-value or decision must satisfy one of the existing target-layout boundaries:
-
-| Basis | Retention obligation |
-|---|---|
-| Published fixed representation | Record the exact complete type and transitive size/alignment commitment for the selected target; compatible replacement must preserve that observation |
-| Explicit layout-coupled build/JIT region | Record every actual layout dependency and its selected revision; rebuild, rebind or invalidate dependent values/code before incompatible layout use |
-| Unfrozen independently replaceable layout without coupling | Do not retain its current size/alignment as an independent layout-dependent constant |
-
-The fixed basis can come from a primitive/handle representation contract or
-the queried type's checked fixed layout. An inline Transparent carrier
-relationship alone does not freeze every unpromised layout across versions.
-Conversely, querying a stable class handle does not freeze the private object
-payload it never measures. Per-target commitment is not cross-target equality.
-
-Layout coupling is explicit admission, not a comment, timestamp, informal
-intention to rebuild or inference from an AOT/JIT label. It propagates through
-derived constants, enclosing layout/allocation decisions and other retained
-uses that rely on the observed fact. A pure form, `nuint` result codec,
-ordinary `const` spelling or backend fold cannot erase it.
-Runtime descriptor use must agree with the selected value/code representation;
-it does not justify baking a previous replaceable descriptor's value into
-independent code. Reuse and value numbering account for exact query identity,
-complete subject, target and every surviving representation dependency.
-No source constructor, user equality or private imported body is replayed
-to reconstruct these facts.
-
-The `nuint` result remains outside the initial
-[constant-generic catalog](constant-generics.md#initial-domains).
-An ordinary scalar constant/default can use it; a generic constant argument
-still needs its own exact eligible domain and checked conversion/formation.
-No query creates a general type-object constant or object-value codec.
+The result is a scalar observation, not a commitment to the queried type.
+A retained layout-dependent value or derived decision must either record a
+published fixed representation commitment for the selected target or retain
+the complete explicit rebuild/rebind/invalidation dependency closure. A
+Blittable result representation does not freeze an unfixed queried layout.
+An AOT/JIT label, timestamp, rebuild comment or informal intention is not
+layout coupling. Per-target commitments do not promise cross-target equality.
 
 ## Retained contracts and compatibility
 
-| Required field | Meaning |
+| Required fact | Meaning |
 |---|---|
-| Identity and rule | Exact Core type/member, `registered-queries/1` and the selected operation, independent of names/row numbers |
-| Signature and forms | Type-formal ordinal, `[Sized]` requirement, empty value-input list, exact `nuint` result, runtime/pure/constant support and intrinsic recipe |
-| Subject | Complete normalized type arguments, representation/access and available type evidence |
-| Target and layout | Exact target ABI/width, coherent size/alignment facts and their transitive representation commitments or coupling dependencies |
-| Retained observation | Actual chosen result/derived use, typed scalar codec and the fixed or explicitly invalidatable basis |
-| Admission | Supported rules/features, complete references, contract compatibility and the existing explicit producer/audit trust policy |
+| Query identity and rule | Exact grammar-owned operation or selected Count-property witness, including its getter identity, independent of display names and row indexes |
+| Subject | Complete normalized type, bound Place/path, or statically known shape; preserve access, representation and ownership |
+| Result | Exact nonnegative `nint` domain; `alignof(void)=0` is the no-placement sentinel |
+| Target/layout | Selected target ABI, coherent layout facts, Blittable/fixed commitments or execution-dependent query evidence |
+| Count witness | Exact shared `ICountable.Count : nint` requirement, property/getter identity and selected implementing witness for live Place observation; shape queries carry no runtime witness |
+| Retained observation | Actual result and its fixed or explicitly invalidatable dependency basis |
+| Admission | Supported query rules, complete references and consumer compatibility; published query facts are the producer's responsibility |
 
-An independent consumer validates required semantics, references and target
-compatibility before affected use. Producer trust does not waive malformed
-records, missing layout evidence or incompatible retention.
-Linking, trimming and remapping preserve semantic member/type/dependency
-identities; physical row reassignment, packing or debug stripping cannot
-drop a surviving observation's obligations.
-Changing the measured subject, result domain, intrinsic behavior or required
-fixed observation is incompatible. A replaceable private layout can change
-within its contract only when affected coupled consumers are regenerated or
-invalidated; unrelated private field names alone do not change a retained
-value-layout fact.
+Implementations claiming support preserve the registered query rules,
+subject/path references, target compatibility and representable results.
+Consumers validate selected record structure, references and target support
+before affected use, then may rely on the producer-published layout and query
+facts without recomputing their semantic truth. Missing
+layout evidence, unsafe authorization or incompatible retained observations
+do not establish support. Linking, trimming and remapping preserve semantic
+operation/type/field/witness/dependency identities independently of physical
+rows, debug names and packing.
+Changing a fixed observation is incompatible; changing an unfrozen private
+layout is permitted only within its contract and after all explicitly coupled
+consumers are regenerated, rebound or invalidated.
 
-These [metadata requirements](../representation/logical-records.md#registered-query-contracts-encoding-pending)
-are logical. No optional attribute, existing scalar constant bits, reserved
-slot or name-based call encoding supplies them. Physical query/target/layout
-dependency records remain separately gated.
-[Conformance cases](../conformance/source-registered-queries.md) distinguish
-source identity, complete subjects, target results, required evaluation and
-retention from implementation or physical codec conformance.
+The logical contract assigns no intrinsic ID, TypeSpec/value form, clause,
+feature bit, table, section, Body operation number or physical Count witness
+codec. These coordinated representation and consumer-validation choices
+remain tracked in
+[logical records](../representation/logical-records.md#registered-query-contracts-encoding-pending)
+and the [conformance inventory](../conformance/source-registered-queries.md).

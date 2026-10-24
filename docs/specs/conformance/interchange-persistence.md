@@ -5,6 +5,11 @@ They distinguish a supported operation from an independent serialized
 interchange claim. Schema/feature, binding, body truth, ABI and runtime facts
 are supplied where their complete general implementations remain separate.
 No fixture proves an arbitrary native image or private serializer correct.
+Consumers validate selected inputs and retained dependencies structurally
+and for the support needed for safe use, without semantically re-proving
+producer-published facts. Invalid or unsupported metadata is rejected for
+affected use; diagnostic wording and internal verification order are not
+prescribed.
 
 ## Artifact classification
 
@@ -17,7 +22,7 @@ No fixture proves an arbitrary native image or private serializer correct.
 | IPTX-05 | Supported `.trng` container and complete supplied graph closure | Private graph operation may succeed; no public graph grammar inferred |
 | IPTX-06 | PE/ELF image conforms to the supplied target format and ABI | Target/image claim is separate from Terrum semantic-byte interchange |
 | IPTX-07 | CLI response conforms to its supplied exact protocol schema | Tooling claim does not standardize its input artifact |
-| IPTX-08 | Known record shape but unassigned required `.trrm` feature | Decline affected use; taxonomy does not activate it |
+| IPTX-08 | Known record shape but unassigned required `.trrm` feature | No support claim for affected use; taxonomy does not activate it |
 
 ## Actual schema identity
 
@@ -25,7 +30,7 @@ No fixture proves an arbitrary native image or private serializer correct.
 |---|---|---|
 | IPID-01 | Private `.trm` bytes relabeled `.trrm` | Relabeling does not establish normative schema or interchange |
 | IPID-02 | `.trm` and `.trrm` both carry `TRRM` magic | Retain distinct actual schemas; do not choose interpretation from magic |
-| IPID-03 | Two `.trrm` drafts both carry `(1, 0)` but disagree on required schema | Decline interpretation without exact supported schema agreement |
+| IPID-03 | Two `.trrm` drafts both carry `(1, 0)` but disagree on required schema | Neither bytes nor version pair establish a schema interpretation; reject affected use absent exact agreement |
 | IPID-04 | Registry allocation digest matches but governing semantics do not | Do not admit by digest alone |
 | IPID-05 | Private package revision equals a known native-profile or semantic revision | Equality does not select the embedded schema, ABI or governing rules |
 | IPID-06 | Supported private outer container embeds an independently interpreted `.trrm` payload | Admit that payload's own exact schema and complete requirements |
@@ -64,11 +69,11 @@ No fixture proves an arbitrary native image or private serializer correct.
 |---|---|---|
 | IPTL-01 | Valid CLI schema reports a successfully parsed private artifact | Report private kind/schema honestly; no normative byte claim |
 | IPTL-02 | Inspector cannot recognize an artifact | May report unrecognized input, not execution support or an empty success |
-| IPTL-03 | Executor cannot admit an actual schema or required semantic feature | Decline before affected execution; no guessed interpretation |
-| IPTL-04 | Optional section attempts to carry required semantic behavior | Reject that use; private persistence does not weaken normative required forms |
+| IPTL-03 | Executor lacks support for an actual schema or required semantic feature | No support claim for affected execution; reject affected use, with diagnostics left to the implementation |
+| IPTL-04 | Producer places required semantic behavior in an optional section | Producer violates the selected schema; private persistence does not make optional data required semantics |
 | IPTL-05 | Private loader has small implementation-selected limits | Do not advertise them as standard portable minima |
 | IPTL-06 | Normative payload work is nested within a private wrapper operation | Preserve the actual selected root accounting; nesting does not reset it |
-| IPTL-07 | Ordinary trusted access selects one indexed object | Taxonomy adds no preliminary all-Body scan |
+| IPTL-07 | Ordinary selective access selects one indexed object | Taxonomy adds no preliminary all-Body scan |
 | IPTL-08 | Program returns a raw status numerically equal to a CLI failure code | Do not infer its result channel from the integer alone |
 
 ## Ownership of documentation and conformance

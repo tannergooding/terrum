@@ -127,9 +127,9 @@ Hex digits include `a` through `f`, so `0x1f32` is one integer token whose full
 value is hexadecimal; its `f32` tail is not a width suffix. A non-hex suffix
 such as `0x1u32` is an invalid attached width suffix. Contextual target
 selection constructs decimal, hexadecimal and binary integers without a
-fallback numeric type. Fractional/exponent value semantics, custom literal
-parsers, registered string targets and `[ConstEval]` are specified outside
-this lexical contract.
+fallback numeric type. This lexical contract does not assign semantics to
+fractional/exponent values, custom literal parsers, registered string targets
+or `[ConstEval]`.
 
 [Literal construction](language/literal-construction.md) defines target
 interpretation. Decimal integer tokens have mathematical range semantics.
@@ -237,7 +237,7 @@ boundaries do not widen eligible constant domains or constrain ordinary
 default expressions.
 Designated keyword-introduced angle lists likewise attach their `<` to
 the introducer: `default<I>`, `.via<I>`, `policy<Domain.Case>`, `friend<F>` and
-`ref<T>` (including `init ref<T>` and `implicit ref<T>`). Their interiors
+`ref<T>` (including `ref<init T>` and `implicit ref<T>`). Their interiors
 retain ordinary trivia, but trivia before the opener rejects. Word
 boundaries between separate keywords are unchanged.
 Optional-type suffix `?` adjoins the type's final token, including a tuple

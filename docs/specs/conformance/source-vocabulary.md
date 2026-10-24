@@ -33,6 +33,8 @@ in the designated vocabulary set, not only the displayed examples.
 | WORD-18 | Pure, ConstEval, NoAlias, SizeOf or ObjectSize appears | Identifier, not a reserved/contextual keyword or name-based semantic registration |
 | WORD-19 | An attribute target uses param, typeparam, module or assembly | Target-position syntax only; no new reserved word or accepted arbitrary @ escape |
 | WORD-20 | A future reservation would reinterpret valid source in the same source-language version | Require a version boundary, not silent reclassification |
+| WORD-21 | Exact `gc` appears in a type/backing or allocation position | Reserved keyword recognition; later type/semantic checks still enforce the admitted GC forms |
+| WORD-22 | `pin` appears unescaped as a local, member or type name | Ordinary identifier; no pin type qualifier or pin-specific source form |
 
 ## Dedicated type query and identity evidence
 

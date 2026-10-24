@@ -12,6 +12,11 @@ document is tracked in [implementation](../implementation.md), not restated here
 
 ## Definitions
 
+The shared [definitions](language.md#definitions-and-notation) explain
+copying, aliasing, references and lifetime. Family-specific terms below do
+not turn a non-owning view into an owner or change the dependencies carried
+by a particular value.
+
 | Term | Meaning |
 |---|---|
 | Family | A declared, explicitly opted-in set of related types (its members), together with members' common operations and any distinguished specialization. A shared name or generic arity does not by itself establish membership. |
@@ -145,7 +150,7 @@ the original type unchanged.
 
 Associated types are named type members of a selected interface witness and
 `Self` relationships express relations such as integer `Wider`, `Signed`, and
-`Unsigned` types and a SIMD member's element and mask types. For example,
+`Unsigned` types and a SIMD member's element type. For example,
 `IInteger<TSelf>` may declare `type Wider;`, with an implementation binding
 that member to a concrete type; `T.Wider` is resolved through the selected
 `IInteger<T>` witness. A constraint may explicitly bind an associated type,
@@ -203,6 +208,33 @@ declaration chain, and preserve complete qualified substitutions and
 effective target accessibility. Alias metadata encoding remains open. See the
 [alias and witness source rules](grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
 
+## Whole-span initialization
+
+`Span<init T>` is a non-owning element view whose entire represented range is
+vacant on entry. `init` qualifies the element type, not the Span descriptor.
+The initial contract tracks only the whole-range vacant/complete transition;
+it does not represent mixed or prefix-initialized elements. Element reads are
+unavailable until the complete range is initialized.
+
+`write Span<init T>` permits initialization writes and, after successful
+completion, repeated whole-element replacement through `write Span<T>`.
+`Span<init write T>` permits one-time whole-range initialization followed by
+inner mutation through `Span<write T>`, where the element type permits it.
+The descriptor's own rebinding authority remains separate (`mut Span<...>`).
+The view retains Span's ordinary backing, access and lifetime dependencies.
+
+A complete direct whole-range operation or a selected helper contract may
+establish the complete state. A helper is identified by its declared
+signature and `OutputState` relation (or an unconditional complete-on-normal
+return promise), never by a method name. A false normal outcome leaves the
+range vacant; a true outcome publishes every valid `T`. If failure can occur
+after partial construction, the helper must settle and clean all partial
+elements so the range is vacant before propagation, or its selected profile
+must exclude that failure. This is settlement, not rollback. A `Clear`-style
+helper counts only if it writes valid `T` values; it does not imply
+`default(T)` or zero initialization. Callers retain the ordinary
+indeterminate-state rule after an exceptional exit.
+
 ## Text views
 
 `TextSpan<TCodeUnit = void>` is **one** family; bare `TextSpan` expands to exactly `TextSpan<void>`. The allowed members are `TextSpan<char8>`, `TextSpan<char16>`, `TextSpan<char32>` and the declared encoding-erased `TextSpan<void>`. `[TextCodeUnit]` describes only the three character types; it does **not** admit `void`. There is no unconditional `where TCodeUnit : [TextCodeUnit]` on the entire family. Here `void` is neither a zero-sized code unit, a default encoding, a top/bottom type nor a raw `Span<void>`.
@@ -236,7 +268,7 @@ family TextSpan<TCodeUnit = void> {
         TextSpan<void> AsTextSpan();  // no copy or transcode
     }
     on TextSpan<void> {
-        bool TryProject<TRequested>(init ref<TextSpan<TRequested>> result)
+        bool TryProject<TRequested>(ref<init TextSpan<TRequested>> result)
             where TRequested : [TextCodeUnit]; // encoding checked
     }
 }
@@ -260,8 +292,10 @@ The bounded target families are `func<Args..., R>` (a lifetime-aware,
 single-cast callable) and `fnptr<Args..., R>` (a raw target-defined code
 pointer), with result last and each concrete signature closed at any supported
 arity. A `func` retains its target and declared capture dependencies; it does
-not automatically own borrowed state or extend its lifetime. A `fnptr` carries
-no independent environment, and its code must outlive use. There is no
+not automatically own state it only references or extend that state's
+contractual validity. Required admitted managed roots are retained, not
+discarded. A `fnptr` carries no independent environment, and its code must
+outlive use. There is no
 multicast callable, custom nominal-delegate declaration, arbitrary type-pack
 expansion, full open/closed-by-thin/fat cross-product, fat `fnptr`, or
 mandatory no-capture family. Bound callables may use a thin trampoline, but
@@ -277,13 +311,14 @@ labels do not change representation, and function arguments are not
 implicitly bundled into a tuple or assigned a tuple ABI. There is no
 user-defined pack declaration, expansion, indexing, fold, or forwarding.
 
-`fnptr` uses the Terrum calling convention by default; foreign ABI selection
-is a checked type-use attribute on its callable entry and follows nested
-pointers, aliases, parameters, and results. An illustrative
-`[CallConv(NativeCallingConvention.Winapi)] fnptr<...>` uses existing design
-vocabulary; exact attribute names/grammar and import/export ergonomics remain
-open. No implicit convention casts are allowed. A `func` invocation has the
-Terrum callable contract even when an explicit adapter targets another ABI.
+`fnptr` uses the Terrum calling convention by default. A foreign ABI is
+selected with the checked type-use attribute
+`[NativeCallConv(NativeCallingConvention.Cdecl)]` immediately before `fnptr`;
+the closed values are `Unmanaged`, `Cdecl`, `Stdcall` and `Vectorcall`.
+The selected convention is part of complete function-pointer identity and is
+preserved through nested pointers, aliases, parameters and results. No
+implicit convention casts are allowed. A `func` invocation has the Terrum
+callable contract even when an explicit adapter targets another ABI.
 Static functions, open instance receivers, and bound instances are distinct:
 an open receiver is an explicit argument with access matching the method,
 whereas a bound receiver is retained with its lifetime dependencies. The
@@ -293,31 +328,31 @@ member-function pointers are not generally raw code addresses.
 
 ## Fixed and scalable vectors
 
-Fixed-width SIMD is a family of explicitly registered *members*, not an obligation for every vector to implement a nominal `ISimdVector` interface or call through a public witness service class. A member provides a concrete width, lane type and corresponding boolean mask shape through checked membership; common static operations are declared by the family and accessed naturally as `TVector.Splat(...)`, `simd128<float32>.Load(...)` and `simd128mask<float32>.First(...)`. Generic fixed-vector algorithms quantify over **any** registered member. Addition takes two operands of the same fully qualified instantiation and produces that instantiation, while comparisons produce its matching mask, mask reductions produce `bool`, and lane reductions may produce the element type. Writable stores require a writable view (`write Span<TElement>`), not a mutable descriptor (`mut Span<TElement>`). Membership checking verifies width, element/mask granularity, operators, ABI and effects; similar names (`simd128` and `simd128mask`) are not evidence of membership. Other unrelated types continue to use granular generic-math protocols such as `IAdditionOperators<TSelf, TOther, TResult>` without becoming SIMD members.
+Fixed-width SIMD is a family of explicitly registered *members*, not an obligation for every vector to implement a nominal `ISimdVector` interface or call through a public witness service class. A member provides a concrete width and lane type through checked membership. There is no separate user-visible SIMD mask family or mask type parameter. Generic fixed-vector algorithms quantify over **any** registered member. Addition takes two operands of the same fully qualified instantiation and produces that instantiation. Comparisons also return the same vector instantiation, with each lane's bits guaranteed to be either all zero or all one. The compiler and target may retain a predicate-register representation internally when observable behavior is preserved; users do not select an ISA-specific mask representation. Writable stores require a writable view (`write Span<TElement>`), not a mutable descriptor (`mut Span<TElement>`). Membership checking verifies width, element granularity, operators, ABI and effects. Other unrelated types continue to use granular generic-math protocols such as `IAdditionOperators<TSelf, TOther, TResult>` without becoming SIMD members.
 
 **Local pseudo-code -- family registration and constraint spelling provisional:**
 
 ```terrum
-fixed_simd_family<TVector, TElement, TMask> {
-    each T : [SimdElement], [Copy], [Sized];
-    member simd128<T> with simd128mask<T>, width 128;
-    // Other valid members register their own concrete width and mask.
+fixed_simd_family<TVector, TElement> {
+    each T : [SimdElement];
+    member simd128<T> with width 128;
+    // Other valid members register their own concrete width.
     static on TVector {
         TVector Splat(TElement value);
         TVector Load(Span<TElement> source);
-        TMask CompareEqual(TVector left, TVector right);
+        TVector CompareEqual(TVector left, TVector right);
+        // Each result lane is all-zero or all-one bits.
     }
-    static on TMask { TMask First(nuint activeLanes); }
 }
 
-where TVector : [FixedSimdMember<float32, TMask>],
+where TVector : [FixedSimdMember<float32>],
                 IAdditionOperators<TVector, TVector, TVector>
-// The selected family witness binds TMask; the spelling is illustrative.
+// The family witness binds the concrete width and element type.
 ```
 
-The desired user-level constraint is “any fixed vector of `float32`”: its concrete width and matching mask remain statically known for each instantiation. Whether that is written with an associated mask, an explicit `TMask` parameter or another checked family form is open; the displayed spelling is not Terrum grammar.
+The desired user-level constraint is “any fixed vector of `float32`”: its concrete width remains statically known for each instantiation. Comparison-result lane patterns do not change the complete vector type; the displayed family spelling is illustrative, not Terrum grammar.
 
-`simd<T>` remains a separate genuinely hardware-scalable, initially sizeless type with target-specific vector length, mask and ABI. It is not an alias for a convenient fixed width or an automatic member of the fixed-vector family. Scalable-value storage, suspension and calling restrictions must be validated for each target.
+`simd<T>` remains a separate genuinely hardware-scalable type with target/runtime-defined extent, vector length, predicate lowering and ABI. It is not an alias for a convenient fixed width or an automatic member of the fixed-vector family. Scalable-value storage, suspension and calling restrictions must be validated for each target.
 
 ## Open questions
 
@@ -335,5 +370,5 @@ not settled contracts:
 - Exact spelling of a bound-receiver marker, and of foreign-calling-convention
   attribute names/grammar.
 - Family/associated-member grammar for fixed-vector registration, including
-  whether an "any fixed vector of `float32`" constraint is expressed with an
-  associated mask, an explicit mask type parameter, or another checked form.
+  how an "any fixed vector of `float32`" constraint expresses the registered
+  width/element relationship.

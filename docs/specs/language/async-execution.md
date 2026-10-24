@@ -76,8 +76,8 @@ of whether execution ever suspends. A caller observing that completion takes
 ordinary language failure at the observation point; it does not retrospectively
 receive a synchronous invocation exception.
 [Runtime requirement defaults](requirement-failures.md) retain the check's
-source callable before/after suspension. Both a constructed requirement
-failure and an actual failure during its ordinary zero-input construction
+source callable before/after suspension. Both a created requirement failure
+and an actual failure during its common exception factory
 use this same establishment boundary. Neither execution on another flow nor
 failed-completion transport selects a caller default or fabricates E.
 
@@ -160,12 +160,12 @@ its request API and failure representation remain separate.
 ## Effects and independent contracts
 
 Failure transport does not erase the exception effect of the code that
-produces it. NoThrow on an ordinary async declaration bounds both its callee
-establishment and operation execution through completion, including applicable
-cleanup/checks on its valid-input domain. Replacing propagation with a failed
-task is not a way to satisfy that promise. NoThrow on a non-async task factory
-bounds its ordinary call; a later-completion promise requires the independently
-declared completion extent. Generated async slots have the former async
+produces it. An ordinary async operation may fail during callee establishment
+or during operation execution through completion, including applicable
+cleanup/checks. Replacing propagation with a failed task does not erase those
+failures. A non-async task factory can return normally and the later task
+operation can still fail; its completion has a distinct operation extent.
+Generated async slots have the former async
 extent. Caller argument evaluation retains its own effects outside the callee.
 
 This chapter does not broaden the synchronous Pure result schema or
@@ -179,8 +179,11 @@ async versus synchronous-factory behavior, establishment boundary, failure
 channel, contract phases, capture/ownership/affinity and observation obligations.
 Replacement cannot move an established body failure into synchronous
 invocation or publish success before required checks/cleanup.
-Consumers require the supported rule and explicit semantic producer/audit
-trust before affected use. Physical task/frame/failure/awaiter records remain
-gated by [metadata](../representation/logical-records.md#async-execution-and-generated-producers-encoding-pending).
+An implementation cannot claim support without the required rule and
+records. Consumers validate selected record structure, references and support
+before affected use, then may rely on producer-published body facts without
+semantic re-proof; they do not rebind from source.
+Physical task/frame/failure/awaiter records remain gated by
+[metadata](../representation/logical-records.md#async-execution-and-generated-producers-encoding-pending).
 [Conformance cases](../conformance/source-async-execution.md) are logical
 requirements, not evidence of compiler or runtime implementation.

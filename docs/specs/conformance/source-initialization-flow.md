@@ -2,8 +2,8 @@
 
 These cases apply [initialization and structural flow](../language/initialization-and-flow.md).
 Assume otherwise valid visible declarations and complete types. `T` in value
-patterns has the required Copy contract; owning outputs use valid declared
-initialization, dependency, and synchronous cleanup contracts.
+patterns uses the default Copy-capable formal domain; owning outputs use valid
+declared initialization, dependency, and synchronous cleanup contracts.
 These are specified outcomes, not executed compiler tests.
 
 ## Scope, vacancy, and joins
@@ -80,9 +80,28 @@ These are specified outcomes, not executed compiler tests.
 | FLOW-58 | A fixed loop pattern's successful body always exits before another attempt | Permit without `mut` when no live reinitialization path exists |
 | FLOW-59 | Save `bool matched = value is T item;`, then read `item` only when unchanged `matched` is true | Retain the positive initialization correlation with the unchanged binding |
 
+## Whole-span initialization
+
+Assume an eligible `write Span<init T>` view over a fixed range whose
+elements are all vacant on entry. These cases specify the accepted whole-range
+contract; they do not claim current compiler/runtime support.
+
+| Case | Situation | Required result |
+|---|---|---|
+| SPAN-INIT-01 | Form `Span<init T>` over a range with any live element | Reject; the whole range must be vacant |
+| SPAN-INIT-02 | Read any element through `Span<init T>` before full-range completion | Reject; no per-element or prefix-live state is tracked |
+| SPAN-INIT-03 | A declared whole-range helper returns normally with `OutputState` complete | Publish the entire range live; every element is a valid initialized `T` |
+| SPAN-INIT-04 | The same helper returns its declared false/vacant outcome | Keep the whole range vacant; no partial element escapes |
+| SPAN-INIT-05 | A helper name is `Fill` or `Clear` but its declaration has no whole-range completion contract | The name supplies no initialization fact |
+| SPAN-INIT-06 | A helper may fail after initializing some elements | It must settle/clean acquired elements so the range is vacant before propagation, or its selected profile must exclude that failure |
+| SPAN-INIT-07 | A `Clear`-style helper writes zero/default bits that are not valid `T` values | Reject the completion claim; zeroing is not initialization |
+| SPAN-INIT-08 | `write Span<init T>` completes successfully | Attenuate to `write Span<T>`; repeated whole-element writes are then permitted |
+| SPAN-INIT-09 | `Span<init write T>` completes successfully | Attenuate to `Span<write T>`; permit inner mutation only where `T` allows it |
+| SPAN-INIT-10 | A caught exceptional exit follows a range helper | Apply the ordinary indeterminate-state/unsafe-continuation rule; do not infer caller-visible vacancy from an exceptional OutputState |
+
 ## Initialization-loan projections
 
-Assume `init ref<int32> destination` and a vacant caller destination.
+Assume `ref<init int32> destination` and a vacant caller destination.
 
 | Case | Fragment or situation | Required result |
 |---|---|---|
@@ -93,8 +112,9 @@ Assume `init ref<int32> destination` and a vacant caller destination.
 | INIT-05 | `destination = anotherReference;` | Diagnose forbidden initialization-descriptor rebinding |
 | INIT-06 | `*destination > int32(0)` before initialization | Diagnose vacant read |
 | INIT-07 | `*destination > int32(0)` after complete initialization | Read the live referent under the loan's permitted contract |
-| INIT-08 | `Helper(init *destination)` before initialization | Forward the same vacant destination and its cleanup/publication obligations |
-| INIT-09 | `Helper(init destination)` | Does not project `int32`; cannot reinterpret descriptor storage as its referent |
+| INIT-08 | `Helper(ref init *destination)` before initialization | Forward the same vacant destination and its cleanup/publication obligations |
+| INIT-09 | `Helper(ref init destination)` for an initialized `ref<init int32>` binding | Targets the descriptor storage, not its `int32` referent; it cannot form a second vacant capability |
+| INIT-13 | `Helper(init destination)` | Reject; initialization forwarding uses explicit `ref init place` formation |
 | INIT-10 | Convert/capture/pass the loan opaquely as an ordinary reference before publication | Diagnose |
 | INIT-11 | Replace `*destination` after it is live using only initialization permission | Diagnose; initialization mode is not ordinary write authority |
-| INIT-12 | `init ref<ref<U>>` with `*destination` | Project the descriptor destination `ref<U>`, not its `U` referent |
+| INIT-12 | `ref<init ref<U>>` with `*destination` | Project the descriptor destination `ref<U>`, not its `U` referent |

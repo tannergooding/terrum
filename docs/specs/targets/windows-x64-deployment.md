@@ -29,15 +29,17 @@ This does not weaken the nonvolatile control/call obligations above.
 An implementation can avoid saves where it provably leaves the fields
 unchanged; it cannot canonicalize copied floating bits to avoid the work.
 
-## 2. Cheap default failure boundary
+## 2. Direct calls and exception boundaries
 
-Ordinary foreign entry and exit are non-unwinding. They use the direct
-selected platform call interface, with no hidden exception-state argument,
-automatic catch/translation thunk or altered scalar carrier.
-Native declarations and Terrum exports must establish that no escaping
-language/native exception crosses that boundary on its valid input domain.
-The actual source effects/NoThrow and provider truth/trust contracts apply;
-merely labeling an import cannot prove its implementation.
+Native imports and exports use the direct selected platform call interface,
+with no hidden exception-state argument, automatic catch/translation thunk
+or altered scalar carrier. Under the separate `NativeExceptionUnwind`
+capability, a native exception from an imported call may unwind inward
+through Terrum frames using the Windows ABI/SEH contract and is normalized
+before source catch matching. This requires the exact platform/runtime
+support; it is not selected by a `NoUnwind` attribute, an Effects bit or a
+per-import adapter. Caller-unsafety and the truth of published native
+contracts remain independent obligations.
 
 Expected normal failures use explicitly matched return/status and output
 relations. Their effects, partial cleanup and initialized/vacant outcomes
@@ -45,29 +47,20 @@ remain distinguishable from checked failure, cancellation or fatal host
 failure. A false or nonzero integer is not a universal error convention.
 No handler guesses a failure from partially written output.
 
-Exception interchange uses the separately selected
-[boundary-contained failure bridge](windows-x64-failure-bridge.md).
-An explicit wrapper can contain its supported exception domain and translate
-to its published normal result, or return an owned failure packet before the
-receiving runtime resumes propagation. Its cost, failure-domain identities, typed failures,
-ownership/cleanup, effects, control restoration and retained helpers belong
-to that contract. They are not charged to every ordinary call.
+The separately selected
+[boundary-contained failure bridge](windows-x64-failure-bridge.md)
+remains a distinct paired normal-return protocol. Its explicit adapter can
+translate a supported exception domain to a normal result or return an owned
+failure packet. It does not define the native inbound unwind path, and its
+special contract is not charged to ordinary calls.
 
-Both directions, including its matched synchronous callback, contain local
-unwinding before normal wire return. This is not a shared foreign unwinder
-through live Terrum frames or a universal exception-object representation.
-
-This profile does not equate C++ exceptions, SEH records and Terrum checked
-failure values. runtimePolicy=1, an unwind table or successful stack walking
-does not encode the missing exception-object/handler protocol.
-longjmp, a foreign unwinder or a callback cannot bypass live Terrum owners
-and supporting frames without an independently complete admitted contract.
-Hardware traps, stack exhaustion and process termination are not silently
-turned into ordinary false, empty output or a default value.
-
-The existing explicitly selected fail-fast implementation boundary remains
-distinct from checked-exception execution. Neither is chosen by filename,
-native image format or this call ABI alone.
+Terrum exceptions do not unwind outward through native frames. Native exports
+and callbacks contain reverse-boundary propagation; no producer-language
+exception object or managed exception payload is passed through. Windows SEH
+events are normalized under the
+[target exception mapping](windows-x64.md#6-native-exception-unwinding-and-normalization).
+Uncaught normalized events may fail fast. Process termination, forced
+unwinds, `longjmp` and cancellation remain excluded.
 
 ## 3. Native image, stack and unwind support
 
@@ -106,8 +99,9 @@ the OS/runtime can use them. Code publication also completes fixups,
 write/execute separation and instruction-cache requirements.
 Retirement deregisters only after all relevant uses end; failure to
 deregister prevents releasing still-registered backing.
-Unwind tables support stack walking and admitted internal cleanup, not
-automatic cross-language failure transport or hot patching.
+Unwind tables support stack walking, platform exception dispatch under the
+admitted native-unwind capability, and admitted internal cleanup. They do not
+encode a foreign exception object or enable hot patching.
 
 ## 4. Selected closure, origin and replacement
 

@@ -8,7 +8,7 @@ this is not a compiler/runtime implementation or physical task/frame codec.
 
 | ID | Scenario | Required outcome |
 |---|---|---|
-| AIPROTO-01 | Exact IAsyncCursor<T> witness exposes TryMoveNextAsync(init ref<T>) | Bind its completion-Boolean output phase, not invocation-return initialization |
+| AIPROTO-01 | Exact IAsyncCursor<T> witness exposes `TryMoveNextAsync(ref<init T>)` | Bind its completion-Boolean output phase, not invocation-return initialization |
 | AIPROTO-02 | Exact IAsyncSequence<T, TCursor> witness is selected | Bind readonly synchronous GetAsyncEnumerator and exact IAsyncCursor<T> result |
 | AIPROTO-03 | User types/members merely have the same names | No Core protocol or phase relationship from spelling |
 | AIPROTO-04 | Ordinary Task<bool>-returning method has init output | Task shape alone does not replace its ordinary declared output contract |
@@ -138,7 +138,7 @@ this is not a compiler/runtime implementation or physical task/frame codec.
 | AIRET-04 | Replacement drops capture/reservation/cleanup obligations | Incompatible; no source/body guess |
 | AIRET-05 | Private task/frame strategy changes while contracts remain | No incompatibility solely from physical implementation |
 | AIRET-06 | Unknown required completion/phase semantics occur | Explicit rejection before affected effects |
-| AIRET-07 | Untrusted producer claims terminal cleanup/validity | Explicit semantic audit/trust/decline policy, not a flag supplying truth |
+| AIRET-07 | A producer publishes terminal cleanup/validity facts | Producer is responsible for their truth; consumers validate record structure, references and support, then may rely on those facts without semantic re-proof |
 | AIRET-08 | Optional Attr/held table slot/opcode is used for mandatory phase semantics | No physical carrier assigned |
 | AIRET-09 | Async-only cursor is used in synchronous eager spread | No implicit await, full materialization or incremental capture |
 | AIRET-10 | Async by-value selection is used to infer lending or producer frame registration | Those catalogs retain independent requirements |

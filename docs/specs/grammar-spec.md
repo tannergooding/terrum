@@ -10,10 +10,12 @@ productions or contracts.
 The [language](language.md), [memory model](memory-model.md),
 [conversions](conversions.md), [lifetimes](lifetimes.md), and
 [libraries](libraries.md) documents define the related semantic
-contracts. The [semantic IL/metadata specification](il-metadata.md),
-[core-library proposal](../proposals/core-library-reference.md) and
-[IL extension proposal](../proposals/il-extensions.md) are separate documents;
-Source productions do not define library APIs or metadata extensions.
+contracts. The [semantic IL/metadata specification](il-metadata.md) and
+[core-library proposal](../proposals/core-library-reference.md) are separate
+documents; source productions do not define library APIs or metadata records.
+The shared [definitions and notation](language.md#definitions-and-notation)
+explain copying, aliasing, references, lifetime, scope and technical
+borrow/loan/lease terms without adding productions.
 
 Sections [5](#5-open-grammar-and-semantic-choices) and
 [6](#6-source-form-coverage-and-open-boundaries) identify unresolved source
@@ -460,11 +462,13 @@ permit it in an arbitrary context.
 | Receiver and self binder | `this` | Refer to the member receiver and mark an interface's implementing-type formal as `<this T>`. |
 | Generic constraints | `where` | State formal parameter constraints. |
 | Compile-time values | `const` | Require static evaluation or declare a compile-time value formal. |
-| Type inspection | `typeof` | Inspect the supplied complete type identity with `typeof(Type)`; not a universal reflection-object API. |
-| Type forms | `void`, `var` | Name the zero-data unit type or infer a non-null local/binding type; `var?` permits a normalized nullable type. |
+| Type and layout queries | `typeof`, `sizeof`, `alignof`, `offsetof` | Inspect complete type identity or selected-target layout through a type or Place query; not a universal reflection-object API. |
+| Count query | `countof` | Observe fixed type/known-expression shape or a live Place's nominal Count contract; not arbitrary enumeration. |
+| Type forms | `void`, `option`, `var` | Name the zero-data unit type, existing optional-presence constructor, or infer a non-null local/binding type; `var?` permits a normalized nullable type. |
+| Backing policy | `gc` | Select an explicit GC-backed class handle, box, root or allocation; it does not qualify arbitrary types or raw pointers. |
 | Ownership | `unique`, `own`, `move` | Express ownership and explicit transfer. |
-| Reference access | `mut`, `ref`, `write`, `pin` | Qualify places, loans and references; pin qualifies `ref<T>` only. |
-| Parameter and argument modes | `init`, `implicit`, `params` | Express vacant initialization, implicit loans or collection arguments; not every combination is legal. |
+| Reference access | `mut`, `ref`, `write` | Qualify binding/place access and checked reference access; pinning is an explicit reborrow dependency, not a type qualifier. |
+| Parameter and argument modes | `init`, `implicit`, `params` | Express vacant initialization, implicit readonly reference adaptation or collection arguments; not every combination is legal. |
 | Branching | `if`, `else`, `switch` | Choose conditional paths or pattern arms. |
 | Default selection | `default` | Select a declared generic default or an interface default body. |
 | Explicit selection | contextual `via` | Select an existing interface witness, an eligible extension provider, or the source/destination conversion owner after `.`. |
@@ -502,13 +506,23 @@ positions; they are not additional reserved keywords. Reserved `return`
 also has the designated result-reference meaning in a postcondition; that
 does not make it an ordinary identifier elsewhere.
 
-`typeof` is reserved in every position. `typeof(Type)` is the dedicated
-type-query production, independent of a same-named user declaration;
+`typeof`, `sizeof`, `alignof`, `offsetof` and `countof` are dedicated query
+forms, independent of same-named user declarations. Type and layout queries
+observe a complete static type through a type or an existing Place; layout
+forms inspect the selected target representation under their separate
+authorization rules. For `typeof`, `sizeof`, `alignof` and `offsetof`, an
+`Expression` grammar operand is admitted only when it binds as a Place; it
+does not authorize arithmetic, calls, getter/indexer invocation or a value
+read. `countof` accepts a statically known shape expression or a readable
+Place selecting its nominal Count contract; other expressions do not imply
+enumeration or a runtime fallback. These forms are not ordinary Core method
+calls or a universal reflection-object API. `typeof` is reserved in every
+position;
 `@typeof` is an ordinary identifier with the name `typeof`. It can name a
 local, member or type under the usual declaration and lookup rules.
 `@typeof(value)` is an ordinary call, not the query, and supplies no built-in
-type-identity evidence. The query takes one `Type`, not a value expression,
-an argument list or an unapplied generic constructor. Its keyword-introduced
+type-identity evidence. A Place-form type/layout query inspects the bound
+static type and does not read or evaluate the stored value. Its keyword-introduced
 parentheses allow ordinary trivia, including `typeof (T)`; they are not a
 postfix call. Ordinary calls through `@typeof` retain call-opener attachment.
 
@@ -521,9 +535,13 @@ checking selects the applicable witness, provider or conversion-owner
 contract; invalid selection diagnoses without reparsing as a same-named call.
 Escaping grants neither conformance nor provider/conversion authority.
 
-Compiler-recognized query or attribute names such as `SizeOf`, `Pure`,
-`ConstEval` and `NoAlias` are not additional keywords. Their resolved identities
-and admitted schemas, not lexer spelling, supply their semantics.
+`Pure`, `ConstEval` and `NoAlias` are compiler-recognized attribute names, not
+additional keywords; their resolved identities and admitted schemas supply
+their semantics. The lowercase `typeof`, `sizeof`, `alignof`, `offsetof` and
+`countof` forms are dedicated query productions described above.
+The [semantic IL display map](il-instruction-set.md#operation-identity-encoding-and-presentation)
+is not a source grammar or member-registration rule; source identities remain
+the ones selected by these productions and resolved declarations.
 [Vocabulary conformance cases](conformance/source-vocabulary.md) distinguish
 token/escape recognition, query evidence and all three selector roles.
 
@@ -535,8 +553,9 @@ stable source-version promise would instead require an explicit boundary for
 breaking recognition changes, not silent reclassification within that
 promised version. Exact source-version selection is a separate tooling contract.
 
-`_` is a distinct nonbinding token, not an identifier. Vacant initialization
-uses `init ref<T>`; arithmetic selection uses policy cases rather than a
+`_` is a distinct nonbinding token, not an identifier. A vacant destination
+has the complete type `ref<init T>` and is formed explicitly with
+`ref init place`; arithmetic selection uses policy cases rather than a
 separate arithmetic-toggle source form.
 
 <a id="3-candidate-grammar-productions-proposed"></a>
@@ -727,7 +746,9 @@ ConstraintClause  = ConformanceConstraint | AssociatedIdentityConstraint
                   | MemberContractConstraint ;
 ConformanceConstraint = "where", Identifier, ":",
                         ConstraintTerm, { ",", ConstraintTerm } ;
-ConstraintTerm  = Type | "[", Identifier, "]" | "write" ;
+ConstraintTerm  = Type | "[", Identifier, "]" | "write"
+                | "unique" | "unique", "?"
+                | "null", "?" ;
 AssociatedIdentityConstraint = "where", AssociatedProjection, "is", Type ;
 AssociatedProjection = ( "void" | DottedIdentifier ), [ TypeArguments ],
                        ".", "via", "<", Type, ">", ".", Identifier ;
@@ -959,6 +980,18 @@ The [NoAlias schema](language/published-predicates-and-effects.md#noalias-parame
 is no-argument, nonrepeatable and parameter-targeted, including exact
 `param(name)` selectors. It specifies checked accessed-region separation,
 not a type qualifier, exclusive loan or overload discriminator.
+The native declaration schemas `NativeImport`, `NativeCallable` and
+`NativeExport` use the same bracketed declaration-attribute form. Their
+placements, defaults and target/ABI obligations are defined by
+[native boundaries](native.md#native-declaration-roles). They intrinsically
+preserve caller-unsafety for imported calls/data access and native-callable
+invocation; the `unsafe` declaration modifier remains independently
+available for authored caller obligations.
+`NativeCallConv` uses that bracketed form immediately before a `fnptr` type.
+It takes exactly one explicit `NativeCallingConvention` value and is part of
+the complete function-pointer type identity. It is not a declaration
+attribute, does not apply to ordinary `func` values, and has no implicit
+convention conversion.
 The resolved [ThreadTransferable/ThreadShareable schemas](runtime/sharing-and-handoff.md#explicit-source-opt-in-and-conditional-contracts)
 are no-argument, nonrepeatable, primary nominal-storage-type opt-ins.
 Only these schemas admit TypeAttribute's following ordinary constraint
@@ -967,13 +1000,12 @@ belong to that capability, bind the annotated type's exact formals, and do
 not constrain type formation. Unmet conditions remove the capability fact.
 Type-header constraints remain type-wide. No `where [Capability]` selector,
 runtime predicate argument or same-named user attribute selects this behavior.
-The resolved [Exception schema](language/local-failures.md#1-registered-exception-capability)
-is no-argument, nonrepeatable and primary-only for nominal storage types and
-declared catch-category interfaces. Explicit category witnesses can supply
-nominal opt-in, and `where T : [Exception]` checks the actual complete form.
-This schema admits no following capability-specific constraint clauses and
-grants no Copy, payload layout or constructor.
-The resolved [RequireException schema](language/requirement-failures.md#3-callable-owned-defaults-and-the-core-payload)
+Exception eligibility is expressed by implementing the exact
+[`IException<TSelf>` contract](language/local-failures.md#1-the-common-exception-contract);
+the former `[Exception]` attribute schema is removed. `where T :
+IException<T>` checks the ordinary complete interface/witness contract and
+does not grant Copy, payload layout or a constructor.
+The resolved [RequireException schema](language/requirement-failures.md#3-callable-owned-defaults-and-the-core-exception-class)
 has one required direct typeof(Type) recipe named ExceptionType and is
 nonrepeatable, primary-callable/accessor-owned. It selects that owner's runtime
 require default; exact get-targeted placement denotes the getter, not a
@@ -1043,7 +1075,7 @@ restrictions are semantic checks, not lexical exceptions.
 The [owning-field Cleanup schema](language/ownership-and-cleanup.md#complete-value-cleanup-and-transitive-field-retirement)
 is resolved, no-argument, nonrepeatable and primary-member-owned. It selects
 one eligible unique type's synchronous parameterless readonly void instance
-operation with checked NoThrow/nonsuspending retirement. Name matching or
+operation with nonsuspending retirement on normal completion. Name matching or
 ordinary direct invocation cannot select or repeat that destruction path.
 
 Declaration contracts group zero or more `require` clauses before zero or
@@ -1199,7 +1231,7 @@ payload accessor surface.
 
 ```terrum
 [ClosedCases]
-public struct union Lookup<T> where T : [Copy]
+public struct union Lookup<T>
 {
     Missing;
     Found(T value);
@@ -1306,9 +1338,11 @@ inspection and compile-time member binding are not runtime access triggers.
 The attribute takes exactly one positional compile-time value of a dedicated,
 closed enum with one case for each accepted trigger choice; it has no default.
 The compiler maps the selected case to the normalized trigger tag, not to a
-runtime policy derived from the enum's underlying bits. The registered enum
-identity and source case spellings remain attribute-catalog details. An
-arbitrary same-named attribute cannot select this behavior.
+runtime policy derived from the enum's underlying bits. Only the exact registered Core `StaticInitializer` attribute identity, closed
+trigger-enum identity and its registered cases select this behavior; matching
+names or enum underlying values are insufficient. Their catalog/metadata
+identifiers and source case spellings remain catalog details. An arbitrary
+same-named attribute cannot select this behavior.
 With no authored static constructor, a synthesized group triggers on first
 runtime access to a grouped static field without requiring a source annotation.
 
@@ -1325,8 +1359,12 @@ declaration order: compiler-received source-input order, then source order
 within each input, including property backing at its declaration position.
 The primary part has no ordering priority. These initializers precede the
 static constructor's preconditions, body and normal-return postconditions.
-The static constructor and checked helpers have initialization authority for
-vacant group storage, not new permission to replace fixed live fields.
+The static constructor and helpers with an explicit, validated
+`InitializationRole` for the same group have initialization authority for
+vacant group storage, not new permission to replace fixed live fields. Such
+a role-bearing helper is initialization-only: an ordinary call without the
+matching group-scoped authority is rejected, and authority is not inferred
+from the call path or method name.
 Successful group completion establishes all required initialization and
 completion guarantees before publishing the group to ordinary callers.
 Missing initialization diagnoses; no caller can read vacant storage to
@@ -1337,14 +1375,20 @@ an individually demand-initialized ordinary, non-`extern` static field,
 outside the ordinary group initializer sequence. It takes no arguments and
 does not configure a trigger or other initialization policy. Its initializer
 remains subject to the ordinary type, effect, access and completion checks.
+Only the exact registered Core attribute identity selects this behavior;
+same-spelled attributes have no effect.
 An external access completes the type group before initializing the requested
 lazy field. Other lazy fields remain untouched unless actually accessed.
-Initializers and checked helpers may access already-initialized fields within
-their unpublished initialization authority; this is not permission for
-ordinary reentrant callers to observe partial group state. A completion
+Initializers and role-bearing helpers may access already-initialized fields
+within their unpublished initialization authority; this is not permission
+for ordinary reentrant callers to observe partial group state. A completion
 demand creating a cycle among unfinished units fails with exact Core
 InitializationCycleException rather than waiting indefinitely or exposing
-an invented default. A permitted independent wait is not itself a cycle.
+an invented default. The exception does not itself mark every participating
+unit failed: a unit fails only when an exception escapes its initializer
+after cleanup; a caught cycle may be followed by normal completion if the
+unit satisfies all obligations. A permitted independent wait is not itself
+a cycle.
 
 The default initialization execution protocol permits one execution flow to
 initialize a unit while competing permitted callers wait for its outcome.
@@ -1370,15 +1414,18 @@ a unit that subsequently completes all required obligations. A lazy-field failur
 after group completion fails that lazy unit, not the completed group. If its
 failure escapes during group initialization, the group fails as well.
 
-An explicit unsafe recovery API may retry a failed unit only with exclusive
-recovery authority, completed partial-state cleanup and no dependencies
-invalidated by the retry. It is not a reset of a live initialized unit.
-An explicit unsafe suppression API may bypass initialization execution;
-suppression alone does not establish checked initialized-state facts. Any
-unsafe assertion of valid state retains the caller's validity, lifetime,
-ownership and publication obligations; an incorrect assumption can cause
-undefined behavior. Concrete recovery/suppression APIs and their schemas
-remain separate library work.
+An explicit unsafe recovery request may retry an exact failed group or lazy
+field only with exclusive recovery authority, completed partial-state cleanup
+and no dependencies invalidated by the retry. Ordinary access does not retry
+implicitly, and the request does not reset the module or sibling units. It is
+not a reset of a live initialized unit. Catching a fresh failure event does
+not reset the unit. No separate unsafe failure-suppression or mark-complete
+operation is selected. A future explicit unsafe transition to `Complete` may
+be considered only for a demonstrated need and must carry its own validity,
+lifetime, ownership, cleanup and publication contract; an incorrect
+assumption can cause undefined behavior. Recovery is requested through a
+registered runtime-owned unsafe call, not a dedicated Body operation. The
+callable's exact identity/signature and unit-target schema remain open.
 
 Static state belongs to its load scope, not an inherently process-immortal
 lifetime. Checked unload requires quiescence and discharge of active calls,
@@ -1419,24 +1466,45 @@ The [call chapter](language/calls-and-inference.md) owns argument mapping,
 finite inference, applicability and ranking for these source forms.
 
 ```ebnf
-Type            = [ "write" ], [ "pin" ], ( NamedType | TupleType ), [ "?" ] ;
-NamedType       = ( "void" | "ref" | "own" | DottedIdentifier ), [ TypeArguments ],
+Type            = [ "write" ], [ "gc" ], TypeCore, { TypeSuffix } ;
+TypeCore        = ReferenceType | OptionalType | NamedType | TupleType
+                | NativeFunctionPointerType ;
+NativeFunctionPointerType = [ Attribute ], "fnptr", "<",
+                            [ Type, { ",", Type }, "," ], Type, ">" ;
+ReferenceType   = "ref", "<", [ "init" ], Type, ">" ;
+OptionalType    = "option", "<", Type, ">" ;
+NamedType       = ( "void" | "own" | DottedIdentifier ), [ TypeArguments ],
                   [ ".", "via", "<", Type, ">", ".", Identifier ] ;
 TupleType       = "(", TupleTypeElement, ",", TupleTypeElement,
                   { ",", TupleTypeElement }, ")" ;
 TupleTypeElement = Type, [ Identifier ] ;
+TypeSuffix      = "?" | "*" ;
 ParameterList   = "(", [ Parameter, { ",", Parameter } ], ")" ;
 Parameter       = { Attribute }, ParameterBinding ;
 ParameterBinding = ParameterType, Identifier, [ "=", ConstantExpression ]
                  | "params", Type, Identifier ;
 ParameterType   = [ "mut" ], Type
-                | [ "mut" ], "implicit", "ref", "<", Type, ">"
-                | "init", "ref", "<", Type, ">" ;
+                | [ "mut" ], "implicit", "ref", "<", Type, ">" ;
 
 Arguments       = "(", [ Argument, { ",", Argument } ], ")" ;
 Argument        = [ Identifier, ":" ],
                   ( Expression | "init", Expression | "init", "var", Identifier ) ;
 ```
+
+Type suffixes are applied left to right before the outer `write` access
+prefix: `T**` is `ptr<ptr<T>>`, `T*?` is `option<ptr<T>>`, `T?*` is
+`ptr<option<T>>`, and `T?*?` is `option<ptr<option<T>>>`; `write C*` is
+`write ptr<C>`. Adjacent optional suffixes such as `T??` remain a source
+error. `option<T>` and `T?` name the same optional type. `write` is
+prefix-only, and nested prefix constructors require explicit grouping such
+as `ref<ref<T>>`; `ref ref T` is not a type form. The `gc` prefix is part of
+complete type identity and is admitted only for class handles, `box<T>` and
+initialized `ref<T>` roots. It does not apply to `ptr<T>`, `own<T>`, inline
+values or an outer `gc ref<init T>`; an inner `gc C` in
+`ref<init gc C>` qualifies the stored class-handle type instead. The combined
+access spelling is `write gc T`. A generic `init T` argument is admitted only by `Span<T>` to
+form `Span<init T>`; it is not a standalone `Type` or a general type-argument
+qualifier. `ref<init T>` retains its distinct reference-constructor spelling.
 
 `void` is the inhabited zero-data Copy type with value `()`, not just a
 return-type marker. It is legal in ordinary value positions, including
@@ -1479,14 +1547,14 @@ nulls or other values into the initial integer/Boolean/nominal-enum domains.
 
 Designated keyword-introduced angle lists use the same opener attachment
 and flexible interior trivia: `default<I>`, `.via<I>`,
-`policy<Domain.Case>`, `require<E>` and `init ref<T>` require `<` to adjoin
+`policy<Domain.Case>`, `require<E>`, `ref<init T>` and `Span<init T>` require
+their generic opener to adjoin
 their introducer. `default <I>`, `.via <I>`, `policy <Domain.Case>`,
-`require <E>` and `init ref <T>` reject. This applies to the
-reference-type/loan constructor
-`ref<T>`, including its separately worded `init` and `implicit` forms.
-Separate words retain their normal boundaries: `init ref<T>` is not
-`initref<T>`. Attachment does not change witness selection, policy
-selection, requirement operand typing, initialization or reference authority.
+`require <E>`, `ref <init T>` and `Span <init T>` reject. In `ref<init T>`,
+`init` is part of the reference-type constructor; in `Span<init T>`, it
+qualifies the whole-range element state. Neither spelling is a parameter
+passing mode. This does not change witness selection, policy selection,
+requirement operand typing, or the explicit `ref init place` call argument.
 
 The optional-type suffix `?` attaches directly to the type's final token:
 `T?`, `(T, U)?` and `List<T>?` are valid forms, but `T ?` and
@@ -1508,7 +1576,7 @@ The standalone constraint term `write`, as in `where T : write`, requires
 the [normalized complete type argument's immediate write access](language/types-and-normalization.md#generic-write-requirements).
 It neither qualifies a readonly argument nor supplies a universal mutation
 protocol. It can accompany ordinary requirements:
-`where T : write, [Copy], IReset<T>`.
+`where T : write, IReset<T>`.
 The formal declaration remains `<T>`; `<write T>` is not shorthand.
 `F<write T>(value)` remains a qualified argument at a call site, checked
 under the caller's ordinary formation guarantees. `where T is write` is
@@ -1583,62 +1651,39 @@ left-to-right in source order. Unknown/duplicate labels and unsupplied
 required parameters reject. A positional argument may follow an in-position
 named argument; after an out-of-position label, subsequent arguments must be
 named. There is no search for the next unfilled parameter and no empty slot.
-Overload selection and output behavior remain checked semantic contracts. The
-`init ref<T>` is a distinct initialization-loan parameter form, with the
-call-site spelling `Create(init value)`. `write` qualifies access
-through a reference and `pin` qualifies only `ref<T>` (for example,
-`write pin ref<T>`); other uses of `pin` in this broad `Type` production
-are invalid. `pin ref<T>` keeps its backing rooted and address-stable for the
-pin-loan lifetime. The initialized local binding `pin ref<T> name = ref place;`
-explicitly and checkably acquires a pin from eligible initialized, addressable
-backing, preserving the source's access and root/owner dependencies. This is
-not a qualifier-only conversion or retyping of an ordinary reference. The pin
-lasts for the binding's promised local lifetime; release or rebinding must
-satisfy its dependency checks, and a derived address, copy, capture or loan
-that still depends on the pin prevents premature release. An ordinary
-`ref<T>` reborrow does not retain the pin guarantee; it retains only its
-ordinary backing/root lifetime dependency. A raw `ptr<T>` is a
-non-relocatable address and does not root or pin GC storage; forming one into
-GC storage requires a live pin with enforced provenance/lifetime or
-independently stable storage.
-Initializing vacant pin storage acquires the new pin before publishing the
-value; acquisition failure leaves that destination vacant and cleans any
-partially acquired state under the ordinary initialization rules. Replacing
-an eligible live mutable pin binding keeps its old value and pin valid while
-evaluating and acquiring the replacement. Failed acquisition leaves the old
-value and pin in place. Successful replacement publishes the acquired value
-and retires the old pin only when its outstanding dependencies permit that.
-Neither staging nor successful acquisition bypasses those checks or permits
-early unpinning. This does not roll back initializer side effects.
+Overload selection and output behavior remain checked semantic contracts.
+The complete type `ref<init T>` selects a fixed vacant destination, and a
+direct call supplies that capability with `Create(ref init value)`. The
+special parameter form `init ref<T>` is not admitted. `write` qualifies
+access through an eligible reference/handle/view. An initialized exact place
+in GC-backed storage can form a `gc ref<T>` root using `gc ref place`; with
+an expected `gc ref<T>`, ordinary `ref place` may acquire the same root.
+This root may move and grants no sibling-field access. `ref *root` explicitly
+reborrows its exact referent as stable `ref<T>`, pinning that backing for the
+bounded reborrow. No GC-rooted initialization-reference form is admitted.
 
-Reacquisition uses the existing vacant-initialization or mutable-assignment
-authority, not a dedicated release/rebind keyword. An ordinary immutable pin
-local can end its value lifetime but cannot be assigned again. For eligible
-initialized backing places `first` and `second`, the target forms include:
+`gc new C(arguments)` explicitly selects GC backing; an expected `gc C` may
+also target ordinary `new C(arguments)`. `gc box<T>(value)` explicitly
+selects a GC-backed box, while `box<T>(value)` may target an expected
+`gc box<T>`. `gc C`, `gc box<T>` and their normal-backed counterparts are
+distinct complete types. `gc` is not admitted on `ptr<T>`, `own<T>`, inline
+values or arbitrary types. A raw pointer remains non-owning/non-rooting; GC
+address use requires `gc ref<T>`, then the explicit stable reborrow before
+pointer extraction. `unsafe` does not substitute for rooting, pinning or
+backing validity.
 
-```terrum
-init pin ref<int32> pinned;
-pinned = ref first;
-pinned = _;
-pinned = ref second;
-
-mut pin ref<int32> current = ref first;
-current = ref second;
-```
-
-The narrow implicit pin-to-pointer conversion and prefix dereference are
-specified in §5.13. A named local's current value can end through `name = _;`
-under §3.3; §5.13 also specifies pointer-formation diagnostics.
-Pinning a slot containing a class handle does not also pin the separately
-allocated object reached through that handle. `mut` qualifies a binding or
-receiver, not a separate reference passing mode. `write ref<T>` is an ordinary
-complete reference type admitted in `ParameterType`; `init ref<T>` is the
-distinct initialization-destination contract. `implicit` applies only to
-an unpinned readonly outer `ref<T>`; its `T` keeps its complete qualifications.
-`mut init ref<T>`, defaults on reference or initialization-loan parameters,
-and parameter-only `ref T`, `mut ref T`, or `out T` reject. `ref` and `own`
-are reserved constructor introducers requiring exactly one type argument,
-not ordinary identifier tokens. See
+`mut` qualifies a binding or receiver, not a separate reference passing mode.
+`ref<init T>` is a complete reference type admitted in `ParameterType`;
+direct parameters use the ordinary parameter mode, not a special `init`
+parameter mode. `implicit` applies only to an ordinary readonly outer
+`ref<T>`, not `gc ref<T>`; its `T` keeps its complete qualifications.
+`write ref<init T>` is admitted with initialization-before-read and repeated
+whole-place writes after initialization. `Span<init T>` is admitted only as
+the Span family’s whole-range element-initialization view.
+Defaults on reference parameters and parameter-only `ref T`, `mut ref T`,
+or `out T` reject. `ref` and `own` are reserved
+constructor introducers requiring exactly one type argument, not ordinary
+identifier tokens. See
 [references and signature identity](language/references.md).
 
 ### 3.3 Statements and local declarations
@@ -1691,7 +1736,7 @@ DeferStatement  = "defer", ( ExpressionStatement | Block ) ;
 PolicyStatement = [ "require" ], "policy", PolicyCases, Block ;
 ReturnStatement = "return", [ Expression ], ";" ;
 YieldStatement  = "yield", Expression, ";" ;
-ThrowStatement  = "throw", [ Expression ], ";" ;
+ThrowStatement  = "throw", Expression, ";" ;
 LoopTransfer    = ( "break" | "continue" ), [ Identifier ], ";" ;
 SwitchTransfer  = "continue",
                   ( CaseLiteral | "_" | "(", ConstantExpression, ")" ), ";" ;
@@ -1842,7 +1887,7 @@ place, and `ref name` reborrows it. `name = _;` ends the binding loan, not T;
 descriptor storage; `mut ref T` selects writable element lending, not rebinding.
 The [value-iteration chapter](language/iteration.md) selects standard
 synchronous ISequence<T, TCursor> factories and direct ICursor<T> sources,
-with TryMoveNext(init ref<T>) and required Close. It does not provide a
+with TryMoveNext(ref<init T>) and required Close. It does not provide a
 Current property, inferred consumption of borrowed elements, or an element
 loan for `ref`/`mut ref` modes. Those modes instead select exact
 ILendingSequence/ILendingCursor or IWritableLendingSequence/IWritableLendingCursor
@@ -1861,7 +1906,7 @@ not an alternate form. Reference modes retain their ordinary access checks,
 with suspension preserving backing, loan and affinity obligations.
 [Async value iteration](language/async-iteration.md) selects exact
 IAsyncSequence<T, TCursor> with synchronous readonly GetAsyncEnumerator,
-or direct IAsyncCursor<T>, whose TryMoveNextAsync(init ref<T>) publishes at
+or direct IAsyncCursor<T>, whose TryMoveNextAsync(ref<init T>) publishes at
 observed task completion. Its vacant output is reserved while pending:
 no caller value/state test, competing init or overlapping advance/close.
 Awaited true supplies the exact live-output discriminator; false/failure
@@ -1935,7 +1980,7 @@ cleanup checks apply; a later failure does not roll back completed writes.
 Switch statements and expressions share pattern arms. The scrutinee evaluates
 once and arms are considered in order; a guard runs only after its pattern
 matches. Guards are ordinary checked Boolean code with preserved effects
-and failures, not purity/NoThrow-only expressions. Both switch forms require
+and failures, not purity-only expressions. Both switch forms require
 coverage or an unguarded wildcard fallback. Normal completion of an arm exits
 the switch, with no implicit fallthrough or switch-specific `break`.
 Guards and catch filters consistently use `when expression`; parentheses are
@@ -2075,7 +2120,7 @@ does not match `var item`, but can match `var? item`.
 Tuple patterns are structural. In matching and value-producing `require`
 contexts, omission of eligible output destinations requests lifting those
 outputs. Explicitly supplied destinations remain ordinary arguments and are
-not lifted. An explicit `init ref<T>` mode with a checked, published ordinary
+not lifted. An explicit `ref<init T>` type with a checked, published ordinary
 call-completion output contract establishes eligibility without an extra
 attribute or registration. Caller-local storage, representation and lifetime
 obligations still apply; later task/producer completion is not invocation.
@@ -2132,13 +2177,14 @@ The operand's Boolean context, not the requirement's unit result, supplies
 ordinary expected-result inference. Unique selective extraction supplies an explicit
 destination and moves it only after the desired match/guard; no implicit
 unique binding or new move-pattern syntax is introduced.
-An explicit `require<E>` chooses only the failed-path payload, not operand
-inference, overload ranking or lifted outputs. On failure it performs ordinary
-checked `new E()` with zero supplied arguments. Callable-local RequireException
-or Core supplies an omitted E. Actual operand/constructor failure and every
+An explicit `require<E>` chooses only the failed-path exception class, not
+operand inference, overload ranking or lifted outputs. On failure it invokes
+that class's ordinary zero-supplied-argument constructor binding.
+Callable-local RequireException or Core supplies
+an omitted E. Actual operand/construction failure and every
 output/hidden-owner state remain governed by
-[requirement failures](language/requirement-failures.md); no factory, hidden
-diagnostic arguments, rollback or early hidden-owner retirement is added.
+[requirement failures](language/requirement-failures.md); no hidden diagnostic
+arguments, rollback or early hidden-owner retirement is added.
 Richer-status contract encoding, later-completion
 lifting and projection metadata are outside these source forms;
 omission does not authorize skipping arbitrary required arguments.
@@ -2172,35 +2218,30 @@ a throwing `unreachable()` helper, remains executable unless soundly proved
 unreachable under all relevant inputs and replacement boundaries. Neither
 undefined behavior nor a diagnostic authorizes changing source intent.
 
-Typed catches use the [local failure subject and binding rules](language/local-failures.md#4-catch-subjects-and-binding-modes).
-`catch (ref<E> failure)` borrows a complete eligible payload through an
-ordinary readonly descriptor; `catch (E failure)` requires an ordinary Copy.
-`catch (E _)` performs no payload read/copy, while a category `catch (I _)`
-tests its exact declared witness without creating interface storage.
-Bare `catch` handles contract-catchable failures without a universal object.
-`when` filters are checked Boolean code: false continues handler selection,
-and a filter failure follows ordinary failure/chaining rules rather than
-silently becoming false. Handlers test declared catchable contracts in source
-order after unwinding to each candidate handler's still-live scope.
-Cleanup of exited inner scopes, including their `finally`/`defer` actions,
-precedes that candidate's type tests and filters. Cleanup failure updates the
-pending failure under the ordinary causal-chaining rules before further
-selection. Filters have checked access to that pending failure and still-live
-state, not invalid references into already unwound frames.
+Typed catches use the [local failure subject and binding rules](language/local-failures.md#4-catch-subjects-and-bindings).
+Exception types are managed classes implementing the self-typed
+`IException<TSelf>` contract. A concrete catch binds that exception object;
+`catch (IException<_> failure)` binds its common existential view without
+boxing or copying the object. `_` here hides the self type of an already
+constructed value; it is not `void` or a direct-call inference hole. Bare
+`catch` matches the selected runtime's contract-catchable local failures.
+`when` filters run in source order. A filter failure replaces the pending
+exception and links the original as `ParentException`.
 
-A false filter proceeds to the next catch in source order at that scope.
-If no catch matches, propagation continues with further outward unwinding.
-The handler body is entered only after its type and filter match; the runtime
-does not unwind past a candidate scope before testing it. This is incremental
-unwind-and-selection, not a first-pass search running authored filters before
-inner cleanup. A filter failure follows ordinary failure/chaining propagation,
-not a false result or a restart that replays completed cleanup.
-Cleanup and filter side effects are observable even if no handler is selected;
-there is no transaction deferring them until the filter succeeds. The pending
-failure must remain valid during selection without keeping exited frames live.
-Fail-fast termination retains its separate no-cleanup guarantee.
-The local failure chapter specifies nominal Exception/category eligibility
-and input ownership. [Core scalar failures](language/scalar-failures.md)
+Handling is an explicit unsafe escape hatch. Dispatch searches outward from
+the current method, testing lexical handlers and their filters in source
+order; handlers are not normal-CFG successors. A normal catch fallthrough
+propagates the same pending event. Explicit non-failure exits from a catch
+swallow it, and every crossed `finally` runs under structured transfer order.
+A new failure from a filter, handler or crossed `finally` becomes primary
+and retains the pending event through `ParentException`. Same-object
+`throw failure;` preserves its origin and parent chain; throwing a distinct
+exception creates a new origin. Bare `throw;` is not admitted. If no handler
+is found by `main`, fail-fast aborts without normal cleanup. Catch recovery
+does not establish general state invariants; post-catch state is indeterminate
+and remains the author's unsafe responsibility. The local failure chapter
+specifies exception eligibility, object and cause properties, handler
+selection and propagation. [Core scalar failures](language/scalar-failures.md)
 select exact zero-data overflow, integer zero-divisor and invalid-shift-count
 payloads without changing source productions or operand evaluation.
 [Numeric selection](language/numeric-selection.md) separately fixes exact
@@ -2212,11 +2253,12 @@ separate contracts.
 [The contained foreign bridge](runtime/foreign-failure-bridge.md) specifies
 its own paired failure transport without completing those catalogs/codecs or
 admitting a native unwinder through Terrum frames.
-Bare `throw;` rethrows the
-active handled failure; it is invalid outside a handler or in a separately
-invoked lambda merely declared there. `throw expression` evaluates its
-operand once and has no normal result; the operand must satisfy the admitted
-[complete exception payload contract](language/local-failures.md#2-eligibility-is-not-storage-or-lifetime-permission)
+`throw expression` evaluates its operand once and has no normal result.
+Throwing the same active exception object preserves its original origin and
+parent chain; throwing a distinct exception from a handler makes it primary
+at that throw site and attaches the pending event as its runtime parent.
+Bare `throw;` is not a source form. The operand must satisfy the admitted
+[complete exception-class contract](language/local-failures.md#1-the-common-exception-contract)
 or an explicitly checked captured-propagation protocol.
 
 The [captured-event contract](language/captured-exceptions.md) selects exact
@@ -2224,8 +2266,8 @@ Core CapturedException and direct `CapturedException.Capture()` with no
 arguments in the active source handler body, including its ordinary lexical
 cleanup scopes. A filter or separately invoked helper/lambda has no such
 context. Successful publication transfers the event and leaves this source
-handler unable to Capture or bare-rethrow it again; existing input borrows
-keep their original checked scope.
+handler unable to Capture or explicitly rethrow the transferred event; the
+exception object remains the propagation event.
 An exact captured owner uses the consuming route of the existing throw
 statement and expression productions: a named owner requires
 `throw move captured;`, while a fresh owner can transfer directly.
@@ -2276,6 +2318,16 @@ syntactically (`a < b < c`) and require semantic checking; the grammar does
 not imply chained-comparison meaning. `is var name` tests initialized
 non-null presence and binds its payload snapshot; `is var? name` permits
 initialized null. `is init` tests initialization independently of presence.
+When the left operand resolves to a generic type formal, `T is unique` is a
+type-property test, not an ordinary value's runtime type or general
+reflection query. Both arms are checked under their declared-domain
+refinements. The true arm carries its property evidence; the false arm
+establishes the default Copy domain for `T : unique?`, but does not generally
+prove the complement of an open property. The test may be resolved during
+Terrum compilation or JIT/AOT specialization, or evaluated in shared or
+canonicalized generic code using compact implementation-provided type
+metadata. In value context it produces an ordinary Boolean, whose relationship
+to the property may refine flow through supported value/path analysis.
 
 ```ebnf
 Expression      = LambdaExpression | ThrowExpression | ConditionalExpression ;
@@ -2284,12 +2336,12 @@ ConditionalExpression = OperatorExpression,
 OperatorExpression = Operand, { ( BinaryOperator, Operand | IsTest ) } ;
 Operand         = { PrefixOperator }, ( Postfix | ThrowExpression ) ;
 PrefixOperator  = "+" | "-" | "!" | "~" | "*" | "&"
-                | "ref" | "move" | "++" | "--" | "await" | "const" ;
+                | "ref" | "gc", "ref" | "move" | "++" | "--" | "await" | "const" ;
 BinaryOperator  = "*" | "/" | "%" | "+" | "-"
                 | "<<" | ">>" | ">>>"
                 | "<" | "<=" | ">" | ">=" | "==" | "!="
                 | "&" | "^" | "|" | "&&" | "||" | "??" ;
-IsTest          = "is", ( "init" | Pattern ) ;
+IsTest          = "is", ( "init" | "unique" | Pattern ) ;
 Postfix         = Primary, { PostfixPart } ;
 PostfixPart     = ".", Identifier, [ TypeArguments ]
                 | "->", Identifier, [ TypeArguments ]
@@ -2307,15 +2359,24 @@ Primary         = "(", [ Expression ], ")" | TupleExpression
                 | SwitchExpression | CollectionExpression | RequireExpression
                 | "new", Type, Arguments,
                   [ ObjectInitializer ]
+                | "gc", "new", Type, Arguments,
+                  [ ObjectInitializer ]
+                | "gc", "box", TypeArguments, Arguments
                 | Number | String | RawText | InterpolatedText | InterpolatedRawText
                 | Character | Boolean | Null | "field" | "this" | ReturnValueReference
-                | "typeof", "(", Type, ")"
+                | TypeQuery | LayoutQuery | OffsetQuery | CountQuery
                 | Identifier, [ TypeArguments ]
                 | "unsafe", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
                 | "default", "<", Type, ">" ;
+TypeQuery       = "typeof", "(", QuerySubject, ")" ;
+LayoutQuery     = ( "sizeof" | "alignof" ), "(", QuerySubject, ")" ;
+OffsetQuery     = "offsetof", "(", ( Type, ",", FieldPath | Expression ), ")" ;
+CountQuery      = "countof", "(", ( Type | Expression ), ")" ;
+QuerySubject    = Type | Expression ;
+FieldPath       = Identifier, { ".", Identifier } ;
 TypeArguments   = "<", GenericArgument, { ",", GenericArgument }, ">" ;
-GenericArgument = Type | ConstantGenericArgument | "_" | "default" ;
+GenericArgument = Type | "init", Type | ConstantGenericArgument | "_" | "default" ;
 ConstantGenericArgument = ConstantLiteral | DottedIdentifier
                         | "(", ConstantExpression, ")" ;
 ConstantLiteral = Number | String | RawText | Character | Boolean | Null ;
@@ -2338,6 +2399,25 @@ CollectionExpression = "[", [ CollectionElement,
                        { ",", CollectionElement }, [ "," ] ], "]" ;
 CollectionElement = Expression | "..", Expression ;
 ```
+
+`_` in `TypeArguments` is resolved by its enclosing source position.
+`M<_>` in a direct generic call requests checked inference for that argument;
+it does not form an existential value. In an admitted generic type position,
+each `_` occupying a type-argument slot in a nominal generic type
+independently hides that slot; any subset, including all type-argument slots,
+may be hidden. Constant generic arguments retain their separate semantics.
+Non-hidden type arguments remain exact in the static type identity. Each
+value retains its own hidden complete arguments and required evidence; only
+operations valid for every hidden argument admitted by the constructor's
+declared constraints are available through the view. A generic type pattern
+such as `G<var T>` captures the corresponding argument under the ordinary
+pattern rules. Multiple hidden slots may be captured in one pattern, such as
+`G<var T, var U>`; a successful match binds each argument and its required
+evidence only within that branch. These type-position and pattern uses do not
+substitute for direct-call inference. A checked generic type pattern is the
+only general mechanism for recovering hidden arguments and their required
+witness evidence; no runtime type/witness-inspection API is selected.
+`typeof(Place)` remains a static type query.
 
 `IsTest` is a postfix-like binary test at equality precedence: it consumes
 the preceding expression as its left operand and its pattern or `init`
@@ -2667,7 +2747,7 @@ block containing explicit discard or another use of its result.
 References used by a deferred action must remain valid until it executes;
 control transfers cannot leave the action, just as they cannot leave a
 `finally`. Deferred actions have the same ordinary failure and effect rules
-as authored `finally`, not a special `NoThrow` requirement. See the
+as authored `finally`. See the
 [language exception contract](language.md#safe-and-unsafe-boundaries).
 
 `PolicyCase` binds a compile-time constant named enum case, not a type
@@ -2680,7 +2760,7 @@ generic forwarding are described in [§5.12](#512-modifiers-cleanup-and-finaliza
 
 These semantic constraints accompany the source forms above.
 
-- **Access, borrowing, and output state:** canonical forms include `ref<T>`,
+- **Access, references, and output state:** canonical forms include `ref<T>`,
   `ptr<T>`, `box<T>`, `val<T>`, `own<T>` and `write`. `mut` qualifies a place,
   nominal declaration or receiver; it is not a passing mode or generic
   type qualifier. Explicit descriptors and their `*`/`->` access follow
@@ -2696,9 +2776,9 @@ These semantic constraints accompany the source forms above.
   [generated producers](language/generated-producers.md), while physical
   correlated-output metadata remains outside this source grammar
   (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
-  `init ref<T>` means
+  `ref<init T>` means
   vacant-storage initialization, distinct from ordinary `ref<T>`/`write ref<T>`;
-  `Create(init value)` is the call-site spelling. The reference chapter
+  `Create(ref init value)` is the call-site spelling. The reference chapter
   defines parameter legality and signature identity; persisted output
   relations additionally require their specified metadata contract.
 - **Generic type checking:** explicit parameters, constraints and static
@@ -2718,8 +2798,11 @@ These semantic constraints accompany the source forms above.
   identity, access attenuation and other admitted bindings are compared
   per supplied argument. Only
   declared projections/attenuations apply, no implicit numeric/conversion-chain
-  search is performed, constraints do not create overloads, return type is not
-  a tie-breaker, and applicable members outrank extensions. By-value `T` beats
+  search is performed. Same-signature generic methods may differ by
+  constraints only when their applicability domains are proven pairwise
+  disjoint under closed, exhaustive properties; overlapping or unknown
+  domains reject. Return type is not a tie-breaker, and applicable members
+  outrank extensions. By-value `T` beats
   `implicit ref<T>` when both apply; fixed arity beats an equally good expanded
   `params` candidate. Explicit extension-provider selection is specified in
   §5.2; concrete extension declaration/import schemas and physical binding
@@ -2805,23 +2888,27 @@ See the [language contracts](language.md) and
 [library layering](libraries.md#dependency-layers-and-package-boundaries)
 for semantic IL/reference boundaries.
 
-### 5.1 Initialization loans at call sites
+### 5.1 Initialization references at call sites
 
-Use `init` as the call-site argument mode for an
-`init ref<T>` parameter, e.g. `Create(init value)`. It designates vacant
-storage and is distinct from ordinary `ref`/`write ref` access; it does not
-make an existing initialized value writable or readable
-through the initialization loan.
+The parameter's complete type is `ref<init T>`; `ref init place` is the
+explicit call-site formation, e.g. `Create(ref init value)`. It forms a capability for
+one vacant destination and is distinct from ordinary `ref`/`write ref`
+access; it does not make an existing initialized value writable or readable
+through the initialization reference.
 
 ```terrum
-// Initialization-loan argument.
-Create(init value);
+// Initialization-reference argument.
+Create(ref init value);
+// Explicit local capability formation.
+ref<init int32> destination = ref init value;
 ```
 
 Argument labels are specified in §3.2; [references](language/references.md)
 and [calls](language/calls-and-inference.md) define place formation, modes,
-applicability and contextual output execution. Physical conditional-output
-metadata remains separate work. This does not
+applicability and contextual output execution. The same capability type is
+used for direct parameters and approved local values; no special
+parameter-only `init ref<T>` form exists. Physical conditional-output
+metadata is defined by the shared publication contract. This does not
 introduce an extra transactional publication protocol.
 
 ### 5.2 Exact overload grammar, ranking, and disambiguation
@@ -2840,8 +2927,10 @@ precede previously permitted, declared projections/erasures; there is no
 implicit numeric or general type-conversion search. Permitted
 access/qualification weakening may participate in matching (for example,
 `write Span<T>` to a readonly `Span<T>` parameter), but no new or reversed
-projection/erasure is inferred. Constraints filter applicability, not form
-constraint-only overloads. Return type alone does not distinguish overloads.
+projection/erasure is inferred. Constraints filter applicability; same-signature
+generic overloads may differ by constraints only when their full domains are
+proven pairwise disjoint under closed, exhaustive properties. Overlapping or
+unknown domains reject. Return type alone does not distinguish overloads.
 Applicable members outrank extensions. These decisions are authoritative in
 [language](language.md#callable-values-params-and-tuples),
 [conversions](conversions.md#conversion-policies), and
@@ -2875,17 +2964,19 @@ public void InspectExample(Item item) { int32 selected = Inspect(item); }
 Retain ordinary same-name declarations as
 source-time candidates. Determine applicability first, then compare argument
 quality independently: identity, then admitted immediate-access attenuation,
-then other admitted single-step bindings. For example, attenuation from
-`write pin ref<T>` to `pin ref<T>` is better than the direct binding to
-`write ptr<T>`; neither acquires a pin or changes inner `T`.
+then other admitted single-step bindings. Explicit root/pin acquisition and
+raw-pointer extraction are not implicit candidate bindings and do not
+participate in ranking.
 A candidate is better only if it is no worse for every argument and better
 for at least one; crossed better/worse arguments are ambiguous, not summed
 into a score. Apply declared specificity and by-value/
 `implicit ref<T>`/`params` priorities, including fixed-arity non-expanded over
 an otherwise equal expanded `params` candidate. There are no return-type,
 declaration-order, or literal-numeric-fit tie-breakers. Do not search implicit
-numeric or arbitrary type-conversion chains. Constraints filter applicability
-but do not form constraint-only overloads. Source binding records the selected
+numeric or arbitrary type-conversion chains. Constraints filter applicability;
+same-signature generic overloads are permitted only for proven pairwise-
+disjoint domains under closed, exhaustive properties. Constraints do not add
+conversion-ranking preferences. Source binding records the selected
 declaration and closed generic arguments; downstream tools do not rerun source
 overload resolution.
 
@@ -2902,7 +2993,7 @@ eligible generic candidates.
 
 ```terrum
 public int32 Select(int32 value) => value;
-public T Select<T>(T value) where T : [Copy] => value;
+public T Select<T>(T value) => value;
 public int32 OrdinarySelection() => Select(int32(7));
 public int32 ExplicitGenericSelection() => Select<int32>(int32(7));
 ```
@@ -3007,13 +3098,18 @@ declaration caller-unsafe. Encourage a `# safety` documentation section to
 explain caller responsibilities in human terms, but prose is not a compiler
 proof or a substitute for contract metadata. An ordinary safe declaration
 may contain internal unsafe work in explicit blocks when its declared safe
-contract is checked; no extra trusted-implementation source marker is required. The
-default binary-trust model does not require downstream consumers to re-prove
-dependency bodies.
+contract is checked; no extra trusted-implementation source marker is
+required. External provider implementations remain trust contracts; consumers
+validate the structures and support needed for safe consumption, then may
+rely on published body facts without semantic re-proof or a claim to prove
+provider behavior.
 The [sharing contract](runtime/sharing-and-handoff.md) uses these same boundaries:
 mechanical checks compose admitted protocols, while arbitrary/native algorithms
-retain their explicit unsafe implementation responsibility and producer/audit
-trust. Capability opt-in is not implementation proof.
+retain their explicit unsafe implementation responsibility. Producers remain
+responsible for published body facts; consumers validate record structure and
+references before affected use but are not required to re-prove those facts.
+Optional audits do not prove arbitrary native algorithms or authored unsafe
+promises. Capability opt-in alone is not implementation proof.
 
 The current [Effects clause](representation/contract-clauses.md) carries
 caller-unsafety. That selected carrier does not complete additional native
@@ -3070,7 +3166,7 @@ associated-type relations; metadata encoding remains open. An interface such as
 `interface ISource { type Item; }` need not declare a self formal merely to
 have associated members.
 
-An associated requirement may have a replaceable checked default,
+An associated-type requirement may have a replaceable checked default,
 `type Item = uint8;`; bodyless `type Item;` requires an implementation binding.
 Conflicting inherited defaults require explicit resolution. A type can
 inherit a member through several paths without creating several copies of
@@ -3084,6 +3180,10 @@ one each. One implicit member can satisfy both only if it fulfills both
 contracts; the witness identities remain distinct. Explicit declarations use
 interface-qualified names, for example `type IReadable.Item = uint8;` and
 `uint8 IReadable.Read() { ... }`.
+Associated constants in the selected metadata profile have no declaration-
+default value; each complete witness supplies an explicit typed binding.
+Their source declaration spelling and physical record schema remain separate
+integration work.
 
 `T.Item` resolves when exactly one applicable selected witness supplies it.
 `T.via<ISource>.Item` and `x.via<ISource>.Member()` select an existing witness
@@ -3259,16 +3359,17 @@ schema, optionally with the same explicit destination targets as a declaration.
 Source names bind against that requirement's receiver/formals, not the
 enclosing caller. Ambiguous/overloaded targets, unestablished facts and arbitrary
 attributes/predicates reject. It filters normal applicability after type
-selection; it supplies no inference evidence, conformance, ranking preference
-or constraint-only overload. Check the generic body under the published
-condition and require it at application; do not infer it from private bodies.
+selection; it supplies no inference evidence, conformance, conversion-ranking
+preference or independent property domain for overload selection. Check the
+generic body under the published condition and require it at application; do
+not infer it from private bodies.
 
 [Dependencies and views](language/dependencies-and-views.md) owns the exact
 source/target, phase, propagation and witness rules. Physical dependency
 registration and encoding remain separate work.
 The [selected query catalog](language/registered-queries.md)
-defines ordinary Core value-layout APIs; broader query APIs require their
-own admitted contracts.
+defines dedicated type, layout and count query forms; any future query family
+requires its own admitted contract.
 
 ### 5.6 Reserved underscore and discard statement
 
@@ -3468,9 +3569,12 @@ Required constant execution uses admitted inline values, private local
 mutation and checked references, with eligibility on the selected path.
 Emitted values require the per-target Blittable commitment, frozen Copy
 validity and admitted typed constant encoding, not today's private layout.
-`ConstEval` implies checked pure-form support and explicit Terrum evaluator
-opt-in; `Pure` alone is not that opt-in. Neither promises termination,
-ordinary-form `NoThrow` or every-input constant success.
+`ConstEval` implies checked pure-form support and explicit admission to
+required compile-time evaluation: Terrum compilation when inputs are known,
+or target JIT/AOT compilation for retained target-dependent work. Such work
+must resolve before runtime and has no runtime fallback. `Pure` alone permits
+optional optimization but not required compile-time execution. Neither
+attribute promises termination or every-input constant success.
 An unused known runtime-only operation is distinct from an invalid source
 or unknown body schema. Admitted constant NaN-processing arithmetic,
 nonidentity numeric conversion and numeric selection use the selected positive
@@ -3502,8 +3606,7 @@ per-index backing storage.
 
 An explicit concrete getter body makes the getter an ordinary checked
 callable member with its declared readonly or `mut` receiver; `{ get; }` generates a backed auto-getter under
-the backing rules below. Accessor attributes such as `[NoThrow]` attach to
-the getter:
+the backing rules below. Accessor attributes attach to the getter:
 
 ```terrum
 // Informative property example.
@@ -3513,7 +3616,7 @@ public struct Point
 
     public int32 X
     {
-        [NoThrow] get { return _x; }
+        get { return _x; }
     }
 }
 
@@ -3523,13 +3626,13 @@ public class Counter
 
     public int32 Count
     {
-        [NoThrow] get { return _count; }
+        get { return _count; }
     }
 }
 ```
 
-Accessor effects attach to the accessor: `[NoThrow] get { ... }`.
-`[get: NoThrow] public int32 Count { get { ... } }` applies to the
+Accessor contracts attach to the accessor through its resolved identity.
+`[get: Pure] public int32 Count { get { ... } }` applies to the
 getter from the enclosing property declaration. An expression-bodied
 getter-only property such as `int32 Size => width;` has the same checked
 getter semantics. File attributes
@@ -3544,9 +3647,6 @@ NoAlias on an indexer parameter or an exact accessor parameter target
 contributes the corresponding invocation requirement. Setter `value` retains
 its actual formal identity; ambiguous property-wide selectors do not guess
 an accessor.
-
-An ordinary `[NoThrow] public int32 GetCount() { ... }` method is an
-alternative callable form; it is not a property-effect placement option.
 
 Treat the accessor as a named, source-bound
 callable member with its checked receiver requirement and result. The property
@@ -3687,8 +3787,8 @@ semantics](language.md#interfaces-access-and-generic-properties).
 `public`/`internal`/
 `private` are visibility; `static` is member placement; `mut` controls a
 place/receiver/nominal declaration; `write` qualifies referent access in a
-type; `ref` and `init ref<T>` distinguish ordinary access from vacant-storage
-initialization.
+type; `ref<T>` and `ref<init T>` distinguish ordinary access from
+vacant-storage initialization.
 `unique` is an ownership form, not an access synonym. `unsafe` on a callable
 declares caller obligations while an `unsafe { ... }` block scopes operations
 inside a body. A bodyless interface declaration requires a witness
@@ -3774,7 +3874,9 @@ publish the relevant ordering, access, ownership and lifetime guarantees;
 it cannot upgrade readonly backing or make readonly item access imply
 deep immutability of referenced objects.
 `unsafe` has block and
-parenthesized-expression forms; default arithmetic remains checked.
+parenthesized-expression forms; ordinary integer add/subtract/multiply/negate
+are checked in Development/Debug and wrapping in Release. Extent arithmetic
+and operations with separate contracts retain those contracts.
 `defer` registers an
 explicit lexical-block-exit action (not automatic `[Cleanup]`, function-exit
 deferral, or delayed live-value destruction). One scope's registered actions
@@ -3919,32 +4021,34 @@ ordinary construction form.
 **Constants and registered queries:** required constant formation uses a
 bounded, checked, encodable value domain. Constants in declarations,
 attributes and generic arguments must evaluate successfully or diagnose;
-they do not silently fall back to runtime execution. Optional runtime folding
-is separate and must preserve source behavior.
-The [registered-query chapter](language/registered-queries.md) owns exact
-query identities, subject/result contracts and runtime/constant admission.
-Core `RuntimeHelpers.SizeOf<T>()` and `AlignmentOf<T>()` are ordinary generic
-APIs returning `nuint`, not new keywords. They measure the complete normalized
-T value/handle representation under the selected target ABI, not host layout
-or an allocated object's payload. `[Sized]` permits admitted runtime layout
-evidence without promising a definition-time numeric constant.
-A retained layout-dependent result needs a published fixed observation or
-explicit rebuild/rebind/invalidation dependencies. Its scalar constant codec
-does not freeze the queried layout; today's private representation or an
-AOT/JIT label is not that promise. Query results do not widen the separate
-constant-generic domains. Universal reflection objects, object-payload queries,
-broader query catalogs and constructed-object encodings remain unselected.
-Builder type-reference arguments instead retain their
+they do not silently fall back to runtime execution. Optional compiler
+constant folding is separate and must preserve source behavior.
+The [registered-query chapter](language/registered-queries.md) owns
+`typeof`, `sizeof`, `alignof`, `offsetof` and `countof`, their type/Place
+subjects, results, authorization and runtime/constant behavior. They are
+dedicated source queries, not duplicate Core size/alignment methods. A query
+of a Place inspects its statically bound type/layout without reading the
+stored value. `Blittable` commits per-target layout; non-Blittable layout
+observations require unsafe and are version-sensitive. Fixed layouts may be
+folded by the selected target compiler/JIT/AOT path, while execution-dependent
+layouts remain runtime operations and cannot satisfy required-constant
+contexts. Layout-dependent retained values preserve fixed commitments or
+explicit rebuild/rebind/invalidation dependencies. Query results do not widen
+the separate constant-generic domains. Universal reflection objects and
+object-payload queries remain unselected. Builder type-reference arguments
+instead retain their
 [bound type recipes](language/construction-handlers.md#type-reference-arguments-are-recipes),
 not values in an implicit reflection-object constant domain.
 
-There is no `~Type()` finalizer production. Deterministic
-`[Cleanup]` for an owning value and scope/unwind cleanup are not GC
-finalization. GC finalizers remain absent unless a concrete API need survives
-explicit ownership and supervision alternatives. Any future proposal must
-review lifecycle, resurrection, affinity, failure/effects and resource safety
-together, apart from `[Cleanup]`. Do not synthesize finalizers from owner
-cleanup or class declarations.
+There is no `~Type()` finalizer production or separate user-callable finalizer
+API. `[Cleanup]` is one object-level obligation for eligible unique values,
+aliasable class objects and boxed payloads. Normal shared backing runs it
+after final strong-hold/dependency retirement; GC backing runs it once after
+the collector establishes unreachability and before reclamation. GC Cleanup
+cannot resurrect its receiver, has nondeterministic timing, and runs on an
+unspecified runtime cleanup thread; its transitive obligations must be
+thread-neutral or transferable. This backing-specific Cleanup contract is
+not a general finalizer feature.
 
 ### 5.13 Operators, assignments and expression gaps
 
@@ -4016,26 +4120,17 @@ formation requires initialized storage. In an explicit unsafe context,
 formation and raw-pointer reads or writes may bypass definite-initialization
 checks; they do not establish checked initialization facts for direct local
 reads or checked-reference formation. This exception does not waive known
-access, provenance, lifetime, alignment, backing/root or pin obligations.
-GC storage requires a statically known covering pin; `unsafe` is not a
-substitute for rooting or pinning. `pin ref<T>` has an implicit conversion to
-the matching `ptr<T>` form, preserving referent access, lifetime, pin and
-backing dependencies. This is one explicitly defined built-in conversion
-edge, not general user-defined implicit conversion support. It acquires no
-pin, grants no stronger access and does not promise identical representation
-on every backend. The complete referent type remains the same.
-Overload applicability recognizes this direct edge without searching
-operators, intermediate types or conversion chains. An identity match is
-better than this permitted projection under existing per-argument ranking.
-Existing specificity rules apply to ties; unresolved ties or crossed
-candidates remain ambiguous. Future exceptions
-require separately selected rules, not extrapolation from this one.
-Named-local early lifetime ending uses `name = _;` under §3.3 and retains all
-pin dependency checks. Pin acquisition/replacement follows §3.2.
-Proven lifetime escapes and missing required pins are checked errors,
-including in an unsafe context; valid pointer formation itself produces no
-warning merely for creating a pointer. Formation does not require unsafe
-when its initialization, access, backing/root and pin obligations are satisfied.
+access, provenance, lifetime, alignment or backing/root obligations.
+GC-backed addresses require a `gc ref<T>` root and explicit `ref *root`
+reborrow before stable reference/pointer use; `unsafe` is not a substitute
+for rooting or pinning. Extracting a raw pointer from a checked reference is
+explicit and requires unsafe authorization; no implicit
+checked-reference-to-pointer conversion or overload-ranking edge exists. A
+statically apparent dangling
+raw address may be retained as inert data only under explicit unsafe
+authorization and a suppressible warning; a later invalid dereference
+remains invalid. Named-local early lifetime ending uses `name = _;` under
+§3.3 and retains all backing/root/pin dependency checks.
 Pointer dereference uses ordinary attached prefix `*` and requires unsafe access;
 reference dereference uses the same syntax without making it unsafe.
 it does not create a new `(* ... )` fence. `*p`, `*(p + offset)`,
@@ -4162,8 +4257,8 @@ appears in §2.
 | Patterns | §§3.3–3.4 and [structural flow](language/initialization-and-flow.md) give inferred/value/reference bindings, generic-slot type matching and named capture, checked `typeof` identity refinement, distinct initialization tests, qualified union cases, structural tuples, per-attempt observations, ordinary declaration rules for `or`, explicit mutable rematching, retained failed-match values, ordinary `when` conditions and explicit transfers. Omitted eligible output arguments select availability-based lifting, including partial omission and initialization-requiring extraction. | Runtime-only type-witness representation, registered object observations and richer-status/projection metadata. General application/constraint `var` binders, higher-kinded application, dedicated member/relational pattern syntax and pattern `where` are excluded from these forms. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection, signature-bound variants and constant-formal forwarding. | Registered variant attribute/catalog encoding and general policy-query subjects. |
 | Contracts | §§3.1, 3.3–3.4 and 5.8 give grouped named/lambda `require`/`ensure`, explicit runtime failure selectors, contextual result `return`, distinct body-level checks, producer creation/operation phases and established async failure channels. | Nonstandard phase selectors and physical correlated-output/require-default metadata; declaration-level static qualifiers have no production here. |
-| Static proof and constants | §5.9 and the proof/evaluation chapter give body proof/const forms, scalar facts/transfers, path eligibility, deterministic NaNs, dependencies and resource accounting; the query chapter selects ordinary Core value-layout APIs and explicit observation dependencies. | Broader intrinsic/query catalogs and physical query/dependency/constant-program/value-ABI records. |
-| Exceptions | §§3.3–3.4, [local failures](language/local-failures.md), [scalar failures](language/scalar-failures.md), [numeric selection](language/numeric-selection.md), [requirement failures](language/requirement-failures.md) and [captured exceptions](language/captured-exceptions.md) give nominal opt-in, exact scalar/bounds payloads, borrowed/Copy catches, incremental selection, fresh/active/captured responsibility and source-owned require construction/defaults. | Other compiler/runtime failure catalogs, shared/typed capture families, physical constructor/default/owner/payload/handler/cause records and selected runtime support. |
+| Static proof and constants | §5.9 and the proof/evaluation chapter give body proof/const forms, scalar facts/transfers, path eligibility, deterministic NaNs, dependencies and resource accounting; the query chapter selects dedicated type/layout/count forms and explicit observation dependencies. | Broader intrinsic/query catalogs and physical query/dependency/constant-program/value-ABI records. |
+| Exceptions | §§3.3–3.4, [local failures](language/local-failures.md), [scalar failures](language/scalar-failures.md), [numeric selection](language/numeric-selection.md), [requirement failures](language/requirement-failures.md) and [captured exceptions](language/captured-exceptions.md) give self-typed exception classes, exact scalar/bounds mappings, object-handle catches, ordered selection, fresh/active/captured responsibility and source-owned require constructors/defaults. | Other compiler/runtime failure catalogs, shared/typed capture families, physical class/constructor/default/owner/handler/cause records and selected runtime support. |
 | Cleanup | §§3.3 and 5.12 and [owning fields](language/ownership-and-cleanup.md) define the exact Cleanup role, complete body-then-reverse-declaration fields, failed-construction reverse acquisition and guarded partial retirement; lexical `defer` remains separate. | Arbitrary body/effect proof, physical cleanup/partial-state programs and complete storage profiles. |
 | Finalization | §5.12 leaves finalizers absent unless a concrete need warrants a separate reviewed lifecycle contract. | Any future finalizer proposal and its lifecycle/ABI contract. |
 | Documentation comments | §§1 and 5.14 describe attachment and structured prose direction. | Exact markup/reference grammar and XML artifact schema. |

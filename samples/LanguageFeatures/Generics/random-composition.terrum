@@ -40,7 +40,7 @@ public mut struct CounterRandom : ISeedableRandom
 }
 
 public mut unique struct DifferentRandom<TRandom> : IRandom
-    where TRandom : IRandom, [Sized]
+    where TRandom : IRandom
 {
     private mut TRandom _inner;
     private uint32 _mask;

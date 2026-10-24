@@ -5,14 +5,17 @@ This document records accepted execution and checking contracts that refine
 candidate syntax or a new semantic-IL representation.
 Approved source forms are in the [source grammar](grammar-spec.md);
 the [proof/evaluation chapter](language/proof-and-constant-evaluation.md)
-owns the selected rule catalog and resource envelope. Remaining alternatives
-belong in the [proof proposal](../proposals/static-proof-and-constant-evaluation.md).
+owns the selected rule catalog and resource envelope. Remaining physical
+integration gates are tracked in
+[CG-010](../implementation/conformance-gaps.md#cg-010).
 [Implementation](../implementation.md) remains the executable support boundary;
 concurrency follows the separately [accepted memory model](memory-model.md).
 Implicit arguments expand to ordinary operations, conditional outputs carry
 checked state facts, and executable contracts participate in ordinary
 evaluation and cleanup. Convenience syntax does not create a second lifetime
 system or a second arithmetic system for the prover.
+Use the shared [definitions](language.md#definitions-and-notation) for the
+copying/aliasing explanation and the precise reference, lifetime and loan terms.
 
 ## 1. One call and reference model
 
@@ -26,18 +29,18 @@ reference-value semantics.
 
 A **place** is existing storage with a checked identity, type, access, lifetime,
 and backing/ownership dependencies. A **value expression** computes a value;
-it need not identify storage that the caller can borrow. These terms describe
+it need not identify storage that the caller can reference. These terms describe
 semantic categories, not a new public type family.
 
 | Argument expression | Meaning for `implicit ref<T>` |
 |---|---|
-| Already compatible `ref<T>` descriptor | Pass the descriptor with its complete dependencies; do not borrow its descriptor slot |
+| Already compatible `ref<T>` descriptor | Pass the descriptor with its complete dependencies; do not reference its descriptor slot |
 | Eligible local, parameter, field, or element place of the required type | Form an ordinary readonly reference to that place |
 | Reference-returning access | Use the returned place and its published dependencies, as for explicit reference passing |
 | Value-returning call, property, operator, or explicit conversion | Evaluate once into a local temporary, then form an ordinary readonly reference to that temporary |
 | Place whose ordinary reference use is invalid | Diagnose the same access/lifetime conflict; do not silently copy it to evade the conflict |
 
-These alternatives use complete types. When `T` is itself `ref<U>`, borrowing
+These alternatives use complete types. When `T` is itself `ref<U>`, referencing
 its descriptor slot creates `ref<ref<U>>`; generic substitution does not
 implicitly dereference an argument.
 
@@ -72,7 +75,7 @@ Inspect(CreateValue())
 
 The second expansion assigns at the original argument-evaluation point.
 A fresh owning result follows ordinary initialization or replacement;
-materialization does not require Copy. Merely borrowing an existing owner
+materialization does not require Copy. Merely referencing an existing owner
 neither copies nor moves it. A skipped evaluation creates no new value and
 leaves any previously initialized value unchanged. A never-initialized binding
 remains vacant, with no `T` cleanup. Evaluation is never hoisted to scope
@@ -228,7 +231,7 @@ initialized null. Neither inferred pattern matches vacant storage. These
 checks use declared initialization facts before value access; they do not
 turn vacancy into null or test bytes whose value is uninitialized.
 
-For `bool TryGet(..., init ref<Customer?> value)`, true can publish either null
+For `bool TryGet(..., ref<init Customer?> value)`, true can publish either null
 or a non-null customer; false may leave it uninitialized. An initialized null,
 an initialized non-null value, and an uninitialized destination are distinct
 states even if representations overlap. A declaration's postconditions state
@@ -355,13 +358,13 @@ selection and source-equivalent execution of contextual outputs.
 Output omission selects lifting in matching and value-producing `require`
 contexts. Explicit destinations remain ordinary arguments; only omitted
 eligible outputs participate in the projection, in declaration order.
-For ordinary call-completion contracts, the explicit `init ref<T>` parameter
-mode establishes eligibility; no additional attribute, registration, or
+For ordinary call-completion contracts, the complete `ref<init T>` parameter
+type establishes eligibility; no additional attribute, registration, or
 `Try` naming convention is required. Its complete `T`, declared normal-output
 relations, ownership and dependencies must be checked and publishable.
 The caller must be able to provide ordinary initially vacant local storage
-of that type under the selected profile. Omission does not make a sizeless,
-unsupported or otherwise ineligible destination storable.
+of that type under the selected profile. Omission does not make an unsupported
+or otherwise ineligible destination storable.
 
 This rule does not omit readonly/writable reference-value parameters,
 required inputs, or destinations whose publication requires later task
@@ -391,11 +394,13 @@ Contextual structural patterns such as `(var x, _)`, `(_, var? y)` and
 `(var x, var y)` evaluate one call and establish the selected outputs'
 initialization/presence facts. `_` does not read or bind an ignored output;
 live ignored owners remain subject to cleanup. Matching follows declared
-availability, so initialized failure outputs may match. Boolean conditional
-init contracts have true publication and false vacancy; enum and richer
-statuses require their own checked per-output relations. Output availability
-does not imply a successful status. Correlations with explicitly supplied
-destinations remain available to caller flow.
+status-outcome availability, so an output explicitly complete for a
+non-success status may match. This is distinct from exceptional exits, whose
+output state is indeterminate. Boolean conditional init contracts have true
+publication and false vacancy; enum and richer statuses require their own
+checked per-output relations. Output availability does not imply a successful
+status. Correlations with explicitly supplied destinations remain available
+to caller flow.
 
 Bare lifted `require` demands initialization of every lifted output and yields
 those values with their complete optional/ownership types. An initialized
@@ -421,20 +426,21 @@ requirement failure; the call's actual destination states are not rolled back.
 A non-Boolean status requires an explicit predicate. This does not reinterpret
 an initialized lifted Boolean payload as a status check.
 [Runtime requirement failures](language/requirement-failures.md) add only
-the failed-path selector/construction: explicit `require<E>`, the semantic
+the failed-path selector/constructor invocation: explicit `require<E>`, the semantic
 callable's RequireException recipe, then exact Core RequirementException.
-Ordinary `new E()` uses zero supplied arguments only after failure. Constructor
-failure propagates its actual event, without clearing initialized destinations,
+The selected ordinary constructor binding is executed only after failure.
+Construction failure
+propagates its actual event, without clearing initialized destinations,
 replaying partial cleanup or retiring supporting-scope hidden owners early.
 No failure type supplies inference evidence for the operand or its outputs.
 [Core scalar failures](language/scalar-failures.md) select their own exact
-mapped payloads; RequireException is not an ambient replacement for operand
+mapped exception classes; RequireException is not an ambient replacement for operand
 overflow, zero division or invalid count. Failed result publication preserves
 actual argument/output states, not transaction rollback.
 [Clamp's published bound relationship](language/numeric-selection.md)
 explicitly uses require<InvalidBoundsException> min <= max after ordinary
 source-order staging. A caller default, outlined helper or physically moved
-check cannot change its selected payload, precondition origin or failure
+check cannot change its selected exception class, precondition origin or failure
 phase; valid clamping preserves the selected input's representation.
 Richer-status contract encoding, later-completion lifting, object-backed
 observation and concrete metadata remain separate work. Current executable
@@ -475,10 +481,10 @@ without requiring additional braces around declaration clauses.
 Each runtime precondition can select E explicitly or use its originating
 primary callable's RequireException/Core default. Physically checking a
 clause in a caller, interface adapter or generated slot preserves that
-semantic owner, ordinary zero-input construction and actual failure channel.
+semantic owner, constructor binding and actual failure channel.
 Runtime ensure uses fixed Core PostconditionException under the
 [standard category contract](runtime/standard-failures.md#2-runtime-postconditions).
-An actual predicate failure is not converted to that payload. Static proof
+An actual predicate failure is not converted to that exception. Static proof
 failure remains a diagnostic, not runtime construction.
 The [binding/flow rules](language/initialization-and-flow.md#binding-pattern-declarations-and-scopes)
 keep name scope independent of value or captured-type availability.
@@ -601,64 +607,68 @@ and historical mutable-state contracts are not part of the initial model.
 | Path | Run declaration postconditions? |
 |---|---|
 | Return expression and all body cleanup complete normally | Yes |
-| Exception is caught inside the body, which later completes normally | Yes |
-| Exception escapes the body, even after successful finally cleanup | No |
+| An exception is explicitly handled inside the body, which later completes normally | Yes |
+| Exception escapes the body, even after an applicable explicit `finally` | No |
 | Cleanup replaces a pending return with an escaping exception | No |
 | Failure while checking a precondition | No |
-| Failure while checking a postcondition | Ordinary failure/unwinding begins at the failed check; completed body cleanup and `finally` blocks are not rerun |
-| A DoesNotReturn invocation has no normal completion | No; a checked escaping failure still performs applicable ordinary unwind cleanup |
-| Fail-fast or process termination | No normal-return guarantee and no cleanup promise |
+| Failure while checking a postcondition | Ordinary failure dispatch begins at the failed check; completed body cleanup and `finally` blocks are not rerun |
+| A DoesNotReturn invocation has no normal completion | No; checked failure follows its operation and handler contract |
+| Fail-fast or process termination | No normal-return guarantee or implicit cleanup promise |
 
 Searching the stack for a handler is not execution of a method's normal
 epilogue. Neither handler search nor unwind itself runs `ensure`. A check after
 the authored body is also outside that body's `try`/`catch`; only an enclosing
 caller recovery scope could handle its propagated failure.
 
-On checked propagation, unwind exited inner scopes to the next candidate
-handler's still-live scope before evaluating that scope's catches and filters
-in source order. Cleanup effects and any replacement failure precede selection;
-ordinary causal chaining preserves the earlier cause. A false filter tests
-the next catch, or continues outward unwinding if none matches. A successful
-type/filter match enters the body without first unwinding past that candidate.
-Filters use valid pending-failure and live-scope state, not references into
-retired frames. Their side effects are not rolled back on false or failure,
-and completed cleanup is never replayed to restart selection. Committing to a
-handler is not a publication transaction for the exception or cleanup effects.
-Fail-fast policy remains separate and promises no cleanup.
+Checked exception dispatch starts at the active instruction and searches
+outward for an explicit handler. Catch clauses and their filters are tested
+in lexical order; the first matching clause handles the event. A filter runs
+once after its type match. A false filter continues candidate selection; a
+filter failure becomes primary and links the pending exception through
+`ParentException`. Handlers are not normal-CFG successors. A normal catch
+fallthrough propagates the same event, while any explicit non-failure exit
+that leaves the catch swallows it. Each crossed explicit `finally` runs in
+structured transfer order. No implicit frame, owner or output cleanup is
+added. If no handler is found by `main`, execution aborts fail-fast without
+normal cleanup; thread, process or platform abort may prevent even an
+explicit `finally`.
 
-[Local failure inputs](language/local-failures.md) use nominal Exception
-eligibility and exact complete subjects/witnesses. A reference catch borrows
-the active payload; a named value catch requires ordinary Copy and does not
-consume the propagation owner. Candidate bindings initialize before their
-filters and retire on false/failure as well as handler exit. Bare rethrow
-ends handler-scope borrows/locals before continuing the same responsible event;
-copying or freshly throwing a payload is not provenance-preserving capture.
+[Local exception inputs](language/local-failures.md) use exact class
+identities implementing `IException<TSelf>` or the common `IException<_>`
+view. A catch binds the managed exception object, not a borrowed or copied
+typed payload. Same-object explicit throw preserves origin; a distinct
+exception raised by the filter, handler or crossed `finally` becomes primary
+and preserves the old event as `ParentException`, separate from authored
+`InnerException`. Catch and post-catch state is generally indeterminate;
+continuation is unsafe and not certified by compiler dataflow. Handling does
+not prove recovery, roll back effects or silently settle output/ownership
+obligations.
 
 [Core CapturedException](language/captured-exceptions.md) instead owns that
 same event after successful lexical no-argument Capture in a source handler
-body. The source activation then has no responsibility for bare rethrow or
-normal retirement; surviving catch borrows still end at their ordinary extent.
-A named consuming `throw move captured;` stages the original event once and
-ends affected inputs/locals before further selection. Authored cleanup failure
-can replace that requested propagation while retaining its cause; it cannot
-duplicate a transferred event or replay cleanup. Ordinary captured-owner
+body. The source activation no longer owns the event; surviving catch
+bindings still end at their ordinary extent. A named consuming
+`throw move captured;` propagates the original event once. A transferred event
+cannot be duplicated by explicit throw or recapture from its former source
+activation. An applicable explicit `finally` runs when the structured
+propagation crosses it; its failure may replace the requested propagation
+while retaining the earlier event as parent. Ordinary captured-owner
 retirement is separately checked, synchronous and nonthrowing/nonsuspending.
 
 The [contained foreign bridge](runtime/foreign-failure-bridge.md) preserves
-this selection order by returning normally across each language boundary
-before the receiving runtime raises. Its packet/cause/mapping contracts
-do not equate foreign and Terrum exception objects or extend exited scopes.
+its boundary contract by returning normally across each language boundary
+before the receiving runtime raises. Its packet/cause/mapping contracts do
+not equate foreign and Terrum exception objects or extend exited scopes.
 
 Postconditions execute the checked predicate at the postcondition phase.
 A false predicate fails there and follows ordinary failure/unwinding;
 partial-operation or invalid-call-domain failure follows ordinary handling.
 A selected pure call cannot escape an exception on its established valid
 domain, but this is not proof that every enclosing check succeeds.
-No transactional rollback
-of body effects occurs, and completed body `finally` blocks are not rerun.
-Any still-live values are handled by their ordinary ownership and failure
-contracts; this does not introduce a separate candidate-cleanup or output
-publication transaction.
+No transactional rollback of body effects occurs, and completed body
+`finally` blocks are not rerun. No automatic owner/output settlement is
+implied by the failed postcondition; still-live values follow only their
+explicitly selected contracts.
 
 An outer-body `static ensure` uses this same normal-completion boundary.
 It proves all such paths; it is not registered only on paths that execute its
@@ -785,14 +795,18 @@ The [constant domain and semantic actions](language/proof-and-constant-evaluatio
 use target arithmetic, inline eligible values, private state and ordinary
 references/cleanup, with admissibility on the executed path.
 `[ConstEval]` is explicit source-required-evaluation opt-in and implies
-checked pure-form support, not ordinary-form `NoThrow`, termination or
+checked pure-form support, not ordinary-form totality, termination or
 all-input constant success. `[Pure]` alone can authorize safe backend folding,
 not source-required interpreter admission. Author-guarded ordinary effects
 can be omitted in a selected pure/constant form through
 [evaluation-mode queries](language/published-predicates-and-effects.md#evaluation-modes).
 Known runtime-only operations on unselected paths do not run; a reachable
 external effect cannot be excused from the pure-form guarantee.
-Unknown/malformed body schemas still reject before use.
+Producers must not emit unknown or malformed Body schemas. Consumers reject
+them before affected use under mandatory structural safe-consumption checks;
+semantic validity of structurally consumable Body facts remains the
+producer's responsibility. Diagnostic wording and internal check order are
+not prescribed.
 There is no ambient I/O, host-address or runtime-static initialization fallback.
 
 An emitted constant additionally requires its target-profile `Blittable`
@@ -837,25 +851,23 @@ declared latitude such as unspecified arithmetic NaN payloads rather than
 silently freezing it. New execution and reuse retain the actual code,
 value, target and initialization dependencies.
 
-AOT, JIT, specialization, interface witnesses and replacement validation use
-the same published contracts. Source compilation checks authored bodies
-against their declared state and effect guarantees. Ordinary binary consumers
-safely decode and check accessed structures/references, resolve retained
-dependencies, check binding/contract compatibility and exposed caller-use
-obligations, then rely on published
-metadata contracts for external dependencies rather than re-proving their
-implementations. A caller still proves its obligations from imported
-preconditions, access, ownership and effect contracts. Unsupported rule
-versions and malformed structures reject;
-this default does not treat malformed bytes as trusted or require dependency
-body inspection. Hand-authored IL that lies about an implementation is not
-excluded by mandatory whole-program proof. Optional deeper audit tooling may
-be considered later, with no v1 or all-behavior certification promise.
-The [reader-trust contract](representation/reader-trust.md) permits selective
-indexed reads without preliminary Body scans. Producers establish index,
-region and semantic truth; natural access/ABI/authorization checks still
-reject exposed invalidity. Table-specific references do not select their
-target table.
+AOT, JIT, specialization, interface witnesses and replacement use the same
+published contracts. Source compilation checks authored bodies against their
+declared state and effect guarantees. After mandatory structural checks and
+support admission, binary consumers may rely on producer-published metadata
+contracts without semantic re-proof or proving arbitrary external
+implementations. Successful binding/support claims still preserve declared
+identities, requirements, compatibility and caller-use obligations. The
+specification requires consumers to validate accessed structures, ranges,
+references and supported semantics before affected use, but not to prove
+producer-published Body facts. Hand-authored IL that lies about an
+implementation violates producer obligations; consumers are not required to
+detect a false assertion that is structurally consumable. Optional deeper
+audits may examine such claims within their stated scope. External provider
+behavior and authored unsafe promises remain trust boundaries. The
+[consumer-verification contract](representation/reader-trust.md) assigns
+producer responsibility for index, region and semantic truth. Table-specific references retain
+their schema-owned namespaces.
 Signing/provenance is a separate distribution concern; signer identity is not
 semantic proof. These target contracts do not change the current bounded
 reader/verifier behavior. Foreign declarations still enter through explicit

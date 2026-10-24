@@ -10,7 +10,7 @@ conformance, native body truth, collector support or exception interchange.
 
 | Case | Fixture | Required outcome |
 |---|---|---|
-| WXSC-01 | All 26 core scalars | Exactly the specified target widths/alignments, including void 0/1 and 128-bit formats 16/16 |
+| WXSC-01 | All 26 core scalars | Exactly the specified target widths/alignments, including void 0/0 (zero extent/no placement) and 128-bit formats 16/16 |
 | WXSC-02 | nint/nuint and equal-width int64/uint64 | Width 64 without identity coalescing or mapping Windows long to nint |
 | WXSC-03 | uint64 bits 0x0123456789ABCDEF | Bytes EF CD AB 89 67 45 23 01 |
 | WXSC-04 | Boolean bytes 0, 1, 2, 255 | First two valid; latter two cannot publish bool or silently mean true |
@@ -105,7 +105,7 @@ conformance, native body truth, collector support or exception interchange.
 |---|---|---|
 | WXCA-01 | uint8, float64, int32, float32, uint64 | RCX/XMM1/R8/XMM3/entry stack +40 |
 | WXCA-02 | Four floating arguments followed by a fifth | XMM0/1/2/3 then entry stack +40, no independent integer count |
-| WXCA-03 | Hidden aggregate result and explicit receiver, then mixed parameters | Hidden RCX, receiver RDX; all later shared ordinals shift |
+| WXCA-03 | Ordinary C-style call with hidden aggregate result and explicit receiver, then mixed parameters | Hidden RCX, receiver RDX; all later shared ordinals shift |
 | WXCA-04 | Logical unit input among nonforeign parameters | No payload position, but retained logical arity/type for binding |
 | WXCA-05 | Zero physical arguments and nested calls | At least 32-byte shadow space and proper CALL alignment |
 | WXCA-06 | Narrow signed/unsigned input/result with arbitrary high register bits | Interpret only low payload bits, without invented extension guarantees |
@@ -119,6 +119,8 @@ conformance, native body truth, collector support or exception interchange.
 | WXCA-14 | Later argument mutates a previously staged value versus captured borrow | Preserve earlier value snapshot; borrow retains original selected place identity |
 | WXCA-15 | Earlier staged owner followed by argument failure | No call; retire the still-staged owner once, do not restore moved source |
 | WXCA-16 | Extra hidden dictionary/context/error argument at an independent ordinary boundary | Decline a mismatched physical signature; no implicit convention extension |
+| WXCA-17 | `NativeCallable` instance method under `Unmanaged`, `Cdecl` or `Stdcall`, with indirect result and explicit arguments | `this` is physical position 0 (RCX), result storage position 1 (RDX), then explicit arguments use shared physical ordinals |
+| WXCA-18 | `NativeCallable` instance method under `Vectorcall` or inherited interface subobject | Apply the selected MSVC convention and required target ABI adjustment; reject unsupported mappings rather than using the C-style receiver order |
 
 ## 7. Stable borrows and initialization
 
@@ -130,11 +132,11 @@ conformance, native body truth, collector support or exception interchange.
 | WXBR-04 | Underaligned uint32 field versus explicitly packed enclosing record | Field cannot satisfy aligned typed borrow; packed record keeps its own alignment contract |
 | WXBR-05 | Callee retains/returns a call-only projected ref | Decline undeclared lifetime/representation, no hidden pin or retained descriptor |
 | WXBR-06 | Movable/managed backing, including pin claim without admitted collector/root support | Decline missing runtime projection support |
-| WXBR-07 | init ref<T> before publication | Reserved vacant destination is not readable T or a writable live alias |
+| WXBR-07 | `ref<init T>` before publication | Reserved vacant destination is not readable T or a writable live alias |
 | WXBR-08 | True-only normal output with partial construction on false | True publishes complete T; false retires private acquisitions and leaves caller vacant |
 | WXBR-09 | Explicitly live failure output | Preserve that declared normal-failure state instead of imposing true-only vacancy |
 | WXBR-10 | Owner/init aliases or code/backing lifetime ended during invocation | Decline invalid authority/lifetime; descriptor bits do not discharge obligations |
-| WXBR-11 | Attempt to use a raw foreign unwind as ordinary output completion | Decline missing selected exception transport; no status/default result |
+| WXBR-11 | Native exception unwinds from an imported call under `NativeExceptionUnwind` | Normalize before source matching; do not publish a status/default result or failure output |
 | WXBR-12 | Actual native borrow/output lowering and runtime publication | Prove original-place access, proper reservations, every-exit cleanup and no unsupported hidden roots/pins |
 
 ## 8. Owners, cleanup and origin
@@ -152,14 +154,15 @@ conformance, native body truth, collector support or exception interchange.
 | WXOW-09 | Release offered by wrong allocator domain or same-named middle cleanup | Decline incompatible pairing/origin, not cross-free by pointer equality |
 | WXOW-10 | Owner retirement while a dependent call/loan/source remains | Decline invalid retirement until the actual dependency ends |
 | WXOW-11 | Actual cross-image resource release and code lifetime | Prove responsible allocator/cleanup provider stays usable through every real release |
-| WXOW-12 | Cleanup marker/trust flag without checked NoThrow/nonsuspending transitive truth | Decline missing complete contract; name/layout is not body proof |
+| WXOW-12 | Normal retirement invokes Cleanup, which raises an exception | Propagate that failure; do not resume generated owner/field cleanup during the unwind |
+| WXOW-13 | Exceptional unwind crosses an owner with selected Cleanup | Do not invoke compiler-generated owner Cleanup; authored crossed `finally` remains explicit |
 
 ## 9. Deployment and support
 
 | Case | Fixture | Required outcome |
 |---|---|---|
-| WXDP-01 | Direct default foreign call with normal status/output failure | Non-unwinding exact ABI, no hidden exception adapter/state |
-| WXDP-02 | Escaping C++/SEH/Terrum failure offered under runtimePolicy=1 alone | Decline missing special exception protocol |
+| WXDP-01 | Direct native call with normal status/output failure | Exact ABI and declared status/output contract; no hidden exception adapter/state |
+| WXDP-02 | Native exception unwind without `NativeExceptionUnwind` capability or runtime support | Decline affected use; no runtime-policy byte or calling convention supplies it |
 | WXDP-03 | Actual calls modify nonvolatile registers/control fields or DF | Prove required restoration/standard call state; volatile status is not a source API |
 | WXDP-04 | Optional ISA/register/unwind extension without CPU/OS/encoding support | Decline; baseline target and parent-page citation do not activate it |
 | WXDP-05 | Wrong machine/PE magic, overflowing RVA/section/relocation or invalid used record | Reject actual platform contradiction before use |
@@ -171,6 +174,8 @@ conformance, native body truth, collector support or exception interchange.
 | WXDP-11 | Private native package/version or renamed extension | No standardized bytes, body trust, managed/owner-mode union or fallback inferred |
 | WXDP-12 | Host-selected Module entry versus Main/PE startup with absent body/import/launch adapter | Require exact admitted invocation and separately complete launch contract; no guessed signature/status/default |
 | WXDP-13 | DWORD-aligned RUNTIME_FUNCTION row with byte-aligned code start/end, plus a misaligned row or UNWIND_INFO | Code RVAs need not be multiples of four; require twelve-byte rows and separately DWORD-aligned row/UNWIND_INFO storage |
+| WXDP-14 | SEH access violation, stack overflow after recovery, integer overflow, integer divide-by-zero, or other admitted event | Map to the selected Terrum exception class or opaque `NativeException`; never decode foreign payload |
+| WXDP-15 | Native exception escapes an export/callback, or Terrum exception would unwind outward through native frames | Contain reverse-boundary propagation; no foreign exception-object ABI |
 
 ## Evidence boundary
 

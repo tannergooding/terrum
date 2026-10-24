@@ -21,7 +21,7 @@ have these logical signatures:
 ```terrum
 public interface IAsyncCursor<T>
 {
-    public mut Task<bool> TryMoveNextAsync(init ref<T> item);
+    public mut Task<bool> TryMoveNextAsync(ref<init T> item);
     public mut Task<void> CloseAsync();
 }
 
@@ -331,9 +331,11 @@ and independently declared capture relationships retain their existing scope.
 | Dependencies | Retained roots, leases, guards, storage/affinity, item result backing and completion/cleanup responsibility |
 | Forwarding | Exact formal/operation mappings or checked outer/inner delegation, with no early publication or ownership duplication |
 | Schedule | Once-only synchronous acquisition and async advance, observed publication before body, item retirement before next advance and awaited close before header exit |
-| Admission | Complete supported relationships, checked semantic producer/audit trust and retained compatibility |
+| Admission | Complete supported relationships and retained compatibility; producer is responsible for published semantic facts |
 
-Independent consumers validate these requirements before affected invocation.
+Implementations claiming support preserve these requirements; consumers
+validate selected requirement structure and references, admit supported
+forms before affected use, and reject unsupported required forms.
 Linking/remapping preserves semantic operation, formal, output and phase
 identities rather than task addresses, source names or row order.
 Changing publication to invocation-return, dropping a reservation/capture,

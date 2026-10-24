@@ -114,9 +114,9 @@ These are specification obligations, not compiler or physical codec results.
 |---|---|---|
 | CDVER-01 | Defining module publishes the checked wrapper contracts | Derive eligibility from those commitments, no second registration |
 | CDVER-02 | Unrelated package attaches an attribute or matching protocol | No authority to add eligibility to another nominal type |
-| CDVER-03 | Consumer lacks required rules or domain/value obligations | Reject before generic use |
-| CDVER-04 | Binary carrier/domain/value shape is malformed or inconsistent | Reject despite producer trust; no erasure to scalar or skipped required metadata |
-| CDVER-05 | Producer validity facts require selected trust/audit admission | Use that explicit policy; metadata flag alone supplies no trust |
+| CDVER-03 | Implementation lacks required rules or domain/value obligations | No support claim for the affected generic use |
+| CDVER-04 | Producer emits a malformed carrier/domain/value record shape, range or reference | Structural safe-consumption checks reject affected use before binding or execution |
+| CDVER-05 | Consumer uses a structurally consumable producer-published validity fact | Permit reliance without semantic re-proof; producer remains responsible for truth, and an optional audit may examine the fact |
 | CDVER-06 | Linker remaps definitions/fields/target dependencies | Preserve exact nominal/carrier value identity and obligations |
 | CDVER-07 | Producer removes Transparent/required Copy/Blittable/value commitments | Breaks dependent domain/value contracts |
 | CDVER-08 | Carrier type, width or canonical identity changes | Incompatible retained domain, not a body-only change |

@@ -86,7 +86,6 @@ public struct rune : IFormattable
 }
 
 public struct InlineArray<T, const nuint N>
-    where T : [Sized]
 {
     // A writable element loan requires writable containing storage; a
     // write-qualified element cannot bypass that place permission.

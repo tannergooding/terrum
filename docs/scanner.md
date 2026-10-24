@@ -1,5 +1,11 @@
 # Compiled Terrum scanner component
 
+This document records current component behavior and prototype integration,
+not an accepted source-grant or persisted invocation contract. Source text is
+compiler input; JIT input is semantic metadata. The `Host.Source` adapter and
+persisted `scanner-10` path described below are implementation evidence only,
+not a source-file runtime capability or a selected compiler interface.
+
 The `Terrum.CodeAnalysis.Terrum` source project (`Text/SourceRange.terrum`,
 `Lexing/CharacterFacts.terrum`, `Text/Utf16CodeUnits.terrum`,
 `Text/Utf16Scalar.terrum`, `Lexing/CharacterLiteral.terrum`,
@@ -160,8 +166,9 @@ component-specific summaries.
 
 ## Storage and host boundary
 
-The compilation host explicitly grants named fixed-buffer capabilities through
-`HostBuffer` descriptors. The scanner adapter grants:
+The current prototype adapter binds named fixed-buffer capabilities through
+`HostBuffer` descriptors. This binding table describes implementation
+evidence, not an accepted ABI or compiler/JIT contract. The adapter grants:
 
 | Capability | Element type | Access | Purpose |
 |---|---|---|---|
@@ -177,26 +184,16 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 | `Host.EscapeKeywords` | `int32` | Read-only | Closed canonical escape spellings, packed in the same kind/length/code-unit format with Identifier kind |
 
 The first nine grants have indices 0–8; the escape catalog is grant 9.
-The scalar frontend adds writable `int32` `Host.Frontend` at index 10
-(2,274 words) and `Host.FrontendProgram` at index 11 (25,025 words).
-The latter holds up to 32 complete-program frames of 780 words, with 64
-expression nodes and 64 corresponding call-target words per function, plus
-61 temporary alias words cleared before publication. `Frontend` carries
-standalone v87 results, zero complete-publication scratch, or the decoded v88
-comparison summary; a completed program uses v88 headers/frame bodies. These
-are separate protocols, not scanner records or semantic-module revision
-numbers. See the
-[composition inventory](implementation/bootstrap-frontend-composition.md#exact-private-identities-and-resources)
-for current bounds and audit limitations, and the
-[module revision inventory](implementation/terrum-code-analysis.md#private-semantic-module-revisions)
-for feature-selected persistence.
-
-The ordinary indexed frontend is source-bounded rather than limited to 64
-tokens. The separate, unapproved
-[summary invocation profiles](proposals/scalar-frontend-invocation-profile.md)
-select 64 or at most 16,385 total tokens including EOF and require complete
-v88 publication. Neither widens the scanner's ten-buffer identity or accepts
-a persisted profile merely because buffer creation is implemented.
+An existing scalar frontend prototype adds writable `Host.Frontend` and
+`Host.FrontendProgram` buffers and emits private v87/v88 projections. Those
+projected layouts and their fixed capacities are implementation experiments,
+not selected compiler interfaces or source limits. The C#-authored and
+Terrum-authored compilers are standalone; the transition fallback invokes
+the C# compiler process on original source, not a Terrum AST or partial
+semantic projection. See the
+[compiler transition inventory](implementation/bootstrap-frontend-composition.md)
+and [component inventory](implementation/terrum-code-analysis.md) for current
+prototype status and migration gaps.
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.
@@ -213,10 +210,12 @@ execution. No source operation can dispose them, and no loan can escape that
 scope. More general span parameters, slices, overlapping mutable loans and
 owner-derived stored views still require the full access/lifetime model.
 
-The adapter copies source units into one 32-bit word per element and grants at
-most 16,384 source units. This is an explicit compiler-host interchange format;
-it chooses neither UTF-16 as runtime text's default nor a general `char16[]`
-storage ABI. Code units are not assumed to be valid Unicode scalars.
+The current scanner adapter copies source units into one 32-bit word per
+element, and its prototype grants at most 16,384 source units. That ceiling
+and packing are implementation-profile details, not accepted source-size or
+general `char16[]` storage limits. `Host.Source` is a fresh input grant, not
+persisted token data or an interchange between the C# and Terrum compilers.
+Code units are not assumed to be valid Unicode scalars.
 
 ## Observable scanning contract
 

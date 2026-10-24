@@ -3,9 +3,12 @@
 The language has one explicit conversion form, `T(expression)`. A literal
 without an established type is constructed directly in its target format; a
 typed expression uses a checked conversion contract. Bare numeric literals
-have no fallback type. Numeric operators are checked by default in every
-build. Actual support for conversions, literal forms and constant evaluation
-is documented in [implementation](../implementation.md).
+have no fallback type. Ordinary integer add/subtract/multiply/negate are
+checked in Development/Debug and wrapping in Release; explicit policies and
+other arithmetic operations retain their separate contracts in
+[primitive operators](language/primitive-operators.md). Actual support for
+conversions, literal forms and constant evaluation is documented in
+[implementation](../implementation.md).
 
 ## Definitions and notation
 
@@ -23,8 +26,10 @@ form, not a prefix cast; `FromBits`/`ToBits` denote representation operations,
 not numeric conversions.
 
 Representation and access are separate from numeric conversion. The canonical
-forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`; `init ref<T>`
-denotes initialization of vacant storage, not general writable access. `write`
+forms are `ref<T>`, `ref<init T>`, `ptr<T>`, `box<T>`, `val<T>` and
+`own<T>`, with explicit GC-backed forms `gc C`, `gc box<T>` and
+`gc ref<T>`. `ref<init T>` denotes an initialization capability for vacant
+storage, not general writable access. `write`
 qualifies access through a reference/view and neither creates authority nor
 changes immutable fields or nominal restrictions. `mut` applies to a place or
 receiver and is not a generic type-argument qualifier. A value with `write`
@@ -89,7 +94,7 @@ does not expand or narrow the selected source conversion pairs.
 Character code units are not integer primitives: direct floating-to-`char16`
 is not included in the numeric conversion contract. Explicit conversion from
 `char16` to `float32` or `float64` uses its unsigned code-unit value; every
-value is exact, so this conversion is total and valid in `[NoThrow]`.
+value is exact, so this conversion is total and cannot fail.
 It does not decode or validate surrogate pairs as Unicode scalar values.
 A value-based
 conversion still range-checks its source: `int32(uint32(0xFFFF_FFFF))` fails,
@@ -117,16 +122,40 @@ conversion; it supplies no extension receiver. Contextual primitive literals
 are not retroactively routed through arbitrary nominal conversions.
 See the [source contract](grammar-spec.md#513-operators-assignments-and-expression-gaps).
 
-The selected `pin ref<T>` to matching `ptr<T>` implicit conversion is a
-narrow built-in exception, not an implicit numeric or nominal conversion
-framework. The complete referent type, access and lifetime/pin/backing
-dependencies are preserved; it acquires no pin and promises no backend-wide
-representation identity. Applicability recognizes this direct edge without
-conversion-operator lookup, intermediate types or transitive chains.
-Under [per-argument ranking](language/calls-and-inference.md#applicability-and-best-candidate),
-identity is better than access attenuation, and attenuation better than this
-other admitted direct binding. Crossed advantages leave the pair incomparable; the edge
-does not enable new tie-breakers. Other exceptions require separate contracts.
+GC backing does not participate in implicit conversion or normal-box
+normalization. The explicit construction form `gc new C(arguments)` selects
+GC backing; an expected `gc C` may also select that backing for
+`new C(arguments)`. Likewise, explicit `box<T>(value)` may use an expected
+`gc box<T>`, while `gc box<T>(value)` selects it without an expected type.
+These forms retain distinct complete backing identities and introduce no
+implicit boxing.
+
+The explicit type-call conversion `C(gcObject)` converts a `gc C` handle to
+stable normal `C` by pinning the whole object. Copies of the converted handle
+share the pin support until the last converted handle retires. This conversion
+is not implicit and does not create a pointer. `ref *root` explicitly
+reborrows an exact `gc ref<T>` root as stable `ref<T>`, pinning that exact
+place for the result's bounded lifetime. Neither operation increases access
+authority or promotes an ordinary reference.
+
+Extracting a raw `ptr<T>` from a checked reference is a separate explicit
+operation and requires unsafe authorization, for example
+`unsafe(&*stableRef)`. The pointer preserves the exact referent and available
+access but is non-owning and non-rooting; it cannot outlive its supporting
+reference/pin/backing. No implicit checked-reference-to-pointer edge exists, and
+overload applicability/ranking does not consider any of these explicit
+operations. A statically apparent dangling raw address may be retained only
+as inert data under explicit unsafe authorization and a suppressible warning;
+that does not authorize a later invalid dereference.
+
+GC allocation and the runtime support for root registration or pinning may
+require resources. If an admitted operation encounters recoverable allocation
+exhaustion, it follows the existing
+[allocation-failure contract](runtime/standard-failures.md#4-recoverable-allocation-exhaustion):
+publish no successful allocation, root or stable reference, and clean actual
+partial acquisitions. Other resource failures retain their selected runtime
+contract. These operations do not gain an optional/result fallback or a new
+failure category, and no particular recoverable-allocation profile is implied.
 
 Resolve known parameter/operand/target types before unresolved literals when
 that yields a unique answer. For `F<T>(T left, T right)`, `F(knownInt32, 1)` can
@@ -208,7 +237,7 @@ sign/carrier API:
 
 ```terrum
 [Literal(LiteralKind.Integer)] [ConstEval]
-public static bool TryParse(TextSpan text, init ref<Port> value);
+public static bool TryParse(TextSpan text, ref<init Port> value);
 ```
 
 The parser consumes the complete unquoted numeric token spelling, including
@@ -231,7 +260,7 @@ neither another overload nor a runtime parser is a fallback.
 `[ConstEval]` opts a declaration into the
 [deterministic, resource-bounded evaluator](language/proof-and-constant-evaluation.md).
 It implies [checked pure-form support](language/published-predicates-and-effects.md),
-not ordinary-form `NoThrow` or guaranteed termination/all-input success.
+not ordinary-form totality or guaranteed termination/all-input success.
 Admissibility follows the selected execution path; mode-guarded runtime effects
 can remain on unselected ordinary paths, but an unguarded admitted pure-form
 effect cannot be excused by one successful evaluation.
@@ -274,7 +303,7 @@ failure. Numeric conversion is distinct from bit reinterpretation.
 | Floating to integer, checked | For either floating source and each of `int32`, `uint32`, `int64` and `uint64`, truncate toward zero, then range-check; throw if the truncated result is out of range. NaN has no integer representation and throws; infinities are out of range. `char16` is excluded as a code-unit destination. |
 | Floating to integer, unchecked or explicitly saturating | Truncate toward zero, then saturate out-of-range results to the destination endpoints, including infinities. NaN converts to zero. This is **not** modulo narrowing. |
 | Integer/floating to floating | Follow IEEE-754 target-format conversion with default round-to-nearest, ties-to-even. Inexact results, finite overflow to infinity, and underflow to subnormal/zero do not fail; NaN and infinities are ordinary floating values. No floating-point exception traps are enabled. Other rounding modes require explicit APIs/adapters; there is no global floating-point control-word API. |
-| `char16` to floating | For explicit conversion to `float32` or `float64`, interpret the source as its unsigned UTF-16 code-unit value in `[0, 65535]`. All values are exactly representable, so conversion is total and valid in `[NoThrow]`; this is not Unicode scalar decoding. |
+| `char16` to floating | For explicit conversion to `float32` or `float64`, interpret the source as its unsigned UTF-16 code-unit value in `[0, 65535]`. All values are exactly representable, so conversion is total and cannot fail; this is not Unicode scalar decoding. |
 | Bit reinterpretation | `FromBits`/`ToBits` preserve the specified representation, including payload bits; this is not numeric conversion. Width, validity and representation must match the declared operation. |
 
 An admitted nonidentity floating numeric conversion returning NaN produces
@@ -317,8 +346,12 @@ explicitly. Core policy domain and case names are illustrative, not fixed.
 Integer-to-integer wrapping conversion reduces modulo 2^N for an N-bit
 destination; the specified non-checked floating-to-integer conversion
 truncates toward zero and saturates, with NaN converting to zero. Selection
-is not ambient checkedness flowing into arbitrary callees. The unannotated
-operation remains checked. A plain policy scope prefers matching variants,
+is not ambient checkedness flowing into arbitrary callees. For conversion
+operations and APIs whose owner specifies a checked default, the unannotated
+operation remains checked. Ordinary integer add/subtract/multiply/negate and
+their updates instead use the source arithmetic profile defined by
+[primitive operators](language/primitive-operators.md#integer-arithmetic-and-bit-operations).
+A plain policy scope prefers matching variants,
 then tries enclosing scopes and the unannotated operation; use
 `require policy<Arithmetic.Wrap>` to reject a missing wrapping variant rather
 than silently accept checked behavior. Exact variant declaration syntax and
@@ -362,9 +395,10 @@ Character spelling and contextual typing follow the
 `char16(value)` conversion checks the code-unit range, not Unicode scalar
 validity; surrogate code units are representable and must be validated when
 decoding text.
-Narrowing and signed/unsigned range failures terminate under the fail-fast
-policy or propagate under the selected checked-exceptions policy. These
-compiler-generated failures do not imply a general exception-object ABI.
+Narrowing and signed/unsigned range failures follow the ordinary local-failure
+rules: an explicit unsafe handler may catch them, and an unhandled failure
+follows the module's fail-fast policy. These compiler-generated failures do
+not imply a native exception ABI.
 
 String targets use registered text parsers too. Their input is validated
 decoded scalar text after escapes or explicit raw transformations, without

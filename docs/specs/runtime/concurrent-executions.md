@@ -374,8 +374,8 @@ pointer bits, a full fence or a successful CAS supplies no reclamation proof.
 Retained artifacts and independently replaceable boundaries preserve required
 operation/representation/order identities, outcome effects, publication and
 full-boundary promises, source dependencies and actual lifetime/protocol
-requirements. Consumers reject missing required facts and unsupported
-profiles before use. Logical selection allocates no opcode, feature number,
+requirements. An implementation cannot claim support without the required
+facts and profiles. Logical selection allocates no opcode, feature number,
 event table, certificate format or optional Attr meaning.
 
 Optimization is refinement of the complete source contract. It can elide
@@ -387,8 +387,9 @@ Compiler-owned helper accesses still need valid extents and compatible
 protocols. Source contracts, not instruction counts, are the boundary.
 
 Checked safe misuse is rejected under its owning authority/failure rules.
-Existing explicit unsafe/producer trust moves proof responsibility, not the
-semantics of a valid operation. Invalid access loses its promised access
+Explicit unsafe implementation responsibility assigns correctness to the
+author/provider, not the consumer; it does not change the semantics of a valid
+operation. Invalid access loses its promised access
 guarantees; it does not license arbitrary whole-program data-race UB,
 unrelated traps or invented unreachable code. This is not unsafe containment.
 

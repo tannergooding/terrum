@@ -6,6 +6,9 @@ They are public definitions with exactly the formals shown, in the
 `Terrum` namespace. They use the ordinary
 [self-interface and witness rules](interface-witnesses.md), not structural
 member discovery, a universal numeric root or new operator syntax.
+The [semantic IL display map](../il-instruction-set.md#operation-identity-encoding-and-presentation)
+does not turn these selected member witnesses into primitive opcodes or
+weaken their exact contracts.
 
 The groups expose existing scalar operations and Abs/Min/Max/Clamp.
 Heterogeneous operand/result families, identity constants, parsing,
@@ -15,16 +18,15 @@ are not prerequisites and are not adopted by these declarations.
 ## 1. Exact capability groups
 
 All shown member requirements are public static, with required ordinary
-by-value inputs. The self formal
-binds to the complete implementing type. Its Copy requirement permits the
-ordinary repeated value use in these scalar contracts; it grants no layout,
-allocation, thread or lifetime property. TCount is independently Copy.
-There are no defaults, params inputs, receivers, init outputs or implicit
-numeric promotions.
+by-value inputs. The self formal binds to the complete implementing type.
+Unmarked type formals already admit the non-unique Copy-capable default
+domain, so these declarations have no explicit `[Copy]` constraints. Copy
+grants no layout, allocation, thread or lifetime property. There are no
+defaults, params inputs, receivers, init outputs or implicit numeric
+promotions.
 
 ```terrum
 public interface IAdditiveOperators<this TSelf>
-    where TSelf : [Copy]
 {
     public static TSelf operator +(TSelf value);
     public static TSelf operator -(TSelf value);
@@ -33,7 +35,6 @@ public interface IAdditiveOperators<this TSelf>
 }
 
 public interface IMultiplicativeOperators<this TSelf>
-    where TSelf : [Copy]
 {
     public static TSelf operator *(TSelf left, TSelf right);
     public static TSelf operator /(TSelf left, TSelf right);
@@ -41,14 +42,12 @@ public interface IMultiplicativeOperators<this TSelf>
 }
 
 public interface IIncrementOperators<this TSelf>
-    where TSelf : [Copy]
 {
     public static TSelf operator ++(TSelf value);
     public static TSelf operator --(TSelf value);
 }
 
 public interface IEqualityOperators<this TSelf>
-    where TSelf : [Copy]
 {
     public static bool operator ==(TSelf left, TSelf right);
     public static bool operator !=(TSelf left, TSelf right);
@@ -56,7 +55,6 @@ public interface IEqualityOperators<this TSelf>
 
 public interface IComparisonOperators<this TSelf>
     : IEqualityOperators<TSelf>
-    where TSelf : [Copy]
 {
     public static bool operator <(TSelf left, TSelf right);
     public static bool operator <=(TSelf left, TSelf right);
@@ -65,7 +63,6 @@ public interface IComparisonOperators<this TSelf>
 }
 
 public interface IBitwiseOperators<this TSelf>
-    where TSelf : [Copy]
 {
     public static TSelf operator &(TSelf left, TSelf right);
     public static TSelf operator |(TSelf left, TSelf right);
@@ -74,8 +71,6 @@ public interface IBitwiseOperators<this TSelf>
 }
 
 public interface IShiftOperators<this TSelf, TCount>
-    where TSelf : [Copy]
-    where TCount : [Copy]
 {
     public static TSelf operator <<(TSelf value, TCount count);
     public static TSelf operator >>(TSelf value, TCount count);
@@ -83,14 +78,12 @@ public interface IShiftOperators<this TSelf, TCount>
 }
 
 public interface IAbsoluteValue<this TSelf>
-    where TSelf : [Copy]
 {
     public static TSelf Abs(TSelf value);
 }
 
 public interface INumericSelection<this TSelf>
     : IComparisonOperators<TSelf>
-    where TSelf : [Copy]
 {
     public static TSelf Min(TSelf left, TSelf right);
     public static TSelf Max(TSelf left, TSelf right);
@@ -104,7 +97,6 @@ public interface IScalarNumber<this TSelf>
       IIncrementOperators<TSelf>,
       IAbsoluteValue<TSelf>,
       INumericSelection<TSelf>
-    where TSelf : [Copy]
 {
 }
 ```
@@ -178,7 +170,7 @@ For example, an ordinary generic helper can request just selection:
 
 ```terrum
 T Limit<T>(T value, T min, T max)
-    where T : [Copy], INumericSelection<T>
+    where T : INumericSelection<T>
 {
     return T.via<INumericSelection<T>>.Clamp(value, min, max);
 }
@@ -191,8 +183,8 @@ not sufficient. A use of addition within that definition would additionally
 need its declared additive evidence; the compiler cannot borrow it from a
 concrete caller's composite.
 
-These interfaces publish no unconditional Pure, ConstEval, NoThrow, allocation
-or nonblocking guarantee. Implementations expose and establish their actual
+These interfaces publish no unconditional Pure, ConstEval, failure-free,
+allocation or nonblocking guarantee. Implementations expose and establish their actual
 supported forms/effect bounds; callers may retain an available checked
 member refinement under the ordinary rules.
 An arithmetic interface name or constant input does not supply a constant
@@ -202,8 +194,9 @@ IScalarNumber does not add automatic author opt-in.
 ## 4. Publication and admission
 
 Retain exact Core interface/self/formal/member identities, complete instances,
-Copy constraints, inherited requirements, selected implementations and all
-published parameter/result, predicate, effect, phase and target dependencies.
+default Copy-capable formal domains, inherited requirements, selected
+implementations and all published parameter/result, predicate, effect, phase
+and target dependencies.
 Generic substitution, witness projection, packing and compatible replacement
 preserve those obligations. A new optional provider member cannot replace a
 missing required binding.

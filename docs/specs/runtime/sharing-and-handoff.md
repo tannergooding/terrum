@@ -10,6 +10,9 @@ These rules supply neither a thread/lock API catalog nor a physical codec.
 mixed-SC/fence, causal and lifetime-event rules. Logical protocol admission
 still needs the actual operation, representation and target profile; it does
 not prove an arbitrary implementation's permitted observations.
+Use the shared [definitions](../language.md#definitions-and-notation) for
+copying, aliases, references, lifetime and loans. Cross-thread authority adds
+the protocol duties below; it is not implicit in a reference or an ordinary move.
 
 ## Capability eligibility is not current authority
 
@@ -59,7 +62,6 @@ where T : [ThreadTransferable]
 [ThreadShareable]
 where T : [ThreadShareable]
 public struct Snapshot<T>
-    where T : [Copy]
 {
     public T Value;
 
@@ -134,12 +136,15 @@ can be checked mechanically; the unsafe boundary identifies the remaining
 implementation responsibility rather than supplying a proof of it.
 An unsafe callable instead exposes its actual caller obligations.
 
-Binary consumers follow the existing explicit producer/audit trust policy
-for semantic implementation facts. Provenance or a record flag is not truth;
-untrusted implementations need the required audit or are declined. Caller
-checking still validates authority, conditions, compatibility and required
-profiles. Trust never waives malformed framing, unknown required semantics,
-missing retained dependencies or a mismatched call/representation contract.
+The producer is responsible for the truth of published semantic implementation
+facts. A binary consumer validates selected record structure, references and
+required support before affected use, then may rely on published body facts
+without semantic re-proof. This does not prove arbitrary external provider
+behavior or authored unsafe promises. Caller checking still validates
+authority, conditions, compatibility and required profiles. Provenance or a record flag
+does not replace the producer's obligation or waive malformed framing,
+unknown required semantics, missing retained dependencies or a mismatched
+call/representation contract.
 
 ## Confined handoff and return of authority
 
@@ -311,7 +316,7 @@ result or perform an implicit blocking join.
 | Boundary | Required treatment |
 |---|---|
 | Invalid or unestablished safe source authority/capability/protocol | Diagnose before the affected operation; no inferred repair or optional-only warning |
-| Missing/incompatible required imported rule, condition or representation | Reject binding/admission before affected use, including under producer trust |
+| Missing/incompatible required imported rule, condition or representation | No support/compatibility claim for affected use; producer correctness does not replace required support |
 | Permitted dynamic contention or mismatch | Follow the primitive's declared wait, Try/status or checked failure contract; no token/access before acquisition success |
 | Checked value/precondition/acquisition failure | Follow ordinary failure/unwind with actual staged holders and retained effects; never fabricate authority, success or a default output |
 | Unsafe caller or implementation violates its stated obligations | The invalid operation lacks its promised access/value/lifetime guarantees; no automatic repair, new synchronization or arbitrary whole-program data-race UB |
@@ -328,11 +333,14 @@ Retained contracts record exact capability identities, conditional premises,
 complete forms and generic mappings, admitted protocol/extent/operation
 identities, authority and generation bindings, publication/return/release
 endpoints, effects, backing, affinity, cleanup and required rules/profiles.
-Consumers may rely only on the declared conditions and guarantees. Replacement
+After mandatory structural checks and support admission, consumers may rely
+only on the declared
+conditions and guarantees. Replacement
 cannot silently remove a relied-on capability, strengthen its conditions,
 add caller obligations, weaken ordering/return/guard promises or change an
 observable failure/cleanup contract.
-Private proof, specialization or producer trust cannot change source binding.
+Private proof, specialization or published producer facts cannot change source
+binding.
 
 Logical approval assigns no capability bit, guard token layout, reservation
 table, proof certificate, feature number, opcode or native helper ABI.

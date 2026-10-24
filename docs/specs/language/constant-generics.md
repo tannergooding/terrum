@@ -178,13 +178,15 @@ Ordinary aggregate/parameter defaults keep their wider constant domain.
 | Formal and expression | Declaring owner/ordinal, domain terms, earlier-formal default dependencies and already-bound operation identities |
 | Dependencies | Construction/validity/value-codec rules, required programs or intrinsics, target ABI and definition/load identities |
 
-The defining module publishes these checked contracts; an unrelated package
-cannot attach eligibility to another type. Repeated imports of the same
-definition/contract preserve identity, not import-order priority.
-Consumers establish validity through the selected admission/trust policy,
-not an unstated execution of the current constructor or equality body.
-Unknown required rules, incompatible carrier/validity contracts or malformed
-values reject before they can justify a generic instantiation.
+The defining module publishes these contracts and is responsible for their
+truth; an unrelated package cannot attach eligibility to another type.
+Repeated imports of the same definition/contract preserve identity, not
+import-order priority. Consumers validate selected metadata structure,
+references and support before affected use, then may rely on producer-
+published constructor/equality facts without semantic re-proof; they do not
+repeat source binding. An implementation claiming support preserves the
+required rule, carrier, validity and value-representation semantics. Unknown,
+incompatible or structurally malformed requirements reject affected use.
 
 Linking and remapping preserve the complete domain and canonical value while
 changing physical references. Independently supplied records cannot erase

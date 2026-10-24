@@ -1,7 +1,11 @@
 # Windows x64 exception ABI probe
 
 This is an independently executed ABI check, not evidence for a general Terrum
-exception ABI. The compiler now separately emits an explicit bounded
+exception ABI. It records the current legacy prototype and does not establish
+conformance to the accepted explicit-unsafe-catch, normal-only Cleanup or
+native-boundary schema; see [CG-003](implementation/conformance-gaps.md#cg-003)
+and [CG-004](implementation/conformance-gaps.md#cg-004). The compiler now
+separately emits an explicit bounded
 `checked-exceptions` profile with a private, versioned four-reason identity,
 Windows scope dispatch and exceptional cleanup; `fail-fast` retains its
 original termination behavior. Compiler-generated source functions preserve

@@ -3,10 +3,15 @@
 This chapter owns logical `captured-exception-owner/1` and
 `lexical-exception-capture/1`: the exact Core owner, its compiler-known
 creation context, transfer of an existing event and consuming propagation.
-[Local failures](local-failures.md) owns fresh payloads, catch inputs and
+[Local failures](local-failures.md) owns exception objects, catch inputs and
 selection; [normal and exceptional exits](../language-contracts.md#33-normal-and-exceptional-exits)
 owns ordinary unwind and causal replacement. Capture changes responsibility,
 not those exit rules.
+
+The captured event may carry an ordinary class exception object or the exact
+Core `UnreachableException` value payload. Capture owns the complete event
+context and responsibility; it does not turn the Copy payload into an
+exception object or duplicate event identity.
 
 This initial contract selects no typed/shared capture family, payload-access
 API, public handler token, ambient current-exception query, thread capability
@@ -35,17 +40,18 @@ construction, default/zero/null owner, payload-argument overload, inferred
 type argument or public factory for a native packet.
 Vacant owner storage is not an empty complete CapturedException.
 
-The owner is not Copy and is not an ordinary Exception payload or catch
+The owner is not Copy and is not an ordinary exception class or catch
 category. It has no implicit conversion to/from its hidden payload, a
-descriptor, native packet or other exception representation. No Blittable,
-ManagedStorable, fixed size, pin, heap allocation or allocator choice follows.
+descriptor, native packet or other exception representation. No `Blittable`
+or `ManagedStorable` commitment, stable layout/size guarantee, pin, heap
+allocation or allocator choice follows.
 Supported storage and transport retain their own complete contracts.
 Opaque internal state is not structurally accessible for partial field moves.
 
 The selected runtime publishes the actual creation, transfer and synchronous
 nonthrowing/nonsuspending retirement programs, effects, resource requirements
 and dependent payload/cause support. This selection supplies no Pure,
-ConstEval or unconditional NoThrow creation promise. Unsupported required
+ConstEval or failure-free creation promise. Unsupported required
 support declines before affected use; a spelling cannot synthesize a runtime.
 
 ## 2. Lexical source context
@@ -66,8 +72,8 @@ Ordinary type aliases and qualified member lookup may still select the exact
 direct invocation.
 
 An entered nested handler selects its **own** event. If that handler already
-transferred responsibility, Capture and bare rethrow reject there; neither
-falls back to an enclosing handler. After the nested handler ends, the
+transferred responsibility, Capture and explicit rethrow of that event reject
+there; neither falls back to an enclosing handler. After the nested handler ends, the
 enclosing source handler's own retained state applies again.
 A nested try body without a newly entered handler does not change that source.
 
@@ -105,7 +111,7 @@ It cannot restore ownership to the source handler. A runtime delivery failure
 must preserve that owner or settle it through the admitted failure contract;
 it cannot lose the event between holders.
 
-Successful Capture makes another Capture or `throw;` of that source
+Successful Capture makes another Capture or explicit throw of that source
 activation invalid, even if the owner was subsequently moved or retired.
 At a flow join, source ownership must hold on every path reaching either
 operation; unresolved maybe-transferred state is not permission to reuse it.
@@ -113,48 +119,32 @@ A newly entered handler after consuming propagation may Capture the same
 event again: each successful capture creates a new affine owner activation,
 not a globally once-capturable event.
 
-## 4. Catch borrows and complete dependencies
+## 4. Catch bindings and complete dependencies
 
-Capture is valid with a live readonly catch input. It transfers the event's
-owner, not the descriptor, and does not silently end the input to perform that
-transfer. Existing catch descriptors and descriptor copies/reborrows retain
-their original checked handler extent, access and dependencies.
-Ordinary payload value copies instead keep their own complete backing and
-may escape only when those ordinary dependencies permit it.
-No descriptor is returned as part of the public owner.
+Capture is valid while the source handler has a live concrete exception
+binding or common `IException<_>` view. It transfers responsibility for the
+event, not the managed exception object or catch binding; the source handler
+cannot recapture or explicitly throw that transferred event. The binding
+remains usable under its ordinary handler scope, access and object-root
+contract. No payload descriptor or copied event is part of the public owner.
 
-The selected storage/root protocol keeps the same logical payload usable
-through those live inputs while the new owner remains responsible. It need
-not promise an immutable payload or stable raw address.
-Already-permitted alias mutations remain actual payload changes, not a
-snapshot. A Copy catch input remains an ordinary value copy with its own
-backing; it is not a copied event.
+Keeping the captured event alive retains the same object and its causes; it
+does not extend unrelated backing, guards, source generations or external
+resources referenced by that object. Storing/returning the owner requires
+all exception/cause dependencies, roots, code/runtime/allocator dependencies
+and protocol obligations to survive that destination and every admitted
+path. The implicit result-source relationship retains that actual event
+closure; it is not a new general DependsOn/Captures selector spelling or a
+lifetime waiver for parameterless APIs.
 
-Keeping the captured event alive does not extend a catch input past its
-original handler scope or keep an exited payload source frame valid.
-Storing/returning the owner requires all payload and cause sources, storage
-generations, guards, roots, code/runtime/allocator dependencies and protocol
-obligations to survive that destination and every admitted path.
-The implicit result-source relationship retains that actual event closure;
-it is not a new general DependsOn/Captures selector spelling or a lifetime
-waiver for parameterless APIs.
-
-Owner transfer between valid holders can preserve a catch borrow when the
-payload source remains live through that borrow. A borrow of the **owner's
-slot** separately blocks a conflicting move/replacement of that slot.
-Neither kind of reference supplies another owner or permission to throw
-through a readonly descriptor.
-
-Retirement or propagation must not invalidate an outstanding borrow.
-Ordinary normal scope cleanup order is unchanged: a captured local that would
-retire before its live catch borrow ends is invalid, rather than repaired by
-topological cleanup reordering or automatic lifetime extension.
-Publish to an independently valid holder, use an admitted exit transfer, or
-end relevant inputs under their ordinary scope rules.
-No owner arena, silent borrow release or pin is inserted.
+A managed catch handle/view is not another propagation owner. It cannot
+duplicate responsibility, authorize rethrow after Capture, or prevent
+conflicting transfer of the affine `CapturedException` holder. Its ordinary
+object backing remains valid only under its declared dependency contract.
+No owner arena, silent lifetime extension or pin is inserted.
 
 For example, assuming the eligible, independent ParseFailure from
-[the local-failure example](local-failures.md#4-catch-subjects-and-binding-modes)
+[the local-failure example](local-failures.md#4-catch-subjects-and-bindings)
 and admitted Inspect/runtime support:
 
 ```terrum
@@ -166,9 +156,9 @@ CapturedException RetainFailure()
         {
             throw new ParseFailure(int32(7));
         }
-        catch (ref<ParseFailure> failure)
+        catch (ParseFailure failure)
         {
-            Inspect(failure->Offset);
+            Inspect(failure.Offset);
             return CapturedException.Capture();
         }
     }
@@ -181,8 +171,8 @@ unsafe
 }
 ```
 
-The staged return owner survives handler cleanup; the catch input ends before
-the returned owner escapes. The later throw preserves the original event,
+The staged return owner survives handler completion; the catch binding is
+limited by its ordinary handler scope. The later throw preserves the original event,
 not a copied ParseFailure with a new origin. The example does not authorize
 returning an event whose payload depends on the exited RetainFailure frame.
 
@@ -204,9 +194,9 @@ the **same** event, payload, origin and existing causes. It does not execute a
 new payload throw, restore the source, replay previous cleanup or mutate
 shared payload state to manufacture a preserved origin.
 
-Handler/local cleanup and ending relevant inputs precede transfer out of
-those scopes and further handler selection. This permits direct consuming
-throw of a just-captured event from its reference handler.
+Structured exits and applicable `finally` code run before transfer reaches
+outer handler selection. This permits direct consuming throw of a just-captured
+event from its handler.
 While that cleanup runs, staged propagation keeps the event live.
 Any handler that still owns a different active event retains it as a cause
 when the captured event escapes, under ordinary causal replacement.
@@ -221,13 +211,13 @@ After transfer, delivery failure likewise retains pending responsibility
 under the admitted failure contract rather than reviving the source.
 
 A wrapper that merely contains a captured owner has no captured-throw role.
-If that wrapper is an eligible fresh Exception payload, throwing it forms a
+If that wrapper is a newly created eligible exception object, throwing it forms a
 new outer event with the wrapper's ordinary owned-field obligations; it does
 not flatten its hidden captured field or preserve the old top-level origin.
 
 ## 6. Handler completion, retirement, phases and effects
 
-Normal handler completion ends its locals and input bindings in ordinary
+Normal handler completion ends its locals and catch bindings in ordinary
 order. If it still owns its active event, ordinary handling retires that event.
 If Capture transferred it, handler completion does not retire, recapture,
 rethrow or add it as a cause merely because lexical context still exists.
@@ -269,9 +259,10 @@ no unconditional ThreadTransferable or ThreadShareable fact.
 Effect bounds include actual creation preparation/publication, transfer,
 payload/cause retirement, authored cleanup and escaping failures. Zero
 arguments and opaque storage do not make Capture pure, constant-evaluable,
-allocation-free or failure-free. Internally handled preparation failure
-need not escape an enclosing NoThrow body; the complete path must prove that
-bound. Proving away a call cannot discard its ownership transition or effects.
+allocation-free or failure-free. An internally handled preparation failure
+need not escape an enclosing operation, but the complete path must satisfy
+its actual effect and evaluation contracts. Proving away a call cannot discard
+its ownership transition or effects.
 Fail-fast/process termination remains a distinct no-cleanup condition.
 
 ## 7. Foreign mapping, retained contracts and admission

@@ -79,6 +79,13 @@ can use its separately checked access attenuation; that adapter is not equality
 of the unadapted signatures. A type name or compatible machine register does
 not authorize it.
 
+Matching actual reference dependencies does not make different declarations
+interchangeable. A direct reference and a wrapper-carried reference can
+designate the same place, while their declared source permissions/provenance,
+retained extents, authority and invalidation obligations still require the
+comparisons above. Descriptor copying does not erase any of those facts or
+turn a reference to source storage into backing-only forwarding.
+
 Formal names and local formal rows may differ. Map corresponding declaration
 formals by kind and ordinal, then compare their substituted terms and
 constraints; do not compare raw owner row numbers or invent a substitution
@@ -94,6 +101,16 @@ consumer still retains its full layout obligations. Additional unrequested
 exports or operations are permitted only when they leave every retained
 obligation intact, including closed cases or complete witness requirements.
 
+Public-contract artifact contents must also support every published
+independent-use promise. A reference artifact used for required constant
+execution retains the checked `ConstEval` Body or an equivalent complete
+admitted program and its dependencies; a null, empty or throwing stub does
+not satisfy that promise. A published `Blittable` value retains the field and
+representation facts needed for consumer validation. A non-Blittable
+reference facade may omit private implementation fields when its contract
+allows, but its implementation artifact cannot omit the actual fields.
+Exact codecs and artifact-closure rules remain representation work.
+
 For a PropertyDef, compare its selected owner and complete value type, then
 its **referenced getter contract**: receiver, parameters/modes, result, access,
 effects, state and dependencies. The property-selected accessor correspondence
@@ -106,21 +123,19 @@ requirement. Other accessor kinds require their own admitted schemas.
 
 Only an explicitly defined contract dimension has a strengthening relation.
 Do not treat every attribute, flag, clause, capability or integer as an ordered
-guarantee. Unknown required facts reject even when a known fact would otherwise
-make them unnecessary to a particular caller.
+guarantee. A compatibility/support claim includes every required fact even
+when another fact would make it unnecessary to a particular caller. The
+specification does not prescribe how an implementation handles a fact it
+does not support.
 
-For the currently assigned MethodDef Effects promises, after valid owner,
-shape and applicability checks:
+For the currently assigned MethodDef Effects promises in a valid artifact:
 
 | Fact | Provider satisfies expectation when |
 |---|---|
-| `NoThrow` | An expected promise is preserved; adding it may reduce the permitted failure effects without changing other promised behavior |
 | `DoesNotReturn` | An expected promise is preserved; adding it is not permission to violate a promised normal completion or another outcome/phase obligation |
 | Caller-unsafe | A safe expectation never selects a caller-unsafe provider; dropping the requirement is permitted while preserving the other contracts |
 
-The masks are not compared for equality or numeric magnitude. `NoThrow` is
-not purity, no-allocation, no-blocking, no-safepoint or a target-independent
-failure policy. The
+The masks are not compared for equality or numeric magnitude. The
 [clause matrix](contract-clauses.md) governs owner/cardinality/applicability,
 not this variance table.
 
@@ -131,7 +146,9 @@ that the provider's checked guarantees imply the expected ones, using the
 applicable structural/scalar rules and portable proof floor. Exact normalized
 predicate identity can establish equality. An opaque predicate is not a
 general numeric summary, and equal names, sample results or private bodies
-cannot establish arbitrary implication. Unestablished compatibility rejects.
+cannot establish arbitrary implication. Compatibility is not established by
+an unproven implication; the specification does not prescribe the
+implementation's response.
 
 Implication retains guards and phases. A guarantee only after a true result,
 or only in a supported pure form, cannot satisfy an unconditional or ordinary
@@ -149,7 +166,7 @@ Ordinary precondition checks are not automatically erased because the provider
 has a broader useful domain.
 
 Pure-form support and ConstEval authorization are retained capabilities, not
-ordinary NoThrow bits. A provider must support every expected selected form and
+Effects bits. A provider must support every expected selected form and
 preserve its domain, read/effect bounds, results, mode-query observations and
 transfer obligations. More supported forms do not retrospectively change the
 form selected by a retained caller. Constant execution still needs its actual
@@ -191,10 +208,12 @@ structural type cycles, infinitely expanding substitutions or recursive
 transparent associated bindings do not become valid through memoization.
 
 Graph-cycle handling establishes no predicate implication or body truth.
-Circular claims that each unproved guarantee follows from another are not
-checking evidence. Source checking or the admitted semantic producer/audit
-policy establishes authored facts; the consumer still validates supported
-records, identity, requirements and the complete binding relation.
+Circular claims that each unproved guarantee follows from another do not
+establish a compatibility claim. The producer is responsible for authored
+body facts; consumers validate selected record structure and references
+before affected use, then rely on producer-published facts without semantic
+re-proof. A binding compatibility claim still checks the declared identities,
+requirements and complete comparison relation.
 Applicable resource exhaustion explicitly declines comparison. No arbitrary
 depth cutoff may count an unvisited obligation as satisfied.
 [Resource accounting](resource-accounting.md) assigns separate structural
@@ -202,9 +221,9 @@ and semantic work/state scopes, with numerical portable minima unassigned.
 
 ## 5. Packing, replacement and relied-on facts
 
-Retained internal and external imports use this same relation. A trusted
-merger checks the expectation before rewriting it to the resolved producer
-definition. Module identities, required semantics and all remaining
+Retained internal and external imports use this same relation. A merger's
+successful compatibility claim requires the expectation to hold for the
+resolved producer definition. Module identities, required semantics and all remaining
 declaration/value/code/load/layout/cleanup obligations survive that rewrite.
 Omitting an unneeded Import is not omitting its required meaning.
 
@@ -212,19 +231,20 @@ Preserve the caller's retained expectation. A provider's extra guarantee is
 not silently substituted into an interface requirement, generic contract or
 consumer metadata. If compilation/optimization relies on a stronger published
 provider fact, retain that stronger dependency obligation in the resulting
-artifact and revalidate it on replacement. Otherwise a later provider satisfying
-only the old broad expectation could invalidate the optimized program.
+artifact. A replacement compatibility claim must still satisfy that
+obligation; a later provider satisfying only the old broad expectation does
+not establish it.
 Private body specialization likewise retains its actual code/value dependencies.
 
-Replacement revalidates affected bindings against the actual selected provider
+Replacement compatibility is determined against the actual selected provider
 revision and retained expectations. Keeping a module/key, same body bytes,
-implementation digest or prior acceptance flag is not that validation.
-Cached decisions remain usable only while their complete relied-on identity,
-contract/context, rule support, target/runtime and trust/audit facts remain
-unchanged or are revalidated.
+implementation digest or prior acceptance flag does not itself establish
+that compatibility. Cached decisions remain applicable only while their
+complete relied-on identity, contract/context, rule support, target/runtime
+and producer facts remain unchanged.
 
 Direct-bound definitions and native derived artifacts retain these obligations
-too. Revalidate or relink/rebuild affected uses when needed, including embedded
+too. A replacement must preserve affected uses, including embedded
 constants, layouts, witness selections, code/load and cleanup dependencies;
 updating a metadata import does not patch old machine code or invalidate its
 facts. A semantically satisfying provider with an incompatible physical ABI
@@ -249,7 +269,7 @@ representations and admission rules.
 
 Target/runtime and rule compatibility use exact supported identities or
 expressly defined applicable mappings. Numeric revision ordering, a broader
-host API, a portable label or producer trust does not establish them.
+host API, a portable label or producer correctness does not establish them.
 The current ModuleRef requirement/policy fields must match the selected
 producer as metadata specifies; this relation creates no alternate selector.
 Admission never runs user getters, equality, initialization or cleanup to

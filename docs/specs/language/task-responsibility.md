@@ -8,6 +8,8 @@ and settles the operation's checked completion obligations.
 failure channels; [dependencies](dependencies-and-views.md) and
 [flow](initialization-and-flow.md) own backing and place/version relationships.
 No task destruction implicitly blocks, suspends, cancels or supervises work.
+The shared [definitions](../language.md#definitions-and-notation) distinguish
+ownership from non-owning reference access and the lifetimes supporting it.
 
 ## Core identity and value contract
 
@@ -19,8 +21,8 @@ Task<write C> retains that exact access-qualified T. There is no automatic
 payload covariance, Task<T>-to-Task<void> conversion or owner-parameter variant.
 
 Task<T> is not Copy. One live value owns the operation's completion, residual
-cleanup, failure-observation and untransferred payload obligations. A borrowed
-task/observer does not own them. The runtime's execution state is not a second
+cleanup, failure-observation and untransferred payload obligations. A non-owning
+reference to a task, or an observer, does not own them. The runtime's execution state is not a second
 independently transferable completion owner. Wrapping/storing an owner
 preserves its obligation; owning the containing value is not permission to
 abandon its task fields.
@@ -41,6 +43,38 @@ true for that operation; owner transfer or storage reuse cannot attach the
 observation to a new one. The getter neither transfers responsibility nor
 supplies payload, failure-handling or completion-output discharge facts.
 It is not a general Pure annotation, synchronization edge or sharing grant.
+
+## Existential Task view
+
+In an admitted type position, `Task<_>` is a per-value existential view of
+`Task<T>` with a hidden complete payload type. It is not `Task<void>`, a
+payload conversion, or a direct-call inference hole. A generic call argument
+`_` continues to request checked inference; `Task<var T>` in a pattern
+continues to capture a type argument.
+
+The view retains the exact operation, its hidden T, and the corresponding
+required witness/evidence for that value. Two values with different hidden
+payload types do not share one artifact-wide inferred T. Each value preserves
+the ordinary task owner, dependencies, failure and cleanup obligations. Its
+physical representation may use a box, tagged representation, specialization
+or another admitted form; no particular allocation or representation is
+required if the same correlation and responsibility contract is preserved.
+A persisted consumer must receive typed hidden-type/witness evidence or
+reconstruct it through a checked path; it must not recover it from names or
+private implementation bodies.
+
+An existential view exposes only operations whose complete signatures and
+contracts are valid for every hidden payload type. The selected common
+observation includes `IsCompleted`. A completion-only consuming operation
+may consume the owner, observe terminal completion, and settle and clean up
+the hidden payload under the Task contract; it returns no hidden payload and
+propagates terminal failure through the ordinary completion path. It is not
+an implicit `Task<void>` conversion or permission to discard an arbitrary
+affine result. Ordinary typed `await` still returns exact T and therefore
+cannot produce an unknown payload from `Task<_>`. The exact Core member name
+and signature for completion-only consumption remain outside this contract.
+No other operation is admitted merely because its spelling matches a method
+on another Task specialization.
 
 ## Establishment and responsibility transfer
 
@@ -281,9 +315,11 @@ payload/failure observation and every-exit settlement. Linking maps declaration
 identities independently of rows; invocation binds actual operation, owner and
 value/output versions. Replacement cannot turn consuming await into copying,
 drop responsibility or rely on hidden blocking/cancellation.
-Consumers reject unsupported required rules or task/awaiter representations
-before use and require checked evidence or explicit semantic producer/audit
-trust for implementation truth.
+An implementation cannot claim support for unsupported required rules or
+task/awaiter representations. The producer is responsible for published
+implementation truth; consumers validate selected metadata structure,
+references and support before affected use, then may rely on those facts
+without semantic re-proof.
 [Metadata](../representation/logical-records.md#task-responsibility-encoding-pending) assigns no
 physical task/awaiter/root record, feature bit, table or opcode.
 [Conformance cases](../conformance/source-task-responsibility.md) are logical

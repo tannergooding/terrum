@@ -114,13 +114,12 @@ Forming or invoking a function pointer requires an explicit unsafe scope; a
 callback target remains valid only while its code image is loaded. These
 declarations and records remain separate from accepted grammar and canonical
 TRRM metadata.
-For the supported provisional invocation-scoped `Host.Source` library path,
-semantic verification rejects native-callable functions that directly or
-transitively depend on that source grant: the foreign callback ABI has no
-hidden source context. The emitter retains a defensive check.
-The provisional `Host.Source` semantic-module JIT adapter is a separate,
-unapproved extension; accepted module execution remains source-independent.
-It does not establish source-dependent native packages or persisted AOT.
+The `Host.Source` semantic-module JIT grant and `NativeSourceGrantLibrary` are
+unselected prototype paths, not compiler input or JIT contracts. Compiler
+frontends consume source text at their input boundary; JIT consumes semantic
+metadata. Native-callable functions have no hidden source context, and the
+emitter retains a defensive check against one. No source-dependent native
+export signature, package profile, or persisted-AOT contract is selected.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
@@ -228,11 +227,13 @@ Nominal compounds are rejected despite binary operator support; `char16` and
 unique-value update destinations remain unsupported. Retained compound
 expression tag 26 is admitted only in statement position.
 
-The executable native scalar frontend adopts these primitive operations in
-current projection v85: ordinary integer shifts, all eleven compound assignments and
-prefix/postfix updates of initialized writable named locals, including grouped
-names. It retains the hosted `int32` count and checked count-range policy,
-not the separate TRRM instruction contract. Shared update/compound nodes save
+The current native scalar frontend prototype projects these primitive
+operations in private tag v85: ordinary integer shifts, all eleven compound
+assignments and prefix/postfix updates of initialized writable named locals,
+including grouped names. It retains the hosted `int32` count and checked
+count-range policy, not the separate TRRM instruction contract. This is
+implementation evidence, not an approved cross-compiler projection profile.
+Shared update/compound nodes save
 the old destination before RHS effects and commit only after successful checked
 computation. Lazy branches and structured loops/returns use the same lowering
 under both native runtime policies. Independent source validation rejects
@@ -241,7 +242,7 @@ operations. Actual DLL calls, JIT/EXE execution, byte parity and unchanged
 persisted consumers cover the bounded component; no ABI/profile change,
 general call syntax, field mutation or nominal operation is added.
 
-The same v85 scalar frontend projections also carry same-format `float32` and
+The same unselected v85 prototype projections also carry same-format `float32` and
 `float64` unary signs, target-typed decimal and hexadecimal floating literals,
 based integer literals directly targeting either format, `+`, `-`, `*`, `/`
 and IEEE comparisons. The hosted reader validates source token spans and
@@ -251,22 +252,24 @@ to either format. V85 provisionally projects `char16`-to-floating and
 floating-to-integer conversions. The eight checked floating-to-integer pairs
 and explicit `char16`-to-floating eligibility are accepted. The source-free
 floating contracts now have one canonical
-[instruction owner](../specs/il-instruction-set.md#floating-operations) and
+[instruction owner](../specs/il-instruction-set.md#floating-predicates) and
 [allocation registry](../specs/representation/registry.md), not a separate native
 opcode catalog. They preserve exact constant/Copy/Select bits, numeric
 comparisons, destination rounding, sign-bit negation, total same-format
 arithmetic and checked truncating integer conversion.
 
-The [implementation-era encoding record](trrm-encoding-history.md)
-identifies the retired draft numbers used by the hosted development inventory.
-That inventory is not evidence that a compiler already emits or accepts the
-unified registry. Projection layouts, native ABI and hosted verification/
-emission remain separate from semantic opcode allocation. Experimental native
-section/clause/Feature numbers likewise describe the implementation, not the
-coordinated next-draft allocations in the native metadata proposal.
+The hosted prototype's encoding is not evidence that a compiler already emits
+or accepts the unified registry; migration is tracked by
+[CG-001](conformance-gaps.md#cg-001). Projection layouts, native ABI and
+hosted verification/emission remain separate from semantic opcode allocation.
+Experimental native section/clause/Feature numbers likewise do not replace
+the accepted assignments in the
+[standard registry](../specs/representation/trrm-1.registry.json).
 
-Only v85 is produced or accepted for single-function and complete-program
-scalar frontend projections, every function frame and diagnostic records.
+The current prototype emits/accepts only v85 for single-function and
+complete-program scalar frontend projections, every function frame and
+diagnostic records. This code limitation is not an accepted source/profile
+boundary.
 V1–v84 tags reject before body auditing. Compact expression and tree/statement
 layouts retain source mapping, type/mode/unsafe/named-call audits and the hosted
 verifier/emitter boundary.
@@ -274,7 +277,12 @@ The current reader has no historical-version selectors or feature-version
 gates. Compact and tree layouts are both actively produced; no older layout is
 kept merely for comparison.
 
-## Current scalar frontend projection
+## Scalar frontend projection prototype (not selected)
+
+The buffer descriptions below record current test/prototype implementation.
+Terrum and C# compiler implementations are intended to remain standalone;
+the C# compiler receives original source through a separate process fallback,
+not these projected frontend records.
 
 The single-function buffer supports bounded self-calls. The complete-program
 buffer inventories uniquely named top-level functions before parsing bodies,
@@ -1238,18 +1246,19 @@ translated directly to an opcode.
 
 `SemanticVerifier.Verify` checks the public bound representation again before
 emission, including operation types, calls, slot initialization/mutability and
-returns. This matters because a library client can construct bound objects
-without going through the binder. Invalid IR is an argument error, not a
-machine-code fallback. Limits on semantic depth and native frame/image size
-are intentional compilation failures, not stack-overflow handling strategies.
-The current ceilings are 1,024 functions, 256 parameter/local slots per function,
-64 arguments, 128 levels of IR nesting, 100,000 verification visits, 3,840-byte frames and
-8 MiB of machine code. Valid programs exceeding emission limits report
-`TRM4001`; these are implementation limits, not language type or ABI guarantees.
-Verification visits include conditional-flow analysis, not only unique IR
-nodes. Source analysis reports an exhausted verification budget as `TRM3016`.
-The fixed-buffer profile additionally limits descriptors to 256 and total
-initialized storage to 1,048,576 32-bit words.
+returns. A library client can construct bound objects without going through
+the binder, so malformed bound IR is an argument error, not a machine-code
+fallback.
+
+The current C# implementation has guards for 1,024 functions, 256
+parameter/local slots per function, 64 arguments, 128 levels of IR nesting,
+3,840-byte frames, 8 MiB of machine code, 256 fixed-buffer descriptors and
+1,048,576 initialized 32-bit words; emitter refusals report `TRM4001`. These
+are implementation limits, not selected language, metadata, or ABI maxima.
+Reassess each count against its actual representation/resource owner rather
+than treating the current values as permanent. The verifier's 100,000 visit
+default is provisional and per-function analysis/budget semantics are tracked
+separately; exhaustion cannot publish verification success.
 
 The x64 backend uses fixed stack frames, caller shadow space and aligned calls.
 The first four scalar arguments use RCX, RDX, R8 and R9; later arguments

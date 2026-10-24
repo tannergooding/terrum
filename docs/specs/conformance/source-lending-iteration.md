@@ -23,7 +23,7 @@ and admitted element, cursor, storage, access and backing facts.
 | LIROLE-12 | Readonly mode sees only a writable lending role | No automatic role attenuation; require a declared witness or explicit adapter |
 | LIROLE-13 | Writable mode sees only a readonly role | No authority upgrade |
 | LIROLE-14 | Async mode sees only synchronous roles or vice versa | No Task wrapper, blocking or fallback |
-| LIROLE-15 | Writable implementation substitutes init ref<write ref<T>> for a readonly output | Reject invariant destination mismatch, not covariance |
+| LIROLE-15 | Writable implementation substitutes `ref<init write ref<T>>` for a readonly output | Reject invariant destination mismatch, not covariance |
 | LIROLE-16 | Typed alias changes an inner qualification of selected T | Reject after selection; do not reinterpret storage |
 | LIROLE-17 | T is an addressable non-Copy element | Lending does not require copying T |
 | LIROLE-18 | T is void with no exposable payload address | Reject lending formation; by-value unit iteration remains valid |
@@ -183,7 +183,7 @@ and admitted element, cursor, storage, access and backing facts.
 | LIRET-05 | Replacement has stronger compatible implementation-only lifetime facts | Do not silently upgrade generic retained broad bound |
 | LIRET-06 | Forwarding/refinement removes a source, phase or cleanup dependency without proof | Reject incompatible mapped contract |
 | LIRET-07 | Linker remaps member/formal/output/source/condition rows or strips debug names | Preserve complete semantic relationships and schedules |
-| LIRET-08 | Producer is untrusted or its private body is unavailable | Explicit semantic trust/audit/decline policy; record flag does not prove truth |
+| LIRET-08 | Consumer uses producer-published lending facts without access to the private body | Permit reliance after required decoding, compatibility and caller checks; producer remains responsible for truth |
 | LIRET-09 | Optional Attr data, held opcode or ref layout is treated as a mandatory lending carrier | No physical allocation/codec is selected |
 | LIRET-10 | Example uses return DependsOn to describe init-output/receiver capture | Wrong selector/relationship; no `"this"` or new annotation syntax adopted |
 | LIRET-11 | Span/List/MatchedAccess name is treated as automatic lending witness/refinement | Require separately admitted exact witness and backing relationship |

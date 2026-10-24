@@ -1,7 +1,10 @@
 # Lifetime and access contracts
 
-This document specifies accepted contracts for loans, views and published
-members. [Dependencies and views](language/dependencies-and-views.md) owns the
+This document specifies the lifetime and access obligations supporting
+references, views and published members, including their non-owning access,
+backing and cleanup relationships. Start with the shared
+[copy, alias, reference and lifetime definitions](language.md#definitions-and-notation).
+[Dependencies and views](language/dependencies-and-views.md) owns the
 whole-source schemas, retained destinations and checked witness refinements.
 This chapter refines
 [language](language.md); [libraries](libraries.md) illustrates span, text and
@@ -10,19 +13,46 @@ collection protocols.
 ## Definitions and notation
 
 A **place** is addressable storage; a reference to a place is distinct from a
-copy of the value stored there. A **loan** grants bounded access to a place or
-backing storage without transferring its ownership. **Backing** is the storage
-whose lifetime and validity support a view's elements. An **owner** retains
-the responsibility to release a resource; a **lease** can keep backing valid
-or prevent its reclamation/replacement for a bounded interval. These
-relationships are independent: a rooted object does not by itself preserve a
-native resource's cleanup scope or grant write authority.
+copy of the value stored there. A **reference** designates that place; copying
+its descriptor aliases the place rather than copying its contents.
+**Borrowing** establishes non-owning access; a **loan** is that bounded access
+relationship and its obligations. Neither term alone implies stack-only or
+exclusive access. **Backing** is the storage and supporting state whose
+lifetime and validity support the reference or view. An **owner** retains
+the responsibility to release a resource. A backing-validity **lease** can
+keep backing valid or prevent its reclamation/replacement for a bounded
+interval; a library [storage-and-release lease](libraries.md#definitions)
+additionally carries allocation release responsibility.
+
+A non-owning `ref<T>` is usable only while its referent, backing and required
+access remain valid. Ordinary class handles `C` and `box<T>` use stable,
+non-moving normal backing with shared-retaining handles; copying an eligible
+handle retains the same object, not its payload. Strong cycles under this
+backing are not collected. No general collection guarantee is selected for
+strong cycles that cross normal and GC backing; a GC node does not by itself
+make a mixed component collectible. Weak-handle and ownership-domain APIs
+remain separate work. The distinct `gc C`, `gc box<T>` and `gc ref<T>` forms
+use collector-managed backing that may move. A GC handle/root keeps backing
+reachable, not stable, and does not preserve a separately released native
+resource, pool rental or guard. Rooting does not by itself grant write
+authority or pin an address. Descriptor lifetime, referent lifetime, GC
+reachability, pinning and resource cleanup are distinct.
+
+A `ref<T>` to a subplace in normal class or box backing carries bounded
+backing support for that exact dependency. It may remain valid after the
+source handle local ends, delaying backing retirement and its Cleanup
+obligation until the reference dependency retires. This does not make the
+reference an owner or let it outlive the containing handle slot, a local
+receiver's inline storage, or an explicit owner/guard endpoint. A reference
+to a local handle slot remains bounded by that slot even when the handle's
+object is independently retained.
 
 Declaration places default to fixed/readonly. `mut` grants place rebinding or
 a writable receiver; `write` grants capability through a reference or view.
 Changing a local descriptor does not create writable referent access, and
 neither qualifier overrides immutable fields or nominal access. The canonical
-representation forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`.
+representation forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`,
+with explicit GC-backed forms `gc C`, `gc box<T>` and `gc ref<T>`.
 `mut` qualifies a place or receiver, not a generic type argument. Every
 reference or view contract applies to the complete qualified form, including
 access, backing, roots, ownership and region dependencies.
@@ -35,48 +65,48 @@ access, backing, roots, ownership and region dependencies.
 | `ref<T>` | Readonly descriptor for a `T` place, not a snapshot or exclusive loan |
 | `mut ref<T>` binding or parameter | Locally rebindable readonly descriptor; does not write the referent or rebind the caller's descriptor |
 | `write ref<T>` | Descriptor permitting writes to a `T` place; slot updates do not grant arbitrary writes through values stored in that slot |
-| `implicit ref<T>` parameter | The same readonly reference contract, borrowing an eligible place or materializing the expression once in its ordinary enclosing scope |
-| `init ref<T>` parameter | Vacant destination initialized according to the published normal-outcome contract, not an arbitrary writable alias |
-| `pin ref<T>` | Explicitly acquired backing/root stability for its pin dependency; ordinary reference qualification does not acquire it |
-| Class handle `C` / `write C` | Readonly / writable object access without borrowing the variable's handle slot |
+| `implicit ref<T>` parameter | The same readonly reference contract, referencing an eligible place or materializing the expression once in its ordinary enclosing scope |
+| `ref<init T>` parameter | Fixed vacant destination initialized according to the published normal-outcome contract, not an arbitrary writable alias |
+| `gc ref<T>` | Independently rooted locator for one initialized exact place in GC-backed storage; no stable-address or sibling-access guarantee |
+| `ref<T>` from `ref *root` | Stable reborrow that pins the `gc ref<T>` referent for the bounded reference lifetime |
+| Class handle `C` / `write C` | Readonly / writable object access through stable, non-moving normal backing |
+| GC class handle `gc C` / `write gc C` | Readonly / writable object access through a GC root; backing may move |
 | `ref<C>` / `write ref<C>` | Readonly / writable handle-slot access, independently of object authority |
 | `ref<write C>` / `write ref<write C>` | Preserve object-write authority with readonly / writable handle-slot access |
 
-Reference-object `C` carries rooting and lifetime dependencies but is not an
+Reference-object `C` carries backing and lifetime dependencies but is not an
 interior pointer into the variable containing its handle. Applicable access,
 capture and lifetime principles are shared with references; their storage
-indirections are not interchangeable. `mut C` permits rebinding a local handle,
-not writing the object; `write C` permits eligible object writes, not rebinding
-that local. Neither readonly access nor a writable alias automatically implies
-exclusivity, deep immutability or stable reads.
+indirections are not interchangeable. `mut C` permits rebinding a local
+handle, not writing the object; `write C` permits eligible object writes, not
+rebinding that local. Neither readonly access nor a writable alias
+automatically implies exclusivity, deep immutability or stable reads.
 Reject an inapplicable qualifier combination rather than inventing a copy,
-pin, initialization route or stronger authority. `implicit` remains parameter-
+root, pin, initialization route or stronger authority. `implicit` remains parameter-
 only; writable and initialization loans do not acquire implicit materialization.
 Descriptor assignment, explicit `ref place`, safe reference dereference, and
 `->` member access follow the canonical
 [reference chapter](language/references.md), including in generic code.
 
-The selected implicit `pin ref<T>` to matching `ptr<T>` conversion is a
-separate, narrowly defined built-in edge. It preserves access and all referent,
-pin and backing dependencies, acquires no pin and does not transfer the pin's
-ownership. A derived pointer cannot outlive its supporting pin or manufacture
-write authority. Overload binding recognizes only this direct projection;
-identity matches rank ahead of it, with no search for intermediate conversions.
-This is a target contract, not current executable reference/pointer support.
+`gc ref<T>` roots one fully initialized exact place in GC-backed storage. It
+may move with the collector and does not authorize adjacent-field access.
+`ref *root` is the explicit bounded reborrow that pins that place and produces
+a stable `ref<T>`; the pin lasts through every copy/dependency of that
+reference. It cannot promote an existing ordinary reference or broaden the
+root's access. An explicit `C(gcObject)` conversion pins the whole `gc C`
+object and produces stable normal `C`; copies share the pin support until the
+last converted handle retires. Neither conversion is implicit or a pointer
+conversion.
 
-Pin initialization acquires before publication: failure leaves a vacant
-destination vacant and cleans partial acquisition state. Eligible mutable
-replacement preserves the old value and pin through evaluation/acquisition
-of its replacement; failed acquisition leaves them in place. On success,
-publication and retirement still require that no outstanding dependency needs
-the old pin. Initializer side effects are not rolled back. Existing
-initialization/write authority applies; early lifetime ending does not make an
-immutable pin binding reassignable. See
-[pin acquisition](grammar-spec.md#32-types-parameters-and-arguments).
-Proven lifetime escapes and missing required pins are checked errors, not
-safe-context warnings or obligations erased by `unsafe`. Valid pointer
-formation itself does not warn or require unsafe; dereference still does.
-These are accepted target contracts, not current executable pin support.
+Raw pointers remain non-owning and non-rooting. Extracting `ptr<T>` from a
+checked reference is explicit and requires unsafe authorization; for GC
+backing, first obtain a stable reference through the applicable pin contract.
+A pointer cannot outlive or extend its supporting pin, root, owner or backing.
+Unsafe authorization does not make a later invalid dereference valid. A
+statically apparent dangling raw address may be retained as inert data only
+under explicit unsafe authorization and a suppressible warning; use that
+diagnostic policy for the escape, not as proof that any dereference is valid.
+Address formation itself preserves the established place/backing facts.
 
 Current executable ownership, view and managed-root boundaries are documented
 in [implementation](../implementation.md) and the
@@ -103,21 +133,21 @@ These are logical obligations, not a selected physical tag or reclamation API.
 
 ## Three independent dependencies
 
-1. **Receiver's own storage:** a result can refer to the receiver *place* or its inline fields. An exclusive or scoped borrow of that place bounds the result. A returned reference to a local receiver's inline field cannot escape that receiver merely because another field contains a long-lived allocation.
-2. **Forwarded backing storage:** a receiver descriptor can contain a view whose address and validity come from another object, stack allocation, arena or native buffer. Forwarding that descriptor's span depends on its *backing* and access authority, not necessarily the lifetime of the descriptor variable. A temporary `Span<T>` may forward a view of a longer-lived allocation; a temporary owner/guard cannot forward a view past its disposal.
-3. **Allocation, lease and disposal:** an owner or lease may keep backing alive and prohibit reclamation or reallocation; logical cleanup can still invalidate a native buffer even if its address and GC wrapper remain. A rooted GC object alone does not preserve a unique resource's cleanup scope, nor grant write authority. Capturing an owner, borrowing it, and transferring its cleanup obligation are different operations.
+1. **Receiver's own storage:** a result can refer to the receiver *place* or its inline fields. Its use is bounded by that place's lifetime and any separately required access protocol. A returned reference to a local receiver's inline field cannot escape that receiver merely because another field contains a long-lived allocation.
+2. **Forwarded backing storage:** a receiver descriptor can contain a view whose address and validity come from another object, stack allocation, arena or native buffer. Forwarding that descriptor's span depends on its *backing* and access authority, not necessarily the lifetime of the descriptor variable. A reference to a normal class/box subplace similarly carries bounded support for that allocation, not for a local handle slot. A temporary `Span<T>` may forward a view of a longer-lived allocation; a temporary owner/guard cannot forward a view past its disposal.
+3. **Allocation, lease and disposal:** an owner or lease may keep backing valid and prohibit reclamation or reallocation; logical cleanup can still invalidate a native buffer even if its address and GC wrapper remain. A rooted GC object alone does not preserve a unique resource's cleanup scope, nor grant write authority. Capturing an owner, referencing it without taking ownership, and transferring its cleanup obligation are different operations.
 
-These relationships are not a single `scoped` bit. One result may borrow receiver bytes, propagate several backing dependencies, and require a separate owner/guard to remain undisposed. Access qualifiers, affinity, rooting and capture destinations travel with the dependencies. Keeping a pointer numerically unchanged is not proof of validity. Empty/end slices retain the same root/guard obligations as nonempty slices.
+These relationships are not a single `scoped` bit. One result may reference receiver bytes, propagate several backing dependencies, and require a separate owner/guard to remain undisposed. Access qualifiers, affinity, rooting and capture destinations travel with the dependencies. Keeping a pointer numerically unchanged is not proof of validity. Empty/end slices retain the same root/guard obligations as nonempty slices.
 
 ## By-value results and borrowed results
 
 A source return of `T` retains its declared semantics even when the physical
 ABI uses a hidden result-storage argument or copy elision. ABI-indirect storage
 does not itself introduce a loan of the original value's storage or permit
-skipping ordinary ownership/cleanup. Handles and loans already contained in
-the complete `T` retain their declared dependencies. A borrowed result's
-`ref<T>` representation must name the permitted source dependency, lifetime,
-access and alias relationship.
+skipping ordinary ownership/cleanup. Handles and references already contained
+in the complete `T` retain their declared dependencies. A checked reference
+result's `ref<T>` representation must name the permitted source dependency,
+lifetime, access and alias relationship.
 Do not turn a large by-value result into a source borrow because of an
 incidental size threshold.
 
@@ -133,8 +163,8 @@ selection and ABI cannot be inferred from those standard roles.
 reference parameter, not `implicit T` or `in T`, a qualifier inside `T` or
 `ref<T>`, a `view<T>` type, or a representation attribute. The caller passes
 an ordinary expression and it is evaluated once. If it denotes an eligible
-place, the call borrows that place's slot; otherwise the compiler assigns
-a hidden local at that argument's original evaluation point in the current
+place, the call forms a readonly reference to that place; otherwise the
+compiler assigns a hidden local at that argument's original evaluation point in the current
 enclosing lexical scope. This is the same scope as an explicit local declared
 there, not a lifetime-only block and not a value hoisted to scope entry.
 A skipped conditional or short-circuit argument creates no new value. If
@@ -152,8 +182,8 @@ Inspect(record);
 Inspect(CreateRecord());
 ```
 
-The introduced loan is an ordinary readonly reference. Return, storage,
-capture and suspension obey the same declared dependencies and lifetime rules
+The introduced reference has the ordinary readonly loan contract. Return,
+storage, capture and suspension obey the same declared dependencies and lifetime rules
 as explicit `ref<T>`; `implicit` does not add an unconditional noescape rule.
 A returned reference to a materialized local may be used by later statements
 in the same lexical scope when its ordinary declared dependencies permit it;
@@ -291,8 +321,10 @@ Ordinary scope exit cleans the last live value once; a never-initialized,
 moved, or explicitly ended binding has no live `T` cleanup. `tmp = _` in
 the first expansion exposes the normal exit point; checked unwind performs
 the same applicable obligations. Borrowers must end before invalidating their
-backing, and cannot escape beyond the supporting scope. This does not move
-observable cleanup to a borrower's last use.
+backing. A loan of the temporary's own place cannot escape its supporting
+scope; a forwarded reference follows its separately declared backing
+dependency rather than the descriptor temporary's lifetime. This does not
+move observable cleanup to a borrower's last use.
 
 The number of materialized bindings is bounded by source sites, not iteration
 count. There is no implicit per-iteration `stackalloc`, retained-owner arena,
@@ -310,7 +342,7 @@ Declaration phase scopes follow the
 The form is available for concrete/generic parameters and explicitly declared
 extension receivers, without changing ordinary instance-receiver defaults. It
 does not alter existing APIs unless they explicitly adopt the parameter
-contract. The modifier does not apply to `write ref<T>`, `init ref<T>`, or
+contract. The modifier does not apply to `write ref<T>`, `ref<init T>`, or
 `ptr<T>` parameters and does not authorize arbitrary conversions. An explicit `ref<T>` and
 `implicit ref<T>` share one reference signature rather than forming distinct
 overloads. Preference between a by-value `T` overload and an
@@ -337,9 +369,9 @@ syntax neither delays the reference nor invents a distinct loan lifetime.
 ## Erased interface storage is explicit
 
 An interface name `I` describes nominal behavior and an abstract payload, not
-an implicit storable handle. Use `ref<I>` for a borrowed erased receiver,
-`write ref<I>` for a writable borrow, `box<I>` for a managed aliasable
-interface handle, or `write box<I>` for a writable object receiver. A
+an implicit storable handle. Use `ref<I>` for a non-owning erased receiver
+reference, `write ref<I>` for writable reference access, `box<I>` for a managed
+aliasable interface handle, or `write box<I>` for a writable object receiver. A
 `List<box<I>>` stores homogeneous handle representations while allowing
 different concrete implementations. Bare `I` is not a local/field storage
 representation, and type notation alone does not allocate or project a value.
@@ -369,7 +401,7 @@ hidden closure capture semantics.
 
 | Example | Required relationship |
 |---|---|
-| `InlineArray<T, N>` element loan | Receiver's inline storage and matched read/write authority |
+| `InlineArray<T, N>` element reference | Receiver's inline storage and matched read/write authority |
 | `Span<T>` slice or its explicit `IContiguousSequence<T>.AsSpan()` | Original backing, bounds, access and guard, not automatically the local span descriptor place; `mut Span<T>` only rebinds the descriptor, while `write Span<T>` lends writable slots |
 | `Span<write C>` | Readonly element slots containing independently writable class-handle capabilities; distinct from `write Span<C>` |
 | Bound `func<...>` | Target and every declared receiver/capture dependency remain valid under the callable's ownership and loan contract |
@@ -378,15 +410,16 @@ hidden closure capture semantics.
 | Typed text erasure to `TextSpan<void>` and successful typed projection | Actual encoding, validity, backing/root/lease and access retained; no receiver-storage borrow invented or cleanup obligation duplicated |
 | Managed inline array elements | Tracked interior location and containing GC root/relocation |
 | Native `UnmanagedArray<T>` elements | Specific allocation and owner/lease; merely retaining the wrapper is insufficient if it can dispose, replace, reallocate or return storage to a pool |
-| `ListWriteAccess<T>.Span` | Guard-backed exclusive loan; cannot outlive/dispose the guard or coexist with overlapping writable extraction |
+| `ListWriteAccess<T>.Span` | Guard-bounded exclusive access (loan); cannot outlive/dispose the guard or coexist with overlapping writable extraction |
 | `SpanTextWriter<T>` storing a destination | Declared captured exclusive loan in writer; not the default noncapturing synchronous parameter |
 | Async write using an argument view | Operation-bounded capture until completion and cleanup; returned views inside the completed task retain their independent dependencies |
 
 The public nominal type is still **one `Span<T>`**, not `Span<T, TOwner>`. Its
 unqualified form is readonly; `mut Span<T>` permits descriptor rebinding,
 `write Span<T>` grants writable slots, and a `write` element type grants a
-separate referent capability. A scoped data/length descriptor can keep its
-owner/guard live separately; a stored, returned or erased view needs a verified
+separate referent capability. A data/length descriptor depends on its
+supporting owner/guard remaining valid; it does not acquire that responsibility.
+A stored, returned or erased view needs a verified
 source relationship and an admitted representation with all required
 root/relocation support. Owner-dependent per-instance sizes, implicit per-slice allocations,
 per-slice retains and a global pointer-to-owner registry are not defaults. A
@@ -401,12 +434,23 @@ not exceptions that restrict the general language contract.
 
 ### Receiver-scoped versus receiver-unscoped
 
-Here **receiver-scoped is a caller guarantee that an escaping result does not borrow the receiver's *own storage***. Receiver-unscoped instead permits such a borrow; it does not require one, promise any particular result lifetime, or erase forwarded backing and lease dependencies. A receiver-scoped implementation can forward backing held in the receiver's descriptor without borrowing the descriptor's own bytes. An implementation that *may* return a loan into the receiver's own fields cannot fulfill a receiver-scoped requirement.
+Prefer **“backing-only for this source”** and **“may reference receiver
+storage”** when explaining the relationship. The locally defined labels below
+summarize those permissions; they are not a second lifetime system.
 
-| Interface receiver contract | Implementation may borrow receiver's own storage | Implementation forwards backing only, without borrowing receiver's own storage |
+Here **receiver-scoped is a caller guarantee that an escaping result does not
+reference the receiver's own storage**. Receiver-unscoped instead permits such
+a reference; it does not require one, promise any particular result lifetime,
+or erase forwarded backing and lease dependencies. A receiver-scoped
+implementation can forward backing held in the receiver's descriptor without
+referencing the descriptor's own bytes. An implementation that *may* return
+a reference into the receiver's own fields cannot fulfill a receiver-scoped
+requirement.
+
+| Interface receiver contract | Implementation may reference receiver's own storage | Implementation forwards backing only, without referencing receiver's own storage |
 |---|---|---|
-| Permits receiver-storage borrowing (unscoped) | Allowed; the result remains bounded by the receiver place | Allowed; the result retains its actual backing/lease dependencies |
-| Guarantees no receiver-storage borrowing (scoped) | Rejected | Allowed; forwarding still cannot outlive backing, a guard or required disposal boundary |
+| Permits references to receiver storage (unscoped) | Allowed; the result remains bounded by the receiver place | Allowed; the result retains its actual backing/lease dependencies |
+| Guarantees no reference to receiver storage (scoped) | Rejected | Allowed; forwarding still cannot outlive backing, a guard or required disposal boundary |
 
 The asymmetry is checked against the **declared implementation contract**, not inferred from its current body. In particular, a scoped requirement rejects an unscoped implementation even if today's implementation happens to forward only: that published permission could allow a later body to borrow receiver storage. Conversely, an unscoped requirement accepts a declared scoped implementation. Neither designation alone proves that an allocation is alive or that disposing its owner is safe.
 
@@ -440,12 +484,12 @@ Public relationships come from declarations, language-versioned defaults and inh
 
 | Declaration shape | Public default |
 |---|---|
-| Synchronous borrowed input | No retention beyond call, except its declared result or capture relationship |
-| View result with one eligible receiver/input | Broad source relationship: result may borrow that source's own storage **or** forward its backing/access dependencies; no unrelated capture |
+| Ordinary synchronous non-owning input (borrowed input) | No retention beyond call, except its declared result or capture relationship |
+| View result with one eligible receiver/input | Broad source relationship: result may reference that source's own storage **or** forward its backing/access dependencies; no unrelated capture |
 | Multiple eligible sources | Explicit permitted source set; conservatively bound by **every** listed source, not by which branch today's body selects |
-| Boolean-success `init ref<T>` without an explicit conditional postcondition | Destination starts vacant; `true` initializes it and `false` leaves it uninitialized |
-| Other result type with `init ref<T>` and no explicit conditional postcondition | Destination starts vacant and must be completely initialized on every normal return |
-| Explicit conditional postcondition for `init ref<T>` | The declared status/result relationship governs initialization; `ensure <expr>` uses an ordinary Boolean expression with [specified clause placement](grammar-spec.md#31-source-file-structure-and-declarations); correlated-output metadata remains to specify |
+| Boolean-success `ref<init T>` without an explicit conditional postcondition | Destination starts vacant; `true` initializes it and `false` leaves it uninitialized |
+| Other result type with `ref<init T>` and no explicit conditional postcondition | Destination starts vacant and must be completely initialized on every normal return |
+| Explicit conditional postcondition for `ref<init T>` | The declared status/result relationship governs initialization; `ensure <expr>` uses an ordinary Boolean expression with [specified clause placement](grammar-spec.md#31-source-file-structure-and-declarations); repeated `OutputState` rows reference the exact published predicate identity |
 | Registered Core `Task<TResult>` result | Affine completion owner; may retain borrowed inputs/receiver through its checked completion/cleanup extent, whether or not the method is async; completed payload bounds remain separate |
 | Implemented interface/registered builder | Inherit the source, access, output and effect contract; no implementation-by-implementation repetition |
 | Registered generated producer | Synchronous creation captures staged inputs/receiver into one affine cursor; retain all declared backing/owner/guard/affinity bounds through release and required completion/close |
@@ -510,7 +554,7 @@ required cleanup.
 
 A `require` expression or matching context lifts eligible destinations omitted
 from the call; explicitly supplied destinations are not lifted, and partial
-omission is permitted. The explicit `init ref<T>` mode and its checked,
+omission is permitted. The complete `ref<init T>` type and its checked,
 published ordinary call-completion output contract establish eligibility;
 no additional registration is required. Hidden destinations must be valid
 ordinary initially vacant locals with the complete type and dependencies,
@@ -644,7 +688,7 @@ They preserve receiver capture, input transfer, result/backing relationships,
 roots and cleanup; projection is neither permission to strengthen a readonly
 result nor body-derived evidence of a stronger lifetime guarantee.
 
-Store both the **broad interface contract** and the **resolved published implementation/member refinement**, including conditional relationships, source selectors, capture destinations, root/disposal requirements, rule versions and ABI layouts. Source compilation checks a member's claimed refinement against its authored body. An independently compiled generic caller sees the broad interface contract; only an explicit checked conditional contract can expose a type/witness refinement when its condition is proven. Ordinary binary consumers rely on published dependency metadata rather than re-proving dependency bodies, while still checking references, contract compatibility and caller use. Devirtualization, specialization and implementation pinning cannot change source validity or substitute body inference for a published relationship. Tightening an interface from permission to borrow receiver storage to a no-borrow requirement rejects existing implementations that published that permission, even if today's bodies do not use it. Broadening a published scoped implementation to permit receiver-storage borrowing invalidates existing callers that relied on its no-borrow guarantee; it requires a breaking revision or explicit checked adapter. Dynamic binding and AOT/JIT replacement checks must reject added capture, weakened access, changed view source, new cleanup obligation or invalid refinement, not merely compare CLR-signature shapes. Compatible changes may be replaced contract-bound; stronger implementation-only facts are not implicitly upgraded in consumer metadata. ABI layout and roll-forward need explicit version-aware validation.
+Store both the **broad interface contract** and the **resolved published implementation/member refinement**, including conditional relationships, source selectors, capture destinations, root/disposal requirements, rule versions and ABI layouts. Source compilation checks a member's claimed refinement against its authored body. An independently compiled generic caller sees the broad interface contract; only an explicit checked conditional contract can expose a type/witness refinement when its condition is proven. Binary consumers validate selected dependency records, references and support before affected use, then may rely on producer-published body facts without re-proof; this does not repeat source binding or prove arbitrary external provider behavior. Source-level caller use and the compatibility required for a successful binding/replacement claim remain governed by their published contracts. Devirtualization, specialization and implementation pinning cannot change source validity or substitute body inference for a published relationship. Tightening an interface from permission to borrow receiver storage to a no-borrow requirement rejects existing implementations that published that permission, even if today's bodies do not use it. Broadening a published scoped implementation to permit receiver-storage borrowing invalidates existing callers that relied on its no-borrow guarantee; it requires a breaking revision or explicit checked adapter. Dynamic binding and AOT/JIT replacement claims preserve capture, access, view source, cleanup and refinement contracts, not merely CLR-signature shapes. Compatible changes may be replaced contract-bound; stronger implementation-only facts are not implicitly upgraded in consumer metadata. ABI layout and roll-forward need explicit version-aware compatibility.
 
 ## Ownership transfer and cleanup
 
@@ -685,6 +729,11 @@ Cleanup uses the same ordering, effects and checked failure rules as ordinary
 scope exit. Retirement is exact once: subsequent scope exit or unwind must not
 repeat completed obligations for the ended value. No rollback or independent
 failure-suppression rule is introduced.
+
+An implementation may release backing support before its lexical boundary
+only when the release is observationally equivalent. In particular, it must
+not advance an observable `[Cleanup]` trigger or any published weak-observation
+boundary. This contract does not select a weak-reference API.
 
 Ending the value grants no new write authority. An ordinary immutable `var`
 cannot be assigned again. An `init var` or `init T` local can be initialized
@@ -731,14 +780,17 @@ partial field moves under ordinary write/init authority, checked repair and
 replacement, and the complete-receiver boundary for authored Cleanup.
 Partial state retains live children and is not whole vacancy.
 
-Complete retirement runs the selected NoThrow/nonsuspending readonly Cleanup
+Normal complete retirement runs the selected nonsuspending readonly Cleanup
 body once while the receiver is complete, then automatically retires fields
 in reverse declaration order. The Close name alone registers nothing.
 Without an authored body, cleanup is derived from the remaining live fields.
-Failed unpublished construction instead unwinds actual acquired values in
-reverse acquisition order without calling the incomplete parent's Cleanup.
-Borrowed children are not independently destroyed; roots and retained
-dependencies remain subject to their actual field retirement contracts.
+If a selected Cleanup throws, ordinary exception propagation begins and the
+remaining generated owner/field cleanup does not resume during that unwind.
+Exceptional cleanup is authored in crossed `finally` blocks. Failed
+unpublished construction instead unwinds actual acquired values in reverse
+acquisition order without calling the incomplete parent's Cleanup. Borrowed
+children are not independently destroyed; roots and retained dependencies
+remain subject to their actual field retirement contracts.
 Managed roots do not release unique resources or keep disposed backing valid.
 The [hosted owner/view inventory](../implementation/view-and-owner-profiles.md)
 records narrower supported field/update/loan shapes and cleanup proofs.

@@ -130,8 +130,9 @@ failures, cleanup, result publication and execution channels. A determined
 NaN result does not permit skipping a later argument. No floating flag
 observation follows, but argument, initialization, helper, resource and
 failure effects still belong to their actual contracts.
-No unconditional Pure, ConstEval or NoThrow capability follows solely from
-fixed rounding or the absence of ambient status.
+No unconditional Pure or ConstEval capability follows solely from fixed
+rounding or the absence of ambient status; neither fact establishes that a
+complete operation is failure-free.
 
 Retain the exact operation/form, complete format/value representation,
 runtime versus constant NaN contract, sign/copy distinction, target control

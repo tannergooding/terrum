@@ -29,7 +29,6 @@ public mut unique struct AllocatorContext
 // Checked creation verifies capacity * sizeof(T), actual base-address alignment,
 // and any required tracing/write-barrier support for the complete element layout.
 public mut unique struct Buffer<T>
-    where T : [Sized]
 {
     public nuint Capacity { get; }
     public nuint Count { get; }
@@ -49,7 +48,7 @@ public mut unique struct Buffer<T>
 }
 
 public mut unique struct Vector<T>
-    where T : [Sized], [Copy]
+    where T : [Copy]
 {
     public nuint Count { get; }
     public nuint Capacity { get; }

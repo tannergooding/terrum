@@ -66,13 +66,16 @@ payload into an unversioned blob or make the entire container standardized.
 An implementation-private representation with no independent semantic-reader
 claim need not adopt `.trrm` as its internal serialization.
 
-Producer trust is distinct from schema identity and execution support.
+Producer responsibility is distinct from schema identity and execution support.
 A checksum, digest, signature or successful platform load does not prove
 semantic compatibility or arbitrary body/code truth. The
-[reader-trust contract](reader-trust.md) retains selective natural checks and
-separate structural/semantic audit scopes; this taxonomy adds no preliminary
-all-Body scan. Unsupported requirements, incompatible bindings and unavailable
-target/runtime support still decline affected use before execution.
+[consumer-verification contract](reader-trust.md) requires structural and
+safe-consumption checks before affected use while preserving producer truth
+obligations and the external-provider/authored-unsafe trust boundaries.
+Consumers may rely on structurally consumable producer facts without
+semantic re-proof. Unsupported requirements,
+incompatible bindings and unavailable target/runtime support reject affected
+use and do not establish a support claim.
 
 ## 3. Native and implementation boundaries
 

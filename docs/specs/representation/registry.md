@@ -3,16 +3,17 @@
 ## 1. Authority and schema identity
 
 The [machine-readable registry](trrm-1.registry.json) is normative for numeric
-allocations, namespace roles, operand sequences, widths, enum domains and the
-stated structural/executable status. The [metadata chapter](../il-metadata.md)
+allocations, namespace roles, operand sequences, widths, enum domains and
+recorded admission constraints. The [metadata chapter](../il-metadata.md)
 owns framing, row semantics and binding; the [instruction chapter](../il-instruction-set.md)
 owns Body and operation semantics. Their displayed tables are projections of
 this registry, not independent allocation authorities. A disagreement is a
 specification defect, not permission to choose a meaning.
 The [clause chapter](contract-clauses.md) owns assigned clause applicability,
 occurrence keys, absence and complete cross-row obligations.
-The [reader-trust chapter](reader-trust.md) owns access-scoped checks,
-trusted indexes and table-implied reference interpretation.
+The [verification chapter](reader-trust.md) owns producer truth obligations,
+mandatory structural safe-consumption checks, optional semantic audits and
+schema-owned reference interpretation.
 The [canonicality chapter](encoding-canonicality.md) owns minimal writer
 widths/maps, equivalent ordinary noncanonical admission and explicit audits.
 The [resource-accounting chapter](resource-accounting.md) owns scoped capacity,
@@ -23,7 +24,7 @@ schema assignments and exact out-of-band draft agreement.
 The [semantic-manifest chapter](semantic-manifests.md) owns Module editions,
 exact coherent capability requirements, complete closure and physical ranges.
 
-`trrm/1-draft-unified-3` identifies this registry edition for the development
+`trrm/1-draft-register-il-1` identifies this registry edition for the development
 format pair `(1, 0)`. It is not an on-wire Feature ID or profile selector.
 Independently exchanged drafts require exact agreement on this registry,
 its semantic catalog **and** governing chapters. Matching `(1, 0)`, an edition
@@ -33,110 +34,120 @@ compatibility obligation. Once a schema is released, its format pair has one
 stable meaning; this registry assigns no released schema or new header field.
 
 There is one catalog. The earlier generic and floating draft catalogs are
-not alternate reader modes or aliases in this schema. A producer emits the
-current assignments; a consumer must not infer a retired catalog from operand
-types, plausible instruction lengths, implementation enums or chronology.
+not alternate reader modes or aliases in this schema. A valid artifact uses
+the selected catalog's assignments; operand types, plausible instruction
+lengths, implementation enums or chronology do not select a retired catalog.
 An explicitly selected old development schema may be inspected by a separate
 tool; those bytes are not current-schema input.
 
-## 2. Allocation policy and growth
+## 2. Instruction allocation
 
-Primary opcode allocation uses the following family capacity. A band reserves
-space for related **semantics**, not one instruction per API, scalar width,
-vector lane or nominal operator. An operation's type matrix and subcode select
-its exact behavior; a source-selected nominal operator remains a call.
+`instructionEncoding=01` selects the current mixed register codec. The first
+byte alone fixes instruction length; no prefix, recursive width selector or
+block-wide mode exists:
 
-| Primary bytes | Role and capacity |
+| First byte | Length | Form |
+|---|---:|---|
+| `00..0F` | 1 byte | Sixteen assigned tiny tuples |
+| `10..BF` | 2 bytes | Assigned short operations and restricted forms |
+| `C0..FF` | 4 bytes | Assigned long families |
+
+The [instruction chapter](../il-instruction-set.md#active-mixed-instruction-encoding)
+lists exact tiny tuples, short operands, long payloads, operation semantics
+and type constraints. The machine-readable registry repeats every primary,
+family selector, record kind and control domain. The assigned numeric ranges
+are:
+
+| Range | Assignment |
 |---|---|
-| `01..0F` | Constants, Copy values, selection, presence and aggregate values |
-| `10..1F` | Integer/Boolean operations, bit operations and checked arithmetic/conversions |
-| `20..2F` | Places, storage transitions, indexing and views |
-| `30..3F` | Selected calls and future invocation/static-target forms |
-| `40..4F` | Floating/decimal operation families and conversions |
-| `50..5F` | Future fixed/scalable vector and mask operation families |
-| `60..6F` | Future explicit memory, atomic, fence and logical-root operations |
-| `70..7E` | Future operation families |
-| `7F` | Reserved for a possible extended operation envelope; no assigned decoding |
-| `80..EE` | Terminators; the registry assigns the present control/failure/exit shapes |
-| `EF` | Reserved for a possible extended terminator envelope; no assigned decoding |
-| `F0` | Width prefix only |
-| `00`, `F1..FF` | Invalid instruction starts |
+| `00..0F` | Tiny tuples T0..T15 |
+| `10..1A`, `20..2B`, `30..36`, `40..41`, `50..52`, `60..67` | Short register, arithmetic, logic, comparison, conversion and place operations |
+| `70..7F` | Field extraction ordinals 0..15 |
+| `80..83`, `90..92`, `A0..AF`, `B0..B5`, `B7..B8` | Call windows/records, predicate branches, control records, failfast, unreachable and Home return |
+| `B6` | Recognized RegionExit shape; no usable `exitKind` or region index domain |
+| `C0..CC` | Scalar/bit/comparison/selection/ternary/recipe families |
+| `D0..DD` | Conversion, constants, Home and typed place/store/reference operations |
+| `E0..E8`, `EB` | Calls, branches, switch, requirement, throw and Home return |
+| `EA` | Recognized RegionExit shape; no usable `exitKind` or region index domain |
 
-Unassigned and reserved primary values reject. `7F` and `EF` are not active
-escapes, and `F0` never selects an operation family or nested prefix. Future
-extended keys need a complete bounded envelope, role, operand sequence,
-canonical writer and admission rules before allocation. No experimental
-opcode or private interpretation is admitted.
+Every other first-byte or family-control value is invalid. The `B6` and `EA`
+shapes reject affected use until their region carrier is assigned. Reserved capacity
+does not create an escape, extension, operation, profile or private
+interpretation. Source-selected nominal operators remain calls under their
+declared bindings; an operation name does not authorize compiler
+recognition.
 
-The current catalog has 34 operation shapes and six terminator shapes.
-Ten place/indexing shapes, two aggregate shapes and `Leave` are inspectable
-only; their numbers do not supply missing ownership, backing or unwind
-contracts. The seven floating shapes use `float32`/`float64` where explicitly
-admitted, not every floating identity in metadata. Vector, atomic, root and
-decimal-operation bands allocate no instructions yet.
+The `B6`/`EA` RegionExit and `Throw` active-handler record shapes do not
+complete their required ExceptionRegion, handler/filter/finally or runtime
+event carriers. No `RegionExit.exitKind` value or Body region inventory is
+assigned; those records reject affected use until the dependent schema is
+selected. See the [conformance gaps](../../implementation/conformance-gaps.md#cg-003).
 
 ## 3. Machine-readable shape conventions
 
-Each instruction's `operands` is an ordered sequence of `[name, form]` pairs.
-An enum form names a fixed `u8` domain, not a width-controlled operand.
-Instruction `ref`, `count` and `data` widths are independent; the common
-envelope uses one byte in each used class. Fixed metadata references always
-use little-endian `u32`, regardless of that envelope.
+Tiny instructions are one byte. A short instruction is its primary byte
+followed by one operand byte. Forms listing `x`/`y` split it into low/high
+nibbles; `90`, `92`, `B0`, `B2..B8` use the full byte where specified. The
+predicate nibble in `A0..AF` and extraction ordinal in `70..7F` are carried
+by the primary byte. A long instruction is
+`primary:u8, control:u8, payload:u16`; the payload is little-endian. The
+register-family payload nibbles are least-significant first:
+result0/result1/source0/source1.
 
-| Operand form | Encoded field |
-|---|---|
-| `definition`, `value`, `place-value`, `type`, `place`, `block`, `region` | Unsigned Body-local reference width; the form fixes its namespace |
-| `definition?`, `value?` | Same width, with zero permitted only by the unit-result rule |
-| `method` | Nonzero local reference; zero instead consumes the following fixed-`u32` artifact-wide MethodDef row index, high byte zero, for the inspectable packed-call shape; no DefId selector |
-| `field` | Fixed-`u32` typed FieldDef reference |
-| `bits`, `signed` | Data width; unsigned bit pattern or two's-complement signed integer respectively |
-| `enum:<domain>` | Fixed `u8`; exact membership in the named domain |
-| `arguments` | Count-width argument count followed by that many value-reference-width IDs |
-| `edge` | Block-reference-width target followed by `arguments` |
-| `cases` | Count-width case count followed by that many `(bits, edge)` pairs |
-| `regions` | Count-width exit count followed by that many region-reference-width IDs |
+The stream codec selector is a separate `u8`, fixed to `01` for this
+encoding. The Body stream prefix is 33 bytes and its map/count/index rules
+are specified in [IL metadata](../il-metadata.md#body-table-and-coded-instruction-boundary)
+and the machine registry. Body-local map, Home, Block and record indexes are
+zero-based `u16`; all 65,536 values are available and corresponding counts
+are `u32`. Global table tokens and code byte offsets/lengths/instruction
+ordinals retain their own widths and namespaces.
 
-Lists and conditional fields are not opaque payloads: their minimum sizes,
-counts and full extents must be checked before traversal or allocation.
-Used width classes follow the fields actually present after list/conditional
-expansion; an empty case list has no data fields and requires data code zero.
-The registry fixes operand boundaries even for an inspectable-only shape.
-It does not waive type, state, contract, target or flow requirements.
-
-Metadata rows similarly list their ordered fields and widths. Table-specific
-`u32` fields, including `str`/`blob`, are row indexes with reserved-zero high
-byte, not table selectors, inline text or native pointers. Only genuinely
-polymorphic definition fields use a DefId discriminator. Clause kind fixes
-the Contract owner's table; slot selector 1 fixes Body and has a zero
-section-kind field.
-`local` widths in Body structures are separate from instruction widths.
-All reference kinds, section kinds, atomic/family codes and clause IDs retain
-their distinct namespaces even when their numbers coincide.
+Records begin with `u8 kind, u8 flags=0, u16 reserved=0`; the kind fixes the
+payload schema. Variable record lists carry their assigned `u32` counts.
+Register roles, selector domains, exact record payloads, reserved values and
+typed operation constraints are normative in the two owning chapters and
+machine-readable assignments. No definition/value/region index or width
+class from the retired SSA codec carries forward; current Body references use
+the distinct register, Home, Block and record namespaces.
 
 ## 4. Admission status and namespace boundaries
 
-`executable` means that the bounded `scalar-copy-failfast` profile admits
-the shape **subject to** its complete type, call, region, effect and runtime
-restrictions. Governing edition `1` selects this baseline; the profile name
-is descriptive, not a separate profile selector or an assigned Feature row.
-`shape-only` means bounded inspection is possible but execution rejects.
-`provisional` retains an allocation without an admitted semantic use; it
-also rejects before affected binding/execution. Other unlisted or reserved
-values reject rather than defaulting to a known form.
+An assigned operation has the semantics specified by the language and
+instruction chapters, subject to its complete type, call, region, effect,
+runtime and capability prerequisites. Assignment is not an implementation
+support claim. Unlisted or reserved values have no assigned meaning and do
+not default to a known form. A support claim requires each required
+capability's complete transitive prerequisite closure.
+The full accepted TRRM 1.0 requirements define GA conformance; implementations
+may advertise partial capabilities but cannot claim full GA conformance while
+omitting a required contract.
 
 Metadata assignment is structural recognition, not a claim of executable
 support for every type or declaration. In particular:
 
-- The 26 atomic and 16 family slots do not admit every family membership,
-  mask, representation, constant codec or operation.
+- The 26 atomic identities and currently assigned TypeSpec/pseudo-family
+  codes do not admit every family membership, representation, constant codec
+  or operation. SIMD comparisons return the same vector type with
+  all-zero/all-one lane bits; there is no separate mask type family.
+- A complete `TypeSpecRef` remains four bytes and may be a TypeSpec row, a
+  well-known `0xF2` token, or an inline built-in-family `0xF3` token. `0xF3`
+  reuses TypeSpec form `0x01` family/atomic-argument and qualifier meanings;
+  `0xF0`/`0xF1` remain Body-local pseudo-types because their base is a Body
+  TypeMap index. These assignments do not admit a type family or operation
+  outside its own semantic contract. `0xF4..0xFE` remain unassigned and
+  `0xFF` remains reserved.
 - Module's required `governingRuleEdition` is a full-width semantic identity,
-  not a row reference. Edition `1` fixes the bounded baseline. Feature has an
-  exact two-word manifest codec, but no capability IDs are registered; current
-  producers omit its table and use empty ranges.
-- Effects has a bounded executable MethodDef use and
-  [closed assigned-clause applicability](contract-clauses.md). Output publication,
-  unassigned transfer/dependency variants, cleanup and generic witnesses
-  retain their separate completion gates.
+  not a row reference. Edition `1` defines the accepted TRRM 1.0 semantic
+  baseline, not a reduced scalar execution profile. Feature has an exact
+  two-word manifest codec. Feature IDs 9-12 are assigned at revision 1, but a
+  number does not complete its registration or prerequisite closure;
+  incomplete required capabilities cannot be admitted or silently omitted.
+- Effects has assigned MethodDef applicability, and OutputState/Dependency
+  have approved shared row contracts in the
+  [clause chapter](contract-clauses.md). OutputState's predicate target still
+  requires its published-predicate carrier; Dependency uses only the assigned
+  shared destinations and has no native-output destination. Transfer remains
+  semantically inactive.
 - Numeric gaps below section kind `8000` are not extensions. Unknown kinds
   `8000..FFFF` may be skipped only under the registered nonsemantic policy;
   they cannot supply required semantics or change core rows.
@@ -144,41 +155,41 @@ support for every type or declaration. In particular:
   referenceable table above `00FF` needs an explicit mapping/indirection
   decision, not truncation into an existing kind.
 
-No reserved type escape, definition kind, header bit, fourth Body form,
-wider constant payload, static identity or semantic optional section becomes
-usable by appearing in a proposal.
+No reserved type escape, definition kind, header bit, extra Body
+implementation kind, wider constant payload, static identity or semantic
+optional section becomes usable by appearing in a proposal.
 
-Status constrains producer validity and affected use, not the amount a trusted
-consumer must scan. Unknown/unsupported accessed forms reject; a producer
-must declare complete required semantics. Trust permits relying on indexes
-without a preliminary all-Body form scan. Whole-artifact structural validation
-and semantic/canonicality audits are separately scoped claims.
+Status constrains producer conformance and what implementation support may be
+claimed. Consumers must validate the selected artifact's framing, references,
+requirements and structural safe-consumption properties before binding, code
+generation or execution; producer indexes and manifests are not substitutes
+for those checks. Producers remain responsible for semantic body facts, which
+consumers may rely on without re-proof. The verifier's organization and
+diagnostic wording are implementation choices. Optional audits remain
+separately scoped claims.
 
 ## 5. Re-encoding and conformance
 
-Canonical instruction widths follow each used class's decoded maximum;
-Body-local widths follow the selected form's complete local inventory.
-Type maps follow first logical use without unused entries. Ordinary
-nonminimal widths, consistently referenced reordered maps and distinct valid
-unused entries remain accepted; canonicality is an explicitly scoped audit,
-not a preliminary trusted-import scan or a universal Body-form choice.
+Canonical writers use the assigned tiny, short or long form; there are no
+variable instruction-width classes. TypeMap, MethodMap and ConstantMap
+entries follow deterministic first logical use, reuse identical entries and
+omit unused entries. Typed records follow first logical use and omit unused
+records. HomeMap entries remain distinct storage identities. Ordinary readers
+accept structurally valid reordered or duplicate TypeMap/MethodMap/
+ConstantMap/typed-record entries where every reference preserves its meaning;
+HomeMap ordering is not canonicalized, and audits do not claim a unique
+HomeMap order. Canonicality is an explicitly scoped audit.
 
-Re-encoding uses decoded instruction roles and operand schemas, never
-search-and-replace of byte values. Opcode values can occur in literals,
-counts, enum values, local IDs, metadata references, presence masks and
-offset arrays. Those occurrences remain in their own namespaces.
-
-The present primary reallocation changes opcode octets, not operand widths
-or instruction lengths. In unchanged example Bodies, definition, block and
-terminator offsets therefore stay valid. A transformation that changes
-length, maps, IDs, CFG, contracts or module context must rebuild every
-affected index/reference and remap or drop optional SourceMap data according
-to its meaning-preservation policy.
+Re-encoding reconstructs typed instructions, records, maps and CFG, then
+rebuilds code offsets, record offsets, references and any affected SourceMap
+slots/step roles. It never searches for matching opcode octets in literals,
+counts, enum values, indexes or offsets. A changed instruction length or
+block order requires corresponding Body index and source-map remapping.
 
 [Required cases and complete artifact vectors](../conformance/il-registry.md)
-cover allocation uniqueness, family capacity, conditional operands, all
-three Body forms, type/result restrictions and rewrites. They identify the
-current schema explicitly and distinguish independent structural/finite
-assessments from arbitrary flow, producer truth, native behavior, performance
-and unassigned feature/codec conformance. The WIP compiler has not been
-silently migrated by changing the specification.
+cover the tiny/short/long partitions, each assigned selector, typed records,
+Body indexes, SourceMap step roles, type/result restrictions and rewrites.
+They identify the current schema explicitly and distinguish independent
+structural/finite assessments from arbitrary flow, producer truth, native
+behavior, performance and unassigned feature conformance. The compiler has
+not been migrated by changing the specification.

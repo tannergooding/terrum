@@ -5,6 +5,12 @@ backend or implementation status. A successful parse does not establish
 binding, emission, execution, or approval of a provisional contract. See the
 [sample entry point](../samples/README.md) for the directory map.
 
+The catalog records current implementation behavior, which can lag the
+accepted specification. In particular, runnable entries using `[NoThrow]` or
+the `checked-exceptions` runtime-policy switch demonstrate legacy prototype
+behavior, not accepted source or module contracts; see
+[CG-003](implementation/conformance-gaps.md#cg-003).
+
 ## Sample groups
 
 | Location | Purpose and evidence boundary |

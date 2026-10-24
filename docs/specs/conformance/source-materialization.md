@@ -112,8 +112,8 @@ placing renewal after the original body where `continue` can skip it.
 
 ## Observable owner traces
 
-For these finite fixtures, `T` is a unique owner with synchronous NoThrow
-cleanup. Each completed `CreateOwner()` produces the next tag. A fixed
+For these finite fixtures, `T` is a unique owner with synchronous cleanup
+that returns normally on the exercised paths. Each completed `CreateOwner()` produces the next tag. A fixed
 preallocated trace sink records events without allocating, blocking, or
 throwing. The owner has no retained borrowers in these fixtures.
 

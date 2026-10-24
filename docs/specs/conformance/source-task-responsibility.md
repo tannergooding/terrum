@@ -22,6 +22,11 @@ awaiter runtime, scheduler, memory model or physical task codec.
 | TREG-10 | IsCompleted is queried on a live task | Synchronous bool status only; terminal true is monotonic for that operation |
 | TREG-11 | Custom awaiter/callback contract is incomplete | Reject before use; no name-based continuation registration |
 | TREG-12 | Target lacks the required task/wait/root representation | Reject; no allocation or blocking fallback |
+| TREG-13 | `Task<_>` appears in an admitted type position | Bind a per-value existential Task view, not `Task<void>` or a call-site inference hole |
+| TREG-14 | Two existential Task values hide different complete payload types | Preserve each value's own type/witness correlation and responsibility |
+| TREG-15 | `M<_>` is a direct generic-call argument or `Task<var T>` is a pattern | Preserve call-site inference and pattern capture; neither is rewritten as a stored existential |
+| TREG-16 | A persisted existential Task view lacks typed evidence and has no checked reconstruction path | Reject before affected use; do not infer from names or private bodies |
+| TREG-17 | Boxed, tagged or specialized representation preserves all view obligations | Representation is permitted; no one physical layout or allocation strategy is required |
 
 ## Ownership and transfer
 
@@ -62,6 +67,19 @@ awaiter runtime, scheduler, memory model or physical task codec.
 | TAWAIT-14 | Continuation adapter changes dispatch | Preserve consumption, owner, failure and affinity; do not reschedule producer |
 | TAWAIT-15 | Awaited Boolean has selected init-output attachment | Observe that exact operation/formal/destination/version relation |
 | TAWAIT-16 | Payload borrows from retiring task/wait storage | Reject; external surviving backing and actual owned transfer are distinct |
+
+## Existential view and completion-only consumption
+
+| ID | Scenario | Required outcome |
+|---|---|---|
+| TEXIST-01 | `Task<_>` observes IsCompleted | Allow only the selected common observation; do not transfer or settle the task owner |
+| TEXIST-02 | A generic operation is available for only some possible hidden T values | Do not expose it through the existential view |
+| TEXIST-03 | Typed `await` is applied to `Task<_>` | Do not return an unknown T; use a provided completion-only operation or retain a concrete `Task<T>` view before typed await |
+| TEXIST-04 | A contractually defined completion-only operation reaches success with an owning hidden payload | Consume the owner and settle/clean the hidden payload exactly once under its checked contract; return no hidden payload |
+| TEXIST-05 | A contractually defined completion-only operation reaches terminal failure | Propagate the ordinary terminal failure while preserving cleanup and dependency obligations |
+| TEXIST-06 | Completion-only consumption is treated as `Task<void>` conversion or ordinary discard | Reject; neither erasure nor arbitrary affine-result discard is implied |
+| TEXIST-07 | The existential value is copied or its hidden payload is transferred twice | Reject duplicate task responsibility or payload transfer |
+| TEXIST-08 | Two views use different admitted physical representations | Preserve per-value type/witness correlation and observable ownership/failure behavior |
 
 ## Observation and payload state
 
@@ -118,7 +136,7 @@ awaiter runtime, scheduler, memory model or physical task codec.
 
 | ID | Scenario | Required outcome |
 |---|---|---|
-| TRET-01 | Consumer lacks either task responsibility or consuming-await rule | Reject required semantics before use |
+| TRET-01 | Implementation lacks either task responsibility or consuming-await rule | No support claim for the affected use; reject before use, with diagnostics left to the implementation |
 | TRET-02 | Link remaps declaration/operation owner records | Preserve logical type, owner, phase and output identities, not row/name coincidence |
 | TRET-03 | Instance/output storage is reused with the same numeric identity | Distinguish generations; no revived owner or result |
 | TRET-04 | Adapter erases T or completion Boolean | Preserve/discharge payload and exact output obligations; no Task<void> cast |
@@ -127,6 +145,6 @@ awaiter runtime, scheduler, memory model or physical task codec.
 | TRET-07 | Consuming await settles task but leaves published element view live | Preserve its backing/guard and independent cursor-close requirement |
 | TRET-08 | Replacement changes consuming await to reusable/copying ownership | Reject incompatible retained contract |
 | TRET-09 | Replacement drops error/output/cleanup responsibility or adds hidden blocking | Reject incompatible retained contract |
-| TRET-10 | Structural registration or semantic attribute is treated as body proof | Require checked evidence or explicit semantic producer/audit trust |
+| TRET-10 | Structural registration or semantic attribute is treated as proof beyond the published task contract | Producer remains responsible for truth; consumers validate record structure, references and support but are not required to re-prove task-contract facts. Optional audits do not prove arbitrary external behavior or authored unsafe promises |
 | TRET-11 | Held opcode/table/optional attribute encodes mandatory task semantics | No physical allocation activated by logical approval |
 | TRET-12 | Finite task schedule/owner fixtures pass | Not compiler/runtime, arbitrary body, collector, concurrency or codec conformance |

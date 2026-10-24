@@ -81,8 +81,9 @@ The detailed [hosted output profiles](implementation/output-profiles.md)
 are informative development inventories. Their historical `out` modes do not
 add parameter forms to the canonical reference model.
 The [hosted view and owner profiles](implementation/view-and-owner-profiles.md)
-record bounded TokenCursor storage, owner/field loans and cleanup projections;
-their restrictions do not limit the general source dependency contracts.
+record the current TokenCursor prototype and bounded owner/field loans and
+cleanup projections; their restrictions do not limit the general source
+dependency contracts.
 The [sample catalog](samples.md) distinguishes runnable programs from design
 sketches.
 The [experimental CLI response reference](implementation/cli-protocol.md)
@@ -107,30 +108,36 @@ indexed Bodies for a bounded source-free, fail-fast scalar subset. It uses the
 shared hosted verifier and backend; general imported-call linking and checked
 exception Body support are not implemented.
 This inventory describes its development encoding, not verified support for
-the [unified registry](specs/representation/registry.md). The
-[encoding history](implementation/trrm-encoding-history.md) distinguishes
-retired floating/generic numbers from current normative assignments.
+the [unified registry](specs/representation/registry.md). Full current-schema
+producer/consumer migration and qualification remain tracked by
+[CG-001](implementation/conformance-gaps.md#cg-001).
 
-Terrum-authored scanner and scalar-frontend components are bounded candidates,
-not a bootstrap compiler. The scalar frontend audits source projections before
-passing them to the hosted verifier/emitter. Its support does not imply that
-verification or emission has moved into Terrum. The source-free compiler
-primitives DLL is likewise distinct from source-grant companion profiles.
-See the [Terrum-authored compiler component inventory](implementation/terrum-code-analysis.md),
-[bootstrap/frontend composition inventory](implementation/bootstrap-frontend-composition.md),
-and [scanner boundary](scanner.md).
+Terrum-authored scanner and scalar-frontend components are implementation
+experiments, not a bootstrapped compiler or compiler interchange. The scalar
+frontend projection is not the selected compiler architecture: the C#-authored
+and Terrum-authored compilers remain standalone, with whole-source process
+fallback on the original source. Source text belongs at the compiler input
+boundary; JIT input is semantic metadata.
 
-Some source-grant and invocation-profile extensions are implemented only
-provisionally under unapproved proposals. They do not change the accepted
+Private `Host.Source` grants, scanner invocation profiles, scalar-frontend
+projections, and native source-grant companions remain prototype evidence only.
+They are not selected compiler interfaces, source-dependent native ABIs, or
+standard TRRM features. Their implementation does not change the accepted
 source-free ABI or establish general source-dependent DLL, graph, module-set,
-or persisted-AOT support. The [proposal index](proposals/README.md) records
-those boundaries and pending promotion decisions.
+or persisted-AOT support. See the [Terrum-authored compiler component
+inventory](implementation/terrum-code-analysis.md), [bootstrap/frontend
+composition inventory](implementation/bootstrap-frontend-composition.md),
+and [scanner implementation notes](scanner.md).
 
-Native DLL imports are a provisional source feature under the unapproved
-[TRRM native interop proposal](proposals/trrm-native-interop-metadata.md).
-Source declarations name a library and export directly and carry generic
-pointer access, retention, output-validity, and unsafe-caller contracts; they
-do not select a compiler-owned Win32, DX11, or native-import catalog.
+Native declaration roles and their standard metadata are accepted in the
+[native boundary contract](specs/native.md), [semantic metadata](specs/il-metadata.md)
+and [native conformance cases](specs/conformance/native-boundaries.md).
+Compiler implementation remains prototype-only and does not yet conform to
+the complete accepted source and metadata contract. The prototype's source
+declarations name a library and export directly and include experimental
+pointer access, retention and output-validity annotations; those annotations
+are not part of the accepted native schema. The declarations do not select a
+compiler-owned Win32, DX11 or native-import catalog.
 `build-native-import` explicitly selects the Windows x64 native-import emitter;
 ordinary `build` does not emit source imports. Fixed-array local storage is
 admitted by ordinary source compilation for fixed-width scalar or committed
@@ -143,10 +150,11 @@ limited to the native import AOT emitter; private semantic modules, native
 modules, JIT, and standard TRRM continue to reject fixed-array expressions.
 The `MessageBoxW` sample is authored using the same direct import form as any
 other native function; its unattended CLI test
-checks the emitted import without invoking the modal API. This remains
-provisional implementation support, not canonical TRRM approval or a
-cross-platform FFI contract. Source-level typed and nested `ptr<T>` signatures
-and unsafe pointer address/read/write nodes persist through private semantic
+checks the emitted import without invoking the modal API. This demonstrates
+bounded implementation support only; it does not establish conformance to
+the accepted metadata schema or support on other targets. Source-level typed
+and nested `ptr<T>` signatures and unsafe pointer address/read/write nodes
+persist through private semantic
 module revision 83. Typed pointer formation can take the address of an element
 in an initialized fixed-array local; native lowering retains its checked
 element bounds. Fixed-array expressions, including those pointer addresses,
@@ -155,26 +163,29 @@ general pointer address/read/write operations, but it carries typed
 native-pointer TypeSpecs and admitted pointer-valued declaration/call
 arguments in its bounded executable profile.
 
-A separate prototype under the unapproved
-[TRRM native interop proposal](proposals/trrm-native-interop-metadata.md)
-supports two-string `Terrum.Interop.NativeImport` declarations with
+The experimental source/TRRM prototype supports two-string
+`Terrum.Interop.NativeImport` declarations with
 `Terrum.Interop.NativeOutput` for result-correlated writable scalar pointers
 and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. Direct imports
 also admit target scalar, represented data-pointer and native-function-pointer
 parameters and results. `NativeParameter` is optional: without it, the raw
 pointer remains caller-unsafe and carries no checked access, retention, extent
-or alignment promise. This does not enable general pointer locals or memory
+or alignment promise. These prototype-only annotations are not part of the
+accepted native schema. This does not enable general pointer locals or memory
 operations in executable Bodies.
 Output conditions are explicit: `NativeOutput(ordinal, NonZero)` selects
 nonzero for `int32` or `uint32` results, while
 `NativeOutput(ordinal, NonNegative)` provisionally expresses signed
 nonnegative status results such as HRESULT success. The latter
 pointer output represents only unmanaged pointer bits; it adds no backing,
-provenance, ownership, pinning, or cleanup guarantee. The prototype carries the raw
-import's caller-unsafety and direct representation through a provisional TRRM
-NativeImport table and source-reference path; that standard path is limited to
-named Windows System32 imports. Its section, clause, and Feature assignments
-are not canonical TRRM assignments. It also persists `NativeCallable` entries
+provenance, ownership, pinning, or cleanup guarantee. The prototype carries
+the raw import's caller-unsafety and direct representation through an
+experimental TRRM NativeImport table and source-reference path; that prototype
+path is limited to named Windows System32 imports. Its section, clause and
+Feature assignments are not canonical TRRM assignments. The accepted records
+and assignments are defined in [semantic metadata](specs/il-metadata.md) and
+the [registry](specs/representation/trrm-1.registry.json). It also persists
+`NativeCallable` entries
 through a provisional NativeCallable table and ABI role; source-free references
 expose those entries as caller-unsafe external declarations. Provisional
 function-pointer signature anchors in experimental section `0x0033` and TypeSpec form `0x0D`
@@ -219,10 +230,11 @@ compact-indexed bodies can call role-4 declarations
 through ordinary `Call`, transporting raw pointers only through
 signature-matched call results/arguments or zero-valued constants; ordinary
 pointer/address operations remain unsupported.
-Vtable-bearing artifacts provisionally require experimental Features `0x0101`
+Vtable-bearing prototype artifacts provisionally require experimental Features `0x0101`
 (`RootlessNativeValues`) and `0x0104` (`NativeVTableCalls`) in addition to
-`0x0100` (`NativeBoundaryContracts`); these implementation assignments remain unapproved
-and differ from the proposal's coordinated next-draft candidates.
+`0x0100` (`NativeBoundaryContracts`); these implementation assignments are
+not the accepted registry assignments and do not establish standard TRRM
+conformance.
 The writer can emit this body from source, and the loader reconstructs and
 verifies it; a loaded indexed body is not yet reserializable by the standard
 writer. Native-package binding and consumer-side revalidation are covered for
@@ -308,10 +320,11 @@ unsafe scope; native-callable entries are `NoThrow` and caller-unsafe. Function
 pointers carry code addresses only: they do not root or extend the lifetime of
 the image containing the target. An independent .NET unmanaged caller exercises
 the exported native ABI, and JIT/module regressions exercise provider callback
-transport. Bounded provisional `.trrm` support is described above; the
-accepted standard schema does not admit these experimental declarations,
-types or Bodies. Source forms and private revisions are not normative
-grammar or interchange assignments.
+transport. Bounded experimental `.trrm` support is described above. The
+accepted schema defines native-callable roles and function-pointer signatures
+with canonical records and encodings; the prototype's source forms, private
+revisions and wire assignments are implementation evidence, not definitions
+of normative grammar or interchange.
 
 The source-only prototype also supports a generic numeric-slot vtable call
 declaration with an explicit receiver and ordinary Windows x64 argument
@@ -393,11 +406,12 @@ They do not establish general reference metadata or executable TRRM support.
 `compile-trrm` emits development `(1, 0)` metadata and compact-linear or indexed
 Bodies for a bounded source-free, fail-fast scalar subset, separately from
 private semantic-module encoding. Its semantics overlap accepted contracts,
-but its retired allocations and manifests do not establish conformance to
-`trrm/1-draft-unified-3`. Consumers load artifact bytes, validate
-metadata and Bodies, reconstruct typed inputs, and invoke the shared mandatory
-verifier and backend; there is no producer-trust bypass. General imported-call
-linking and checked-exception Body support are not implemented. Body-local
+but its retired allocations and manifests do not establish conformance to the
+selected [native-boundaries schema](specs/representation/trrm-1.registry.json).
+Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed
+inputs, and invoke the shared mandatory verifier and backend; there is no
+producer-trust bypass. General imported-call linking and standard
+exception-region Body support are not implemented. Body-local
 optional scalar values use independent presence and payload state, with the
 assigned optional operations covered by linear/indexed JIT and AOT tests.
 Optional floating types remain rejected, and optional `char16` is limited to
@@ -417,9 +431,9 @@ foreign storage, generic or partial composition, and managed or
 cleanup-bearing static values. Imported or packed definitions cannot
 participate in an initialization dependency, though unrelated imports may
 remain in the module. This is an implementation boundary, not a source
-restriction or a complete TRRM 1.0 GA profile. The
-[proposal](proposals/static-initialization-metadata.md) tracks unresolved
-schemas, encoding and runtime integration.
+restriction or a complete TRRM 1.0 GA profile. Remaining static schema and
+runtime integration gates are tracked in
+[CG-008](implementation/conformance-gaps.md#cg-008).
 The development reader/compiler also supports same-format binary32/binary64
 comparisons, raw-bit constants, Copy/Select, format conversion, fixed-width
 integer conversion, char16-to-floating conversion, sign-bit negation and
@@ -429,12 +443,11 @@ semantics and the processing-result NaN contract remain independent of their
 encoding. Linear/indexed regression cases exist for these operations; this
 documentation change does not establish fresh execution evidence.
 
-The [encoding inventory](implementation/trrm-encoding-history.md) maps their
-retired `19..1F` bytes to the current `40..46` family. The compiler must migrate
-its complete selected schema, references, indexes, manifests and independent
-fixtures before claiming current standard interchange. Unsupported additional
-formats or operations remain explicit boundaries, not reasons to freeze the
-accepted design.
+The compiler must migrate the complete selected schema, references, indexes,
+manifests and independent fixtures before claiming current standard
+interchange; see [CG-001](implementation/conformance-gaps.md#cg-001).
+Unsupported additional formats or operations remain explicit boundaries, not
+reasons to freeze the accepted design.
 
 ## Platform and validation
 

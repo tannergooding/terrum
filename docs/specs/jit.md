@@ -6,6 +6,9 @@ contract defaults or artifact schemas. The
 observable behavior for the same selected features. This chapter applies
 existing execution, admission and target rules; it selects no public JIT,
 scheduler, code-servicing or sandbox API.
+The [semantic operation display map](il-instruction-set.md#operation-identity-encoding-and-presentation)
+keeps selected source/semantic identities distinct from schema names and
+target lowering; JIT/AOT timing does not create a different operation.
 
 ## Admitted execution
 

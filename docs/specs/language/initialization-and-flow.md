@@ -22,6 +22,19 @@ not by comparing their bytes or display names.
 | Partial structural aggregate | Some required fields or complete-value validity are missing, while acquired fields remain | Checked field projection/state/repair and partial retirement; no ordinary whole-value use or whole-place initialization over live children |
 | Reserved for pending initialization | A selected completion-output operation owns initialization/publication of this exact place/version | Preserve backing and operation responsibility; no caller state/value test, competing initialization, move, retirement or reuse |
 
+`Span<init T>` tracks one state for the entire represented range. Formation
+requires every element place in that range to be vacant; reads remain
+unavailable until the range is fully initialized. The initial profile does
+not track a per-element bitmap or permit a mixed/prefix state to escape.
+`OutputState` relates a selected Span parameter to its exact normal-outcome
+predicate: false leaves the range vacant and true publishes the whole range
+complete. An unconditional complete-on-normal-return helper needs no
+conditional row. The contract is declaration-owned, not recognized from a
+method name. If failure can follow partial construction, the helper must
+settle and clean those elements before propagation, or its selected profile
+must exclude that failure. This is not rollback; caller state after an
+exceptional exit remains indeterminate.
+
 The reserved state is supplied by an explicit
 [completion-phase contract](async-iteration.md#invocation-and-pending-initialization),
 not Task shape or private writes. Its producing operation can form/check its
@@ -325,6 +338,13 @@ only its selected branch. Join facts from the actually possible edges,
 not from an imagined eager evaluation.
 Saved Boolean results retain structurally established initialization
 correlations while their relevant value/place versions remain unchanged.
+The same rule applies to a generic type-property test such as `T is unique`:
+its Boolean result retains the tested property and true/false edge facts.
+An unchanged saved value can refine the tested formal when used as a branch
+condition. For mutable values or control-flow joins, refinement is permitted
+only when the relevant reaching definitions and path facts establish the
+same property or a sound combination; arbitrary Boolean theorem proving is
+not required.
 
 Pattern `not`, `and`, and `or` use the corresponding negation and
 short-circuit matching order on the same subject observation.

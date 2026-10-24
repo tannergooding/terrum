@@ -96,6 +96,6 @@ Expected event traces describe semantic execution, not compiler conformance.
 | HBOUND-03 | User enum is named ConstructionEvaluation with Eager/Incremental cases | Ordinary user policy identity only; no Core construction-evaluation domain or deferred-operand authority |
 | HBOUND-04 | User interface is named ITextContent or ITextContext | Ordinary nominal interface only; no recognized deferred content program, implicit implementation or call conversion |
 | HBOUND-05 | Source uses identifiers eager, incremental or streaming | No new keyword or handler evaluation selector from these spellings |
-| HBOUND-06 | Independent retained construction program lacks its required eager rule/schedule | Reject unsupported required semantics; optional attribute erasure cannot change source effects |
+| HBOUND-06 | Independent retained construction program lacks its required eager rule/schedule | No support claim for the affected semantics; reject before use. Optional attribute erasure cannot change source effects |
 | HBOUND-07 | Replacement changes eager captures to conditional or drain-time evaluation | Incompatible observable construction contract, even when one execution yields equal output |
 | HBOUND-08 | Optimization preserves final elements but changes capture/acquisition order, alias reads, refusal or cleanup | Equality of final output alone is insufficient; require permitted or proved-unobservable transformation |

@@ -87,7 +87,7 @@ forms, publication and backing/ownership obligations.
 | VILOOP-12 | A retained item/source loan would be invalidated by next advance or close | Diagnose invalid plan; no early lifetime end or silent copy/boxing repair |
 | VILOOP-13 | Inner loop performs named transfer to an outer loop | Close/clean intervening traversal and item scopes in ordinary order |
 | VILOOP-14 | Close faults after another failure | Preserve causal cleanup chaining, not suppression or successful exhaustion |
-| VILOOP-15 | Close has side effects on normal exhaustion | Execute it once; do not erase it as a destructor or inferred NoThrow call |
+| VILOOP-15 | Close has side effects on normal exhaustion | Execute it once; do not erase it as a destructor or assume it has no effects |
 | VILOOP-16 | Producer cleanup already completed during terminal advancement | Required Close cannot rerun completed body/resource cleanup |
 | VILOOP-17 | Cursor value retires after its required Close | Clean only residual obligations; no double close/release |
 | VILOOP-18 | Loop borrows an original collection as source | Closing cursor does not dispose the collection |
@@ -125,7 +125,7 @@ forms, publication and backing/ownership obligations.
 | VIKEEP-05 | Same-spelled imported member is offered as replacement | No implicit rebinding or body-derived adapter |
 | VIKEEP-06 | Replacement changes false/vacancy, close timing or source consumption | Incompatible retained contract |
 | VIKEEP-07 | A result dependency/refinement disappears | Incompatible; do not infer old behavior from implementation |
-| VIKEEP-08 | Untrusted producer claims safe output/cleanup | Use explicit semantic audit/decline policy; no trust flag supplies truth |
+| VIKEEP-08 | A producer publishes safe output/cleanup facts | Producer remains responsible for truth; consumers validate record structure, references and support but are not required to re-prove output/cleanup facts. Optional audits do not prove arbitrary external behavior or authored unsafe promises |
 | VIKEEP-09 | Authored exception/close effects are omitted from retained contract | Reject mismatched effect/failure obligations |
 | VIKEEP-10 | Standard roles are attached through optional Attr/reserved opcode data | No mandatory physical carrier is assigned |
 | VIKEEP-11 | Iterator producer has affine captures and direct cursor result | Source mode can preserve one-shot ownership; exact generated frame/phase contracts are still required |

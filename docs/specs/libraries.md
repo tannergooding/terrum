@@ -16,6 +16,9 @@ broader value/effect rules and [lifetimes](lifetimes.md) access and
 dependencies. In signatures, `mut` grants place rebinding or a writable
 receiver, while `write` grants reference/view access; generic parameters
 preserve their full qualification and mutable storage is invariant.
+The shared [definitions](language.md#definitions-and-notation) introduce
+copying, aliases, references and lifetime; the specific lease and protocol
+roles below retain their additional obligations.
 
 ## Definitions
 
@@ -23,7 +26,7 @@ preserve their full qualification and mutable storage is invariant.
 |---|---|
 | Language baseline profile (`language`) | The selected compilation/conformance floor: its closed primitive binding catalog and required substrate, distinct from optional library APIs. Exact profile inventories and feature dependencies must be selected explicitly. |
 | Dependency layer (Core/Foundation/Application/Platform leaves) | A candidate cumulative package-boundary grouping, described in the [core-library proposal](../proposals/core-library-reference.md#dependency-layers); each layer may depend only on preceding layers and its declared substrate. |
-| Storage-and-release lease | A per-allocation handle that grants access to allocated storage and the obligation to release it; distinct from an owned allocator context. |
+| Storage-and-release lease | A per-allocation handle that grants access to allocated storage and the obligation to release it; distinct from an owned allocator context and from a non-owning reference. This release-carrying role is more specific than a general backing-validity lease. |
 | Allocator context | A retained handle to an allocator, used to obtain leases; owned by a container such as a growing vector, not per-allocation. |
 | Family, member, witness | Defined in [type families](type-families.md); a family is a declared set of related types (members), and conformance to a behavioral contract is established by an explicit witness. |
 | `func` / `fnptr` | `func<Args..., R>` is a lifetime-aware, single-cast callable retaining its capture dependencies; `fnptr<Args..., R>` is a raw target-defined code pointer with no retained environment. |
@@ -106,37 +109,43 @@ An exact member-contract constraint can require a checked published witness
 refinement. This selects no general Span anchor ABI, closure/task substrate
 or otherwise proposed collection/guard/stream API.
 
-[Local failure eligibility](language/local-failures.md) selects Core's
-no-argument, nonrepeatable primary Exception capability for nominal storage
-types and declared catch-category interfaces. Explicit category witnesses
-provide nominal opt-in, and ordinary Exception property constraints check
-the complete argument. Named value catches require Copy; reference catches
-borrow without consuming the active event. No empty mandatory IException
-interface, universal Exception base, message/stack-trace field, implicit box,
-default constructor or public capture API follows from this selection.
-[Runtime requirement failures](language/requirement-failures.md) separately
-select ordinary `new E()` with zero supplied arguments on failure, the resolved
-primary-callable `RequireException(typeof(E))` recipe and Core's exact public
-`Terrum.RequirementException` fallback. The latter is a nongeneric zero-data
-Exception/Copy struct with a public zero-parameter constructor and no authored
-construction effects or diagnostic fields. Explicit `require<E>` wins; recipes
-and defaults belong to their semantic source owner, not caller/type/module
-inheritance. No constructor runs on a successful check, and actual constructor
-failure is not replaced with a fabricated E or another default.
+[Local failures](language/local-failures.md) select class-only managed
+exceptions implementing `IException<this TException>`. The exact common
+contract supplies durable non-null `Message`, static `DefaultMessage`,
+default/message/typed-eager-text creation paths, authored nullable
+`InnerException`, runtime-readonly `ParentException`, and the existing
+`IFormattable` witness with a message-forwarding default. The object itself
+is the propagation event. `IException<_>` is a per-value existential view of
+an already-constructed object, not `void`, a nongeneric base, boxing or
+inheritance. Catch bindings are object handles/views of the same event object;
+they neither duplicate event identity nor transfer event responsibility. The former `[Exception]`
+attribute and payload-category interfaces are removed. `ParentException`'s
+exact physical storage remains a runtime integration requirement; stack-trace
+and causal-chain rendering are not common interface obligations.
+[Runtime requirement failures](language/requirement-failures.md) select the
+ordinary zero-supplied-argument constructor binding for a false `require`, the
+resolved primary-callable `RequireException(typeof(E))` recipe and Core's
+exact public `Terrum.RequirementException` fallback. This is a class
+implementing `IException<RequirementException>`, not a value struct or a
+constructor-based exception marker. Explicit `require<E>` wins; recipes and
+defaults belong to their semantic source owner, not caller/type/module
+inheritance. No constructor runs on a successful check, and actual predicate
+or construction failure is not replaced with a fabricated exception.
 [Scalar checked failures](language/scalar-failures.md) additionally select
-exact public nongeneric zero-data Exception/Copy structs
+exact public nongeneric exception classes
 Terrum.OverflowException, Terrum.DivideByZeroException and
-Terrum.ArgumentOutOfRangeException, each with a public zero-parameter
-constructor and no authored construction effects. Their initial mappings
+Terrum.ArgumentOutOfRangeException, each implementing its self-typed common
+contract. Their initial mappings
 cover unrepresentable checked numeric results, integer zero divisors and
 invalid original shift counts. Provenance/causes belong to the event, not
-mandatory operand/message/stack-trace fields. Zero-data payloads do not imply
-failure-free or allocation-free transport. Other compiler/runtime failure mappings have their own canonical owners.
+mandatory operand or stack-trace fields. Exception creation and transport
+retain their checked failure/resource contracts. Other compiler/runtime
+failure mappings have their own canonical owners.
 
 [Standard runtime categories](runtime/standard-failures.md) additionally
-select zero-data Exception/Copy PostconditionException, IndexOutOfRangeException,
-OutOfMemoryException, InitializationCycleException and InitializationFailedException
-with the same exact public zero-parameter construction shape.
+select PostconditionException, IndexOutOfRangeException, OutOfMemoryException,
+InitializationCycleException and InitializationFailedException as public
+exception classes implementing their self-typed common contract.
 They apply respectively to normally false runtime ensure, already admitted
 checked index access, explicitly recoverable allocation exhaustion, cyclic
 unfinished initialization demand and accesses to a failed unit.
@@ -146,20 +155,19 @@ No universal recoverable-OOM runtime, user-indexer mapping, retry API or
 shared capture facility follows.
 
 [Numeric selection](language/numeric-selection.md#4-reusable-invalidboundsexception)
-separately selects exact public nongeneric zero-data Terrum.InvalidBoundsException
-with Exception/Copy and a public zero-parameter instance constructor without
-authored checks/effects. It describes bounds that do not satisfy a published
+separately selects public nongeneric Terrum.InvalidBoundsException implementing
+its self-typed common contract. It describes bounds that do not satisfy a published
 relationship, not a value outside valid bounds or a universal exception base.
-Clamp explicitly uses require<InvalidBoundsException> for min <= max;
+Clamp explicitly uses `require<InvalidBoundsException>` for min <= max;
 no comparison syntax, name or caller default automatically supplies that type.
 
 [Captured exceptions](language/captured-exceptions.md) separately select
 exact public nongeneric opaque unique Terrum.CapturedException and its public
 static nongeneric zero-parameter CapturedException Capture() member.
 Only a direct invocation in the active source handler body supplies its
-compiler-known event source. Publication transfers the existing event,
-payload/causes and dependencies; it is not construction from E, a payload
-Copy or an ambient current-exception query. Named consuming throw requires
+compiler-known event source. Publication transfers the existing exception object/event, causes and
+dependencies; it is not construction from E, an object copy or an ambient
+current-exception query. Named consuming throw requires
 move. The owner has no ordinary constructor/default, Exception/Copy opt-in,
 payload extraction API, shared/typed family or implicit thread capability.
 Creation effects and complete nonthrowing/nonsuspending retirement support
@@ -191,16 +199,18 @@ Providers retain actual handoff/publication/guard/scalar protocol identities,
 affinity, backing and every-exit responsibility. No thread/lock/guard API,
 custom-algorithm proof, physical token or helper ABI is selected by that schema.
 
-[Registered Core value-layout queries](language/registered-queries.md)
-select `RuntimeHelpers.SizeOf<T>()` and `AlignmentOf<T>()`: ordinary static
-generic APIs requiring the complete form's checked `[Sized]` property and
-returning `nuint`. They measure value/handle representation rather than
-object payload or reachable backing. Runtime type/layout evidence, required
-constant admission and fixed-versus-coupled layout retention remain distinct.
-The exact intrinsic contracts are pure and constant-eligible without mutable
-static storage, allocation or a reflection object; their scalar result does
-not freeze an uncommitted queried layout. No general query attribute or
-additional physical intrinsic assignment is selected.
+[Registered queries](language/registered-queries.md) own dedicated
+`typeof`, `sizeof`, `alignof`, `offsetof` and `countof` forms; these are not
+Core methods or general reflection. Type/layout queries observe complete
+value/handle representations rather than object payload or reachable backing.
+`sizeof` and `alignof` return nonnegative `nint`, with
+`alignof(void) == 0` meaning no placement requirement. Safe observation
+requires the selected target's `Blittable` commitment; a non-Blittable layout
+query requires unsafe authorization and is version-sensitive. Runtime
+type/layout evidence, required-constant admission and fixed-versus-coupled
+retention remain distinct. A scalar result does not freeze an uncommitted
+queried layout, and no general query registration or physical intrinsic
+assignment is selected.
 
 [Constant-generic domains](language/constant-generics.md) derive eligible
 one-field integer/Boolean wrapper participation from the checked Transparent
@@ -211,7 +221,7 @@ domain plus carrier value, independent of user equality/hash witnesses.
 Literal parsers, constructors, conversions and runtime operations remain
 separate explicitly admitted APIs.
 
-The API inventories deliberately mix signatures with selected algorithm bodies. Unspecified bodies do not imply native exports or implementations. `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[SimdElement]` and `[TextCodeUnit]` denote checked capability predicates rather than arbitrary user attributes. The [Foundation ownership inventory](../../library/foundation.api.terrum) distinguishes a per-allocation **storage-and-release lease** from an owned **allocator context** retained by a growing vector. `Buffer<T>.Adopt` takes an existing allocation, validating byte extent, actual element alignment and required tracing capabilities; it does not create storage from a release token. Initial `Vector<T>` accepts `[Copy]` elements: `Reserve` obtains a new lease from its retained context, copies the initialized prefix, cleans partial copies on failure and publishes replacement storage only after success. The old allocation cannot be replaced while views borrow it. Affine/borrowed element storage, initialized prefixes, allocator-provider selection, write-guard enforcement and native GC barriers still need complete contracts. Additional proposed signatures and associated-family notation require language design and validation before they can become compiler acceptance fixtures.
+The API inventories deliberately mix signatures with selected algorithm bodies. Unspecified bodies do not imply native exports or implementations. `[Copy]`, `[Blittable]`, `[ManagedStorable]`, `[SimdElement]` and `[TextCodeUnit]` denote checked capability predicates rather than arbitrary user attributes. The [Foundation ownership inventory](../../library/foundation.api.terrum) distinguishes a per-allocation **storage-and-release lease** from an owned **allocator context** retained by a growing vector. `Buffer<T>.Adopt` takes an existing allocation, validating byte extent, actual element alignment and required tracing capabilities; it does not create storage from a release token. Initial `Vector<T>` accepts the default Copy-capable element-formal domain: `Reserve` obtains a new lease from its retained context, copies the initialized prefix, cleans partial copies on failure and publishes replacement storage only after success. The old allocation cannot be replaced while views borrow it. Affine/borrowed element storage, initialized prefixes, allocator-provider selection, write-guard enforcement and native GC barriers still need complete contracts. Additional proposed signatures and associated-family notation require language design and validation before they can become compiler acceptance fixtures.
 
 ## Shared memory and explicit memory primitives
 
@@ -287,9 +297,9 @@ are control operands, not numeric promotion. Floating `%` uses truncating
 remainder, with dividend-signed zero and the selected decimal cohort; a named
 nearest-integer IEEE remainder retains its separate contract.
 
-Integer arithmetic is checked regardless of build; wrapping and saturating forms are explicit. Checked integer-to-integer conversions preserve the value or throw on range overflow; unchecked conversions wrap to destination-width bits. For floating-to-integer conversion, checked behavior truncates toward zero then throws if out of range, while unchecked behavior and explicit saturating APIs truncate then saturate (not modulo), with NaN converting to zero. Floating-to-floating conversions follow IEEE-754, with nearest/ties-even default rounding and no language failure for inexactness, overflow to infinity, underflow, NaN or infinity; alternate rounding is explicit, not ambient. No floating-point exception traps or global control-word API are provided. [Conversion policies](conversions.md) distinguish these cases from explicit saturating APIs and `FromBits`/`ToBits` reinterpretation. No promotion between already typed numbers is implicit. Numeric literals are constructed directly in an unambiguous target type, not converted from an implicit default. The single explicit conversion spelling is `T(expression)`; built-in or declared checked conversion contracts select its behavior, while reusable checked/saturating/truncating protocols replace permanent per-source-type `FromInt32` method families. `Splat`/broadcast replicates the *same* lane value or tensor elements, without itself converting them. A widening vector conversion must define output shape and lane count explicitly -- it cannot silently discard half the elements. Fixed-width `float32` math has strict target-format rounding and no implicit reassociation/contraction; `FusedMultiplyAdd`, native/approximate functions and reproducible reductions are separate contracts. IEEE `decimal32` is not CLR `decimal` or a binary64 intermediary. The CLR's decimal BID software implementation is a useful reference, not proof of matching Terrum ABI, parsing, rounding and exceptional behavior.
+Ordinary integer add/subtract/multiply/negate are checked in Development/Debug and wrapping in Release; explicit checked, wrapping and saturating forms retain their declared policies. Checked integer-to-integer conversions preserve the value or throw on range overflow; unchecked conversions wrap to destination-width bits. For floating-to-integer conversion, checked behavior truncates toward zero then throws if out of range, while unchecked behavior and explicit saturating APIs truncate then saturate (not modulo), with NaN converting to zero. Floating-to-floating conversions follow IEEE-754, with nearest/ties-even default rounding and no language failure for inexactness, overflow to infinity, underflow, NaN or infinity; alternate rounding is explicit, not ambient. No floating-point exception traps or global control-word API are provided. [Conversion policies](conversions.md) distinguish these cases from explicit saturating APIs and `FromBits`/`ToBits` reinterpretation. No promotion between already typed numbers is implicit. Numeric literals are constructed directly in an unambiguous target type, not converted from an implicit default. The single explicit conversion spelling is `T(expression)`; built-in or declared checked conversion contracts select its behavior, while reusable checked/saturating/truncating protocols replace permanent per-source-type `FromInt32` method families. `Splat`/broadcast replicates the *same* lane value or tensor elements, without itself converting them. A widening vector conversion must define output shape and lane count explicitly -- it cannot silently discard half the elements. Fixed-width `float32` math has strict target-format rounding and no implicit reassociation/contraction; `FusedMultiplyAdd`, native/approximate functions and reproducible reductions are separate contracts. IEEE `decimal32` is not CLR `decimal` or a binary64 intermediary. The CLR's decimal BID software implementation is a useful reference, not proof of matching Terrum ABI, parsing, rounding and exceptional behavior.
 
-The target `IParsable<TSelf>.TryParse` contract initializes `init ref<TSelf>` only on success; the destination is vacant and unreadable until then. A development parser's legacy passing modes are [informative support](../implementation/libraries.md#parser-output-support), not alternate source signatures or mandatory alpha compatibility. `TryParse` is the fundamental expected-input API: callers branch on its published success contract, or deliberately use `int32 value = require int32.TryParse(text);` when malformed input should raise. A requirement-failure type may be selected explicitly; that selection applies only to a false result, not exceptions from evaluating the predicate. Core parsing/formatting is ordinal plus invariant: ASCII signs/digits/punctuation, whole-input parse, no locale, normalization or Unicode lookalike substitution. Formatting writes through the supplied typed writer, never a required intermediate `Text`. The default typed hook forwards to the value formatter; a custom handler can intercept values and forward nested typed parts. Refusal stops further writes without replay and can leave already accepted fragments. The supplied [numeric sketch](../../library/numerics.api.terrum) retains the typed writer forwarding point. Collection/text expressions select explicitly registered handler types (for example, `[CollectionBuilder(typeof(ListBuilder<T>))]` on `List<T>` and `[TextBuilder(typeof(TextBuilder))]`), rather than arbitrary same-named methods. The [builder recipe and eager construction contracts](language/construction-handlers.md) bind constructed types by the target's own formal identities, with complete nominal operation admission separately required. Source captures evaluate once, left-to-right before that site's builder acquisition and draining; refusal or consumer disablement cannot suppress these effects. Formatting and spread enumeration occur only when draining reaches them. Ownership, lifetime, refusal, cleanup and publication remain checked, without adopting incremental policies or a deferred-content interface. Expression handlers consume declared typed operation graphs, not callback bodies divined for vectorization; additional standard-library handler APIs require their own adoption.
+The target `IParsable<TSelf>.TryParse(TextSpan, ref<init TSelf>)` contract initializes its output only on success; the destination is vacant and unreadable until then. A development parser's legacy passing modes are [informative support](../implementation/libraries.md#parser-output-support), not alternate source signatures or mandatory alpha compatibility. `TryParse` is the fundamental expected-input API: callers branch on its published success contract, or deliberately use `int32 value = require int32.TryParse(text);` when malformed input should raise. A requirement-failure type may be selected explicitly; that selection applies only to a false result, not exceptions from evaluating the predicate. Core parsing/formatting is ordinal plus invariant: ASCII signs/digits/punctuation, whole-input parse, no locale, normalization or Unicode lookalike substitution. Formatting writes through the supplied typed writer, never a required intermediate `Text`. The default typed hook forwards to the value formatter; a custom handler can intercept values and forward nested typed parts. Refusal stops further writes without replay and can leave already accepted fragments. The supplied [numeric sketch](../../library/numerics.api.terrum) retains the typed writer forwarding point. Collection/text expressions select explicitly registered handler types (for example, `[CollectionBuilder(typeof(ListBuilder<T>))]` on `List<T>` and `[TextBuilder(typeof(TextBuilder))]`), rather than arbitrary same-named methods. The [builder recipe and eager construction contracts](language/construction-handlers.md) bind constructed types by the target's own formal identities, with complete nominal operation admission separately required. Source captures evaluate once, left-to-right before that site's builder acquisition and draining; refusal or consumer disablement cannot suppress these effects. Formatting and spread enumeration occur only when draining reaches them. Ownership, lifetime, refusal, cleanup and publication remain checked, without adopting incremental policies or a deferred-content interface. Expression handlers consume declared typed operation graphs, not callback bodies divined for vectorization; additional standard-library handler APIs require their own adoption.
 
 [TextTarget](language/construction-handlers.md#texttarget-parameter-schema)
 is a no-argument parameter schema over eligible generic IFormattable content,
@@ -413,14 +423,14 @@ logical numeric groups and floating result contracts are also selected;
 physical member/witness/program/event codecs are not. The
 [scalar catalog](language/scalar-failures.md) now assigns
 OverflowException to signed-minimum Abs without selecting its physical
-transport. No unconditional `NoThrow` contract,
+transport. No unconditional failure-free contract,
 primitive intrinsic, or additional math operation follows from this direction.
 
 ## SIMD as a family of shapes
 
-Explicit `simd64/128/256/512<T>` are fixed ABI shapes where supported; `simd<T>` denotes a **genuine target-scalable** type, not a preferred-width fixed vector. The [SIMD contract inventory](../../library/simd.api.terrum) uses locally labeled family pseudocode: "any fixed vector of float32" preserves the actual concrete type/width and its associated mask for checking/codegen, unlike runtime-erased text. Two operands and their result must retain required same-instantiation relationships. Membership and common operations are checked declarations, not matching names. Vector addition returns that same vector type; lane comparisons return its mask; reductions may return the element type; whole-vector equality returns `bool`. A mask represents **boolean lane predicates**, not a numeric data vector of all-one bit patterns. `CompareEqual` produces a mask; `Any`/`All` reduce it to `bool`; `Select` consumes it. Mask shape and granularity must match element shape. Bit reinterpretation, numeric conversion, splatting, and rebinding families are distinct operations. Family participation requires explicit opt-in with declared checked projections and constraints; exact family/associated-member grammar and eligible projections remain specification work. No universal `Type<T>`-to-`Type<void>` erasure or inferred covariance follows; see [type families](type-families.md).
+Explicit `simd64/128/256/512<T>` are fixed ABI shapes where supported; `simd<T>` denotes a **genuine target-scalable** type, not a preferred-width fixed vector. The [SIMD contract inventory](../../library/simd.api.terrum) uses locally labeled family pseudocode: "any fixed vector of float32" preserves the actual concrete type/width for checking and code generation, unlike runtime-erased text. Two operands and their result must retain required same-instantiation relationships. Membership and common operations are checked declarations, not matching names. Vector addition returns that same vector type; lane comparisons also return that same `simd<T>` type, with each lane's bits guaranteed to be all zero or all one. There is no separate user-visible mask type or family. The compiler and target may retain predicate-register state internally when observable behavior is preserved; users do not select an ISA-specific mask representation. Reductions may return the element type; whole-vector equality returns `bool`. Bit reinterpretation, numeric conversion, splatting, and rebinding families are distinct operations. Family participation requires explicit opt-in with declared checked projections and constraints; exact family/associated-member grammar and eligible projections remain specification work. No universal `Type<T>`-to-`Type<void>` erasure or inferred covariance follows; see [type families](type-families.md).
 
-Fixed SIMD values can be `[Sized]` if layout supports their element type. The proposed initial scalable profile is SVE-like **sizeless**: locals, scoped loans and statically specialized compatible calls, but not ordinary fields, heap boxes, array/pool elements or aggregate payloads. [Arm ACLE](references.md#other-official-library-specific-prior-art) specifies related SVE vector/predicate restrictions, but does not supply Terrum's ABI or lifetime rules. Such live values cannot cross `await`, incompatible vector contexts or an ABI boundary that cannot carry them. RVV requires its own validated profile; mask representation, vector length and ABI cannot be copied blindly from SVE. Specializations explicitly name an exact closed generic declaration and target requirement, for example `[Specialize(Scale<float32>, Requires = CpuFeature.Avx2, Priority = 100)]`; source binding remains on the generic declaration and AOT dispatch checks CPU and OS support. AOT publishes a bounded explicit variant plan rather than inventing runtime code generation. Reusable static operators/witnesses allow code sharing without erasing masks, boxing sizeless values or conflating vectors with scalar `INumber`.
+Fixed SIMD values have a target-selected extent when their registered layout is supported. As for other types, `Blittable` governs safe layout observation; a non-Blittable layout query requires `unsafe`. The proposed initial scalable profile has a target/runtime-defined extent, with SVE-like restrictions on ordinary fields, heap boxes, array/pool elements or aggregate payloads, while allowing locals, scoped loans and statically specialized compatible calls. [Arm ACLE](references.md#other-official-library-specific-prior-art) specifies related SVE vector/predicate restrictions, but does not supply Terrum's ABI or lifetime rules. Such live values cannot cross `await`, incompatible vector contexts or an ABI boundary that cannot carry them. RVV requires its own validated profile; predicate lowering, vector length and ABI cannot be copied blindly from SVE. Specializations explicitly name an exact closed generic declaration and target requirement, for example `[Specialize(Scale<float32>, Requires = CpuFeature.Avx2, Priority = 100)]`; source binding remains on the generic declaration and AOT dispatch checks CPU and OS support. AOT publishes a bounded explicit variant plan rather than inventing runtime code generation. Reusable static operators/witnesses allow code sharing without erasing the same-type comparison lane-bit contract, boxing target-scalable values or conflating vectors with scalar `INumber`.
 
 Tail handling is part of correctness: `First(remaining)` masks the final iteration, inactive masked **loads/stores do not access memory**, and no safe lane is poison/undefined. Stores with repeated scatter indexes preflight active bounds before writes, then define duplicate-index order (last active lane wins). Aliasing/alignment rules are checked at the public boundary. A fixed vector may use full-vector processing and a scalar tail instead; neither strategy may read beyond the provided span. Dot/sum ordering across vector widths needs an explicitly chosen reproducibility policy: per-vector lane order alone is insufficient to make a whole-input reduction bitwise stable. Strict scalar order is a defensible default; a separately named relaxed/high-throughput reduction may regroup and document architecture-dependent results.
 
@@ -488,7 +498,11 @@ tensor contract, not to a vector's lane ABI; a tensor is not flattened or
 converted to SIMD merely because the element count matches.
 
 One `Span<T>` family carries qualified read/write authority and opaque backing
-dependencies, **not** an owner generic parameter. Bare `Span<C>` has a fixed
+dependencies, **not** an owner generic parameter. Copying an eligible span
+descriptor aliases the same elements; it does not copy their storage, acquire
+their owner or universally extend their backing lifetime. Copies preserve
+their required root/backing support without overriding guard or release
+boundaries. Bare `Span<C>` has a fixed
 descriptor, readonly slots, and readonly handles; `mut Span<C>` permits
 descriptor rebinding only; `write Span<C>` permits writing slots but not through
 its readonly `C` handles; `Span<write C>` keeps slots readonly while carrying
@@ -499,8 +513,8 @@ struct field. `Span<T>` implements `IContiguousSequence<T>.AsSpan()`
 *explicitly* so a constrained generic caller can obtain a read projection
 without boxing, while `span.AsSpan()` is intentionally absent on concrete
 spans. Its implementation **forwards existing backing dependencies**, without
-borrowing the descriptor place simply because it read the descriptor. The broad
-interface receiver-view contract permits implementations to borrow receiver
+referencing the descriptor place simply because it read the descriptor.
+The broad interface receiver-view contract permits implementations to reference receiver
 storage. A generic caller sees that broad contract; propagation of an
 implementation's narrower backing-only relationship through a wrapper requires
 the checked [member-contract refinement](language/dependencies-and-views.md#published-witnesses-and-generic-refinements),
@@ -515,7 +529,7 @@ extends owner/allocation lifetime or bypasses disposal.
 
 Small shape metadata can be inline; arbitrary rank may use independent, immutable Foundation-owned metadata or explicitly borrowed metadata. A tensor view then has **two** dependency sources: data backing/access *and* externally stored shape metadata. Returning/storing/erasing it preserves both, even at an empty/end slice. The whole-source schemas can declare both dependencies; the tensor's exact construction/shape and anchor ABI remain separate. A provisional ViewOf sketch cannot prove them. The factory requires `write Span<T>` for writable storage and returns `write TensorSpan<T>`; `mut Span<T>` would only permit descriptor rebinding. A read-only source returns a read-only view, never an upgraded writable one. Writable tensors require injective logical-index-to-address mapping (zero-stride broadcasting with length greater than one is read-only); overlapping or duplicate addresses cannot manufacture multiple writable loans. Broadcasting is a read view or an explicit materialization, not an implicit arithmetic conversion. `TryAsDenseSpan` succeeds only when the logical order actually maps to one contiguous range with proper access/lifetimes. An arbitrary transposition must not pretend to be contiguous. `CopyTo` checks equal logical shapes and `[Copy]` elements, traverses logical indexes, accepts disjoint backings or **identical per-index mappings** (no-op), and rejects displaced or differently strided overlap before writing; it does not allocate a hidden temporary.
 
-Core `TensorPrimitives` operate over borrowed spans and caller destinations, not hidden owning tensors. `Add` requires compatible lengths/shapes and preflights destination capacity and alias safety before mutation. `Add`, `Sum`, `Dot` and copying tensor views explicitly require `[Copy]` complete elements when invoking value-taking operators; arithmetic witnesses alone confer **no** copy permission. A future operator consuming `ref<T>` would need a separate contract, not implicit duplication. Exact same-position in-place operands are permitted only where each output reads all required inputs before overwriting; displaced overlap is rejected unless an operation explicitly supplies memmove/temporary semantics. Numeric callbacks can still throw mid-operation, so an algorithm without a no-throw bound does not promise transactional output. `Sum(empty)` returns additive identity, `Dot(empty,empty)` returns zero; unequal dot lengths fail. A strict reduction observes logical row-major order and specified floating behavior; accelerated relaxed variants can specify different rounding/order. Fused operations avoid an intermediate allocation, but must not silently change IEEE rounding to FMA. Transcendentals, normalization and softmax require separate domain, overflow, NaN and stability policies; the runtime `SoftMax` span implementation uses exp-then-sum-then-divide, illustrating a cost/overflow tradeoff, not a Terrum semantic mandate.
+Core `TensorPrimitives` operate over non-owning spans and caller destinations, not hidden owning tensors. `Add` requires compatible lengths/shapes and preflights destination capacity and alias safety before mutation. `Add`, `Sum`, `Dot` and copying tensor views explicitly require `[Copy]` complete elements when invoking value-taking operators; arithmetic witnesses alone confer **no** copy permission. A future operator consuming `ref<T>` would need a separate contract, not implicit duplication. Exact same-position in-place operands are permitted only where each output reads all required inputs before overwriting; displaced overlap is rejected unless an operation explicitly supplies memmove/temporary semantics. Numeric callbacks can still throw mid-operation, so an algorithm without a no-throw bound does not promise transactional output. `Sum(empty)` returns additive identity, `Dot(empty,empty)` returns zero; unequal dot lengths fail. A strict reduction observes logical row-major order and specified floating behavior; accelerated relaxed variants can specify different rounding/order. Fused operations avoid an intermediate allocation, but must not silently change IEEE rounding to FMA. Transcendentals, normalization and softmax require separate domain, overflow, NaN and stability policies; the runtime `SoftMax` span implementation uses exp-then-sum-then-divide, illustrating a cost/overflow tradeoff, not a Terrum semantic mandate.
 
 ## Collections, algorithms and application services
 
@@ -532,7 +546,7 @@ carriers, unions, or interface representations; for example,
 `List<box<I>>` stores one checked managed-handle form while allowing distinct
 implementations. The `I` payload itself is not an implicit stored handle.
 
-Foundation owns explicit `Buffer<T>`, `Vector<T>`, arena-backed storage, maps and persistent shape metadata with allocator/lease obligations; Application provides managed aliasable collections. The mutable `List<T>` and `LinkedList<T>` declarations require writable receiver access for structural mutation. A read-only collection path may still return a `write C` element handle if that is part of the element type, but cannot write its slots, nodes or links. The [managed collection inventory](../../library/collections.api.terrum) specifies initial `List<T>` element restrictions (`[ManagedStorable]`, `[Copy]`, `[Sized]`); this is **not** a permanent language ban on storing pointers/loans or affine elements. GC visits only initialized slots and uses write barriers; no fabricated `default(T)` fills unused capacity. Preflight capacity, checked count/version and guard conflicts precede mutation; remove/clear vacate slots and release retained references. `ListWriteAccess<T>` lends checked exclusive slot access, keeps actual storage stable and live and releases once. Every alias, indexer, cursor and reentrant callback checks the relevant guard. It is not a cross-thread mutex. `TryGet` distinguishes missing index from a present optional/null element.
+Foundation owns explicit `Buffer<T>`, `Vector<T>`, arena-backed storage, maps and persistent shape metadata with allocator/lease obligations; Application provides managed aliasable collections. The mutable `List<T>` and `LinkedList<T>` declarations require writable receiver access for structural mutation. A read-only collection path may still return a `write C` element handle if that is part of the element type, but cannot write its slots, nodes or links. The [managed collection inventory](../../library/collections.api.terrum) specifies initial `List<T>` element restrictions (`[ManagedStorable]` over the default Copy-capable formal domain); this is **not** a permanent language ban on storing pointers/loans or affine elements. GC visits only initialized slots and uses write barriers; no fabricated `default(T)` fills unused capacity. Preflight capacity, checked count/version and guard conflicts precede mutation; remove/clear vacate slots and release retained references. `ListWriteAccess<T>` lends checked exclusive slot access, keeps actual storage stable and live and releases once. Every alias, indexer, cursor and reentrant callback checks the relevant guard. It is not a cross-thread mutex. `TryGet` distinguishes missing index from a present optional/null element.
 For `LinkedList<T>`, `First`/`Last` and node-link projections use checked
 `[MatchedAccess]`: readonly traversal returns readonly node handles, while a
 writable list path may preserve write access. This is distinct from an element
@@ -544,7 +558,7 @@ writable structural node whose `Value` or links would mutate list-owned state.
 `LinkedListNode<T>` has stable **logical node identity**, not a promised machine address. Detached nodes remain usable and may be reinserted; attached nodes retain exactly one owner. Removal clears owner/links. `Clear` detaches *all* nodes, including externally retained nodes, and cannot merely drop the head/tail. Node values are accessors, never public writable fields that bypass guards. Membership/count/version are checked before nonthrowing link changes. A concrete `foreach` cursor need not box; structural mutation invalidates it, while payload replacement alone is not structural. Copy-, borrow-, consume- and snapshot-yielding iteration are separate operations.
 
 [Standard synchronous value iteration](language/iteration.md) uses Core's
-Terrum.ICursor<T> with TryMoveNext(init ref<T>) and mandatory Close, and
+Terrum.ICursor<T> with TryMoveNext(ref<init T>) and mandatory Close, and
 Terrum.ISequence<T, TCursor> with readonly GetEnumerator. Both factory sources
 and already-created direct cursors are admitted; distinct source relationships
 need explicit selection/adaptation, not precedence by name or body.
@@ -557,7 +571,7 @@ dependencies, not an automatic requirement for the freestanding language floor.
 [Standard async value iteration](language/async-iteration.md) uses exact Core
 IAsyncSequence<T, TCursor>/IAsyncCursor<T>. The readonly GetAsyncEnumerator
 factory is synchronous; direct cursors keep ordinary explicit affine transfer.
-TryMoveNextAsync(init ref<T>) reserves its exact destination/cursor state and
+TryMoveNextAsync(ref<init T>) reserves its exact destination/cursor state and
 publishes one complete item only with observed true completion. False/failure
 leaves vacancy after cleanup, not an absent optional item or swallowed error.
 CloseAsync is required and awaited after pending advance and item retirement,
@@ -566,7 +580,7 @@ Task<TCursor> acquisition, general Task lifecycle or implicit async spread is
 introduced; required completion/reservation support stays profile-explicit.
 
 The inventory's ListCursor<T>/LinkedListCursor<T> implement that by-value
-contract under their retained `[ManagedStorable], [Copy], [Sized]` item profile.
+contract under their retained `[ManagedStorable]` item profile over the default Copy-capable domain.
 They copy selected stored items only with that permission, retaining any
 actual item dependencies and never moving nodes/elements out of a borrowed
 collection. Their published source/guard relationship survives until close;
@@ -631,7 +645,7 @@ Text targets give character fragments `rune` context and forward them through `T
 
 ## Open contract work
 
-Associated vector/mask family syntax and valid element predicates; scalable
+Associated vector-family syntax and valid element predicates; scalable
 ABI/vector-context rules; exact anchored view and multi-source shape
 representation; TensorShape layout and signed-stride support; strict/relaxed
 reduction APIs; allocator selection; concrete text storage and async/backpressure

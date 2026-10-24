@@ -17,7 +17,7 @@ truth, actual Terrum dispatch, every-exit retirement, roots or safe unload.
 | FBSC-04 | Native runtime uses first-pass filters | Do not substitute that timing for Terrum incremental post-cleanup selection |
 | FBSC-05 | A C++ domain offers ordinary language exceptions | No automatic SEH/hardware-fault or Terrum object equivalence |
 | FBSC-06 | Native image has valid Windows unwind tables | Local unwind support only; no shared exception-object ABI |
-| FBSC-07 | Raw entry is NoThrow, source-facing proxy can raise | Retain proxy's actual source failure effect |
+| FBSC-07 | Raw entry returns a failure packet, source-facing proxy raises | Retain the proxy's actual source failure behavior |
 | FBSC-08 | Native failure arrives through false/live packet | Exceptional protocol outcome, not automatic normal Error/Result translation |
 | FBSC-09 | User catches a mapped failure | Ordinary unsafe recovery and invariant rules still apply |
 | FBSC-10 | Filename, target number or runtimePolicy=1 is present | No implicit bridge selection or missing-feature activation |

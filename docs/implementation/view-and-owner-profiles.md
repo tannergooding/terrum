@@ -5,27 +5,27 @@ specification. It describes bounded hosted projections, not limits on the
 [general dependency contract](../specs/language/dependencies-and-views.md).
 The [implementation summary](../implementation.md) owns current support.
 No general view ABI, stored-reference codec or concurrent protocol follows.
+The shared [definitions](../specs/language.md#definitions-and-notation)
+distinguish copying a descriptor from copying its referent or acquiring its
+owner. The bounded loan terms below retain their implementation-specific
+access and retirement restrictions; they are not a separate source lifetime model.
 
-## TokenCursor view
+<a id="tokencursor-view"></a>
+## Direct parser spans; TokenCursor prototype
 
-On the current Windows x64 hosted profile, a compiler-owned readonly
-Span<Token> is projected from a validated TokenSnapshot, stored in the unique
-TokenCursor and used by the bounded scalar parser. Its descriptor is 16 bytes
-(data address and element count). Indexing returns Copy elements by value with
-unsigned native-width bounds checks, using uint64 in that implementation.
-This does not remove nint/nuint from the independent language scalar catalog.
+The selected implementation direction is to pass a validated readonly
+`Span<Token>` directly through synchronous parser calls. Use `nint` length and
+index values, reject negative indexes, then perform full-width bounds checks
+before address calculation. A span copy does not own the TokenSnapshot or
+extend its lifetime; ordinary backing, access and retirement dependencies
+remain required. There is no general 64-token length cap.
 
-Captures(nameof(tokens)) forwards the complete backing and guard dependency
-set to the cursor field without owning or extending them. Construction cannot
-publish unless those dependencies outlive every use.
-The cursor's mutable view field and cursor-only AdvanceOne rebind the
-descriptor without dropping dependencies. The parser receives it
-synchronously rather than storing it in managed parser state.
-The existing 64-token limit and parser-window behavior are unchanged.
-
-This bounded profile does not implement general view construction, slicing,
-writable or ref-returning access, arbitrary storage or escape, persisted
-capture metadata, owner/guard retention or a new public ABI.
+The current `TokenCursor` wrapper and its `AdvanceOne`/capture profile remain
+in the prototype and tests, but the user declined this extra abstraction.
+They are not an accepted library/API or persistence contract and should not
+be the parser's selected path. Direct spans do not add general slicing,
+writable/ref-returning access, stored/escaping views, persisted captures,
+owner/guard retention or a public ABI.
 
 ## Compact unique-owner loans
 

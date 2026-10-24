@@ -9,7 +9,7 @@ serialized constants, allocator headers or descriptor bookkeeping.
 
 | Type | Size | Alignment | Representation and value domain |
 |---|---:|---:|---|
-| void | 0 | 1 | One inhabited unit value; no payload data address |
+| void | 0 | 0 | One inhabited unit value; no payload data address or placement requirement |
 | bool | 1 | 1 | Exactly byte 0 or 1 |
 | char8 | 1 | 1 | Unsigned eight-bit raw code unit |
 | char16 | 2 | 2 | Unsigned sixteen-bit raw code unit, including surrogates |
@@ -49,6 +49,9 @@ ptr<void> can be an explicitly opaque address, not an exposable void payload.
 Stored ref/own/box/class/view/task representations and optional/tag layouts are
 not assigned by this pointer rule. A call-only reference projection likewise
 does not assign a stored ref<T> layout.
+The separate optional contract uses null as absence for optional class
+handles, checked references and raw pointers; it does not complete their
+stored layouts or select encodings for other optional values.
 
 Boolean bytes outside 0/1 and invalid rune values cannot be used as those
 typed values. Code units do not undergo Unicode validation as runes.
@@ -299,8 +302,9 @@ their complete byte, validity and lifetime contracts. A safe adapter must
 account for every transmitted byte, including padding when its protocol
 exposes it. It cannot publish invalid Boolean/rune/nominal values.
 
-SizeOf observes complete object extent including layout padding;
-AlignmentOf observes completed object alignment. Neither reports call-slot
-size, heap/header cost, foreign equivalence or a stored descriptor that this
-profile did not assign. Retained observations keep their
-[fixed or coupled dependencies](../language/registered-queries.md#value-layout-queries).
+`sizeof` observes complete object extent including layout padding;
+`alignof` observes completed object alignment, with zero for `void` because
+unit has no placement requirement. Neither reports call-slot size, heap/header
+cost, foreign equivalence or a stored descriptor that this profile did not
+assign. Retained observations keep their
+[fixed or coupled dependencies](../language/registered-queries.md#layout-observation-and-authorization).

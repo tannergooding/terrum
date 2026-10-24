@@ -66,17 +66,17 @@ provider, resource/OOM fixture or independent physical codec.
 | NSFL-14 | Legal decimal coefficient/exponent boundaries | Retain the selected quantum without cross-format rounding |
 | NSFL-15 | Proposed unrestricted totalOrder or numeric-key Min/Max | Does not replace NaN propagation or signed-zero observations |
 | NSFL-16 | Valid floating Clamp with NaN, subnormal, infinite, zero or decimal input | Quiet NaN on the NaN path; in-range non-NaN input keeps its representation |
-| NSFL-17 | Different permitted runtime quiet-NaN sign/payload results | No bit-copy, ambient status, Pure or NoThrow guarantee; constant selection uses its separate canonical recipe |
+| NSFL-17 | Different permitted runtime quiet-NaN sign/payload results | No bit-copy, ambient status or Pure guarantee; constant selection uses its separate canonical recipe |
 | NSFL-18 | Actual floating providers, quieting and distinct noncanonical encodings | Document-only: finite value/quantum facts do not prove all format or encoding behavior |
 
-## Ordered bounds and the Core payload
+## Ordered bounds and the Core exception class
 
 | Case | Input or condition | Required outcome |
 |---|---|---|
-| NSBF-01 | Core InvalidBoundsException declaration and constructor | Exact public nongeneric zero-data Exception/Copy struct with public zero-parameter instance construction |
+| NSBF-01 | Core InvalidBoundsException declaration and ordinary constructor eligibility | Exact public nongeneric class implementing `IException<InvalidBoundsException>` with an applicable zero-supplied binding for Clamp |
 | NSBF-02 | InvalidBoundsException versus ArgumentOutOfRangeException | Distinct nominal siblings and catch subjects |
-| NSBF-03 | Static, nonpublic, optional/required-input or effectful replacement constructor | Does not supply the selected Core construction |
-| NSBF-04 | Transparent payload alias or another same-spelled provider | Alias preserves identity; another provider does not |
+| NSBF-03 | Missing accessible zero-supplied constructor binding or a required hidden input | Does not supply the selected Core construction contract |
+| NSBF-04 | Transparent exception-class alias or another same-spelled provider | Alias preserves identity; another provider does not |
 | NSBF-05 | Every reversed int8/uint8 bound pair | Fail the exact published min <= max precondition |
 | NSBF-06 | Reversed finite or infinite floating bounds | Bounds failure before value selection |
 | NSBF-07 | NaN in either bound, including with NaN value | Invalid bounds, not successful NaN selection |
@@ -84,25 +84,25 @@ provider, resource/OOM fixture or independent physical codec.
 | NSBF-09 | Negated min > max or totalOrder used as the bound predicate | Not the selected predicate; neither may admit an unordered NaN pair |
 | NSBF-10 | Value outside valid bounds | Normal Clamp result, not ArgumentOutOfRangeException |
 | NSBF-11 | Unrelated requirement, comparison or min/max parameter name | No automatic InvalidBoundsException selection |
-| NSBF-12 | Actual Core source declaration and zero-input constructor binding | Document-only: supplied nominal/construction facts are not source registration |
+| NSBF-12 | Actual Core source declaration and zero-supplied constructor binding | Document-only: supplied nominal/constructor facts are not source registration |
 
 ## Construction and event responsibility
 
 | Case | Input or condition | Required outcome |
 |---|---|---|
-| NSCR-01 | Successful Min/Max or valid Clamp | No failure constructor or event |
-| NSCR-02 | Invalid bounds under admitted checked propagation | Construct once and publish one fresh event owned by the Clamp precondition |
+| NSCR-01 | Successful Min/Max or valid Clamp | No failure construction or event |
+| NSCR-02 | Invalid bounds under admitted checked propagation | Execute the selected ordinary constructor binding once; its object is the fresh event owned by the Clamp precondition |
 | NSCR-03 | Callable or first argument fails, including at a terminal precondition site | Keep the actual event/channel; skip remaining arguments and bounds construction |
 | NSCR-04 | Later argument fails after earlier effects or staged invalid bounds | Preserve that failure/effects; do not invoke the member precondition |
-| NSCR-05 | Actual preparation failure before bounds-event publication | Propagate that failure; no fabricated InvalidBoundsException event or result |
-| NSCR-06 | Two invalid-bound calls with equal zero-data payloads | Distinct fresh events |
-| NSCR-07 | Copy catch and subsequent throw of a payload copy | Copy no event responsibility; authored throw creates a new event |
+| NSCR-05 | Actual constructor/preparation failure before bounds-event publication | Propagate that failure; fail fast if no exception object can represent it; fabricate no InvalidBoundsException event or result |
+| NSCR-06 | Two invalid-bound calls with equal messages | Distinct fresh events |
+| NSCR-07 | Handler throws the same caught exception object versus a distinct replacement | Same object preserves origin; distinct object becomes primary and retains the pending object as ParentException |
 | NSCR-08 | Active rethrow of the bounds failure | Preserve its event, origin and causes |
 | NSCR-09 | Borrowed catch, lexical Capture and later consuming throw | Preserve the event; retain the descriptor's original lexical extent |
-| NSCR-10 | Bounds failure escapes a still-responsible handler | Preserve the earlier event as a cause |
+| NSCR-10 | Bounds failure escapes a still-responsible handler | Preserve the earlier exception object through ParentException |
 | NSCR-11 | Cleanup replaces the pending bounds failure | Preserve the cause closure and exactly-once retirement |
 | NSCR-12 | Admitted terminal precondition policy | No local event/catch/cleanup promise after termination |
-| NSCR-13 | Real constructor preparation, resources, rooting or OOM/replacement | Document-only: zero data does not prove allocation-free or failure-free transport |
+| NSCR-13 | Real factory preparation, resources, rooting or OOM/replacement | Document-only: the common class/factory contract does not prove allocation-free or failure-free transport |
 | NSCR-14 | Executable runtime handlers, capture and delivery programs | Document-only: reused finite responsibility is not an actual runtime implementation |
 | NSCR-15 | The bound comparison itself fails under its admitted effect contract | Keep that actual event/channel; no false-check bounds payload, result or terminal-policy reinterpretation |
 
@@ -131,7 +131,7 @@ provider, resource/OOM fixture or independent physical codec.
 |---|---|---|
 | NSAD-01 | Missing exact owner/member/formal/result/domain/target support | Decline before affected evaluation |
 | NSAD-02 | Missing numeric, NaN, zero, subnormal or decimal-tie rule | Decline; matching machine compare/select names do not fill it |
-| NSAD-03 | Missing Clamp predicate, exact payload/constructor or requirement support | Decline rather than choose a fallback failure |
+| NSAD-03 | Missing Clamp predicate, exact exception class/constructor binding or requirement support | Decline rather than choose a fallback failure |
 | NSAD-04 | Missing source origin, phase, policy, result state or actual event/transport dependency | Decline before affected evaluation |
 | NSAD-05 | Changed bound predicate, result rule, failure identity or source owner | Does not satisfy the retained contract |
 | NSAD-06 | Changed scalar identity, signedness or native width | Cannot silently reuse equal-layout support |
@@ -140,7 +140,7 @@ provider, resource/OOM fixture or independent physical codec.
 | NSAD-09 | Stronger guarantees or unrelated valid provider additions | Do not break a complete unchanged expectation |
 | NSAD-10 | Trusted selected-record access | Visit the retained closure, not unrelated Bodies |
 | NSAD-11 | Required constant use without opt-in/program/value/choice/cost/resource support | No implicit authorization or runtime fallback |
-| NSAD-12 | Pure/NoThrow inferred solely from integer selection or zero-data payloads | Require the actual complete guarantee/proof |
+| NSAD-12 | Pure inferred solely from integer selection or common exception-class shape | Require the actual complete guarantee/proof |
 | NSAD-13 | Logical member rules are offered as physical schema registration | No new wire IDs or codecs follow; interpret retained artifacts only under their exact selected schema |
 | NSAD-14 | Independent member/value/precondition/program/event/handler/cause codecs | Document-only: logical supplied facts are not source-free physical conformance |
 

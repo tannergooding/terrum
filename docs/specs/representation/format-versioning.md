@@ -26,13 +26,15 @@ governing semantic catalog and chapters, not only the
 [allocation registry](registry.md). The [Module manifest](semantic-manifests.md)
 does not replace this draft agreement. That agreement is
 out of band: equal version bytes, a registry digest, a build number, a filename
-or a native container do not establish it. A consumer must not discover an
-alternate draft decoder by trying plausible row layouts or opcode meanings.
+or a native container do not establish it. Trying plausible row layouts or
+opcode meanings does not select an alternate draft decoder; no alternate
+decoder is assigned without exact schema selection.
 
-The current-schema consumer accepts `(1, 0)` and rejects other pairs. This
-does not make every earlier `(1, 0)` draft current-schema input. A tool may
-explicitly select a historical draft schema without making that schema an
-alias, compatibility mode or support obligation of the current specification.
+This specification defines the current draft schema for `(1, 0)`; other pairs
+have no schema definition here. This does not make every earlier `(1, 0)`
+draft current-schema input. A tool may explicitly select a historical draft
+schema without making that schema an alias, compatibility mode or support
+obligation of the current specification.
 
 ## 3. Released encoding schemas
 
@@ -43,10 +45,11 @@ different pair; this rule does not impose pair changes on pre-release drafts.
 Source semantic editions and Feature revisions remain independent where the
 unchanged encoding can represent them under its specified rules.
 
-A consumer uses the exact released-schema assignment and declares which
-schemas it supports. Equal major versions, a higher minor version or numeric
-ordering do not imply compatible decoding, backward support or roll-forward.
-An unsupported pair rejects; a known pair does not supply implementation
+A consumer's support claim identifies the exact released-schema assignment.
+Equal major versions, a higher minor version or numeric ordering do not imply
+compatible decoding, backward support or roll-forward. An unsupported pair
+has no assigned interpretation for that consumer; this specification does
+not prescribe its handling. A known pair does not supply implementation
 support for its required semantics.
 
 The pair does not reveal whether bytes came from a released producer or a
@@ -56,11 +59,12 @@ This specification assigns no released schema yet.
 
 ## 4. Admission and transformation
 
-Schema selection precedes interpretation of schema-specific payloads. The
-selected schema's header/directory framing, reserved values, reference bounds
-and natural access checks remain mandatory under [reader trust](reader-trust.md).
-Neither exact version agreement nor producer trust requires a preliminary
-all-Body scan or proves arbitrary body facts.
+Schema selection identifies the valid encoding schema whose framing,
+reserved-value and reference rules govern the artifact. Producers must emit
+valid artifacts under that schema. This specification does not prescribe
+consumer validation of those rules or handling of an invalid artifact.
+Neither exact version agreement nor producer correctness requires a
+preliminary all-Body scan or proves arbitrary body facts to the consumer.
 
 The encoding identity does not replace a Module's governing semantic edition,
 required Feature revisions, retained dependencies, complete binding contracts,

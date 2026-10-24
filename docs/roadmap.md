@@ -38,13 +38,17 @@ prerequisite has already been met.
    identity and complete argument mapping. Preserve existing access,
    initialization, place, ownership and reservation checks; do not infer
    lifetime or memory-safety guarantees from `unsafe`. The
-   [reference-call metadata proposal](proposals/reference-call-metadata.md)
-   records one unapproved schema recommendation. Implemented bounded slices
-   are tracked in the [implementation reference](implementation.md).
+   [shared dependency contract](specs/representation/contract-clauses.md)
+   and its physical gates are tracked in
+   [CG-002](implementation/conformance-gaps.md#cg-002) and
+   [CG-004](implementation/conformance-gaps.md#cg-004). Implemented bounded
+   slices are tracked in the [implementation reference](implementation.md).
 2. **Full runtime/structured contracts — initialization and outputs.** Complete
-   general `out`/`init ref<T>` declaration and call migration with definite
-   initialization, cleanup and publication rules. Preserve their distinct
-   contracts; this is not a parser-only rename. Carry the
+   `ref<init T>` parameter/local implementation and `ref init place` formation
+   with definite initialization, cleanup and publication rules. Preserve the
+   distinction between a live descriptor to a vacant referent and a vacant
+   descriptor declared with `init ref<T>`; this is not a parser-only rename.
+   Carry the
    [static initialization contracts](specs/grammar-spec.md#static-initialization-and-load-scoped-storage)
    through separate metadata/schema work before compiler adoption: loaded
    closed-type groups and lazy units, explicit constructor triggers, checked
@@ -56,27 +60,33 @@ prerequisite has already been met.
    their state, lifetime and publication machinery.
    Preserve uniform generic/concrete reference matching and supply checked
    runtime type evidence/generic execution before adopting runtime captures.
-   General source catches/filters require incremental post-inner-cleanup
-   selection, not reuse of the bounded Windows first-pass discriminator as an
-   authored predicate.
+   General source catches and filters follow the accepted lexical-region and
+   ordered-handler contract. Standard execution requires the complete
+   ExceptionRegion, handler/filter and runtime capability closure; do not
+   reuse the bounded Windows first-pass discriminator as an authored
+   predicate.
 3. **Full runtime/structured contracts — conditions and constants.** Implement
    the selected published/static conditions, literal/constant domains and
    portable proof/evaluation floor. Complete their physical effect/program/
    value records and independent-consumer support before claiming general
    execution; additional domains and beyond-floor rules remain separate work.
-4. **Resources/graphs.** Extend beyond bounded owners, views and managed graphs
-   only after representation, lifetime, cleanup, failure and publication
-   rules are defined. Implement the accepted partial-field move/repair and
-   retirement contracts through their complete state/cleanup representation.
-   General stored-view profiles, arbitrary owning graphs, allocators and
-   relocation retain their remaining design and implementation gates.
+4. **Resources/graphs.** Implement the accepted distinction between stable,
+   shared normal backing and explicit GC-backed class/box/root forms, including
+   exact-place roots, stable reborrows, backing-specific Cleanup and the
+   required verification/retirement carriers. The existing private managed
+   graph profiles do not establish those source or exchange contracts; the
+   remaining work is tracked in
+   [CG-027](implementation/conformance-gaps.md#cg-027). Complete the accepted
+   partial-field move/repair and retirement contracts through their full
+   state/cleanup representation. General stored-view profiles, arbitrary
+   owning graphs, allocators and relocation retain their remaining design and
+   implementation gates.
 5. **General separate compilation — layouts.** Complete standard persistence
    and native ABI integration for the accepted public Windows x64 Blittable
    contracts. Natural Sequential and bounded Transparent source support
    already exist; Packing/Alignment controls, Union and broader ABI cases
    remain implementation work. The
-   [integration proposal](proposals/public-fixed-layout-profile.md) separates
-   the accepted target rules, pending physical carriers and current support.
+   [CG-005 gate](implementation/conformance-gaps.md#cg-005) tracks that work.
 6. **General separate compilation — binding contracts.** Implement the
    selected source call/inference algorithm, witness/default resolution and
    qualified interface forms; complete their physical identity, dispatch and
@@ -85,12 +95,13 @@ prerequisite has already been met.
    Windows x64 FFI direction crosses this area and runtime safety: raw
    caller-unsafe imports, general stable storage/pointers, explicit native
    entries/function pointers, generic vtable calls and authored applications.
-   The settled [authored-library boundary](proposals/unsafe-ffi-vtable-cleanup.md)
-   supersedes compiler catalogs, COM ownership inference and sample-specific
-   admission. Review the [standard metadata](proposals/trrm-native-interop-metadata.md)
-   as a coherent route through declarations, dependencies, mandatory
-   verification and lowering. Completed sample generalization does not
-   approve its experimental source or wire schemas.
+   The selected [native source contract](specs/native.md) and
+   [metadata](specs/il-metadata.md) supersede compiler API catalogs, COM
+   ownership inference and sample-specific admission. They define
+   declarations, dependencies, mandatory verification and lowering. Their
+   implementation and target qualification remain tracked in
+   [conformance gaps](implementation/conformance-gaps.md#cg-004); completed
+   sample generalization and schema registration do not establish support.
 7. **Rich libraries — builders and handlers.** Implement the selected
    registered builders and handlers, including eager capture before draining,
    ownership, refusal, cleanup, failure and publication. Complete their
@@ -104,6 +115,12 @@ prerequisite has already been met.
    numeric-conversion policies with their target contracts and boundary
    behavior. Existing bounded floating implementation does not establish
    support for every accepted format, source form or interchange operation.
+   Under [CG-011](implementation/conformance-gaps.md#cg-011), migrate the
+   source compiler, constant evaluator, diagnostics and serialization to the
+   approved Development/Debug checked and Release wrapping defaults for
+   ordinary integer add/subtract/multiply/negate. Resolve the profile before
+   checking/evaluation/serialization and retain explicit IL policy across
+   consumers; this approval is not a current support claim.
 10. **Full runtime/structured contracts — asynchronous producers.** Integrate
     accepted completion, producer, capture and suspension contracts after
     their loan, effect, ownership and cleanup prerequisites. Complete physical
@@ -117,14 +134,18 @@ prerequisite has already been met.
     bounded components toward a compiler bootstrap only as their language and
     library prerequisites are met and through the shared
     [self-host gate](#compiler-and-self-hosting-gate). Keep the deferred
-    [invocation-scoped source grant](proposals/invocation-scoped-source-grant.md),
-    [native source-grant ABI](proposals/native-source-grant-library.md) and
-    [scanner invocation profile](proposals/scanner-invocation-profile.md)
-    separate from accepted execution contracts. Promotion requires concrete
-    consumers and complete invocation, lifetime, size/resource and admission
-    rules; provisional implementation does not establish those contracts.
-    Current component support and the hosted verifier/emitter boundary are
-    recorded in the [Terrum-authored component inventory](implementation/terrum-code-analysis.md).
+    source-dependent native ABI separate from accepted execution contracts.
+    The C#-authored and Terrum-authored compilers are separate implementations
+    maintained side-by-side while the language evolves. A transitional miss
+    in the Terrum compiler invokes the C# compiler as a separate process on
+    the original source; no AST or partial semantic projection crosses that
+    boundary. Remove the C# compiler only after the Terrum implementation is
+    self-sustaining after GA. Current component support and remaining
+    implementation work are recorded in the
+    [Terrum-authored component inventory](implementation/terrum-code-analysis.md).
+    The previous scalar v87/v88 projection profiles are not the selected
+    compiler architecture; reconcile any dependent private invocation profile
+    before claiming it as accepted.
 
 These are pending contracts, not support claims. Exact grammar, metadata and
 implementation remain subject to their canonical specifications and proposals.
@@ -187,15 +208,20 @@ TRRM is a compact binary representation of the language and ecosystem: an
 input for metadata binding, reflection, tooling, linking and AOT/JIT code
 generation without source recompilation. It is not merely private-IR
 serialization or a verifier certificate. The approved source grammar and
-current `(1, 0)` metadata and coded-instruction designs specify target
+current `(1, 0)` metadata and register instruction designs specify target
 contracts, not a complete executable profile, current compiler support or a
-released schema. Complete implementation of the selected Body/verifier and
-feature-admission rules remains work; higher structured physical profiles
-and numerical portable representation-reader minima retain their explicit design gates.
-Source compilation checks authored bodies;
-binary consumers validate structure, references, binding, compatibility and
-caller use, then may rely on declared contracts for external dependencies
-without re-proving their bodies. Malformed data is never trusted.
+released schema. Migrate private SSA/value-ID Body paths to
+`instructionEncoding=01`, compact implementation kinds, fixed `u16`
+Body-local indexes and recipe-aware SourceMap locations. Complete the
+producer/reader/rewriter, structural safe-consumption and feature-admission
+rules under [CG-001](implementation/conformance-gaps.md#cg-001); higher
+structured physical profiles and numerical portable representation-reader
+minima retain their explicit design gates. Source compilation checks authored
+bodies. Binary consumers validate structure, bounds, references, required
+schema/support, binding compatibility and caller use before affected use,
+then may rely on producer-published semantic facts without re-proof. External
+provider behavior remains a trust contract. Malformed, unsafe-to-consume or
+unsupported required data is rejected before use.
 
 Pre-v1 changes, including breaking format changes, remain possible; no frozen
 versioning scheme, published managed-machine ABI, or pre-v1 stability level is

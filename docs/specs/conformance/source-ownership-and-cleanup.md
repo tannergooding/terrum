@@ -4,14 +4,16 @@ These cases specify [ownership and cleanup](../language/ownership-and-cleanup.md
 Fixtures supply complete type, field, authority, dependency and protocol facts.
 Finite state/retirement schedules assess those facts, not arbitrary source
 checking, cleanup bodies, collector behavior, concurrency or physical codecs.
+GC backing-specific Cleanup triggers and thread constraints are covered by
+[storage and GC cases](source-storage-and-gc.md).
 
 ## Registered cleanup and complete types
 
 | ID | Scenario | Required outcome |
 |---|---|---|
-| OREG-01 | Eligible unique type selects one Cleanup method | Bind the exact registered primary method, not its name |
+| OREG-01 | Eligible unique value, aliasable class object or boxed payload selects one Cleanup method | Bind the exact registered primary method, not its name; aliases share one object-level obligation |
 | OREG-02 | Ordinary Copy aggregate contains an owning field | Reject duplicate ownership or silently removing Copy |
-| OREG-03 | Copy type declares owning Cleanup | Reject |
+| OREG-03 | Inline Copy aggregate declares owning Cleanup | Reject; ordinary handle copies do not duplicate the aliased object's obligation |
 | OREG-04 | Cleanup returns non-void or has parameters | Reject automatic cleanup eligibility |
 | OREG-05 | Cleanup is static, async, extern or caller-unsafe | Reject automatic cleanup eligibility |
 | OREG-06 | Cleanup body or automatic child cleanup may throw/suspend | Reject the transitive retirement contract |
@@ -143,13 +145,13 @@ checking, cleanup bodies, collector behavior, concurrency or physical codecs.
 
 | ID | Scenario | Required outcome |
 |---|---|---|
-| OADM-01 | Consumer lacks owning-fields-and-cleanup/1 | Reject required rule before use |
+| OADM-01 | Implementation lacks owning-fields-and-cleanup/1 | No support claim for the affected use; reject before use, with diagnostics left to the implementation |
 | OADM-02 | Link remaps field/type/cleanup/storage records | Preserve declaration identity/order and actual value generations |
 | OADM-03 | Storage numeric/name identity is reused | Old retired value and acquired-state journal cannot revive |
 | OADM-04 | Replacement adds authored Cleanup to a structurally movable type | Reject relied-on partial-move contract incompatibility |
 | OADM-05 | Replacement changes observable field-retirement order | Reject incompatible retained contract |
 | OADM-06 | Replacement weakens cleanup effects or complete-receiver guarantee | Reject |
-| OADM-07 | Schema/body annotation is used as proof of arbitrary cleanup | Require checked evidence or explicit semantic producer/audit trust |
+| OADM-07 | Schema/body annotation is treated as proof beyond the published cleanup contract | Producer remains responsible for truth; consumers validate record structure, references and support but are not required to re-prove cleanup facts. Optional audits do not prove arbitrary external behavior or authored unsafe promises |
 | OADM-08 | Layout/GC/native profile cannot transport required partial state | Reject crossing before use; no new type/hidden representation fallback |
 | OADM-09 | Existing Move/Drop or held range encodes missing partial-state semantics | No physical ownership program/profile activated by logical approval |
 | OADM-10 | Finite construction/cleanup model passes | Not compiler/runtime, arbitrary body/validity, concurrent, collector or codec conformance |

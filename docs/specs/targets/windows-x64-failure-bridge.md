@@ -137,8 +137,8 @@ Arbitrary caller destinations are not initialized by examining their bytes.
 The entry contains its own supported escaping failures and returns normally
 with these correlations. It has no hidden language-exception argument,
 language unwinder crossing or automatic host-exception equivalence.
-Its raw native contract is NoThrow; the source-facing receiving proxy retains
-its actual failure effect.
+Its raw native contract returns through the packet protocol; the source-facing
+receiving proxy retains its actual language-failure behavior.
 
 The Boolean result has no hidden result pointer. Explicit result/failure
 pointers occupy ordinary integer-carrier positions after the original
@@ -256,7 +256,7 @@ Before independent use, the consumer needs complete physical records for
 every retained source declaration/value/operation and local failure feature.
 This profile fixes native machine-call structures only. It allocates no
 Feature/target ID, Attr, TypeSpec extension, exception-body region, packet
-codec or callback metadata in `trrm/1-draft-unified-3`.
+codec or callback metadata in `trrm/1-draft-register-il-1`.
 Out-of-band governing rule agreement does not repair missing physical records.
 Private serializers remain private.
 

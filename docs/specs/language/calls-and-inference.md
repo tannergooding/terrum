@@ -12,9 +12,10 @@ No phase executes candidate bodies or searches for an implementation type.
 receiver/formals to staged arguments and the exact result/retained destination.
 Every permitted source constrains the call; a private branch cannot remove
 one. Member-contract ForwardsBacking requirements are checked after normal
-complete-type/witness selection. They create no inference evidence, conversion
-preference or constraint-only overload, and failed capture admission is not
-repaired by a copied descriptor, hidden owner or candidate-body inspection.
+complete-type/witness selection. They add no inference evidence or conversion
+preference and do not themselves justify a constraint-only overload. Failed
+capture admission is not repaired by a copied descriptor, hidden owner or
+candidate-body inspection.
 
 [Core tasks](task-responsibility.md) transfer completion responsibility through
 ordinary by-value staging, returns and retained holders. A later argument's
@@ -41,11 +42,10 @@ Operator protocols retain their separately declared operand/result contracts.
 An unsupported family, builder, representation, or execution feature does not
 become supported because source inference produces a complete term.
 
-[Runtime `require<E>`](requirement-failures.md#2-ordinary-zero-input-construction)
-uses these ordinary constructor rules for `new E()` with zero supplied
-arguments. Defaults/empty params may participate when ordinarily eligible;
-the failure type supplies no operand/output inference evidence, constructor
-capability, hidden argument, factory or alternate binding retry.
+[Runtime `require<E>`](requirement-failures.md#2-ordinary-zero-supplied-argument-construction)
+uses the selected class's ordinary zero-supplied-argument constructor binding
+after a normally false check. The failure type supplies no operand/output
+inference evidence, hidden argument or alternate class/constructor retry.
 
 ## Argument mapping and call forms
 
@@ -71,7 +71,8 @@ arguments in parameter order. Nontrailing omissions need appropriate labels.
 |---|---|
 | Ordinary value | Complete parameter type, existing value binding, and its copy/transfer contract |
 | `implicit ref<T>` | Ordinary explicit-reference-equivalent formation; exact stored `T`, no snapshot or invented loan protocol |
-| `init ref<T>` | Explicit `init` argument designates vacant storage of exact complete `T`; mode cannot be supplied by an ordinary value |
+| `ref<init T>` | Explicit `init` argument designates vacant storage of exact complete `T`; mode cannot be supplied by an ordinary value |
+| `Span<init T>` | Pass the Span descriptor by value over a whole vacant range; its complete/vacant normal outcome uses the declared OutputState relation |
 | Ordinary default | Selected published Copy constant when that position is unsupplied; no default for reference/initialization loans |
 | Normal `params` | One argument binds the declared collection through an admitted direct binding |
 | Expanded `params` | Corresponding arguments bind elements of a new eligible collection, with ordinary construction and copy/move rules |
@@ -175,8 +176,12 @@ writable `C` storage cannot accept a readonly handle by upgrading it.
 
 Collect evidence independent of argument order. An explicit pinned type is
 checked against the arguments, not retargeted by them.
-Constraints filter the established argument; they do not choose an implementer
-or weaken `T` merely to make `[Copy]`, `where T : write`, or a witness succeed.
+Constraints filter the established argument; they do not weaken `T` to satisfy
+a Copy-required operation or `where T : write`, or choose an interface
+implementer. Same-signature generic methods may be selected by constraint
+applicability only when their domains are proven pairwise disjoint; inside a
+generic body, selection must be valid for the full formal domain or use an
+explicit specialization branch.
 
 ### Forward shapes and non-injective projections
 
@@ -192,9 +197,9 @@ substitute forward and check the resulting complete type and admitted binding.
 A proven redundant `write T` under `where T : write` is the same formal term,
 not a non-injective search for readonly and writable originals.
 
-The selected pin-reference-to-pointer edge can expose its known, exact
-referent term in forward matching. It does not expose new inferred access,
-acquire a pin, or enable user-conversion/intermediate-type search.
+Explicit address extraction and `ref *root` are expression operations, not
+implicit bindings. Inference cannot synthesize a root, pin, or checked-
+reference-to-pointer extraction to make a candidate applicable.
 Qualification attenuation remains separate from changing the referent type.
 Other registered direct projections may participate only through their
 published forward contract; they are not inverse inference rules.
@@ -376,7 +381,11 @@ unrelated/crossed structures remain ambiguous.
 An applicable `List<U>` pattern is more specific than bare `T` at a
 `List<int32>` argument. A nongeneric exact declaration wins a remaining tie
 with a generic declaration, not before argument quality.
-Constraints do not create constraint-only overloads.
+Constraints do not add conversion-ranking preferences. Same-signature generic
+methods may differ by constraints only when their applicability domains are
+proven pairwise disjoint under closed, exhaustive properties; overlapping or
+unknown domains reject. A generic body must type-check across its full
+declared domain or use an explicit specialization branch.
 
 Ordinary and omitted-output forms share those comparisons. Omitted
 destinations provide neither comparison arguments nor specificity advantage.
@@ -413,7 +422,7 @@ rerun overload resolution or recover a missing source feature.
 Only a call directly serving a matching or value-producing `require` subject
 requests omission; ordinary parentheses preserve that subject.
 The context does not omit destinations from unrelated nested argument calls.
-Explicit `init ref<T>` modes with checked ordinary call-completion output,
+Explicit `ref<init T>` types with checked ordinary call-completion output,
 ownership and dependency contracts establish eligibility without another
 attribute or output registration. Required inputs remain required.
 Later task/producer completion needs its separate phase contract.
@@ -561,7 +570,7 @@ integers and status enums have no implicit truthiness.
 
 ```terrum
 var result = require Ready(); // Ready returns bool; result has type void.
-int32 value = require Read(); // Read has an omitted init ref<int32> output.
+int32 value = require Read(); // Read has an omitted ref<init int32> output.
 init int32 destination;
 var checkedResult = require Read(init destination); // Check status; yield ().
 ```

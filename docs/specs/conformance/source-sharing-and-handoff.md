@@ -162,23 +162,23 @@ native algorithms, weak-memory observations, collector behavior or codecs.
 | SFAIL-07 | Permitted runtime contention is returned as false | Follow declared Try semantics; unsupported capability is not contention |
 | SFAIL-08 | Failure occurs after successful guard adoption | Preserve/release the actual affine holder once on permitted exits |
 | SFAIL-09 | Failure occurs after committed handoff adoption | Preserve receiver/transit responsibility; no source revival |
-| SFAIL-10 | Trusted artifact lacks a required rule/profile/import | Required rejection still applies |
-| SFAIL-11 | Consumer cannot trust implementation truth | Perform required semantic audit or decline execution |
+| SFAIL-10 | Implementation lacks a required rule/profile/import | No support claim for the affected use; reject before use, with diagnostics left to the implementation |
+| SFAIL-11 | Consumer uses a producer-published implementation contract | Validate record structure, references and required support before affected use; then rely on published body facts without semantic re-proof, retaining producer responsibility |
 | SFAIL-12 | Unsafe access-contract violation occurs | No invented synchronization, unrelated traps or arbitrary whole-program data-race UB; not unsafe-code containment proof |
 
 ## Retained contract and independent admission
 
 | ID | Scenario | Required outcome |
 |---|---|---|
-| SADM-01 | Consumer lacks capability/protocol rule version | Reject required semantics before use |
+| SADM-01 | Implementation lacks capability/protocol rule version | No support claim for the affected use; reject before use, with diagnostics left to the implementation |
 | SADM-02 | Source logical approval is used to set a physical bit/opcode | No physical allocation or runtime helper ABI follows |
 | SADM-03 | Mixed-SC/fence/causality/lifetime profile remains incomplete | No complete concurrent-execution conformance claim |
-| SADM-04 | Carrier/root/call representation cannot transport required authority | Reject crossing; no boxing/pinning/retain fallback |
+| SADM-04 | Implementation's carrier/root/call representation cannot transport required authority | No support claim for the affected crossing; no boxing/pinning/retain fallback is implied |
 | SADM-05 | Linking remaps type/formal/protocol/extent/generation identities | Preserve exact relationships, not names or row ordinals |
 | SADM-06 | Replacement adds condition/caller obligation | Reject relied-on caller-domain restriction |
 | SADM-07 | Replacement removes a relied-on thread capability | Reject |
 | SADM-08 | Replacement weakens guard/return/ordering/failure promises | Reject incompatible retained contract |
 | SADM-09 | Code/load/dependency endpoint changes | Preserve actual retained source obligations or reject |
-| SADM-10 | Producer truth is trusted while use is structurally invalid | Reject use; trust is not a capability bypass |
+| SADM-10 | Producer-published facts are false about an internally represented use | Producer violates its truth obligation; a consumer need not detect a structurally consumable false fact, though an optional audit may |
 | SADM-11 | Stronger private conditions change generic binding | No new inference evidence, conformance or overload preference |
 | SADM-12 | Finite supplied-fact authority model passes | Not source compiler, arbitrary algorithm, concurrent event model, collector or physical-codec conformance |

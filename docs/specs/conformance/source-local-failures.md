@@ -1,133 +1,119 @@
-# Local failure eligibility and typed catch conformance
+# Local exception and catch conformance
 
-These cases apply to [local failure types and catch bindings](../language/local-failures.md),
-ordinary complete types/witnesses and the existing incremental unwind rule.
-They do not claim compiler/runtime support or allocate a physical failure
-codec. Each fixture supplies the stated complete declarations and runtime
-contracts; actual evidence limits remain explicit.
+These cases apply to [local exception objects and typed catches](../language/local-failures.md),
+the exact self-typed interface/witness contract and capability-compositional
+exception routing. They do not claim compiler/runtime support or allocate a
+physical exception codec. Each fixture supplies the stated complete
+declarations and runtime contracts; actual evidence limits remain explicit.
 
-## Registered nominal opt-in
+## Exception class and common contract
 
 | ID | Fixture | Required outcome |
 |---|---|---|
-| EXRG-01 | Primary nominal struct has resolved no-argument Exception | Eligible, without added Copy or storage facts |
-| EXRG-02 | Primary unique class has resolved Exception | Eligible under its own complete ownership/representation contract |
-| EXRG-03 | Primary enum and union have resolved Exception | Eligible without adding interface-conformance syntax |
-| EXRG-04 | Type is named Exception or ParseException but is unannotated | Ineligible; spelling supplies no opt-in |
-| EXRG-05 | Same-spelled attribute resolves to another module identity | Ordinary attribute, not exception opt-in |
-| EXRG-06 | Exception receives positional, named or runtime predicate arguments | Diagnose invalid schema |
-| EXRG-07 | Exception repeats on one primary or across partial placements | Diagnose; no last placement wins |
-| EXRG-08 | Exception occurs only on a secondary partial | Diagnose primary-contract violation |
-| EXRG-09 | Exception targets static class, alias, formal, field, callable or parameter | Diagnose inapplicable target |
-| EXRG-10 | Nominal type explicitly witnesses a marked category interface | Eligible through its exact declared witness |
-| EXRG-11 | Type witnesses a derived interface inheriting a marked closed category | Inherited eligibility; retain exact closed identities |
-| EXRG-12 | Duplicate inherited paths reach the same category | Deduplicate the same identity; no ambiguity or repeated annotation |
-| EXRG-13 | Conflicting witnesses or cyclic category inheritance | Diagnose under ordinary witness rules |
-| EXRG-14 | Matching methods, imported extension or unrelated adapter resemble category | No conformance or eligibility |
-| EXRG-15 | Direct annotation and compatible category witness coexist | One compatible eligibility fact; not a repeated annotation |
-| EXRG-16 | Actual Core bootstrap and independently compiled schema registration | Requires real compiler/registration evidence, not a finite declaration map |
+| EXRG-01 | Class binds `IException<this TException>` to its exact implementing type | Accept the self-typed common contract under ordinary interface-witness rules |
+| EXRG-02 | Struct, enum, union or static class is used as an exception type | Reject; exceptions are class-only managed objects |
+| EXRG-03 | Same-named `IException`, attribute or member has another resolved identity | It does not satisfy the registered common contract |
+| EXRG-04 | Class has `Message`, `DefaultMessage` or factories with matching names but no witness | Reject; shape/name does not supply the interface contract |
+| EXRG-05 | Common view `IException<_>` is used for a constructed exception object | Preserve object identity and common instance witness without boxing |
+| EXRG-06 | `IException<void>` is substituted for `IException<_>` | Reject; void is not an existential self-type projection |
+| EXRG-07 | Self-dependent static factory is requested through `IException<_>` | Reject; existential view exposes common instance members, not hidden-self factories |
+| EXRG-08 | Concrete exception test narrows a common view through `via<T>` | Select only the exact concrete witness and complete type |
+| EXRG-09 | Common `Message` is null or `DefaultMessage` is not the selected durable Text | Reject the common contract; `Message` is non-null |
+| EXRG-10 | Nullable Text factory input is null or empty | Null selects `DefaultMessage`; empty text remains a valid explicit message |
+| EXRG-11 | Typed `[TextTarget]` factory receives eager interpolated content | Materialize durable Text; do not retain generated content |
+| EXRG-12 | Authored `InnerException` is compared with runtime `ParentException` | Keep user cause and runtime propagation parent distinct |
+| EXRG-13 | Runtime attaches the pending exception as its own parent | Reject self-parenting; preserve the original exception object identity |
+| EXRG-14 | Common default formatter is selected | Forward `Message.TryFormat(writer, format)` without adding type/stack/causal text |
+| EXRG-15 | Stack-trace field, CLR `ToString`, boxing or virtual dispatch is inferred | No such common exception guarantee |
 
 ## Complete subjects, representation and constraints
 
 | ID | Fixture | Required outcome |
 |---|---|---|
-| EXTY-01 | Transparent alias resolves to an eligible complete payload | Preserve target identity/eligibility |
-| EXTY-02 | Alias expansion cycles | Diagnose; no invented eligible target |
-| EXTY-03 | Unannotated Transparent wrapper has eligible field and equal layout | Ineligible wrapper |
-| EXTY-04 | Annotated wrapper retains a complete owner/descriptor field | Eligibility does not waive its dependencies or retirement |
-| EXTY-05 | Generic T requires resolved Exception and is instantiated with eligible E | Check selected complete T without rewriting or inferring it |
-| EXTY-06 | T lacks the required Exception fact or a category witness is malformed | Diagnose; body/name/layout inference cannot repair it |
-| EXTY-07 | Annotated generic family is formed under its ordinary constraints | All admitted complete instances retain their declared eligibility |
-| EXTY-08 | Capability-specific where clause follows Exception | Diagnose unsupported annotation clause; header constraints remain ordinary |
-| EXTY-09 | Distinct nominal modules, generic arguments or representations share bits | Remain distinct failure/catch subjects |
-| EXTY-10 | E, write C, ref<C> and ref<write C> participate in catches | Preserve exact stored qualifications; no reference covariance |
-| EXTY-11 | Mandatory scalar, void or raw descriptor is proposed as annotated payload | Diagnose non-nominal target or ineligible throw form |
-| EXTY-12 | Annotated zero-data nominal aggregate is complete | Eligible; not void and not fabricated initialization |
-| EXTY-13 | Optional E is absent or thrown without presence refinement | Not an eligible E payload; no implicit null/default failure |
-| EXTY-14 | Bare category interface is used as a fresh payload | Diagnose absent concrete storage; no implicit boxing |
-| EXTY-15 | Eligible complete E has no supported transport/layout or retained source | Decline unsupported use or diagnose invalid dependency; marker supplies neither |
-| EXTY-16 | A borrowed wrapper would outlive its source frame, guard or exact generation | Reject invalid escape; bytes/root alone do not retain authority |
+| EXTY-01 | Transparent alias resolves to an exception class implementing the exact self contract | Preserve target definition and witness identity |
+| EXTY-02 | Alias expansion cycles | Diagnose; do not invent an exception identity |
+| EXTY-03 | Unrelated wrapper contains an exception field and has equal layout | It is not itself an exception object |
+| EXTY-04 | Exception object retains backing, owner or resource dependencies | Enforce those ordinary dependencies; common eligibility does not waive them |
+| EXTY-05 | Generic T requires `IException<T>` and is instantiated with a conforming class | Check the selected complete self/witness contract |
+| EXTY-06 | T lacks the exact self witness or the witness is malformed | Diagnose; body/name/layout inference cannot repair it |
+| EXTY-07 | Distinct nominal modules, generic arguments or representations share bits | Keep exception identities distinct |
+| EXTY-08 | `IException<_>` hides the self type inside `List<Task<_>>` | Each value has its own existential; do not unify hidden arguments |
+| EXTY-09 | Exception object is retained after catch | Preserve ordinary dependency/backing limits; a root does not extend unrelated loans |
 
 ## Fresh throws and responsibility
 
 | ID | Fixture | Required outcome |
 |---|---|---|
-| EXTH-01 | Throw operand has observable evaluation and is complete | Evaluate once; no normal continuation |
-| EXTH-02 | Named unique eligible owner is thrown with move | Transfer once, vacate source and preserve dependencies |
-| EXTH-03 | Named unique operand omits move | Diagnose missing transfer, not implicit consumption |
-| EXTH-04 | Fresh complete unique result is thrown | Transfer directly without Copy |
-| EXTH-05 | Named Copy payload is thrown | Perform ordinary value copy; original source remains live |
-| EXTH-06 | Operand evaluation fails before producing the outer payload | Propagate actual operand failure; fabricate no outer payload/event |
-| EXTH-07 | Payload is vacant or structurally partial | Diagnose incomplete whole-value use |
-| EXTH-08 | A catch value copy is freshly thrown | New origin; copied data does not preserve the handled event |
-| EXTH-09 | Fresh throw uses a Copy handle to the same object | New event/provenance; no required deep snapshot |
-| EXTH-10 | Fresh throw later fails delivery after a successful move | Retain responsible state; do not restore the vacated source |
-| EXTH-11 | Exception opt-in is treated as NoThrow, Pure, Blittable or thread permission | Reject inferred unrelated capability |
-| EXTH-12 | Failure is internally handled under valid effect bounds | No escaping-failure fact by mere presence of throw; retain actual effects |
-| EXTH-13 | Payload carries unsettled task/guard/protocol responsibility | Must settle or validly transfer it; catching cannot silently abandon it |
-| EXTH-14 | Actual partial construction, every-exit delivery and resource failure | Requires runtime/state evidence beyond supplied finite obligations |
+| EXTH-01 | Throw operand has observable evaluation and is a complete exception object | Evaluate once; no normal continuation |
+| EXTH-02 | A fresh exception object is thrown outside a handler | Establish its origin at the throw operation |
+| EXTH-03 | `throw failure;` throws the same object active in the current handler | Preserve its original origin and parent chain |
+| EXTH-04 | Handler throws a distinct exception object | Make it primary at the new throw site; attach the pending event as ParentException |
+| EXTH-05 | A named class handle denotes the same exception object | Preserve object/event identity; copying a handle does not create a new event |
+| EXTH-06 | Operand evaluation or exception factory fails | Propagate that actual failure; fabricate no outer/default/null exception |
+| EXTH-07 | Operand is vacant, partial, or not an IException<TSelf> object | Reject the throw |
+| EXTH-08 | Source uses bare `throw;` | Reject; same-object propagation uses `throw expression` or catch fallthrough |
+| EXTH-09 | Exception factory failure cannot be represented as an exception object | Fail fast; do not fabricate a fallback event |
+| EXTH-10 | Exception eligibility is treated as Copy, Pure, Blittable or thread permission | Reject inferred unrelated capability |
+| EXTH-11 | Exception object carries unsettled task/guard/resource obligations | Enforce those obligations; catch/throw does not silently settle them |
+| EXTH-12 | No handler is found by `main` | Abort fail-fast without implicit frame/owner/output cleanup |
+| EXTH-13 | Event materialization is elided despite propagation, parent capture or diagnostic need | Preserve required event identity/origin; elision is not a source guarantee |
+| EXTH-14 | Actual object allocation, parent retention, cleanup and resource failure | Requires runtime/state evidence beyond supplied finite obligations |
 
 ## Explicit catch bindings
 
 | ID | Fixture | Required outcome |
 |---|---|---|
-| EXCB-01 | ref<E> names a complete non-Copy payload | Borrow readonly descriptor; original propagation owner remains |
-| EXCB-02 | Value E names a Copy payload | One ordinary copy; original event remains independently responsible |
-| EXCB-03 | Named value E has no Copy contract | Diagnose even if today's pending failure would not match |
-| EXCB-04 | E underscore tests a non-Copy payload | No local/read/copy; exact type test remains |
-| EXCB-05 | Marked category I underscore sees an exact declared witness | Match without interface storage or payload copy |
-| EXCB-06 | Category I has no matching closed witness | No match; no structural or open-generic fallback |
-| EXCB-07 | Unmarked interface is used as a category, without a marked base | Diagnose ineligible catch subject |
-| EXCB-08 | Named value uses bare interface I | Diagnose absent storable value, even for Copy concrete payload |
-| EXCB-09 | ref<I> uses bare interface as referent, including underscore | Diagnose absent ordinary interface place; no raw reinterpretation |
-| EXCB-10 | Catch uses writable, pinned, pointer, init, implicit or mutable input | Diagnose unsupported catch mode |
-| EXCB-11 | Borrow name is used with member dot as though it were E | Ordinary descriptor lookup; use dereference or arrow for E members |
-| EXCB-12 | Borrow attempts whole payload move or slot replacement | Reject readonly referent consumption/write |
-| EXCB-13 | ref<write C> observes actual stored write C | Retain existing inner object authority, not writable slot authority |
-| EXCB-14 | ref<C> is tested against stored write C | No match through inner qualification attenuation |
-| EXCB-15 | Concrete nominal/representation/argument mismatch reaches catch | No conversion, box, adapter or widening is tried |
-| EXCB-16 | Type mismatch has an effectful filter | Execute no filter or input formation |
-| EXCB-17 | Match has a named input and filter | Initialize input before once-only filter; scope is candidate-local |
-| EXCB-18 | Value Copy contains a scalar versus an aliased handle | Scalar copy independent; reachable handle state need not be a snapshot |
-| EXCB-19 | Borrowed or copied input exits on filter false, failure or body exit | Retire its own obligations, never the borrowed original twice |
-| EXCB-20 | Actual typed storage, roots, Copy helpers and reference lowering | Requires compiler/runtime evidence, not finite binding facts |
-| EXCB-21 | Catch Type alias resolves to ref<E> or ordinary E | Select normalized borrow versus Copy/test mode without name-based adaptation |
-| EXCB-22 | Alias hides writable/pinned/pointer input, or ref<ref<E>> is requested | Reject forbidden form or ineligible inner descriptor; never unwrap again |
+| EXCB-01 | Concrete exception class matches a typed catch | Bind the matching managed object; do not borrow/copy its event responsibility |
+| EXCB-02 | `IException<_>` matches a constructed exception | Bind a common existential view preserving object identity |
+| EXCB-03 | Concrete or existential named catch binding lacks Copy | Accept; a catch binding does not copy the exception object |
+| EXCB-04 | Concrete or existential catch uses `_` | Test the exact type/contract without declaring a binding |
+| EXCB-05 | Same-named non-IException interface is used as a catch subject | Reject unless it independently has the selected complete witness/type relation |
+| EXCB-06 | `IException<void>` is used as the common catch view | Reject; hidden self type is not void |
+| EXCB-07 | `catch (ref<E> failure)` attempts to borrow a typed payload | Reject; typed catches bind exception objects, not payload references |
+| EXCB-08 | Concrete nominal type or complete arguments differ | No conversion, adapter, box or name-based match |
+| EXCB-09 | Common view is narrowed through a concrete type test | Select only the concrete type's checked witness |
+| EXCB-10 | A match has an effectful filter | Initialize the object/view binding before its once-only filter |
+| EXCB-11 | Filter type does not match | Execute no filter or binding-dependent code |
+| EXCB-12 | Catch binds `Message`, `InnerException` or `ParentException` | Preserve common property nullability/access; authored cause and runtime parent remain distinct |
+| EXCB-13 | Catch attempts to consume or transfer event responsibility through its binding | Reject; event responsibility is not transferred by binding |
+| EXCB-14 | Catch uses writable, pinned, pointer or initialization-reference input syntax | Reject unsupported catch binding form |
+| EXCB-15 | Actual object rooting, witness selection and existential representation | Requires compiler/runtime evidence, not finite binding facts |
 
-## Selection and active rethrow
+## Selection, recovery and propagation
 
 | ID | Fixture | Required outcome |
 |---|---|---|
-| EXSEL-01 | Exited inner finally changes state tested by candidate filter | Cleanup precedes type/input/filter tests |
-| EXSEL-02 | Inner cleanup replaces pending failure before candidate type test | Test replacement; retain earlier cause responsibility |
-| EXSEL-03 | First matching filter is false and next sibling matches | End first binding, retain effects and test next sibling in source order |
-| EXSEL-04 | No candidate at one scope matches | Continue outward cleanup; do not unwind past untested candidate |
-| EXSEL-05 | Candidate filter raises a checked failure | Propagate from recovery scope to lexical enclosing handlers, not false/sibling restart |
-| EXSEL-06 | Handler body raises a fresh failure | Its own protected try does not catch that body failure |
-| EXSEL-07 | Normal handler exits with an input borrow and value locals | End locals/borrow before discharging original event |
-| EXSEL-08 | Reference catch executes bare throw | End catch-scope borrow, then propagate same owner/origin without Copy |
-| EXSEL-09 | Nested handler executes bare throw | Rethrow innermost active event, not enclosing handler's event |
-| EXSEL-10 | Bare throw is outside handler or inside separately invoked lambda/helper | Diagnose missing source handler context |
-| EXSEL-11 | Rethrow reaches later candidates | Do not repeat previously completed cleanup or create a fresh origin |
-| EXSEL-12 | Copies/borrows/catches are used as rollback, snapshot or suppression | Preserve real effects/aliases and every-exit responsibility |
-| EXSEL-13 | Exception annotation is used to bypass unsafe recovery authorization | Diagnose missing existing unsafe recovery authorization |
-| EXSEL-14 | Actual nested typed/filter propagation with source cleanup | Requires executable source/runtime evidence for all entered/exited scopes |
-| EXSEL-15 | Handler cleanup faults while a rethrow or normal departure is pending | Preserve live input through authored cleanup, end it, then propagate replacement with earlier cause |
+| EXSEL-01 | Multiple typed handlers or filters exist in one region | Test in source order; select first matching clause |
+| EXSEL-02 | First matching filter is false and next sibling matches | Continue selection in order; keep filter effects, do not replay |
+| EXSEL-03 | Catch body falls through normally | Propagate the same pending event by default |
+| EXSEL-04 | Catch exits explicitly with return, break or continue | Swallow its pending event and traverse crossed finally regions |
+| EXSEL-05 | Nested loop transfer does not leave the active catch | Do not swallow the pending event |
+| EXSEL-06 | Labeled break exits a bounded if/switch/try construct from catch | Permit structured exit; swallow event and run crossed finally |
+| EXSEL-07 | `continue label` targets a non-loop construct | Reject |
+| EXSEL-08 | Filter or handler raises a distinct failure | Make new failure primary and link pending event as ParentException |
+| EXSEL-09 | Handler explicitly throws the same active exception object | Preserve its origin and parent chain |
+| EXSEL-10 | Failure occurs in a filter | Replace pending event; do not treat as false or restart sibling selection |
+| EXSEL-11 | `try/catch`, `try/finally` or combined handling lacks enclosing unsafe | Reject; exception constructs require explicit unsafe authorization |
+| EXSEL-12 | Source uses bare `throw;` inside or outside a handler | Reject; there is no empty throw production |
+| EXSEL-13 | No handler is found while dispatch searches outward by main | Fail fast without implicit frame/owner/output cleanup |
+| EXSEL-14 | Code continues after a catch using possibly affected general state | Treat state as indeterminate and continuation as unsafe; no compiler recovery proof |
+| EXSEL-15 | An applicable finally is crossed by structured control or propagation | Run it under the selected region contract; its failure becomes primary with pending event as parent |
+| EXSEL-16 | Actual nested typed/filter propagation and exception-region routing | Requires executable source/runtime evidence for all entered/exited regions |
 
 ## Retention, requirement failure and foreign mapping
 
 | ID | Fixture | Required outcome |
 |---|---|---|
-| EXCP-01 | Copy payload is retained after catch and later freshly thrown | Fresh event; not captured original provenance |
-| EXCP-02 | Catch descriptor escapes after original event retirement | Diagnose invalid dependency |
-| EXCP-03 | Annotated wrapper or method named Capture claims preserved event | Require actual registered captured-failure protocol |
-| EXCP-04 | Unique captured event has admitted transfer contract | Consume original responsibility; payload Copy does not permit duplication |
+| EXCP-01 | A common exception view is retained after handler exit without capture | Reject escape of handler responsibility; view alone is not a captured owner |
+| EXCP-02 | Exception object backing or a cause depends on an exited frame/guard | Reject invalid dependency despite managed rooting |
+| EXCP-03 | Wrapper or same-named method claims preserved propagation | Require the exact registered CapturedException protocol |
+| EXCP-04 | Captured event has an admitted consuming transfer contract | Consume original responsibility; do not duplicate the event |
 | EXCP-05 | Repeatable captured propagation lacks checked sharing/thread facts | Reject unsupported repeat/crossing; marker is insufficient |
-| EXCP-06 | Requirement selector names eligible E but no construction contract | Decline missing constructor/catalog; no default or false-success substitute |
+| EXCP-06 | Requirement selector names an E without the common checked factory | Decline missing factory/catalog; no default or false-success substitute |
 | EXCP-07 | Predicate evaluation fails instead of returning false | Preserve actual predicate failure, not selected requirement failure |
-| EXCP-08 | Foreign packet is mapped to annotated complete local E | Check mapping before local tests and retain affine domain/cause dependencies |
-| EXCP-09 | Raw packet, unadmitted foreign domain or hardware/fail-fast condition is thrown | No automatic eligibility/catchability or cleanup guarantee |
-| EXCP-10 | Actual captured payload/cause roots, allocator and image retirement | Requires runtime/protocol evidence beyond finite responsible holders |
+| EXCP-08 | Foreign packet is mapped to an IException<_> object | Check mapping before local tests and retain domain/cause dependencies |
+| EXCP-09 | Raw packet, unadmitted foreign domain or hardware/fail-fast condition is raised | No automatic object eligibility/catchability or cleanup guarantee |
+| EXCP-10 | Actual captured object/cause roots, allocator and image retirement | Requires runtime/protocol evidence beyond finite responsible holders |
 | EXCP-11 | Independent replacement retains an earlier frame/guard/generation-dependent cause | Check the complete cause closure; replacement independence cannot hide invalid sources |
 | EXCP-12 | Cause still has a live input borrow or unsettled protocol responsibility | Preflight retirement; do not partly release another cause and then abandon this one |
 | EXCP-13 | A cause owner is reattached, duplicated or used to create an owning cycle | Reject invalid responsibility graph rather than duplicate release |
@@ -136,15 +122,15 @@ contracts; actual evidence limits remain explicit.
 
 | ID | Fixture | Required outcome |
 |---|---|---|
-| EXAD-01 | Independent consumer retains direct Exception or category-witness route | Check exact schema, complete identities and declared route |
+| EXAD-01 | Independent consumer retains an `IException<TSelf>` implementation/witness | Check exact interface identity, self type and complete class identity |
 | EXAD-02 | Source/debug names replace required eligibility or witness records | Decline missing semantic support; optional names are insufficient |
-| EXAD-03 | Replacement removes retained direct or inherited eligibility | Incompatible affected use |
-| EXAD-04 | Replacement changes closed category arguments or actual representation | Reject changed relied-on subject/witness contract |
-| EXAD-05 | Replacement changes borrowed input into Copy-required value input | Reject changed ownership/mode promise |
-| EXAD-06 | Catch elimination relied on positive or negative witness facts | Retain those facts and recheck replacement |
-| EXAD-07 | New eligibility/category is added without changing retained client facts | Apply ordinary compatibility; not universally breaking or automatically valid |
-| EXAD-08 | A selected body is accessed by trusted reader | Keep selective access and required retained semantics; no preliminary all-Body scan |
-| EXAD-09 | Missing payload/handler/cause/cleanup codec is treated as runtimePolicy support | Decline before affected source-free use |
-| EXAD-10 | Exception attribute name is assigned a private opcode/Feature ID | No standard allocation or feature activation follows |
+| EXAD-03 | Replacement removes the retained IException implementation/witness | Incompatible affected use |
+| EXAD-04 | Replacement changes complete exception type, self argument or object representation | Reject changed relied-on subject/witness contract |
+| EXAD-05 | Replacement changes the common exception members or propagation/capture obligations | Reject changed relied-on contract |
+| EXAD-06 | Catch elimination relied on positive or negative interface-witness facts | Retain those facts and recheck replacement |
+| EXAD-07 | A new IException implementation is added without changing retained client facts | Apply ordinary compatibility; not universally breaking or automatically valid |
+| EXAD-08 | A selected body is accessed by a selective reader | Keep selective access and required retained semantics; no preliminary all-Body scan |
+| EXAD-09 | Missing exception/object/handler/cause codec is treated as runtimePolicy support | Decline before affected source-free use |
+| EXAD-10 | An exception class or interface spelling is assigned implicit policy | No implementation or feature admission follows from source names |
 | EXAD-11 | Prior contained native bridge and ordinary direct calls are retained | Preserve original supported contracts; new local marker supplies no shared unwind ABI |
 | EXAD-12 | Complete independent serialized handler/capture and source execution | Requires real producers/readers/runtime; logical unit allocates none of those codecs |
