@@ -6,95 +6,111 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
-/// <summary>A required feature assignment in a TRRM Feature table.</summary>
-/// <param name="FeatureId">The assigned feature identifier.</param>
-/// <param name="MinimumRuleRevision">The minimum rule revision required by the artifact.</param>
-public readonly record struct TrRmFeatureRow(uint FeatureId, uint MinimumRuleRevision)
+/// <summary>An exact required feature and rule revision in a Module manifest.</summary>
+public readonly record struct TrRmFeatureRow(uint FeatureId, uint RuleRevision)
 {
-    /// <summary>The provisional ScalarInitOutput assignment supported by this implementation.</summary>
-    public static TrRmFeatureRow ScalarInitOutput
-        => new(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
-            TrRmFeatureTableReader.ScalarInitOutputRuleRevision);
-
-    /// <summary>The provisional native boundary contract assignment.</summary>
+    /// <summary>Gets the exact NativeBoundaryContracts requirement.</summary>
     public static TrRmFeatureRow NativeBoundaryContracts
         => new(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
-            TrRmFeatureTableReader.NativeBoundaryContractsRuleRevision);
+            TrRmFeatureTableReader.RuleRevision);
 
-    /// <summary>The provisional native rootless-value assignment.</summary>
+    /// <summary>Gets the exact RootlessNativeValues requirement.</summary>
     public static TrRmFeatureRow RootlessNativeValues
         => new(TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
-            TrRmFeatureTableReader.RootlessNativeValuesRuleRevision);
+            TrRmFeatureTableReader.RuleRevision);
 
-    /// <summary>The provisional direct native-call assignment.</summary>
+    /// <summary>Gets the exact DirectNativeCalls requirement.</summary>
     public static TrRmFeatureRow DirectNativeCalls
         => new(TrRmFeatureTableReader.DirectNativeCallsFeatureId,
-            TrRmFeatureTableReader.DirectNativeCallsRuleRevision);
+            TrRmFeatureTableReader.RuleRevision);
 
-    /// <summary>The provisional native callable-entry assignment.</summary>
-    public static TrRmFeatureRow NativeCallableEntries
-        => new(TrRmFeatureTableReader.NativeCallableEntriesFeatureId,
-            TrRmFeatureTableReader.NativeCallableEntriesRuleRevision);
+    /// <summary>Gets the exact NativeExportEntries requirement.</summary>
+    public static TrRmFeatureRow NativeExportEntries
+        => new(TrRmFeatureTableReader.NativeExportEntriesFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
 
-    /// <summary>The provisional native vtable-call assignment.</summary>
-    public static TrRmFeatureRow NativeVTableCalls
-        => new(TrRmFeatureTableReader.NativeVTableCallsFeatureId,
-            TrRmFeatureTableReader.NativeVTableCallsRuleRevision);
+    /// <summary>Gets the exact NativeInterfaceCalls requirement.</summary>
+    public static TrRmFeatureRow NativeInterfaceCalls
+        => new(TrRmFeatureTableReader.NativeInterfaceCallsFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
+
+    /// <summary>Gets the exact NativeDataImports requirement.</summary>
+    public static TrRmFeatureRow NativeDataImports
+        => new(TrRmFeatureTableReader.NativeDataImportsFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
+
+    /// <summary>Gets the exact NativeExceptionUnwind requirement.</summary>
+    public static TrRmFeatureRow NativeExceptionUnwind
+        => new(TrRmFeatureTableReader.NativeExceptionUnwindFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
+
+    /// <summary>Gets the exact NominalUnionMetadata requirement.</summary>
+    public static TrRmFeatureRow NominalUnionMetadata
+        => new(TrRmFeatureTableReader.NominalUnionMetadataFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
+
+    /// <summary>Gets the exact PublishedPredicates requirement.</summary>
+    public static TrRmFeatureRow PublishedPredicates
+        => new(TrRmFeatureTableReader.PublishedPredicatesFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
+
+    /// <summary>Gets the exact TypedFrozenValues requirement.</summary>
+    public static TrRmFeatureRow TypedFrozenValues
+        => new(TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
+
+    /// <summary>Gets the exact ConstantExecution requirement.</summary>
+    public static TrRmFeatureRow ConstantExecution
+        => new(TrRmFeatureTableReader.ConstantExecutionFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
+
+    /// <summary>Gets the exact LayoutQueries requirement.</summary>
+    public static TrRmFeatureRow LayoutQueries
+        => new(TrRmFeatureTableReader.LayoutQueriesFeatureId,
+            TrRmFeatureTableReader.RuleRevision);
 }
 
-/// <summary>Validates the required feature assignments supported by provisional TRRM (1, 0).</summary>
+/// <summary>Structurally validates eight-byte Feature rows without assuming row order.</summary>
 /// <remarks>The borrowed Feature section must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmFeatureTableReader
 {
-    /// <summary>The provisional feature identifier assigned to ScalarInitOutput.</summary>
-    public const uint ScalarInitOutputFeatureId = 1;
-
-    /// <summary>The provisional candidate identifier for native boundary contracts.</summary>
-    public const uint NativeBoundaryContractsFeatureId = 0x0100;
-
-    /// <summary>The provisional candidate identifier for rootless native values.</summary>
-    public const uint RootlessNativeValuesFeatureId = 0x0101;
-
-    /// <summary>The provisional candidate identifier for direct native calls.</summary>
-    public const uint DirectNativeCallsFeatureId = 0x0102;
-
-    /// <summary>The provisional candidate identifier for native callable entries.</summary>
-    public const uint NativeCallableEntriesFeatureId = 0x0103;
-
-    /// <summary>The provisional candidate identifier for native vtable calls.</summary>
-    public const uint NativeVTableCallsFeatureId = 0x0104;
-
-    /// <summary>The initial ScalarInitOutput rule revision supported by this implementation.</summary>
-    public const uint ScalarInitOutputInitialRuleRevision = 1;
-
-    /// <summary>The current ScalarInitOutput rule revision supported by this implementation.</summary>
-    public const uint ScalarInitOutputRuleRevision = 8;
-
-    /// <summary>The provisional native boundary contract rule revision supported by this implementation.</summary>
-    public const uint NativeBoundaryContractsRuleRevision = 1;
-
-    /// <summary>The provisional rootless native value rule revision supported by this implementation.</summary>
-    public const uint RootlessNativeValuesRuleRevision = 1;
-
-    /// <summary>The provisional direct native-call rule revision supported by this implementation.</summary>
-    public const uint DirectNativeCallsRuleRevision = 1;
-
-    /// <summary>The provisional native callable-entry rule revision supported by this implementation.</summary>
-    public const uint NativeCallableEntriesRuleRevision = 1;
-
-    /// <summary>The provisional native vtable-call rule revision supported by this implementation.</summary>
-    public const uint NativeVTableCallsRuleRevision = 1;
+    /// <summary>The assigned identifier for NativeBoundaryContracts.</summary>
+    public const uint NativeBoundaryContractsFeatureId = 1;
+    /// <summary>The assigned identifier for RootlessNativeValues.</summary>
+    public const uint RootlessNativeValuesFeatureId = 2;
+    /// <summary>The assigned identifier for DirectNativeCalls.</summary>
+    public const uint DirectNativeCallsFeatureId = 3;
+    /// <summary>The assigned identifier for NativeExportEntries.</summary>
+    public const uint NativeExportEntriesFeatureId = 4;
+    /// <summary>The assigned identifier for NativeInterfaceCalls.</summary>
+    public const uint NativeInterfaceCallsFeatureId = 5;
+    /// <summary>The assigned identifier for NativeDataImports.</summary>
+    public const uint NativeDataImportsFeatureId = 6;
+    /// <summary>The assigned identifier for NativeExceptionUnwind.</summary>
+    public const uint NativeExceptionUnwindFeatureId = 7;
+    /// <summary>The assigned identifier for NominalUnionMetadata.</summary>
+    public const uint NominalUnionMetadataFeatureId = 9;
+    /// <summary>The assigned identifier for PublishedPredicates.</summary>
+    public const uint PublishedPredicatesFeatureId = 10;
+    /// <summary>The assigned identifier for TypedFrozenValues.</summary>
+    public const uint TypedFrozenValuesFeatureId = 11;
+    /// <summary>The assigned identifier for ConstantExecution.</summary>
+    public const uint ConstantExecutionFeatureId = 12;
+    /// <summary>The assigned identifier for LayoutQueries.</summary>
+    public const uint LayoutQueriesFeatureId = 13;
+    /// <summary>The assigned Feature rule revision shared by currently assigned features.</summary>
+    public const uint RuleRevision = 1;
 
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
 
-    /// <summary>Gets the number of validated feature rows.</summary>
+    /// <summary>Gets the number of validated Feature rows.</summary>
     public int Count => _recordCount;
 
-    /// <summary>Validates the fixed-width Feature rows and supported assignments.</summary>
+    /// <summary>Validates the fixed-width rows in a Feature section.</summary>
     /// <param name="section">The borrowed Feature section bytes.</param>
-    /// <param name="recordCount">The number of Feature rows.</param>
+    /// <param name="recordCount">The number of eight-byte Feature rows.</param>
     public TrRmFeatureTableReader(ReadOnlySpan<byte> section, int recordCount)
     {
         if (recordCount < 0 || recordCount > 0xFF_FFFF
@@ -105,34 +121,16 @@ public readonly ref struct TrRmFeatureTableReader
 
         _rows = section;
         _recordCount = recordCount;
-        uint previousFeatureId = 0;
         for (var row = 0; row < recordCount; row++)
         {
-            var offset = row * RowSize;
-            var featureId = Read(offset);
-            var minimumRuleRevision = Read(offset + 4);
-            var maximumRevision = featureId switch
-            {
-                ScalarInitOutputFeatureId => ScalarInitOutputRuleRevision,
-                NativeBoundaryContractsFeatureId => NativeBoundaryContractsRuleRevision,
-                RootlessNativeValuesFeatureId => RootlessNativeValuesRuleRevision,
-                DirectNativeCallsFeatureId => DirectNativeCallsRuleRevision,
-                NativeCallableEntriesFeatureId => NativeCallableEntriesRuleRevision,
-                NativeVTableCallsFeatureId => NativeVTableCallsRuleRevision,
-                _ => 0u,
-            };
-            if (featureId <= previousFeatureId || minimumRuleRevision == 0
-                || minimumRuleRevision > maximumRevision)
+            if (Read(row * RowSize) == 0 || Read((row * RowSize) + 4) == 0)
             {
                 throw InvalidFeature();
             }
-
-            previousFeatureId = featureId;
         }
     }
 
     /// <summary>Gets a validated Feature row by its one-based row number.</summary>
-    /// <param name="row">The one-based Feature row number.</param>
     public TrRmFeatureRow GetFeature(int row)
     {
         if (row <= 0 || row > _recordCount)
@@ -144,36 +142,37 @@ public readonly ref struct TrRmFeatureTableReader
         return new TrRmFeatureRow(Read(offset), Read(offset + 4));
     }
 
-    /// <summary>Finds a validated Feature row by feature identifier.</summary>
-    /// <param name="featureId">The feature identifier to locate.</param>
-    /// <param name="feature">Receives the matching feature row, if present.</param>
-    /// <returns><see langword="true"/> if a matching row exists; otherwise, <see langword="false"/>.</returns>
+    /// <summary>Finds a non-conflicting exact Feature pair by identifier.</summary>
     public bool TryGetFeature(uint featureId, out TrRmFeatureRow feature)
     {
-        var low = 0;
-        var high = _recordCount;
-        while (low < high)
-        {
-            var middle = low + (high - low) / 2;
-            var currentFeatureId = Read(middle * RowSize);
-            if (currentFeatureId < featureId)
-            {
-                low = middle + 1;
-            }
-            else
-            {
-                high = middle;
-            }
-        }
-
-        if (low < _recordCount && Read((low * RowSize)) == featureId)
-        {
-            feature = new TrRmFeatureRow(Read((low * RowSize)), Read((low * RowSize) + 4));
-            return true;
-        }
-
+        var found = false;
         feature = default;
-        return false;
+        for (var row = 0; row < _recordCount; row++)
+        {
+            var offset = row * RowSize;
+            if (Read(offset) != featureId)
+            {
+                continue;
+            }
+
+            var current = new TrRmFeatureRow(featureId, Read(offset + 4));
+            if (found && current.RuleRevision != feature.RuleRevision)
+            {
+                feature = default;
+                return false;
+            }
+
+            feature = current;
+            found = true;
+        }
+
+        return found;
+    }
+
+    internal static bool TryGetAssignedRuleRevision(uint featureId, out uint ruleRevision)
+    {
+        ruleRevision = featureId is (>= 1 and <= 7) or (>= 9 and <= 13) ? 1u : 0u;
+        return ruleRevision != 0;
     }
 
     private uint Read(int offset)
@@ -181,4 +180,113 @@ public readonly ref struct TrRmFeatureTableReader
 
     private static InvalidDataException InvalidFeature()
         => new("Invalid TRRM Feature table.");
+}
+
+internal static class TrRmProvisionalFeatureRevisions
+{
+    internal const uint ScalarInitOutputInitialRuleRevision = 1;
+    internal const uint ScalarInitOutputRuleRevision = 8;
+}
+
+internal static class TrRmFeatureManifestValidator
+{
+    internal static void Validate(TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules)
+    {
+        Span<uint> revisions = stackalloc uint[14];
+        for (var module = 1; module <= modules.Count; module++)
+        {
+            ExpandModuleRequirements(features, modules, module, revisions);
+        }
+    }
+
+    internal static bool Requires(TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules, int module, uint featureId)
+    {
+        if (featureId >= 14)
+        {
+            throw InvalidManifest();
+        }
+
+        Span<uint> revisions = stackalloc uint[14];
+        ExpandModuleRequirements(features, modules, module, revisions);
+        return revisions[(int)featureId] != 0;
+    }
+
+    private static void ExpandModuleRequirements(TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules, int module, Span<uint> revisions)
+    {
+        revisions.Clear();
+        var (first, count) = modules.GetFeatureRange(module);
+        for (var offset = 0; offset < count; offset++)
+        {
+            var feature = features.GetFeature(first + offset);
+            if (feature.FeatureId >= revisions.Length
+                || !TrRmFeatureTableReader.TryGetAssignedRuleRevision(
+                    feature.FeatureId, out var assignedRevision)
+                || feature.RuleRevision != assignedRevision)
+            {
+                throw InvalidManifest();
+            }
+
+            ref var revision = ref revisions[(int)feature.FeatureId];
+            if (revision != 0 && revision != feature.RuleRevision)
+            {
+                throw InvalidManifest();
+            }
+
+            revision = feature.RuleRevision;
+        }
+
+        var expanded = true;
+        while (expanded)
+        {
+            expanded = false;
+            for (uint featureId = 1; featureId < revisions.Length; featureId++)
+            {
+                if (revisions[(int)featureId] == 0)
+                {
+                    continue;
+                }
+
+                var prerequisiteCount = PrerequisiteCount(featureId);
+                for (var prerequisiteIndex = 0; prerequisiteIndex < prerequisiteCount;
+                    prerequisiteIndex++)
+                {
+                    var prerequisite = Prerequisite(featureId, prerequisiteIndex);
+                    ref var revision = ref revisions[(int)prerequisite];
+                    if (revision == 0)
+                    {
+                        revision = 1;
+                        expanded = true;
+                    }
+                    else if (revision != 1)
+                    {
+                        throw InvalidManifest();
+                    }
+                }
+            }
+        }
+    }
+
+    private static int PrerequisiteCount(uint featureId) => featureId switch
+    {
+        2 or 7 => 1,
+        3 or 5 or 6 or 12 => 2,
+        4 or 10 => 1,
+        _ => 0,
+    };
+
+    private static uint Prerequisite(uint featureId, int index) => featureId switch
+    {
+        2 or 7 => 1,
+        3 or 5 or 6 => index == 0 ? 1u : 2u,
+        4 => 3,
+        10 => 11,
+        12 => index == 0 ? 10u : 11u,
+        _ => throw InvalidManifest(),
+    };
+
+    private static InvalidDataException InvalidManifest()
+        => new("Invalid TRRM Module Feature manifest.");
 }

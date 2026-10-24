@@ -115,7 +115,7 @@ public static partial class TrRmExecutableCompiler
             var place = body.Places[index];
             var placeType = OutputType(body, types, place.TypeId);
             if (!IsOutputScalarType(placeType)
-                || ruleRevision == TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision
+                || ruleRevision == TrRmProvisionalFeatureRevisions.ScalarInitOutputInitialRuleRevision
                     && placeType != PrimitiveType.Int32)
             {
                 throw Invalid("The executable place profile has an unsupported referent type.");

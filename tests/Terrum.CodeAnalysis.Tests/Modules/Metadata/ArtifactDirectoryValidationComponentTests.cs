@@ -49,7 +49,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         byte[] outOfOrder = OutOfOrderArtifact();
         byte[] referenceSlots = ReferenceSlotArtifact();
         byte[] featureArtifact = FeatureArtifact(1, 1,
-            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 6)]));
+            FeatureRow(1, 6));
         var cases = new List<TestCase> {
             NewCase(minimal, 0x0002),
             NewCase(minimal, 0x0010),
@@ -61,9 +61,9 @@ public sealed class ArtifactDirectoryValidationComponentTests
             NewCase(SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0x7F00),
             NewCase(featureArtifact, 0x0004),
             NewCase(FeatureArtifact(0, 0,
-                TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 8)])), 0x0004),
+                FeatureRow(1, 8)), 0x0004),
             NewCase(FeatureArtifact(0, 0,
-                TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])), 0x0001),
+                FeatureRow(1, 1)), 0x0001),
             NewCase(WithZeroGap(minimal), 0x0002),
             Invalid(ChangeByte(minimal, 0, (byte)'X')),
             Invalid(ChangeHalfWord(minimal, 4, 2)),
@@ -81,7 +81,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
             Invalid(ChangeWord(minimal, 56, 104)),
             Invalid(ChangeWord(minimal, 60, (uint)(ReadWord(minimal, 60) + 1))),
             Invalid(ChangeStringStart(minimal, 1)),
-            Invalid(ChangeByte(WithZeroGap(minimal), 109, 1)),
+            Invalid(ChangeByte(WithZeroGap(minimal), 113, 1)),
             Invalid(AppendTrailingByte(minimal)),
             Invalid(NoModuleArtifact()),
             Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 0, 0x0021)),
@@ -99,19 +99,19 @@ public sealed class ArtifactDirectoryValidationComponentTests
             Invalid(ChangeSourceMapSlotHalfWord(
                 SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0, 0x0002)),
             Invalid(SourceMapWithTrailingPayload()),
-            Invalid(ChangeSectionWord(featureArtifact, 0x0004, 0, 2)),
+            NewCase(ChangeSectionWord(featureArtifact, 0x0004, 0, 2), 0x0004),
             Invalid(ChangeSectionWord(featureArtifact, 0x0004, 4, 0)),
-            Invalid(ChangeSectionWord(featureArtifact, 0x0004, 4, 9)),
-            Invalid(AddSecondFeatureRow(
+            NewCase(ChangeSectionWord(featureArtifact, 0x0004, 4, 9), 0x0004),
+            NewCase(AddSecondFeatureRow(
                 FeatureArtifact(0, 0,
                     TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])),
-                new TrRmFeatureRow(1, 1))),
-            Invalid(ChangeSectionWord(minimal, 0x0001, 16, 1)),
+                new TrRmFeatureRow(1, 1)), 0x0004),
+            NewCase(ChangeSectionWord(minimal, 0x0001, 16, 1), 0x0001),
             Invalid(ChangeSectionWord(minimal, 0x0001, 20, 1)),
-            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 16, 0)),
+            NewCase(ChangeSectionWord(featureArtifact, 0x0001, 16, 0), 0x0001),
             Invalid(ChangeSectionWord(featureArtifact, 0x0001, 20, 0x0100_0000)),
-            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x0100_0000)),
-            Invalid(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x00FF_FFFF)),
+            NewCase(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x0100_0000), 0x0001),
+            NewCase(ChangeSectionWord(featureArtifact, 0x0001, 16, 0x00FF_FFFF), 0x0001),
             InvalidWithHostedAccepted(outOfOrder, 0x8001),
             InvalidIntByte(minimal, 64, 256),
         };
@@ -294,6 +294,14 @@ public sealed class ArtifactDirectoryValidationComponentTests
         ]);
     }
 
+    private static byte[] FeatureRow(uint featureId, uint ruleRevision)
+    {
+        var bytes = new byte[8];
+        WriteWord(bytes, 0, featureId);
+        WriteWord(bytes, 4, ruleRevision);
+        return bytes;
+    }
+
     private static byte[] AddSecondFeatureRow(byte[] artifact, TrRmFeatureRow row)
     {
         var result = new byte[artifact.Length + 8];
@@ -305,7 +313,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         WriteWord(result, directoryRow + 4, 2);
         WriteWord(result, directoryRow + 12, sectionLength + 8);
         WriteWord(result, sectionStart + 8, row.FeatureId);
-        WriteWord(result, sectionStart + 12, row.MinimumRuleRevision);
+        WriteWord(result, sectionStart + 12, row.RuleRevision);
         return result;
     }
 

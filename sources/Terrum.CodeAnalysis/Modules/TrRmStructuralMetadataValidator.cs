@@ -68,30 +68,34 @@ public static class TrRmStructuralMetadataValidator
     }
 
     public static void Validate(ReadOnlySpan<byte> artifact)
-        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.None);
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.None,
+            developmentProfile: false);
 
     internal static void Validate(TrRmArtifactIndex index)
-        => _ = ValidateCore(index, BodyInspection.None);
+        => _ = ValidateCore(index, BodyInspection.None, developmentProfile: false);
 
     internal static ValidatedExecutionTables ValidateAndGetExecutionTables(
         TrRmArtifactIndex index)
-        => ValidateCore(index, BodyInspection.None);
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false);
+
+    internal static ValidatedExecutionTables ValidateDevelopmentAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: true);
 
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
-        => _ = ValidateCore(artifact, BodyInspection.CompactLinear);
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.CompactLinear,
+            developmentProfile: true);
 
     public static void ValidateCompactIndexed(ReadOnlySpan<byte> artifact)
-        => _ = ValidateCore(artifact, BodyInspection.CompactIndexed);
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.CompactIndexed,
+            developmentProfile: true);
 
     public static void ValidateCompact(ReadOnlySpan<byte> artifact)
-        => _ = ValidateCore(artifact, BodyInspection.CompactMixed);
-
-    private static ValidatedExecutionTables ValidateCore(ReadOnlySpan<byte> artifact,
-        BodyInspection inspection)
-        => ValidateCore(new TrRmArtifactIndex(artifact), inspection);
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.CompactMixed,
+            developmentProfile: true);
 
     private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
-        BodyInspection inspection)
+        BodyInspection inspection, bool developmentProfile)
     {
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
             || !index.TryGetSection(0x0002, out var stringBytes, out var stringCount))
@@ -144,6 +148,10 @@ public static class TrRmStructuralMetadataValidator
             {
                 throw InvalidMetadata();
             }
+        }
+        if (!developmentProfile)
+        {
+            TrRmFeatureManifestValidator.Validate(features, modules);
         }
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, moduleRefCount,
             strings, modules);
@@ -203,7 +211,7 @@ public static class TrRmStructuralMetadataValidator
         }
         ValidateNativeBoundaryFeatureAssignments(features, modules, typeSpecs, signatures,
             parameters, methods, bodies, contracts, nativeImports, nativeCallables,
-            nativeFunctionPointerSignatures, nativeVTables);
+            nativeFunctionPointerSignatures, nativeVTables, developmentProfile);
         var sourceFiles = sourceFileCount == 0 ? default
             : new TrRmSourceFileTableReader(sourceFileBytes, sourceFileCount, strings, modules);
         var sourceMaps = sourceMapCount == 0 ? default
@@ -212,12 +220,14 @@ public static class TrRmStructuralMetadataValidator
 
         if (inspection != BodyInspection.None)
         {
+            var developmentFeatures = new TrRmDevelopmentFeatureTableReader(
+                featureBytes, featureCount);
             var linearCounts = sourceMapCount == 0
-                || inspection != BodyInspection.CompactLinear ? Array.Empty<int>()
+                || inspection != BodyInspection.CompactLinear ? []
                 : new int[methods.Count + 1];
             var indexedCounts = sourceMapCount == 0
-                || inspection == BodyInspection.CompactLinear ? []
-                : new int[methods.Count + 1][];
+                || inspection == BodyInspection.CompactLinear
+                    ? [] : new int[methods.Count + 1][];
             if (bodyCount != 0)
             {
                 for (var method = 1; method <= methods.Count; method++)
@@ -249,7 +259,7 @@ public static class TrRmStructuralMetadataValidator
                         {
                             var body = new TrRmCompactIndexedBodyReader(bodies, method, modules,
                                 methods, signatures, parameters, typeSpecs, types, imports,
-                                features, nativeCallables, nativeImports,
+                                developmentFeatures, nativeCallables, nativeImports,
                                 nativeFunctionPointerSignatures,
                                 nativeVTables);
                             if (sourceMapCount != 0)
@@ -302,7 +312,7 @@ public static class TrRmStructuralMetadataValidator
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
-        TrRmNativeVTableTableReader nativeVTables)
+        TrRmNativeVTableTableReader nativeVTables, bool developmentProfile)
     {
         for (var module = 1; module <= modules.Count; module++)
         {
@@ -337,58 +347,66 @@ public static class TrRmStructuralMetadataValidator
                 hasNativeVTables |= nativeVTables.HasVTableForMethod(method);
             }
 
-            var (featureStart, moduleFeatureCount) = modules.GetFeatureRange(module);
-            var declaresNativeBoundaryFeature = false;
-            var declaresRootlessNativeValues = false;
-            var declaresDirectNativeCalls = false;
-            var declaresNativeCallableEntries = false;
-            var declaresNativeVTableCalls = false;
-            for (var offset = 0; offset < moduleFeatureCount; offset++)
-            {
-                var featureId = features.GetFeature(featureStart + offset).FeatureId;
-                if (featureId == TrRmFeatureTableReader.NativeBoundaryContractsFeatureId)
-                {
-                    declaresNativeBoundaryFeature = true;
-                }
-                else if (featureId == TrRmFeatureTableReader.RootlessNativeValuesFeatureId)
-                {
-                    declaresRootlessNativeValues = true;
-                }
-                else if (featureId == TrRmFeatureTableReader.DirectNativeCallsFeatureId)
-                {
-                    declaresDirectNativeCalls = true;
-                }
-                else if (featureId == TrRmFeatureTableReader.NativeCallableEntriesFeatureId)
-                {
-                    declaresNativeCallableEntries = true;
-                }
-                else if (featureId == TrRmFeatureTableReader.NativeVTableCallsFeatureId)
-                {
-                    declaresNativeVTableCalls = true;
-                }
-            }
+            var declaresNativeBoundaryFeature = RequiresModuleFeature(features, modules, module,
+                TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+                TrRmDevelopmentFeatureTableReader.NativeBoundaryContractsFeatureId,
+                developmentProfile);
+            var declaresRootlessNativeValues = RequiresModuleFeature(features, modules, module,
+                TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+                TrRmDevelopmentFeatureTableReader.RootlessNativeValuesFeatureId,
+                developmentProfile);
+            var declaresDirectNativeCalls = RequiresModuleFeature(features, modules, module,
+                TrRmFeatureTableReader.DirectNativeCallsFeatureId,
+                TrRmDevelopmentFeatureTableReader.DirectNativeCallsFeatureId,
+                developmentProfile);
+            var declaresNativeInterfaceCalls = RequiresModuleFeature(features, modules, module,
+                TrRmFeatureTableReader.NativeInterfaceCallsFeatureId,
+                TrRmDevelopmentFeatureTableReader.NativeVTableCallsFeatureId,
+                developmentProfile);
+            var declaresNativeCallableEntries = RequiresModuleFeature(features, modules, module,
+                TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+                TrRmDevelopmentFeatureTableReader.NativeCallableEntriesFeatureId,
+                developmentProfile);
 
-            if (hasNativeBoundaryContracts != declaresNativeBoundaryFeature)
+            if (hasNativeBoundaryContracts && !declaresNativeBoundaryFeature)
             {
                 throw InvalidMetadata();
             }
-            if ((hasNativeVTables && (!declaresRootlessNativeValues || !declaresNativeVTableCalls))
-                || (hasNativeVTables != declaresNativeVTableCalls)
+            if ((hasNativeVTables && (!declaresRootlessNativeValues || !declaresNativeInterfaceCalls))
                 || (hasNativeFunctionPointerSignatures && !declaresRootlessNativeValues)
                 || (hasNativePointerValues && !declaresRootlessNativeValues)
                 || (declaresRootlessNativeValues && !declaresNativeBoundaryFeature)
-                || (declaresNativeVTableCalls && !declaresRootlessNativeValues)
+                || (declaresNativeInterfaceCalls && !declaresRootlessNativeValues)
                 || (hasNativeImports && !declaresDirectNativeCalls)
                 || (hasNativeCallableEntries && !declaresNativeCallableEntries)
                 || (declaresDirectNativeCalls
-                    && (!declaresNativeBoundaryFeature || !declaresRootlessNativeValues))
-                || (declaresNativeCallableEntries
-                    && (!declaresDirectNativeCalls || !declaresRootlessNativeValues
-                        || !declaresNativeBoundaryFeature)))
+                    && (!declaresNativeBoundaryFeature || !declaresRootlessNativeValues)))
             {
                 throw InvalidMetadata();
             }
         }
+    }
+
+    private static bool RequiresModuleFeature(TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules, int module, uint currentFeatureId,
+        uint developmentFeatureId, bool developmentProfile)
+    {
+        if (!developmentProfile)
+        {
+            return TrRmFeatureManifestValidator.Requires(
+                features, modules, module, currentFeatureId);
+        }
+
+        var (first, count) = modules.GetFeatureRange(module);
+        for (var offset = 0; offset < count; offset++)
+        {
+            if (features.GetFeature(first + offset).FeatureId == developmentFeatureId)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool HasNativeFunctionPointerType(int method,

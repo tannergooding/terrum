@@ -88,9 +88,12 @@ alternate schema.
 
 **Current/evidence:** `TrRmBodyExampleTests.ReadExample` explicitly embeds
 development-schema fixtures. The C# Module row reader/writer and artifact
-framer now use the assigned 48-byte row and validate governing edition 1, but
-the Feature assignments, Body codecs and private/native/output experiments
-retain other assignments. See
+framer use the assigned 48-byte row and validate governing edition 1. The
+standard Feature reader/writer now use exact assigned pairs, accept unordered
+ordinary lists with identical duplicates, canonicalize writer output, and
+derive prerequisite closure per Module. The executable compiler still routes
+through separate development Feature assignments; Body codecs and
+private/native/output experiments retain other assignments. See
 [ModuleCompiler](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs),
 [Feature admission](../../sources/Terrum.CodeAnalysis/Modules/TrRmFeatureTableReader.cs),
 [Body fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)

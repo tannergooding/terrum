@@ -20,11 +20,11 @@ public sealed class TrRmArtifactWriterTests
             new TrRmSection(0x0002, 0, 1, strings),
         ]);
 
-        Assert.That(artifact.Length, Is.EqualTo(124));
+        Assert.That(artifact.Length, Is.EqualTo(128));
         Assert.That(artifact[..4], Is.EqualTo("TRRM"u8.ToArray()));
         Assert.That(Read(artifact, 32 + 8), Is.EqualTo((uint)64));
-        Assert.That(Read(artifact, 32 + 12), Is.EqualTo((uint)44));
-        Assert.That(Read(artifact, 48 + 8), Is.EqualTo((uint)108));
+        Assert.That(Read(artifact, 32 + 12), Is.EqualTo((uint)48));
+        Assert.That(Read(artifact, 48 + 8), Is.EqualTo((uint)112));
         Assert.That(Read(artifact, 48 + 12), Is.EqualTo((uint)strings.Length));
         TrRmStructuralMetadataValidator.Validate(artifact);
 
@@ -56,40 +56,42 @@ public sealed class TrRmArtifactWriterTests
     }
 
     [Test]
-    public void EncodesSupportedProvisionalFeatureAssignments()
+    public void EncodesCanonicalExactFeatureAssignments()
     {
-        var features = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]);
-        Assert.That(features.Length, Is.EqualTo(8));
-        Assert.That(Read(features, 0), Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputFeatureId));
-        Assert.That(Read(features, sizeof(uint)), Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
+        var features = TrRmFeatureTableWriter.Encode([
+            TrRmFeatureRow.LayoutQueries,
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.NativeBoundaryContracts,
+        ]);
+        Assert.That(features.Length, Is.EqualTo(16));
+        Assert.That(Read(features, 0), Is.EqualTo(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId));
+        Assert.That(Read(features, sizeof(uint)), Is.EqualTo(TrRmFeatureTableReader.RuleRevision));
+        Assert.That(Read(features, 8), Is.EqualTo(TrRmFeatureTableReader.LayoutQueriesFeatureId));
+        Assert.That(Read(features, 12), Is.EqualTo(TrRmFeatureTableReader.RuleRevision));
         var strings = TrRmStringTableWriter.EncodeNames([("A", 0)]);
         var artifact = TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, Module()),
             new TrRmSection(0x0002, 0, 1, strings),
-            new TrRmSection(0x0004, 0, 1, features),
+            new TrRmSection(0x0004, 0, 2, features),
         ]);
         Assert.That(new TrRmArtifactIndex(artifact).TryGetSection(0x0004, out _, out _), Is.True);
         Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, Module()),
             new TrRmSection(0x0002, 0, 1, strings),
-            new TrRmSection(0x0004, 1, 1, features),
+            new TrRmSection(0x0004, 1, 2, features),
         ]));
-        var retiredComFeatures = new byte[8];
-        Write(retiredComFeatures, 0, 3);
-        Write(retiredComFeatures, sizeof(uint), 1);
-        Assert.Throws<InvalidDataException>(() => new TrRmFeatureTableReader(retiredComFeatures, 1));
         Assert.Throws<InvalidDataException>(() =>
-            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(3, 1)]));
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(8, 1)]));
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(0, 1)]));
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 0)]));
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1,
-                TrRmFeatureTableReader.ScalarInitOutputRuleRevision + 1)]));
+                TrRmFeatureTableReader.RuleRevision + 1)]));
         Assert.Throws<InvalidDataException>(() =>
             TrRmFeatureTableWriter.Encode([
-                TrRmFeatureRow.ScalarInitOutput, TrRmFeatureRow.ScalarInitOutput,
+                new TrRmFeatureRow(1, 1), new TrRmFeatureRow(1, 2),
             ]));
     }
 

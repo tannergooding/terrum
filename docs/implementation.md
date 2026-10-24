@@ -113,6 +113,13 @@ representations. Module framing alone does not make the artifact conform to
 the [unified registry](specs/representation/registry.md). Full
 current-schema producer/consumer migration and qualification remain tracked by
 [CG-001](implementation/conformance-gaps.md#cg-001).
+The standard Feature-table reader and writer now model exact assigned
+`(featureId, ruleRevision)` pairs, unordered ordinary module lists with
+identical-duplicate tolerance, canonical sorted/deduplicated output, and
+catalog-derived per-Module prerequisite closure. The executable compiler
+continues to emit and consume its separate development Feature assignments;
+this metadata progress does not qualify its Body or native capabilities as
+current-schema support.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar

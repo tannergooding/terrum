@@ -21,6 +21,9 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmExecutableCompilerTests
 {
+    private const uint ScalarInitOutputInitialRuleRevision = 1;
+    private const uint ScalarInitOutputRuleRevision = 8;
+
     private static BoundProgram Compile(string source, bool library = false)
     {
         var syntax = SyntaxTree.Parse(source);
@@ -94,7 +97,8 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(index.TryGetSection(4, out var featureBytes, out var featureCount), Is.True);
         Assert.That(featureCount, Is.EqualTo(1));
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
-        Assert.That(features.GetFeature(1), Is.EqualTo(TrRmFeatureRow.ScalarInitOutput));
+        Assert.That(features.GetFeature(1),
+            Is.EqualTo(new TrRmFeatureRow(1, ScalarInitOutputRuleRevision)));
 
         var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
@@ -367,7 +371,7 @@ public sealed class TrRmExecutableCompilerTests
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
         Assert.That(ScalarInitOutputRevision(artifact),
-            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
+            Is.EqualTo(ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
@@ -411,7 +415,7 @@ public sealed class TrRmExecutableCompilerTests
 
         var artifact = TrRmExecutableCompiler.Emit(program, "boolean-output-result");
         Assert.That(ScalarInitOutputRevision(artifact),
-            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
+            Is.EqualTo(ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
@@ -467,7 +471,7 @@ public sealed class TrRmExecutableCompilerTests
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
         Assert.That(ScalarInitOutputRevision(artifact),
-            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
+            Is.EqualTo(ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
@@ -533,7 +537,7 @@ public sealed class TrRmExecutableCompilerTests
         var loaded = TrRmExecutableCompiler.Load(artifact);
 
         Assert.That(ScalarInitOutputRevision(artifact),
-            Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
+            Is.EqualTo(ScalarInitOutputRuleRevision));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
 
@@ -791,7 +795,7 @@ public sealed class TrRmExecutableCompilerTests
             """;
         var legacyArtifact = TrRmExecutableCompiler.Emit(Compile(int32Source), "legacy-output");
         legacyArtifact = SetScalarInitOutputRuleRevision(legacyArtifact,
-            TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision);
+            ScalarInitOutputInitialRuleRevision);
         var loaded = TrRmExecutableCompiler.Load(legacyArtifact);
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
@@ -806,7 +810,7 @@ public sealed class TrRmExecutableCompilerTests
             """;
         var unsupportedArtifact = TrRmExecutableCompiler.Emit(Compile(boolSource), "legacy-output-bool");
         unsupportedArtifact = SetScalarInitOutputRuleRevision(unsupportedArtifact,
-            TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision);
+            ScalarInitOutputInitialRuleRevision);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(unsupportedArtifact));
     }
 
@@ -2359,7 +2363,7 @@ public sealed class TrRmExecutableCompilerTests
                 continue;
             }
             var offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(32 + i * 16 + 8));
-            bytes[offset + 8] = 1;
+            bytes[offset + 8] = 2;
             Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(bytes));
             bytes[offset + 8] = 0;
             bytes[offset + 4] = 0;
@@ -2965,9 +2969,9 @@ public sealed class TrRmExecutableCompilerTests
         var index = new TrRmArtifactIndex(artifact);
         Assert.That(index.TryGetSection(4, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
-        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
+        Assert.That(features.TryGetFeature(1,
             out var feature), Is.True);
-        return feature.MinimumRuleRevision;
+        return feature.RuleRevision;
     }
 
     private static byte[] ReplaceParameterMode(byte[] artifact, byte mode)

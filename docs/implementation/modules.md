@@ -30,9 +30,12 @@ policy-3 integer reinterpretations preserve the source shift contract without
 changing checked numeric conversions. Loaded scalar graphs, including linear
 Bodies that need these representation operations or calls, are not serializable as
 development structured IR. Its Module section now emits and reads the assigned
-48-byte row, including governing edition 1. The Feature assignments and Body
-forms remain provisional; the Module-row update does not claim current-schema
-TRRM support.
+48-byte row, including governing edition 1. The standard Feature-table reader
+and writer model exact assigned pairs, ordinary unordered per-Module lists
+with identical-duplicate tolerance, canonical sorted/deduplicated output, and
+catalog-derived prerequisite closure. This executable path still uses
+separate development Feature assignments and compact Bodies; the Module and
+Feature migrations do not claim current-schema TRRM execution support.
 Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute

@@ -3,14 +3,15 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
-/// <summary>Emits validated required-feature rows for provisional TRRM (1, 0) artifacts.</summary>
+/// <summary>Emits canonical exact Feature requirements for TRRM Module manifests.</summary>
 public static class TrRmFeatureTableWriter
 {
-    /// <summary>Encodes rows after validating their identifiers and supported rule revisions.</summary>
-    /// <param name="rows">The ordered feature rows to encode.</param>
+    /// <summary>Encodes assigned exact Feature pairs in ascending identifier order without duplicates.</summary>
+    /// <param name="rows">The required feature pairs; repeated identical pairs are coalesced.</param>
     /// <returns>The encoded Feature section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmFeatureRow> rows)
     {
@@ -20,18 +21,54 @@ public static class TrRmFeatureTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
-        var result = new byte[rows.Count * 8];
+        var orderedRows = new TrRmFeatureRow[rows.Count];
         for (var index = 0; index < rows.Count; index++)
         {
             var row = rows[index];
-            Write(result, index * 8, row.FeatureId);
-            Write(result, (index * 8) + 4, row.MinimumRuleRevision);
+            if (!TrRmFeatureTableReader.TryGetAssignedRuleRevision(row.FeatureId,
+                    out var assignedRevision)
+                || row.RuleRevision != assignedRevision)
+            {
+                throw InvalidFeature();
+            }
+
+            orderedRows[index] = row;
         }
 
-        _ = new TrRmFeatureTableReader(result, rows.Count);
+        Array.Sort(orderedRows, static (left, right) => left.FeatureId.CompareTo(right.FeatureId));
+        var distinctCount = 0;
+        for (var index = 0; index < orderedRows.Length; index++)
+        {
+            var row = orderedRows[index];
+            if (distinctCount != 0
+                && orderedRows[distinctCount - 1].FeatureId == row.FeatureId)
+            {
+                if (orderedRows[distinctCount - 1].RuleRevision != row.RuleRevision)
+                {
+                    throw InvalidFeature();
+                }
+
+                continue;
+            }
+
+            orderedRows[distinctCount++] = row;
+        }
+
+        var result = new byte[distinctCount * 8];
+        for (var index = 0; index < distinctCount; index++)
+        {
+            var row = orderedRows[index];
+            Write(result, index * 8, row.FeatureId);
+            Write(result, (index * 8) + 4, row.RuleRevision);
+        }
+
+        _ = new TrRmFeatureTableReader(result, distinctCount);
         return result;
     }
 
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+
+    private static InvalidDataException InvalidFeature()
+        => new("Invalid TRRM Feature table.");
 }

@@ -599,10 +599,10 @@ public static partial class TrRmExecutableCompiler
             : TrRmStringTableWriter.EncodeNames(names);
         var strings = new TrRmStringTableReader(stringsBytes, names.Count);
         var hasOutputFeatures = outputFeatures.Any(static enabled => enabled);
-        var featureRows = new List<TrRmFeatureRow>(8);
+        var featureRows = new List<TrRmDevelopmentFeatureRow>(8);
         if (hasOutputFeatures)
         {
-            featureRows.Add(TrRmFeatureRow.ScalarInitOutput);
+            featureRows.Add(TrRmDevelopmentFeatureRow.ScalarInitOutput);
         }
         if (nativeImportCount != 0 || nativeCallableCount != 0 || nativeVTableCount != 0
             || nativeFunctionPointerSignatureRows.Count != 0
@@ -610,7 +610,7 @@ public static partial class TrRmExecutableCompiler
             || !program.NativePointerTypes.IsEmpty
             || !blittableStructureIndexes.IsEmpty)
         {
-            featureRows.Add(TrRmFeatureRow.NativeBoundaryContracts);
+            featureRows.Add(TrRmDevelopmentFeatureRow.NativeBoundaryContracts);
         }
         var hasNativeFunctionPointerBodyOperations = program.Functions
             .Any(HasNativeFunctionPointerBodyOperation);
@@ -625,24 +625,24 @@ public static partial class TrRmExecutableCompiler
                     && HasRootlessNativeValues(program.Functions[index]));
         if (hasRootlessNativeValues)
         {
-            featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
+            featureRows.Add(TrRmDevelopmentFeatureRow.RootlessNativeValues);
         }
         if (nativeImportCount != 0 || nativeCallableContractCount != 0
             || hasNativeFunctionPointerBodyOperations)
         {
-            featureRows.Add(TrRmFeatureRow.DirectNativeCalls);
+            featureRows.Add(TrRmDevelopmentFeatureRow.DirectNativeCalls);
         }
         if (nativeCallableContractCount != 0 || hasNativeFunctionPointerBodyOperations)
         {
-            featureRows.Add(TrRmFeatureRow.NativeCallableEntries);
+            featureRows.Add(TrRmDevelopmentFeatureRow.NativeCallableEntries);
         }
         if (nativeVTableCount != 0)
         {
-            featureRows.Add(TrRmFeatureRow.NativeVTableCalls);
+            featureRows.Add(TrRmDevelopmentFeatureRow.NativeVTableCalls);
         }
         var featureCount = featureRows.Count;
         var featureBytes = featureCount == 0
-            ? [] : TrRmFeatureTableWriter.Encode(featureRows);
+            ? [] : TrRmDevelopmentFeatureTableWriter.Encode(featureRows);
         var typeDefCount = blittableStructureIndexes.Length;
         var moduleRefRows = new List<TrRmModuleRefRow>(moduleImportIdentities.Length);
         foreach (var identity in moduleImportIdentities)
@@ -872,7 +872,7 @@ public static partial class TrRmExecutableCompiler
     {
         var index = new TrRmArtifactIndex(artifact);
         var validatedTables = TrRmStructuralMetadataValidator
-            .ValidateAndGetExecutionTables(index);
+            .ValidateDevelopmentAndGetExecutionTables(index);
         var modules = validatedTables.Modules;
         var typeDefs = validatedTables.TypeDefs;
         var strings = validatedTables.Strings;
@@ -917,7 +917,7 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Expected one self-contained scalar module with one Body per method.");
         }
 
-        var featureTable = new TrRmFeatureTableReader(featureBytes, featureCount);
+        var featureTable = new TrRmDevelopmentFeatureTableReader(featureBytes, featureCount);
         var hasOptionalScalarTypes = false;
         for (var row = 1; row <= typeCount; row++)
         {
@@ -934,11 +934,11 @@ public static partial class TrRmExecutableCompiler
         for (var feature = firstFeature; feature < firstFeature + requiredFeatureCount; feature++)
         {
             var required = featureTable.GetFeature(feature);
-            if (required.FeatureId == TrRmFeatureTableReader.ScalarInitOutputFeatureId)
+            if (required.FeatureId == TrRmDevelopmentFeatureTableReader.ScalarInitOutputFeatureId)
             {
                 scalarInitOutputRuleRevision = required.MinimumRuleRevision;
             }
-            else if (required.FeatureId == TrRmFeatureTableReader.RootlessNativeValuesFeatureId)
+            else if (required.FeatureId == TrRmDevelopmentFeatureTableReader.RootlessNativeValuesFeatureId)
             {
                 rootlessNativeValuesRuleRevision = required.MinimumRuleRevision;
             }
@@ -1103,7 +1103,8 @@ public static partial class TrRmExecutableCompiler
                                 [.. nativePointerTypeDefinitions]))
                         || (nativeParameter is not null && type != PrimitiveType.NativeRawPointer)))
                     || (!isNativeImport && mode == 2 && (scalarInitOutputRuleRevision == 0
-                        || (scalarInitOutputRuleRevision == TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision
+                        || (scalarInitOutputRuleRevision
+                            == TrRmDevelopmentFeatureTableReader.ScalarInitOutputInitialRuleRevision
                             && type != PrimitiveType.Int32)
                         || flags == 2)))
                 {
@@ -1348,11 +1349,6 @@ public static partial class TrRmExecutableCompiler
             }
             else if (bodyForm == 0)
             {
-                if (scalarInitOutputRuleRevision == 0)
-                {
-                    throw Invalid("A general place Body requires the ScalarInitOutput feature.");
-                }
-
                 var outputBody = TrRmScalarInitOutputBodyReader.Read(bodies, row, modules,
                     defs, sigs, parameters, types, contractBytes,
                     contractTable, nativeImports, nativeVTables, scalarInitOutputRuleRevision,
@@ -1420,7 +1416,7 @@ public static partial class TrRmExecutableCompiler
     {
         ArgumentNullException.ThrowIfNull(providerArtifact);
         var program = Load(providerArtifact);
-        var validatedTables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+        var validatedTables = TrRmStructuralMetadataValidator.ValidateDevelopmentAndGetExecutionTables(
             new TrRmArtifactIndex(providerArtifact));
         var providerIdentity = validatedTables.Modules.GetIdentity(1);
         var (targetRequirement, runtimePolicy) = validatedTables.Modules.GetRequirements(1);

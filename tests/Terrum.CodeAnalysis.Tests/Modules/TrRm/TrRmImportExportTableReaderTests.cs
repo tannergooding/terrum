@@ -234,6 +234,7 @@ public sealed class TrRmImportExportTableReaderTests
         var rows = new byte[96];
         Write(rows, 0, 2);
         Write(rows, 4, 1);
+        Write(rows, 8, 1);
         Write(rows, 32, 1);
         Write(rows, 36, 1);
         Write(rows, 40, 1);

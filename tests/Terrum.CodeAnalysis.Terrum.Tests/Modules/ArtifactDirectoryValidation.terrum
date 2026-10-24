@@ -214,7 +214,7 @@ public static bool TryGetArtifactSection(int32 queryKind,
 
 int32 GetArtifactSectionStride(int32 kind)
 {
-    if (kind == 0x0001) { return 44; }
+    if (kind == 0x0001) { return 48; }
     if (kind == 0x0002 || kind == 0x0003 || kind == 0x0011
         || kind == 0x001B || kind == 0x0020 || kind == 0x7F00) { return 0; }
     if (kind == 0x0004) { return 8; }
@@ -267,20 +267,15 @@ bool TryValidateArtifactFeatures()
     if (featureCount != 0)
     {
         int32 featureStart = Host.SectionStarts[FindArtifactSection(0x0004)];
-        mut uint32 previousFeatureId = 0;
         for (mut int32 row = 0; row < int32(featureCount); row = row + 1)
         {
             int32 rowStart = featureStart + row * 8;
             if (!TryReadArtifactWord(rowStart, init var featureId)
-                || !TryReadArtifactWord(rowStart + 4, init var minimumRuleRevision)
-                || featureId <= previousFeatureId
-                || featureId != 1
-                || minimumRuleRevision == 0 || minimumRuleRevision > 8)
+                || !TryReadArtifactWord(rowStart + 4, init var ruleRevision)
+                || featureId == 0 || ruleRevision == 0)
             {
                 return false;
             }
-
-            previousFeatureId = featureId;
         }
     }
 

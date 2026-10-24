@@ -1300,11 +1300,11 @@ public sealed class DirectNativeImportTests
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(featureCount, Is.EqualTo(3));
         Assert.That(features.GetFeature(1).FeatureId,
-            Is.EqualTo(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId));
+            Is.EqualTo(0x0100u));
         Assert.That(features.GetFeature(2).FeatureId,
-            Is.EqualTo(TrRmFeatureTableReader.RootlessNativeValuesFeatureId));
+            Is.EqualTo(0x0101u));
         Assert.That(features.GetFeature(3).FeatureId,
-            Is.EqualTo(TrRmFeatureTableReader.DirectNativeCallsFeatureId));
+            Is.EqualTo(0x0102u));
 
         var reference = TrRmExecutableCompiler.CreateReference(artifact);
         var consumer = Compilation.Create(SyntaxTree.Parse("""
@@ -1367,13 +1367,13 @@ public sealed class DirectNativeImportTests
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(featureCount, Is.EqualTo(4));
         Assert.That(features.GetFeature(1),
-            Is.EqualTo(TrRmFeatureRow.ScalarInitOutput));
+            Is.EqualTo(new TrRmFeatureRow(1, 8)));
         Assert.That(features.GetFeature(2),
-            Is.EqualTo(TrRmFeatureRow.NativeBoundaryContracts));
+            Is.EqualTo(new TrRmFeatureRow(0x0100, 1)));
         Assert.That(features.GetFeature(3),
-            Is.EqualTo(TrRmFeatureRow.RootlessNativeValues));
+            Is.EqualTo(new TrRmFeatureRow(0x0101, 1)));
         Assert.That(features.GetFeature(4),
-            Is.EqualTo(TrRmFeatureRow.DirectNativeCalls));
+            Is.EqualTo(new TrRmFeatureRow(0x0102, 1)));
 
         var reemitted = TrRmExecutableCompiler.Emit(loaded, "typed-address-body-reemitted");
         Assert.That(TrRmExecutableCompiler.Load(reemitted).Functions
@@ -1500,10 +1500,9 @@ public sealed class DirectNativeImportTests
         var index = new TrRmArtifactIndex(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
-        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
+        Assert.That(features.TryGetFeature(0x0100,
             out var blittableFeature), Is.True);
-        Assert.That(blittableFeature.MinimumRuleRevision,
-            Is.EqualTo(TrRmFeatureTableReader.NativeBoundaryContractsRuleRevision));
+        Assert.That(blittableFeature.RuleRevision, Is.EqualTo(1u));
 
         var reference = TrRmExecutableCompiler.CreateReference(artifact);
         Assert.That(reference.Structures.Select(static structure => structure.Name),
@@ -1909,8 +1908,8 @@ public sealed class DirectNativeImportTests
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.GetFeature(1),
             Is.EqualTo(new TrRmFeatureRow(
-                TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
-                TrRmFeatureTableReader.NativeBoundaryContractsRuleRevision)));
+                0x0100,
+                1)));
         Assert.That(index.TryGetSection(0x0030, out _, out var nativeImportCount), Is.True);
         Assert.That(nativeImportCount, Is.EqualTo(1));
 

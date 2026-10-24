@@ -225,9 +225,9 @@ public sealed class TrRmExecutionAuditTests
         Assert.That(sum.Right, Is.TypeOf<BoundRead>());
     }
     [TestCase(1,4,2u)]
-    [TestCase(1,8,1u)]
+    [TestCase(1,8,2u)]
     [TestCase(1,12,2u)]
-    [TestCase(1,16,1u)]
+    [TestCase(1,16,2u)]
     [TestCase(0x16,8,0x11000001u)]
     [TestCase(0x16,12,3u)]
     [TestCase(0x16,24,0u)]
@@ -489,7 +489,7 @@ public sealed class TrRmExecutionAuditTests
         var calleeContractFirst = hasCalleeEffect ? callerNoThrow ? 2u : 1u : 0;
         var sections = new List<(ushort Kind, uint Count, byte[] Bytes)>
         {
-            (1, 1, Words(1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1)),
+            (1, 1, Words(1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1)),
             (2, 3, Rows(strings)),
             (0x11, 7, Rows(codes.Select(code => new byte[] { 1, 0, code }))),
             (0x16, 2, Words(
@@ -879,7 +879,7 @@ public sealed class TrRmExecutionAuditTests
         }
         var sections = new List<(ushort Kind, uint Count, byte[] Bytes)>
         {
-            (1, 1, Words(1, 1, 0, entry ? 1u : 0u, 0, 0, 0, 1, 1, 1, 1)),
+            (1, 1, Words(1, 1, 1, 0, entry ? 1u : 0u, 0, 0, 0, 1, 1, 1, 1)),
             (2, 2, Rows(strings)),
             (0x11, 7, Rows(codes.Select(code => new byte[] { 1, 0, code }))),
             (0x16, 1, Words(0, 2, 1, exported ? 2u : 1u, effect.HasValue ? 1u : 0u,

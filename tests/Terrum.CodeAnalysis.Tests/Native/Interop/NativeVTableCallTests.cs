@@ -132,7 +132,7 @@ public sealed class NativeVTableCallTests
 
         var missingVTableFeatures = (byte[])callArtifact.Clone();
         var moduleOffset = FindSectionOffset(callArtifact, 0x0001);
-        BinaryPrimitives.WriteUInt32LittleEndian(missingVTableFeatures.AsSpan(moduleOffset + 20), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(missingVTableFeatures.AsSpan(moduleOffset + 24), 2);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingVTableFeatures));
 
         var privateArtifact = ModuleCompiler.CreateProducer(offsetLoaded, ["Invoke"]);
@@ -180,7 +180,8 @@ public sealed class NativeVTableCallTests
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var index = new TrRmArtifactIndex(artifact);
-        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(index);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateDevelopmentAndGetExecutionTables(index);
         var invokeRow = 0;
         for (var row = 1; row <= tables.Methods.Count; row++)
         {
@@ -584,12 +585,12 @@ public sealed class NativeVTableCallTests
             featureIds[row - 1] = features.GetFeature(row).FeatureId;
         }
         Assert.That(featureIds,
-            Does.Contain(TrRmFeatureTableReader.NativeBoundaryContractsFeatureId));
+            Does.Contain(0x0100u));
         Assert.That(featureIds,
-            Does.Contain(TrRmFeatureTableReader.RootlessNativeValuesFeatureId));
+            Does.Contain(0x0101u));
         Assert.That(featureIds,
-            Does.Contain(TrRmFeatureTableReader.NativeVTableCallsFeatureId));
-        Assert.That(featureIds.Contains(TrRmFeatureTableReader.ScalarInitOutputFeatureId),
+            Does.Contain(0x0104u));
+        Assert.That(featureIds.Contains(1u),
             Is.EqualTo(hasScalarInitOutput));
     }
 

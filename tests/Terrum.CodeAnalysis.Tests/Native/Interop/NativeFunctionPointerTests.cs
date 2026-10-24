@@ -683,9 +683,9 @@ public sealed class NativeFunctionPointerTests
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(
-            TrRmFeatureTableReader.DirectNativeCallsFeatureId, out _), Is.True);
+            0x0102, out _), Is.True);
         Assert.That(features.TryGetFeature(
-            TrRmFeatureTableReader.NativeCallableEntriesFeatureId, out _), Is.True);
+            0x0103, out _), Is.True);
 
         var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.That(loaded.Functions.Single(static function => function.Name == "GetAnswer")
@@ -776,9 +776,9 @@ public sealed class NativeFunctionPointerTests
             out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(
-            TrRmFeatureTableReader.NativeBoundaryContractsFeatureId, out _), Is.True);
+            0x0100, out _), Is.True);
         Assert.That(features.TryGetFeature(
-            TrRmFeatureTableReader.RootlessNativeValuesFeatureId, out _), Is.True);
+            0x0101, out _), Is.True);
 
         var loaded = TrRmExecutableCompiler.Load(artifact);
         var loadedFunction = loaded.Functions.Single(static candidate => candidate.Name == "Invoke");
@@ -887,7 +887,7 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
-    public void StandardTrRmRequiresFunctionPointerFeaturesOnEveryUsingModule()
+    public void DevelopmentTrRmRequiresFunctionPointerFeaturesOnEveryUsingModule()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [NoThrow]
@@ -900,9 +900,9 @@ public sealed class NativeFunctionPointerTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "module-feature-closure");
 
-        Assert.DoesNotThrow(() => TrRmStructuralMetadataValidator.Validate(
+        Assert.DoesNotThrow(() => TrRmStructuralMetadataValidator.ValidateCompact(
             SplitSignatureAnchorModule(artifact, includeRootlessFeature: true)));
-        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.ValidateCompact(
             SplitSignatureAnchorModule(artifact, includeRootlessFeature: false)));
     }
 
@@ -959,9 +959,9 @@ public sealed class NativeFunctionPointerTests
             out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(
-            TrRmFeatureTableReader.NativeBoundaryContractsFeatureId, out _), Is.True);
+            0x0100, out _), Is.True);
         Assert.That(features.TryGetFeature(
-            TrRmFeatureTableReader.RootlessNativeValuesFeatureId, out _), Is.True);
+            0x0101, out _), Is.True);
 
         var loaded = TrRmExecutableCompiler.Load(artifact);
         var ignored = loaded.Functions.Single(static function => function.Name == "Ignore");
@@ -1719,18 +1719,22 @@ public sealed class NativeFunctionPointerTests
             var bytes = sectionBytes.ToArray();
             if (kind == 0x0001)
             {
+                var featureCount = index.TryGetSection(0x0004, out _, out var count)
+                    ? count : throw new InvalidOperationException("Missing Feature section.");
                 var modules = new byte[bytes.Length + 48];
                 bytes.CopyTo(modules, 0);
                 bytes.CopyTo(modules, bytes.Length);
                 var firstModule = modules.AsSpan(0, 48);
                 var secondModule = modules.AsSpan(48, 48);
-                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[20..],
-                    includeRootlessFeature ? 4u : 1u);
+                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[20..], 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(firstModule[24..],
+                    includeRootlessFeature ? (uint)featureCount : 1);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule, methodNameRow);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule[4..], 1);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule[16..], 0);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule[20..], 1);
-                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[24..], 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(secondModule[24..],
+                    includeRootlessFeature ? (uint)featureCount : 1);
                 BinaryPrimitives.WriteUInt32LittleEndian(secondModule[40..], 2);
                 bytes = modules;
                 recordCount++;

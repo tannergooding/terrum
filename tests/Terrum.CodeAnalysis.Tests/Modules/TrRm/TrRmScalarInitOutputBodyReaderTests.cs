@@ -13,6 +13,8 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmScalarInitOutputBodyReaderTests
 {
+    private const uint ScalarInitOutputRuleRevision = 8;
+
     // A typed delegate keeps the provisional API internal without boxing its ref-struct inputs.
     private delegate object ReadBody(TrRmBodyTableReader bodies, int method,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
@@ -622,7 +624,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         byte? contractKind = null, int resultTypeSpecRow = 0,
         byte[]? paramTypeSpecRows = null,
         int targetResultTypeSpecRow = 2,
-        uint ruleRevision = TrRmFeatureTableReader.ScalarInitOutputRuleRevision)
+        uint ruleRevision = ScalarInitOutputRuleRevision)
     {
         var methodCount = targetModes is null ? 1 : 2;
         var parameterCount = modes.Length + (targetModes?.Length ?? 0);
@@ -716,7 +718,7 @@ public sealed class TrRmScalarInitOutputBodyReaderTests
         var bodies = new TrRmBodyTableReader(bodyBytes, methodCount);
         return s_read(bodies, 1, modules, methods, signatures, parameters, types,
             contractSection, contractTable, nativeImports, nativeVTables, ruleRevision,
-            TrRmFeatureTableReader.RootlessNativeValuesRuleRevision);
+            TrRmFeatureTableReader.RuleRevision);
     }
 
     private static void Signature(byte[] bytes, int offset, uint result, int first, int count)

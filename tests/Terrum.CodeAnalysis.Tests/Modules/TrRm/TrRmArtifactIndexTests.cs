@@ -52,23 +52,17 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
-    public void ReadsTheProvisionalScalarInitOutputFeatureAndModuleRange()
+    public void ReadsExactFeaturePairsAndModuleRange()
     {
         var artifact = FeatureArtifact(1, 1,
-            TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]));
+            TrRmFeatureTableWriter.Encode([TrRmFeatureRow.LayoutQueries]));
         var index = new TrRmArtifactIndex(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
-        Assert.That(features.GetFeature(1), Is.EqualTo(TrRmFeatureRow.ScalarInitOutput));
-        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
+        Assert.That(features.GetFeature(1), Is.EqualTo(TrRmFeatureRow.LayoutQueries));
+        Assert.That(features.TryGetFeature(TrRmFeatureTableReader.LayoutQueriesFeatureId,
             out var feature), Is.True);
-        Assert.That(feature.MinimumRuleRevision, Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputRuleRevision));
-
-        var legacyBytes = TrRmFeatureTableWriter.Encode(
-            [new TrRmFeatureRow(TrRmFeatureTableReader.ScalarInitOutputFeatureId,
-                TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision)]);
-        var legacy = new TrRmFeatureTableReader(legacyBytes, 1);
-        Assert.That(legacy.GetFeature(1).MinimumRuleRevision, Is.EqualTo(TrRmFeatureTableReader.ScalarInitOutputInitialRuleRevision));
+        Assert.That(feature.RuleRevision, Is.EqualTo(TrRmFeatureTableReader.RuleRevision));
 
         Assert.That(index.TryGetSection(0x0002, out var stringBytes, out var stringCount), Is.True);
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
@@ -79,23 +73,106 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
-    public void RejectsUnsupportedFeaturesMalformedPayloadsAndModuleRanges()
+    public void OrdinaryFeatureRowsPermitReorderingAndIdenticalDuplicates()
     {
-        var feature = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.ScalarInitOutput]);
+        byte[] section =
+        [
+            13, 0, 0, 0, 1, 0, 0, 0,
+            1, 0, 0, 0, 1, 0, 0, 0,
+            13, 0, 0, 0, 1, 0, 0, 0,
+        ];
+        var features = new TrRmFeatureTableReader(section, 3);
+        Assert.That(features.GetFeature(1), Is.EqualTo(TrRmFeatureRow.LayoutQueries));
+        Assert.That(features.GetFeature(2), Is.EqualTo(TrRmFeatureRow.NativeBoundaryContracts));
+        Assert.That(features.TryGetFeature(13, out var feature), Is.True);
+        Assert.That(feature, Is.EqualTo(TrRmFeatureRow.LayoutQueries));
+
+        byte[] conflictingRows =
+        [
+            13, 0, 0, 0, 1, 0, 0, 0,
+            13, 0, 0, 0, 2, 0, 0, 0,
+        ];
+        var conflictingFeatures = new TrRmFeatureTableReader(conflictingRows, 2);
+        Assert.That(conflictingFeatures.TryGetFeature(13, out _), Is.False);
+    }
+
+    [Test]
+    public void ValidatesExactFeatureManifestClosure()
+    {
+        var reordered = FeatureArtifact(1, 2,
+        [
+            2, 0, 0, 0, 1, 0, 0, 0,
+            1, 0, 0, 0, 1, 0, 0, 0,
+        ]);
+        TrRmStructuralMetadataValidator.Validate(reordered);
+
+        var duplicate = FeatureArtifact(1, 2,
+        [
+            13, 0, 0, 0, 1, 0, 0, 0,
+            13, 0, 0, 0, 1, 0, 0, 0,
+        ]);
+        TrRmStructuralMetadataValidator.Validate(duplicate);
+
+        var conflictingRevision = FeatureArtifact(1, 2,
+        [
+            13, 0, 0, 0, 1, 0, 0, 0,
+            13, 0, 0, 0, 2, 0, 0, 0,
+        ]);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(conflictingRevision));
+
+        var unassignedFeature = FeatureArtifact(1, 1,
+            [8, 0, 0, 0, 1, 0, 0, 0]);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(unassignedFeature));
+    }
+
+    [Test]
+    public void DerivesPrerequisiteClosurePerModule()
+    {
+        var artifact = FeatureArtifact(1, 1,
+            [12, 0, 0, 0, 1, 0, 0, 0]);
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.That(index.TryGetSection(0x0002, out var stringBytes, out var stringCount), Is.True);
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount), Is.True);
+        Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount);
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
+            0, 0, 0, 0, featureCount);
+
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 12), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 9), Is.False);
+    }
+
+    [Test]
+    public void InspectsUnsupportedFeaturesAndRejectsMalformedPayloadsAndModuleRanges()
+    {
+        var feature = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.LayoutQueries]);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 1, feature)));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(1, 2, feature)));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 0, [0, 0, 0, 0, 1, 0, 0, 0])));
-        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
-            FeatureArtifact(0, 0, [4, 0, 0, 0, 1, 0, 0, 0])));
+        _ = new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [4, 0, 0, 0, 1, 0, 0, 0]));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 0, [1, 0, 0, 0, 0, 0, 0, 0])));
-        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
-            FeatureArtifact(0, 0, [1, 0, 0, 0, 9, 0, 0, 0])));
-        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
-            FeatureArtifact(0, 0, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])));
+        _ = new TrRmArtifactIndex(
+            FeatureArtifact(0, 0, [1, 0, 0, 0, 9, 0, 0, 0]));
+        var unsupportedRevision = FeatureArtifact(1, 1, [1, 0, 0, 0, 9, 0, 0, 0]);
+        _ = new TrRmArtifactIndex(unsupportedRevision);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(unsupportedRevision));
+        var unassignedFeature = FeatureArtifact(1, 1, [8, 0, 0, 0, 1, 0, 0, 0]);
+        _ = new TrRmArtifactIndex(unassignedFeature);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(unassignedFeature));
+        _ = new TrRmFeatureTableReader(
+            [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 2);
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(
             FeatureArtifact(0, 0, [1, 0, 0, 0, 1])));
         Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(

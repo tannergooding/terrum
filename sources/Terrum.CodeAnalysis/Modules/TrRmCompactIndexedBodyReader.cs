@@ -71,7 +71,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
-        TrRmImportTableReader imports, TrRmFeatureTableReader features,
+        TrRmImportTableReader imports, TrRmDevelopmentFeatureTableReader features,
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
         TrRmNativeVTableTableReader nativeVTables)
@@ -85,7 +85,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
-        TrRmImportTableReader imports, TrRmFeatureTableReader features,
+        TrRmImportTableReader imports, TrRmDevelopmentFeatureTableReader features,
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
@@ -109,7 +109,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     internal static void ValidateOnly(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, TrRmFeatureTableReader features,
+        TrRmTypeSpecTableReader types, TrRmDevelopmentFeatureTableReader features,
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
         TrRmNativeVTableTableReader nativeVTables)
@@ -119,7 +119,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     internal static void ValidateOnly(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, TrRmFeatureTableReader features,
+        TrRmTypeSpecTableReader types, TrRmDevelopmentFeatureTableReader features,
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
@@ -134,7 +134,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
-        TrRmImportTableReader imports, TrRmFeatureTableReader features,
+        TrRmImportTableReader imports, TrRmDevelopmentFeatureTableReader features,
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
@@ -735,7 +735,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         {
                             hasNativeCallableEntriesFeature |= features
                                 .GetFeature(featureStart + featureOffset).FeatureId
-                                == TrRmFeatureTableReader.NativeCallableEntriesFeatureId;
+                                == TrRmDevelopmentFeatureTableReader.NativeCallableEntriesFeatureId;
                         }
 
                         nativeFunctionPointerFeaturesLoaded = true;
@@ -776,7 +776,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         {
                             hasNativeCallableEntriesFeature |= features
                                 .GetFeature(featureStart + featureOffset).FeatureId
-                                == TrRmFeatureTableReader.NativeCallableEntriesFeatureId;
+                                == TrRmDevelopmentFeatureTableReader.NativeCallableEntriesFeatureId;
                         }
 
                         nativeFunctionPointerFeaturesLoaded = true;
